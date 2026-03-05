@@ -69,6 +69,38 @@ const uplaySteamMap = loadUplayMapping();
 const uplayToSteam = new Map(
   uplaySteamMap.map((row) => [String(row.uplay_id), row])
 );
+const SCHEMA_LANGUAGE_VALUES = [
+  "arabic",
+  "bulgarian",
+  "schinese",
+  "tchinese",
+  "czech",
+  "danish",
+  "dutch",
+  "english",
+  "finnish",
+  "french",
+  "german",
+  "greek",
+  "hungarian",
+  "indonesian",
+  "italian",
+  "japanese",
+  "koreana",
+  "norwegian",
+  "polish",
+  "portuguese",
+  "brazilian",
+  "romanian",
+  "russian",
+  "spanish",
+  "latam",
+  "swedish",
+  "thai",
+  "turkish",
+  "ukrainian",
+  "vietnamese",
+];
 const gogNameFallbackAppIds = new Set();
 function reloadUplayMappingFromDisk() {
   try {
@@ -227,6 +259,31 @@ function readPrefsSafe() {
   } catch {
     return {};
   }
+}
+
+function normalizeSchemaLanguageList(value) {
+  const allowed = new Set(SCHEMA_LANGUAGE_VALUES);
+  const list = Array.isArray(value) ? value : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const token = String(item || "")
+      .trim()
+      .toLowerCase();
+    if (!token || !allowed.has(token) || seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+}
+
+function resolveSchemaLanguagesForGenerator(candidate = undefined) {
+  const source =
+    candidate !== undefined ? candidate : readPrefsSafe()?.schemaLanguages;
+  const normalized = normalizeSchemaLanguageList(source);
+  if (normalized.length) return normalized;
+  if (candidate !== undefined || source !== undefined) return ["english"];
+  return [...SCHEMA_LANGUAGE_VALUES];
 }
 function getBlacklistedAppIdsSet() {
   const prefs = readPrefsSafe();
@@ -724,6 +781,7 @@ function runAchievementsGenerator(
       typeof opts.platform === "string" && opts.platform.length
         ? opts.platform.toLowerCase()
         : null;
+    const schemaLangs = normalizeSchemaLanguageList(opts.langs);
     const args = [
       String(appid),
       "--apps-concurrency=1",
@@ -731,6 +789,7 @@ function runAchievementsGenerator(
       `--user-data-dir=${userDataDir}`,
     ];
     if (platform) args.push(`--platform=${platform}`);
+    if (schemaLangs.length) args.push(`--langs=${schemaLangs.join(",")}`);
     const logDir = path.join(app.getPath("userData"), "logs");
     try {
       fs.mkdirSync(logDir, { recursive: true });
@@ -805,6 +864,7 @@ function runAchievementsGenerator(
 async function generateGameConfigs(folderPath, outputDir, opts = {}) {
   const onSeedCache = opts.onSeedCache || null;
   const forcedPlatform = normalizePlatform(opts.forcePlatform) || null;
+  const schemaLanguages = resolveSchemaLanguagesForGenerator(opts.schemaLanguages);
   if (forcedPlatform) {
     autoConfigLogger.info("generate:forced-platform", {
       targetPlatform: forcedPlatform,
@@ -974,6 +1034,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
             try {
               await runAchievementsGenerator(uplayId, schemaBase, userDataDir, {
                 platform: platformMode,
+                langs: schemaLanguages,
               });
               if (
                 platformMode === "uplay" &&
@@ -1215,6 +1276,7 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
     emu: opts.emu || null,
     savePathOverride: opts.savePathOverride || null,
     preferredName: opts.preferredName || null,
+    schemaLanguages: opts.schemaLanguages,
   });
   autoConfigLogger.debug("generate-single:batch-generated", {
     appid,

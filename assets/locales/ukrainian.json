@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Редагувати",
   "dashboardMenuIgnore": "Ігнорувати гру",
   "dashboardMenuRegenerate": "Відновити схему",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Видалити з чорного списку",
   "dashboardPerfectLabel": "Ідеальні ігри:",
   "deleteConfigBtn": "Видалити",
@@ -94,6 +96,8 @@
   "label.configList": "Виберіть «Конфігурація»:",
   "label.configName": "Назва конфігурації:",
   "label.configPath": "Шлях до конфігурації: ! Залиште порожнім для генерації !",
+  "label.settings-disableProcessNameWatcherCheckbox": "ðÆð©ð╝ð║ð¢ÐâÐéð© ð▓Ðûð┤ÐüÐéðÁðÂðÁð¢ð¢ÐÅ ð¢ð░ðÀð▓ð© ð┐ÐÇð¥ÐåðÁÐüÐâ",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Ігнорувати початкові артиклі під час сортування (A/An/The)",
   "label.exeArgs": "Аргументи (опціонально):",
   "label.executablePath": "Виконуваний файл (опціонально):",
   "label.languageSelect": "Виберіть мову:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Керівництво по платформі",
   "title.tab-platformGuide": "Посібник із платформи та емулятора"
 }
+

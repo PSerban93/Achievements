@@ -6,6 +6,7 @@ const {
   screen,
   globalShortcut,
   Tray,
+  shell,
 } = require("electron");
 // Polyfill File for environments where undici expects it (Electron main may lack global File)
 if (typeof globalThis.File === "undefined") {
@@ -426,6 +427,70 @@ function getDefaultScreenshotFolder() {
   }
 }
 
+const SCHEMA_LANGUAGE_VALUES = [
+  "arabic",
+  "bulgarian",
+  "schinese",
+  "tchinese",
+  "czech",
+  "danish",
+  "dutch",
+  "english",
+  "finnish",
+  "french",
+  "german",
+  "greek",
+  "hungarian",
+  "indonesian",
+  "italian",
+  "japanese",
+  "koreana",
+  "norwegian",
+  "polish",
+  "portuguese",
+  "brazilian",
+  "romanian",
+  "russian",
+  "spanish",
+  "latam",
+  "swedish",
+  "thai",
+  "turkish",
+  "ukrainian",
+  "vietnamese",
+];
+
+function normalizeSchemaLanguageList(value) {
+  const allowed = new Set(SCHEMA_LANGUAGE_VALUES);
+  const list = Array.isArray(value) ? value : [];
+  const out = [];
+  const seen = new Set();
+  for (const item of list) {
+    const token = String(item || "")
+      .trim()
+      .toLowerCase();
+    if (!token || !allowed.has(token) || seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+}
+
+function getSchemaLanguagesFromPreferences(prefs = null) {
+  const source =
+    prefs && typeof prefs === "object"
+      ? prefs
+      : cachedPreferences && typeof cachedPreferences === "object"
+        ? cachedPreferences
+        : readPrefsSafe?.() || {};
+  const normalized = normalizeSchemaLanguageList(source?.schemaLanguages);
+  if (normalized.length) return normalized;
+  if (Object.prototype.hasOwnProperty.call(source || {}, "schemaLanguages")) {
+    return ["english"];
+  }
+  return [...SCHEMA_LANGUAGE_VALUES];
+}
+
 const DEFAULT_PREFERENCES = {
   startInTray: false,
   screenshotFolder: getDefaultScreenshotFolder(),
@@ -459,6 +524,9 @@ const DEFAULT_PREFERENCES = {
   blacklistedAppIds: [],
   watchedFolders: [],
   lumaPlayWatcherEnabled: false,
+  disableProcessNameWatcher: false,
+  ignoreLeadingArticlesSort: true,
+  schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
 };
 
@@ -550,6 +618,7 @@ function ensurePreferencesFile() {
 }
 
 const BLACKLIST_PREF_KEY = "blacklistedAppIds";
+const blacklistedAppIdsSet = new Set();
 let watchedFoldersApi = null;
 let cachedPreferences = {};
 let mainWindow;
@@ -597,6 +666,15 @@ function normalizeAppIdValue(value) {
     return trimmed;
   }
   return "";
+}
+
+function setBlacklistedAppIds(list) {
+  blacklistedAppIdsSet.clear();
+  const arr = Array.isArray(list) ? list : [];
+  for (const id of arr) {
+    const normalized = normalizeAppIdValue(id);
+    if (normalized) blacklistedAppIdsSet.add(normalized);
+  }
 }
 
 process.on("uncaughtException", (err) => {
@@ -1314,6 +1392,12 @@ function isLumaPlayWatcherEnabled(prefs = null) {
   const source =
     prefs && typeof prefs === "object" ? prefs : readPrefsSafe?.() || {};
   return source?.lumaPlayWatcherEnabled === true;
+}
+
+function isProcessNameWatcherEnabled(prefs = null) {
+  const source =
+    prefs && typeof prefs === "object" ? prefs : readPrefsSafe?.() || {};
+  return source?.disableProcessNameWatcher !== true;
 }
 
 //Achievements Image
@@ -2038,13 +2122,22 @@ function notifyConfigsChanged() {
 
 configsWatcher
   .on("add", (p) => {
-    if (p.endsWith(".json")) notifyConfigsChanged();
+    if (p.endsWith(".json")) {
+      notifyConfigsChanged();
+      queueAutoSelectIndexUpsertFromConfigPath(p);
+    }
   })
   .on("unlink", (p) => {
-    if (p.endsWith(".json")) notifyConfigsChanged();
+    if (p.endsWith(".json")) {
+      notifyConfigsChanged();
+      queueAutoSelectIndexRemoveByConfigPath(p);
+    }
   })
   .on("change", (p) => {
-    if (p.endsWith(".json")) notifyConfigsChanged();
+    if (p.endsWith(".json")) {
+      notifyConfigsChanged();
+      queueAutoSelectIndexUpsertFromConfigPath(p);
+    }
   });
 
 let selectedLanguage = "english";
@@ -2055,6 +2148,9 @@ cachedPreferences = ensurePreferencesFile();
 if (!cachedPreferences || typeof cachedPreferences !== "object") {
   cachedPreferences = {};
 }
+try {
+  setBlacklistedAppIds(cachedPreferences?.[BLACKLIST_PREF_KEY]);
+} catch {}
 const fileSteamApiKey = readSteamApiKeyFromFile();
 if (fileSteamApiKey && !cachedPreferences.steamApiKey) {
   cachedPreferences.steamApiKey = fileSteamApiKey;
@@ -2105,6 +2201,11 @@ function applyPreferenceSideEffects(
   prefsSnapshot = {},
   options = {},
 ) {
+  if (Object.prototype.hasOwnProperty.call(patch, BLACKLIST_PREF_KEY)) {
+    try {
+      setBlacklistedAppIds(prefsSnapshot?.[BLACKLIST_PREF_KEY]);
+    } catch {}
+  }
   if ("language" in patch && typeof prefsSnapshot.language === "string") {
     selectedLanguage = prefsSnapshot.language;
   }
@@ -2188,6 +2289,21 @@ function applyPreferenceSideEffects(
         achievementsFilePath = `lumaplay:${selectedLumaAppId || "unknown"}`;
         monitorAchievementsFile(achievementsFilePath);
       }
+    }
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(patch, "disableProcessNameWatcher")
+  ) {
+    const processWatcherEnabled = isProcessNameWatcherEnabled(prefsSnapshot);
+    try {
+      processPoller.setEnabled(processWatcherEnabled);
+    } catch {}
+    if (!processWatcherEnabled) {
+      stopAutoSelectProcessPoller();
+      appLogger.info("process-poller:disabled-by-preferences");
+    } else {
+      appLogger.info("process-poller:enabled-by-preferences");
+      scheduleAutoSelectProcessPollerAfterBoot();
     }
   }
   if (options.removeSteamKey === true) {
@@ -2365,6 +2481,7 @@ async function runAchievementsGenerator(
       typeof opts.platform === "string" && opts.platform.length
         ? opts.platform.toLowerCase()
         : null;
+    const schemaLangs = normalizeSchemaLanguageList(opts.langs);
     const args = [
       String(appid),
       "--apps-concurrency=1",
@@ -2372,6 +2489,7 @@ async function runAchievementsGenerator(
       `--user-data-dir=${userDataDir}`,
     ];
     if (platform) args.push(`--platform=${platform}`);
+    if (schemaLangs.length) args.push(`--langs=${schemaLangs.join(",")}`);
     const cp = fork(script, args, {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
       env: {
@@ -2495,6 +2613,7 @@ async function ensureSchemaForApp(appid, platform = "steam") {
   try {
     await runAchievementsGenerator(appid, schemaBase, app.getPath("userData"), {
       platform: normalizedPlatform,
+      langs: getSchemaLanguagesFromPreferences(),
     });
     if (fs.existsSync(achJson)) {
       ipcLogger.info("schema:ensure-generated", {
@@ -4092,7 +4211,10 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
         appid,
         SCHEMA_ROOT_PATH,
         app.getPath("userData"),
-        { platform },
+        {
+          platform,
+          langs: getSchemaLanguagesFromPreferences(),
+        },
       );
     } catch (err) {
       ipcLogger.error("schema:regenerate-failed", {
@@ -7824,22 +7946,29 @@ ipcMain.handle("launchExecutable", async (_event, exePath, argsString) => {
       const configPath = path.join(configsDir, `${selectedConfig}.json`);
       if (fs.existsSync(configPath)) {
         const configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
-        const safeConfigName = sanitizeConfigName(selectedConfig);
-        configData.__playtimeKey = safeConfigName;
-        if (child?.pid) {
-          configData.__launchPid = child.pid;
-          manualLaunchPidMap.set(child.pid, selectedConfig);
-          setTimeout(() => {
-            if (manualLaunchPidMap.get(child.pid) === selectedConfig) {
-              manualLaunchPidMap.delete(child.pid);
-            }
-          }, 120000);
+        if (isProcessNameWatcherEnabled(cachedPreferences)) {
+          const safeConfigName = sanitizeConfigName(selectedConfig);
+          configData.__playtimeKey = safeConfigName;
+          if (child?.pid) {
+            configData.__launchPid = child.pid;
+            manualLaunchPidMap.set(child.pid, selectedConfig);
+            setTimeout(() => {
+              if (manualLaunchPidMap.get(child.pid) === selectedConfig) {
+                manualLaunchPidMap.delete(child.pid);
+              }
+            }, 120000);
+          }
+          manualLaunchInProgress = true;
+          detectedConfigName = configData.name;
+          activePlaytimeConfigs.add(configData.name);
+          startPlaytimeLogWatcher(configData);
+        } else {
+          appLogger.info("process-poller:playtime-watch-skipped", {
+            reason: "process-watcher-disabled",
+            config: selectedConfig,
+            appid: String(configData?.appid || ""),
+          });
         }
-        manualLaunchInProgress = true;
-        detectedConfigName = configData.name;
-        activePlaytimeConfigs.add(configData.name);
-        //if (!global.disablePlaytime) startPlaytimeLogWatcher(configData);
-        startPlaytimeLogWatcher(configData);
       } else {
         notifyError(
           tUi("main.notify.config.notFound", { config: selectedConfig }),
@@ -8083,6 +8212,9 @@ app.whenReady().then(async () => {
     applyOverlayInteractShortcutRegistration();
     global.disableProgress = prefs.disableProgress === true;
     global.disablePlaytime = prefs.disablePlaytime === true;
+    try {
+      processPoller.setEnabled(isProcessNameWatcherEnabled(prefs));
+    } catch {}
     selectedSound = prefs.sound || "mute";
     selectedPreset = prefs.preset || "default";
     selectedPosition = prefs.position || "center-bottom";
@@ -8506,6 +8638,199 @@ ipcMain.on("notify-from-child", (_event, message) => {
 const { pathToFileURL } = require("url");
 const processPoller = require("./utils/process-poller");
 
+const autoSelectIndex = {
+  built: false,
+  buildPromise: null,
+  lastBuildAt: 0,
+  exeToConfigs: new Map(), // exeLower -> Set(configName)
+  configEntries: new Map(), // configName -> { name, exeLower, appid, data }
+};
+const autoSelectIndexTimers = new Map(); // configName -> timeout
+const AUTO_SELECT_INDEX_UPSERT_DEBOUNCE_MS = 120;
+const AUTO_SELECT_INDEX_BUILD_CONCURRENCY = 16;
+
+function getConfigNameFromConfigFilePath(filePath) {
+  try {
+    if (!filePath) return "";
+    return path.basename(String(filePath), ".json");
+  } catch {
+    return "";
+  }
+}
+
+function normalizeExeNameFromProcessName(processName) {
+  const raw = String(processName || "").trim();
+  if (!raw) return "";
+  try {
+    return path.basename(raw).toLowerCase();
+  } catch {
+    return raw.toLowerCase();
+  }
+}
+
+function normalizeConfigAppIdValue(configData) {
+  try {
+    return normalizeAppIdValue(
+      configData?.appid || configData?.appId || configData?.steamAppId || "",
+    );
+  } catch {
+    return "";
+  }
+}
+
+function removeAutoSelectIndexEntry(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return;
+
+  const existing = autoSelectIndex.configEntries.get(safeName);
+  if (existing?.exeLower) {
+    const set = autoSelectIndex.exeToConfigs.get(existing.exeLower);
+    if (set) {
+      set.delete(safeName);
+      if (set.size === 0) autoSelectIndex.exeToConfigs.delete(existing.exeLower);
+    }
+  }
+  autoSelectIndex.configEntries.delete(safeName);
+}
+
+async function upsertAutoSelectIndexEntryFromPath(filePath) {
+  const rawName = getConfigNameFromConfigFilePath(filePath);
+  const safeName = sanitizeConfigName(rawName);
+  if (!safeName) return;
+
+  let data = null;
+  try {
+    const raw = await fs.promises.readFile(filePath, "utf8");
+    data = JSON.parse(raw);
+  } catch {
+    removeAutoSelectIndexEntry(safeName);
+    return;
+  }
+  if (!data || typeof data !== "object") {
+    removeAutoSelectIndexEntry(safeName);
+    return;
+  }
+
+  const exeLower = normalizeExeNameFromProcessName(data?.process_name);
+  if (!exeLower) {
+    removeAutoSelectIndexEntry(safeName);
+    return;
+  }
+
+  const appid = normalizeConfigAppIdValue(data);
+  if (!data.name) data.name = safeName;
+
+  const prev = autoSelectIndex.configEntries.get(safeName);
+  if (prev?.exeLower && prev.exeLower !== exeLower) {
+    const prevSet = autoSelectIndex.exeToConfigs.get(prev.exeLower);
+    if (prevSet) {
+      prevSet.delete(safeName);
+      if (prevSet.size === 0) autoSelectIndex.exeToConfigs.delete(prev.exeLower);
+    }
+  }
+
+  autoSelectIndex.configEntries.set(safeName, {
+    name: safeName,
+    exeLower,
+    appid,
+    data,
+  });
+  if (!autoSelectIndex.exeToConfigs.has(exeLower)) {
+    autoSelectIndex.exeToConfigs.set(exeLower, new Set());
+  }
+  autoSelectIndex.exeToConfigs.get(exeLower).add(safeName);
+}
+
+function queueAutoSelectIndexUpsertFromConfigPath(filePath) {
+  const rawName = getConfigNameFromConfigFilePath(filePath);
+  const safeName = sanitizeConfigName(rawName);
+  if (!safeName) return;
+
+  const prev = autoSelectIndexTimers.get(safeName);
+  if (prev) clearTimeout(prev);
+  const t = setTimeout(() => {
+    autoSelectIndexTimers.delete(safeName);
+    upsertAutoSelectIndexEntryFromPath(filePath).catch(() => {});
+  }, AUTO_SELECT_INDEX_UPSERT_DEBOUNCE_MS);
+  autoSelectIndexTimers.set(safeName, t);
+}
+
+function queueAutoSelectIndexRemoveByConfigPath(filePath) {
+  const rawName = getConfigNameFromConfigFilePath(filePath);
+  const safeName = sanitizeConfigName(rawName);
+  if (!safeName) return;
+
+  const prev = autoSelectIndexTimers.get(safeName);
+  if (prev) {
+    clearTimeout(prev);
+    autoSelectIndexTimers.delete(safeName);
+  }
+  removeAutoSelectIndexEntry(safeName);
+}
+
+async function rebuildAutoSelectIndex(reason = "manual") {
+  autoSelectIndex.exeToConfigs.clear();
+  autoSelectIndex.configEntries.clear();
+  autoSelectIndex.built = false;
+
+  let files = [];
+  try {
+    if (!configsDir || !fs.existsSync(configsDir)) {
+      autoSelectIndex.built = true;
+      autoSelectIndex.lastBuildAt = Date.now();
+      return;
+    }
+    files = await fs.promises.readdir(configsDir);
+  } catch {
+    files = [];
+  }
+
+  const fullPaths = (Array.isArray(files) ? files : [])
+    .filter((f) => String(f || "").toLowerCase().endsWith(".json"))
+    .map((f) => path.join(configsDir, f));
+
+  const max = Math.max(1, Math.floor(AUTO_SELECT_INDEX_BUILD_CONCURRENCY));
+  let idx = 0;
+  const workers = Array.from({ length: max }, async () => {
+    while (idx < fullPaths.length) {
+      const p = fullPaths[idx++];
+      try {
+        await upsertAutoSelectIndexEntryFromPath(p);
+      } catch {
+        /* ignore */
+      }
+    }
+  });
+  try {
+    await Promise.all(workers);
+  } catch {
+    /* ignore */
+  }
+
+  autoSelectIndex.built = true;
+  autoSelectIndex.lastBuildAt = Date.now();
+  appLogger.info("auto-select:index-built", {
+    reason,
+    totalFiles: fullPaths.length,
+    entries: autoSelectIndex.configEntries.size,
+  });
+}
+
+async function ensureAutoSelectIndexReady() {
+  if (autoSelectIndex.built) return;
+  if (autoSelectIndex.buildPromise) return autoSelectIndex.buildPromise;
+  autoSelectIndex.buildPromise = rebuildAutoSelectIndex("ensure")
+    .catch((err) => {
+      appLogger.warn("auto-select:index-build-failed", {
+        error: err?.message || String(err),
+      });
+    })
+    .finally(() => {
+      autoSelectIndex.buildPromise = null;
+    });
+  return autoSelectIndex.buildPromise;
+}
+
 const AUTO_SELECT_AFTER_BOOT_DELAY_MS = 5000;
 const AUTO_SELECT_BOOT_CHECK_INTERVAL_MS = 500;
 let autoSelectProcessPollerStarted = false;
@@ -8524,9 +8849,30 @@ function clearAutoSelectProcessPollerTimers() {
   }
 }
 
+function stopAutoSelectProcessPoller() {
+  clearAutoSelectProcessPollerTimers();
+  if (typeof autoSelectProcessPollerUnsubscribe === "function") {
+    try {
+      autoSelectProcessPollerUnsubscribe();
+    } catch {}
+    autoSelectProcessPollerUnsubscribe = null;
+  }
+  autoSelectProcessPollerStarted = false;
+}
+
 function startAutoSelectProcessPoller() {
   if (autoSelectProcessPollerStarted) return;
+  if (!isProcessNameWatcherEnabled(cachedPreferences)) {
+    appLogger.info("process-poller:auto-select-start-skipped", {
+      reason: "process-watcher-disabled",
+    });
+    return;
+  }
+  try {
+    processPoller.setEnabled(true);
+  } catch {}
   autoSelectProcessPollerStarted = true;
+  ensureAutoSelectIndexReady().catch(() => {});
   autoSelectProcessPollerUnsubscribe = processPoller.subscribe((list) => {
     autoSelectRunningGameConfig(list);
   });
@@ -8536,6 +8882,16 @@ function startAutoSelectProcessPoller() {
 }
 
 function scheduleAutoSelectProcessPollerAfterBoot() {
+  if (!isProcessNameWatcherEnabled(cachedPreferences)) {
+    stopAutoSelectProcessPoller();
+    try {
+      processPoller.setEnabled(false);
+    } catch {}
+    appLogger.info("process-poller:auto-select-disabled", {
+      reason: "process-watcher-disabled",
+    });
+    return;
+  }
   if (autoSelectProcessPollerStarted) return;
   if (autoSelectProcessPollerWaitTimer || autoSelectProcessPollerStartTimer)
     return;
@@ -8567,6 +8923,7 @@ function scheduleAutoSelectProcessPollerAfterBoot() {
 
 let detectedConfigName = null;
 const activePlaytimeConfigs = new Set();
+let autoSelectRunningGameConfigInFlight = false;
 
 function splitArgsString(input) {
   const argStr = String(input || "").trim();
@@ -8586,121 +8943,219 @@ function splitArgsString(input) {
     .filter(Boolean);
 }
 
+function normalizeProcessCmdLine(proc) {
+  if (!proc || typeof proc !== "object") return "";
+  if (typeof proc.cmd === "string" && proc.cmd.trim()) {
+    return proc.cmd.trim().toLowerCase();
+  }
+  if (Array.isArray(proc.cmd)) {
+    const joined = proc.cmd
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    if (joined) return joined.toLowerCase();
+  }
+  if (typeof proc.command === "string" && proc.command.trim()) {
+    return proc.command.trim().toLowerCase();
+  }
+  return "";
+}
+
+function getConfigProcessArgTokens(configData) {
+  if (!configData || typeof configData !== "object") return [];
+  if (Array.isArray(configData.__processArgsTokens)) {
+    return configData.__processArgsTokens;
+  }
+  const rawArgs =
+    typeof configData.arguments === "string"
+      ? configData.arguments
+      : typeof configData.args === "string"
+        ? configData.args
+        : "";
+  const tokens = splitArgsString(rawArgs)
+    .map((token) => String(token || "").trim().toLowerCase())
+    .filter(Boolean);
+  configData.__processArgsTokens = tokens;
+  return tokens;
+}
+
 function processMatchesConfig(proc, configData, configName) {
   if (!proc || !proc.name || !configData?.process_name) return false;
   const exeName = path.basename(configData.process_name).toLowerCase();
   if (String(proc.name || "").toLowerCase() !== exeName) return false;
   const mapped = manualLaunchPidMap.get(proc.pid);
   if (mapped) return mapped === configName;
-  return true;
+  const argTokens = getConfigProcessArgTokens(configData);
+  if (!argTokens.length) return true;
+  const cmdLine = normalizeProcessCmdLine(proc);
+  if (!cmdLine) return true;
+  return argTokens.every((token) => cmdLine.includes(token));
 }
 
 async function autoSelectRunningGameConfig(processes) {
+  if (autoSelectRunningGameConfigInFlight) return;
+  autoSelectRunningGameConfigInFlight = true;
   try {
     const list = Array.isArray(processes) ? processes : [];
     if (!list.length) return;
+    if (!isProcessNameWatcherEnabled(cachedPreferences)) return;
     if (process.env.ACH_LOG_PROCESSES === "1") {
       const logPath = path.join(app.getPath("userData"), "process-log.txt");
       fs.writeFileSync(logPath, list.map((p) => p.name).join("\n"), "utf8");
     }
 
+    await ensureAutoSelectIndexReady();
+
+    const procsByExe = new Map();
+    for (const p of list) {
+      const exe = String(p?.name || "").toLowerCase();
+      if (!exe) continue;
+      if (!procsByExe.has(exe)) procsByExe.set(exe, []);
+      procsByExe.get(exe).push(p);
+    }
+
+    const getEntry = (name) => {
+      const safe = sanitizeConfigName(name || "");
+      if (!safe) return null;
+      return autoSelectIndex.configEntries.get(safe) || null;
+    };
+
+    const isBlacklisted = (entry) => {
+      const id = String(entry?.appid || "").trim();
+      if (!id) return false;
+      return blacklistedAppIdsSet.has(id);
+    };
+
+    const isEntryRunning = (entry, configName) => {
+      if (!entry?.exeLower || !entry?.data?.process_name) return false;
+      const procs = procsByExe.get(entry.exeLower) || [];
+      if (!procs.length) return false;
+      return procs.some((p) => processMatchesConfig(p, entry.data, configName));
+    };
+
     if (manualLaunchInProgress) {
-      const configPath = path.join(configsDir, `${detectedConfigName}.json`);
-      if (!fs.existsSync(configPath)) {
+      const entry = getEntry(detectedConfigName);
+      if (!entry) {
         manualLaunchInProgress = false;
         detectedConfigName = null;
       } else {
-        const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
-        const isRunning = list.some((p) =>
-          processMatchesConfig(p, config, detectedConfigName),
-        );
-
+        const isRunning = isEntryRunning(entry, detectedConfigName);
         if (!isRunning) {
-          notifyInfo(tUi("main.notify.config.closed", { name: config.name }));
+          notifyInfo(
+            tUi("main.notify.config.closed", {
+              name: entry?.data?.name || entry?.name || detectedConfigName,
+            }),
+          );
           manualLaunchInProgress = false;
-          activePlaytimeConfigs.delete(config.name);
+          activePlaytimeConfigs.delete(entry?.data?.name || detectedConfigName);
           detectedConfigName = null;
         }
       }
     }
 
-    try {
-      const configs = listConfigs();
-
-      if (detectedConfigName) {
-        const configPath = path.join(configsDir, `${detectedConfigName}.json`);
-        if (!fs.existsSync(configPath)) {
-          detectedConfigName = null;
-        } else {
-          const configData = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-          const isStillRunning = list.some((p) =>
-            processMatchesConfig(p, configData, detectedConfigName),
-          );
-
-          if (!isStillRunning) {
-            notifyInfo(
-              tUi("main.notify.config.closed", { name: configData.name }),
-            );
-            activePlaytimeConfigs.delete(configData.name);
-            if (detectedConfigName === configData.name)
-              detectedConfigName = null;
-          }
-        }
-      }
-
-      for (const activeName of [...activePlaytimeConfigs]) {
-        const cfgPath = path.join(configsDir, `${activeName}.json`);
-        if (!fs.existsSync(cfgPath)) {
-          activePlaytimeConfigs.delete(activeName);
-          if (detectedConfigName === activeName) detectedConfigName = null;
-          continue;
-        }
-
-        const cfgData = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-        const stillRunning = list.some((p) =>
-          processMatchesConfig(p, cfgData, activeName),
-        );
-
-        if (!stillRunning) {
-          notifyInfo(tUi("main.notify.config.closed", { name: cfgData.name }));
-          activePlaytimeConfigs.delete(activeName);
-          if (detectedConfigName === activeName) detectedConfigName = null;
-        }
-      }
-
-      for (const configName of configs) {
-        if (activePlaytimeConfigs.has(configName)) continue;
-        const configPath = path.join(configsDir, `${configName}.json`);
-        if (!fs.existsSync(configPath)) continue;
-
-        const configData = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-        if (!configData.process_name) continue;
-
-        const isRunning = list.some((p) =>
-          processMatchesConfig(p, configData, configName),
-        );
-
-        if (isRunning) {
-          detectedConfigName = configName;
-          activePlaytimeConfigs.add(configName);
+    if (detectedConfigName) {
+      const entry = getEntry(detectedConfigName);
+      if (!entry) {
+        detectedConfigName = null;
+      } else {
+        const isStillRunning = isEntryRunning(entry, detectedConfigName);
+        if (!isStillRunning) {
           notifyInfo(
-            tUi("main.notify.config.started", { name: configData.name }),
+            tUi("main.notify.config.closed", {
+              name: entry?.data?.name || entry?.name || detectedConfigName,
+            }),
           );
-          configData.__playtimeKey = sanitizeConfigName(configName);
-
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send("auto-select-config", configName);
-            //if (!global.disablePlaytime) startPlaytimeLogWatcher(configData);
-            startPlaytimeLogWatcher(configData);
-          }
-          return;
+          activePlaytimeConfigs.delete(entry?.data?.name || detectedConfigName);
+          if (detectedConfigName === entry?.data?.name) detectedConfigName = null;
         }
       }
-    } catch (err) {
-      notifyError(tUi("main.notify.autoSelect.error", { error: err.message }));
+    }
+
+    for (const activeName of [...activePlaytimeConfigs]) {
+      const entry = getEntry(activeName);
+      if (!entry) {
+        activePlaytimeConfigs.delete(activeName);
+        if (detectedConfigName === activeName) detectedConfigName = null;
+        continue;
+      }
+      const stillRunning = isEntryRunning(entry, activeName);
+      if (!stillRunning) {
+        notifyInfo(
+          tUi("main.notify.config.closed", {
+            name: entry?.data?.name || entry?.name || activeName,
+          }),
+        );
+        activePlaytimeConfigs.delete(activeName);
+        if (detectedConfigName === activeName) detectedConfigName = null;
+      }
+    }
+
+    for (const p of list) {
+      const mapped = manualLaunchPidMap.get(p?.pid);
+      if (!mapped) continue;
+      const entry = getEntry(mapped);
+      if (!entry) continue;
+      if (isBlacklisted(entry)) continue;
+      if (activePlaytimeConfigs.has(entry.name)) continue;
+      if (!processMatchesConfig(p, entry.data, entry.name)) continue;
+
+      detectedConfigName = entry.name;
+      activePlaytimeConfigs.add(entry.name);
+      notifyInfo(
+        tUi("main.notify.config.started", {
+          name: entry?.data?.name || entry?.name || entry.name,
+        }),
+      );
+      entry.data.__playtimeKey = sanitizeConfigName(entry.name);
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("auto-select-config", entry.name);
+        startPlaytimeLogWatcher(entry.data);
+      }
+      return;
+    }
+
+    for (const [exe, procs] of procsByExe.entries()) {
+      const candidates = autoSelectIndex.exeToConfigs.get(exe);
+      if (!candidates || !candidates.size) continue;
+
+      for (const configName of Array.from(candidates)) {
+        if (activePlaytimeConfigs.has(configName)) continue;
+
+        const entry = getEntry(configName);
+        if (!entry) continue;
+        if (isBlacklisted(entry)) continue;
+
+        const running = (Array.isArray(procs) ? procs : []).some((p) =>
+          processMatchesConfig(p, entry.data, entry.name),
+        );
+        if (!running) continue;
+
+        detectedConfigName = entry.name;
+        activePlaytimeConfigs.add(entry.name);
+        notifyInfo(
+          tUi("main.notify.config.started", {
+            name: entry?.data?.name || entry?.name || entry.name,
+          }),
+        );
+        entry.data.__playtimeKey = sanitizeConfigName(entry.name);
+
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send("auto-select-config", entry.name);
+          startPlaytimeLogWatcher(entry.data);
+        }
+        return;
+      }
     }
   } catch (err) {
-    notifyError(tUi("main.notify.autoSelect.error", { error: err.message }));
+    notifyError(
+      tUi("main.notify.autoSelect.error", {
+        error: err?.message || String(err),
+      }),
+    );
+  } finally {
+    autoSelectRunningGameConfigInFlight = false;
   }
 }
 
@@ -9398,6 +9853,25 @@ ipcMain.handle("startup:set-start-with-windows", async (_e, enabled) => {
   return true;
 });
 
+ipcMain.handle("open-external-url", async (_evt, url) => {
+  const raw = String(url || "").trim();
+  try {
+    if (!raw) throw new Error("url-required");
+    const parsed = new URL(raw);
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      throw new Error("invalid-protocol");
+    }
+    await shell.openExternal(parsed.toString());
+    return { success: true };
+  } catch (err) {
+    ipcLogger.warn("open-external-url:failed", {
+      url: raw || null,
+      error: err?.message || String(err),
+    });
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
 const {
   fetchSteamDbLibraryCover,
   fetchSteamGridDbImage,
@@ -9723,16 +10197,13 @@ async function flagPlatinumFromCacheOnBoot() {
 
 app.on("before-quit", () => {
   stopActiveLumaPlayRegistryWatcher();
-  clearAutoSelectProcessPollerTimers();
+  stopAutoSelectProcessPoller();
+  try {
+    processPoller.setEnabled(false);
+  } catch {}
   if (overlayDragHookBootWaitTimer) {
     clearTimeout(overlayDragHookBootWaitTimer);
     overlayDragHookBootWaitTimer = null;
-  }
-  if (typeof autoSelectProcessPollerUnsubscribe === "function") {
-    try {
-      autoSelectProcessPollerUnsubscribe();
-    } catch {}
-    autoSelectProcessPollerUnsubscribe = null;
   }
   flushCacheBatchWindow("before-quit", true);
   appLogger.info("app:before-quit", {

@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Bewerken",
   "dashboardMenuIgnore": "Negeer spel",
   "dashboardMenuRegenerate": "Schema opnieuw genereren",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Verwijderen uit zwarte lijst",
   "dashboardPerfectLabel": "Perfecte spellen:",
   "deleteConfigBtn": "Verwijderen",
@@ -94,6 +96,8 @@
   "label.configList": "Selecteer Configuratie:",
   "label.configName": "Configuratienaam:",
   "label.configPath": "Configuratiepad: ! Laat leeg om te genereren !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Procesnaamcontrole uitschakelen",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Negeer lidwoorden aan het begin bij sorteren (A/An/The)",
   "label.exeArgs": "Argumenten (optioneel):",
   "label.executablePath": "Uitvoerbaar bestand (optioneel):",
   "label.languageSelect": "Selecteer taal:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Platformgids",
   "title.tab-platformGuide": "Platform- en emulatorgids"
 }
+

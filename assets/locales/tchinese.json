@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "編輯",
   "dashboardMenuIgnore": "忽略遊戲",
   "dashboardMenuRegenerate": "重新建立架構",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "從黑名單中移除",
   "dashboardPerfectLabel": "完美遊戲：",
   "deleteConfigBtn": "刪除",
@@ -94,6 +96,8 @@
   "label.configList": "選擇設定：",
   "label.configName": "設定檔名稱：",
   "label.configPath": "設定路徑： ! 留空以自動生成 !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Õü£þö¿þ¿ïÕ║ÅÕÉìþ¿▒þøúÞªûÕÖ¿",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "排序時忽略開頭冠詞 (A/An/The)",
   "label.exeArgs": "參數（可選）：",
   "label.executablePath": "可執行檔（選用）：",
   "label.languageSelect": "選擇語言：",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "平台指南",
   "title.tab-platformGuide": "平台和模擬器指南"
 }
+

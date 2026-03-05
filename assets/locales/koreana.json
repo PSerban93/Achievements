@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "편집",
   "dashboardMenuIgnore": "블랙리스트에 추가",
   "dashboardMenuRegenerate": "스키마 재생성",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "블랙리스트에서 제거",
   "dashboardPerfectLabel": "모든 업적 완료:",
   "deleteConfigBtn": "삭제",
@@ -94,6 +96,8 @@
   "label.configList": "구성 선택:",
   "label.configName": "구성 이름:",
   "label.configPath": "구성 경로: ! 생성하려면 비워 두세요 !",
+  "label.settings-disableProcessNameWatcherCheckbox": "ÝöäÙí£ýä©ýèñ ýØ┤Ùªä Û░Éýï£Û©░ Ù╣äÝÖ£ýä▒ÝÖö",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "정렬 시 앞의 관사 무시 (A/An/The)",
   "label.exeArgs": "인수(선택 사항):",
   "label.executablePath": "실행 파일 (선택 사항):",
   "label.languageSelect": "언어 선택:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "플랫폼 가이드",
   "title.tab-platformGuide": "플랫폼 및 에뮬레이터 가이드"
 }
+

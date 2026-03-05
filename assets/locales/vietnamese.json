@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Chỉnh sửa",
   "dashboardMenuIgnore": "Bỏ qua trò chơi",
   "dashboardMenuRegenerate": "Tái tạo lược đồ",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Xóa khỏi danh sách đen",
   "dashboardPerfectLabel": "Trò chơi hoàn hảo:",
   "deleteConfigBtn": "Xóa",
@@ -94,6 +96,8 @@
   "label.configList": "Chọn Cấu hình:",
   "label.configName": "Tên cấu hình:",
   "label.configPath": "Đường dẫn cấu hình: ! Để trống để tạo !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Tß║»t theo d├Ái t├¬n tiß║┐n tr├¼nh",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Bỏ qua mạo từ đứng đầu khi sắp xếp (A/An/The)",
   "label.exeArgs": "Tham số (tùy chọn):",
   "label.executablePath": "Tệp thực thi (tùy chọn):",
   "label.languageSelect": "Chọn ngôn ngữ:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Hướng dẫn nền tảng",
   "title.tab-platformGuide": "Hướng dẫn về nền tảng và trình mô phỏng"
 }
+

@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "編集",
   "dashboardMenuIgnore": "無視ゲーム",
   "dashboardMenuRegenerate": "スキーマを再生成する",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "ブラックリストから削除",
   "dashboardPerfectLabel": "完全試合：",
   "deleteConfigBtn": "削除",
@@ -94,6 +96,8 @@
   "label.configList": "設定を選択:",
   "label.configName": "設定名:",
   "label.configPath": "設定パス: ! 生成するには空欄のままにしてください !",
+  "label.settings-disableProcessNameWatcherCheckbox": "ÒâùÒâ¡Òé╗Òé╣ÕÉìÒéªÒé®ÒââÒâüÒâúÒâ╝ÒéÆþäíÕè╣Õîû",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "並び替え時に先頭の冠詞を無視する (A/An/The)",
   "label.exeArgs": "引数（オプション）：",
   "label.executablePath": "実行可能ファイル（オプション）：",
   "label.languageSelect": "言語を選択:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "プラットフォームガイド",
   "title.tab-platformGuide": "プラットフォームとエミュレータのガイド"
 }
+

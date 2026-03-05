@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Modifier",
   "dashboardMenuIgnore": "Ignorer le jeu",
   "dashboardMenuRegenerate": "Régénérer le schéma",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Supprimer de la liste noire",
   "dashboardPerfectLabel": "Jeux parfaits :",
   "deleteConfigBtn": "Supprimer",
@@ -94,6 +96,8 @@
   "label.configList": "Sélectionner la configuration :",
   "label.configName": "Nom de la configuration :",
   "label.configPath": "Chemin de configuration : ! Laisser vide pour générer !",
+  "label.settings-disableProcessNameWatcherCheckbox": "D├®sactiver la surveillance du nom du processus",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Ignorer les articles initiaux dans le tri (A/An/The)",
   "label.exeArgs": "Arguments (facultatifs) :",
   "label.executablePath": "Exécutable (facultatif) :",
   "label.languageSelect": "Sélectionnez la langue :",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Guide de la plateforme",
   "title.tab-platformGuide": "Guide de la plateforme et de l'émulateur"
 }
+

@@ -164,6 +164,8 @@ async function fetchSteamDbLibraryCover(appid) {
   coverLogger.info("steamdb:fetch:start", { appid: String(appid) });
   const url = `https://steamdb.info/app/${appid}/info/`;
   const browser = await getBrowserForApp(appid, { headless: true });
+  const steamDbCapsuleFallbackSelector =
+    "#js-assets-table > tbody > tr:nth-child(6) > td:nth-child(2) > table > tbody > tr:nth-child(2) > td:nth-child(2) > a";
 
   const ctx = await browser.newContext({
     userAgent:
@@ -186,33 +188,42 @@ async function fetchSteamDbLibraryCover(appid) {
       throw markSteamDbNotFound(null, `HTTP ${res?.status?.() ?? "??"}`);
 
     await page
-      .waitForSelector('a.image-hover, a[href*="library_600x900.jpg"]', {
-        timeout: 5000,
-      })
+      .waitForSelector(
+        `a.image-hover, a[href*="library_600x900.jpg"], a[href*="library_capsule.jpg"], ${steamDbCapsuleFallbackSelector}`,
+        {
+          timeout: 5000,
+        }
+      )
       .catch(() => {});
 
-    const found = await page.evaluate(() => {
+    const found = await page.evaluate((capsuleSelector) => {
       const isLib = (s) => /library_600x900\.jpg/i.test(s || "");
+      const isCapsule = (s) =>
+        /library_capsule(?:_[a-z0-9]+)*\.jpg/i.test(s || "");
       const anchors = Array.from(
         document.querySelectorAll(
-          'a.image-hover, a[href*="library_600x900.jpg"]'
+          `a.image-hover, a[href*="library_600x900.jpg"], a[href*="library_capsule.jpg"], ${capsuleSelector}`
         )
       );
       for (const a of anchors) {
         const href = a.getAttribute("href") || "";
         if (isLib(href)) return href.split("?")[0];
+        if (isCapsule(href)) return href.split("?")[0];
         const txt = (a.textContent || "").trim();
         if (isLib(txt)) return txt.split("?")[0].replace(/^\/+/, "");
+        if (isCapsule(txt)) return txt.split("?")[0].replace(/^\/+/, "");
       }
       const html = document.documentElement.innerHTML;
-      const abs = html.match(/https?:\/\/[^"'<\s]*library_600x900\.jpg/i);
+      const abs = html.match(
+        /https?:\/\/[^"'<\s]*(?:library_600x900\.jpg|library_capsule(?:_[a-z0-9]+)*\.jpg)/i
+      );
       if (abs) return abs[0].split("?")[0];
       const rel = html.match(
-        /store_item_assets\/steam\/apps\/\d+\/[^"'<\s]*\/library_600x900\.jpg/i
+        /store_item_assets\/steam\/apps\/\d+\/[^"'<\s]*(?:library_600x900\.jpg|library_capsule(?:_[a-z0-9]+)*\.jpg)/i
       );
       if (rel) return rel[0].replace(/^\/+/, "");
       return "";
-    });
+    }, steamDbCapsuleFallbackSelector);
 
     if (!found) {
       coverLogger.warn("steamdb:fetch:missing", { appid: String(appid) });

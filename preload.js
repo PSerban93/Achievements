@@ -171,6 +171,7 @@ contextBridge.exposeInMainWorld("api", {
   getSteamDbCover: (appid) => ipcRenderer.invoke("covers:steamdb", appid),
   getSteamGridDbCover: (payload) =>
     ipcRenderer.invoke("covers:steamgriddb", payload),
+  openExternalUrl: (url) => ipcRenderer.invoke("open-external-url", url),
   trayAction: (action) => ipcRenderer.send("tray:action", action),
   setStartWithWindows: (enabled) =>
     ipcRenderer.invoke("startup:set-start-with-windows", enabled),

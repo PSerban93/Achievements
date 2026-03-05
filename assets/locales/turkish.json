@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Düzenle",
   "dashboardMenuIgnore": "Oyunu Yoksay",
   "dashboardMenuRegenerate": "Şemayı Yeniden Oluştur",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Kara Listeden Çıkar",
   "dashboardPerfectLabel": "Mükemmel Oyunlar:",
   "deleteConfigBtn": "Sil",
@@ -94,6 +96,8 @@
   "label.configList": "Yapılandırmayı seçin:",
   "label.configName": "Yapılandırma Adı:",
   "label.configPath": "Yapılandırma yolu: ! Oluşturmak için boş bırakın !",
+  "label.settings-disableProcessNameWatcherCheckbox": "─░┼ƒlem ad─▒ izleyicisini devre d─▒┼ƒ─▒ b─▒rak",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Sıralamada baştaki artikelleri yok say (A/An/The)",
   "label.exeArgs": "Argümanlar (isteğe bağlı):",
   "label.executablePath": "Yürütülebilir (isteğe bağlı):",
   "label.languageSelect": "Dil seç:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Platform Rehberi",
   "title.tab-platformGuide": "Platform ve Emülatör Kılavuzu"
 }
+

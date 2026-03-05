@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "แก้ไข",
   "dashboardMenuIgnore": "เพิกเฉยต่อเกม",
   "dashboardMenuRegenerate": "สร้างโครงสร้างใหม่",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "นำออกจากบัญชีดำ",
   "dashboardPerfectLabel": "เกมสมบูรณ์แบบ:",
   "deleteConfigBtn": "ลบ",
@@ -94,6 +96,8 @@
   "label.configList": "เลือกการตั้งค่า:",
   "label.configName": "ชื่อการกำหนดค่า:",
   "label.configPath": "เส้นทางกำหนดค่า: ! ปล่อยว่างไว้เพื่อสร้าง!",
+  "label.settings-disableProcessNameWatcherCheckbox": "Ó©øÓ©┤Ó©öÓ╣âÓ©èÓ╣ëÓ©çÓ©▓Ó©ÖÓ©üÓ©▓Ó©úÓ╣ÇÓ©ØÓ╣ëÓ©▓Ó©öÓ©╣Ó©èÓ©ÀÓ╣êÓ©¡Ó╣éÓ©øÓ©úÓ╣ÇÓ©ïÓ©¬",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "ไม่เรียงตามคำนำหน้านามเมื่อจัดเรียง (A/An/The)",
   "label.exeArgs": "อาร์กิวเมนต์ (ไม่จำเป็น):",
   "label.executablePath": "ไฟล์ที่สามารถรันได้ (ไม่จำเป็น):",
   "label.languageSelect": "เลือกภาษา:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "คู่มือแพลตฟอร์ม",
   "title.tab-platformGuide": "คู่มือแพลตฟอร์มและโปรแกรมจำลอง"
 }
+

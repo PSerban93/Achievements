@@ -1,6 +1,7 @@
 const path = require("path");
 const { spawnSync, spawn } = require("child_process");
 const { getNameIndexFromConfigPath } = require("./achievement-data");
+const { subscribeLumaPlayRegistryEvents } = require("./process-event-watcher");
 
 const LUMAPLAY_ROOT_KEY = "HKCU\\SOFTWARE\\LumaPlay";
 
@@ -84,6 +85,29 @@ function startLumaPlayRegistryEventWatcher(options = {}) {
       stop() {},
       isRunning() {
         return false;
+      },
+    };
+  }
+  const useUnifiedHost = process.env.ACH_UNIFIED_EVENT_HOST !== "0";
+  if (useUnifiedHost) {
+    const subscription = subscribeLumaPlayRegistryEvents({
+      restartDelayMs: options.restartDelayMs,
+      onReady: options.onReady,
+      onWarn: options.onWarn,
+      onChange: options.onChange,
+    });
+    return {
+      stop() {
+        try {
+          subscription.stop();
+        } catch {}
+      },
+      isRunning() {
+        try {
+          return subscription.isRunning();
+        } catch {
+          return false;
+        }
       },
     };
   }

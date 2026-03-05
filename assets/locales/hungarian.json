@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Szerkesztés",
   "dashboardMenuIgnore": "Játék figyelmen kívül hagyása",
   "dashboardMenuRegenerate": "Séma újragenerálása",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Törlés a feketelistáról",
   "dashboardPerfectLabel": "Tökéletes játékok:",
   "deleteConfigBtn": "Törlés",
@@ -94,6 +96,8 @@
   "label.configList": "Válassza a Konfiguráció lehetőséget:",
   "label.configName": "Konfiguráció neve:",
   "label.configPath": "Konfigurációs útvonal: ! Hagyja üresen a generáláshoz !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Folyamatn├®v-figyel├®s letilt├ísa",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "A névelők figyelmen kívül hagyása rendezéskor (A/An/The)",
   "label.exeArgs": "Érvek (opcionális):",
   "label.executablePath": "Végrehajtható fájl (opcionális):",
   "label.languageSelect": "Nyelv kiválasztása:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Platform útmutató",
   "title.tab-platformGuide": "Platform és emulátor útmutató"
 }
+

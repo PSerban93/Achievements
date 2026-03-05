@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Редактиране",
   "dashboardMenuIgnore": "Игнорирай играта",
   "dashboardMenuRegenerate": "Регенериране на схема",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Премахване от черния списък",
   "dashboardPerfectLabel": "Перфектни игри:",
   "deleteConfigBtn": "Изтрий",
@@ -94,6 +96,8 @@
   "label.configList": "Изберете Конфигурация:",
   "label.configName": "Име на конфигурацията:",
   "label.configPath": "Конфигурационен път: ! Оставете празно, за да се генерира !",
+  "label.settings-disableProcessNameWatcherCheckbox": "ðöðÁð░ð║Ðéð©ð▓ð©ÐÇð░ð╣ ð¢ð░ð▒ð╗ÐÄð┤ðÁð¢ð©ðÁÐéð¥ ð¢ð░ ð©ð╝ðÁÐéð¥ ð¢ð░ ð┐ÐÇð¥ÐåðÁÐüð░",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Игнорирай началните членове при сортиране (A/An/The)",
   "label.exeArgs": "Аргументи (по избор):",
   "label.executablePath": "Изпълним файл (по избор):",
   "label.languageSelect": "Изберете език:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Ръководство за платформата",
   "title.tab-platformGuide": "Ръководство за платформа и емулатор"
 }
+

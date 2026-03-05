@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Edit",
   "dashboardMenuIgnore": "Abaikan Game",
   "dashboardMenuRegenerate": "Regenerasi Skema",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Hapus dari Daftar Hitam",
   "dashboardPerfectLabel": "Permainan Sempurna:",
   "deleteConfigBtn": "Hapus",
@@ -94,6 +96,8 @@
   "label.configList": "Pilih Konfigurasi:",
   "label.configName": "Nama Konfigurasi:",
   "label.configPath": "Jalur konfigurasi: ! Biarkan kosong untuk menghasilkan !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Nonaktifkan pemantauan nama proses",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Abaikan kata sandang di awal saat mengurutkan (A/An/The)",
   "label.exeArgs": "Argumen (opsional):",
   "label.executablePath": "Berkas yang dapat dieksekusi (opsional):",
   "label.languageSelect": "Pilih Bahasa:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Panduan Platform",
   "title.tab-platformGuide": "Panduan Platform & Emulator"
 }
+

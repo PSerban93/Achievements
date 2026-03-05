@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Muokkaa",
   "dashboardMenuIgnore": "Ohita peli",
   "dashboardMenuRegenerate": "Regeneroi skeema",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Poista mustalta listalta",
   "dashboardPerfectLabel": "Täydelliset pelit:",
   "deleteConfigBtn": "Poista",
@@ -94,6 +96,8 @@
   "label.configList": "Valitse Config:",
   "label.configName": "Konfiguraation nimi:",
   "label.configPath": "Konfigurointipolku: ! Jätä tyhjäksi luodaksesi !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Poista prosessin nimen valvonta k├ñyt├Âst├ñ",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Ohita alkuartikkelit lajittelussa (A/An/The)",
   "label.exeArgs": "Argumentit (valinnainen):",
   "label.executablePath": "Suoritettava tiedosto (valinnainen):",
   "label.languageSelect": "Valitse kieli:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Alustan opas",
   "title.tab-platformGuide": "Alustan ja emulaattorin opas"
 }
+

@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "تحرير",
   "dashboardMenuIgnore": "تجاهل اللعبة",
   "dashboardMenuRegenerate": "إعادة إنشاء المخطط",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "إزالة من القائمة السوداء",
   "dashboardPerfectLabel": "المباريات المثالية:",
   "deleteConfigBtn": "حذف",
@@ -94,6 +96,8 @@
   "label.configList": "حدد التكوين:",
   "label.configName": "اسم التكوين:",
   "label.configPath": "مسار التكوين: ! اتركه فارغًا لإنشائه !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Ï¬Ï╣ÏÀ┘è┘ä ┘àÏ▒Ïº┘éÏ¿ ÏºÏ│┘à Ïº┘äÏ╣┘à┘ä┘èÏ®",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "تجاهل أدوات التعريف في الترتيب (A/An/The)",
   "label.exeArgs": "الحجج (اختياري):",
   "label.executablePath": "قابل للتنفيذ (اختياري):",
   "label.languageSelect": "اختر اللغة:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "دليل المنصة",
   "title.tab-platformGuide": "دليل النظام الأساسي والمحاكي"
 }
+

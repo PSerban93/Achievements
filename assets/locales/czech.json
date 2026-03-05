@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Upravit",
   "dashboardMenuIgnore": "Ignorovat hru",
   "dashboardMenuRegenerate": "Regenerovat schéma",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Odebrat z černé listiny",
   "dashboardPerfectLabel": "Dokonalé hry:",
   "deleteConfigBtn": "Smazat",
@@ -94,6 +96,8 @@
   "label.configList": "Vyberte konfiguraci:",
   "label.configName": "Název konfigurace:",
   "label.configPath": "Cesta ke konfiguraci: ! Nechte prázdné pro generování !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Zak├ízat sledov├ín├¡ n├ízvu procesu",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Ignorovat úvodní členy při řazení (A/An/The)",
   "label.exeArgs": "Argumenty (volitelné):",
   "label.executablePath": "Spustitelný soubor (volitelné):",
   "label.languageSelect": "Vyberte jazyk:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Průvodce platformou",
   "title.tab-platformGuide": "Průvodce platformou a emulátorem"
 }
+

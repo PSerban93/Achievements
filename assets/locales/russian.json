@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Редактировать",
   "dashboardMenuIgnore": "Игнорировать игру",
   "dashboardMenuRegenerate": "Восстановить схему",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Удалить из черного списка",
   "dashboardPerfectLabel": "Идеальные игры:",
   "deleteConfigBtn": "Удалить",
@@ -94,6 +96,8 @@
   "label.configList": "Выберите конфигурацию:",
   "label.configName": "Имя конфигурации:",
   "label.configPath": "Путь к конфигурации: ! Оставьте пустым для генерации !",
+  "label.settings-disableProcessNameWatcherCheckbox": "ð×Ðéð║ð╗ÐÄÐçð©ÐéÐî ð¥ÐéÐüð╗ðÁðÂð©ð▓ð░ð¢ð©ðÁ ð©ð╝ðÁð¢ð© ð┐ÐÇð¥ÐåðÁÐüÐüð░",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Игнорировать артикли в начале при сортировке (A/An/The)",
   "label.exeArgs": "Аргументы (необязательно):",
   "label.executablePath": "Исполняемый файл (опционально):",
   "label.languageSelect": "Выберите язык:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Руководство по платформе",
   "title.tab-platformGuide": "Руководство по платформе и эмулятору"
 }
+

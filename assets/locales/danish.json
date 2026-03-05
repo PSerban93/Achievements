@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Rediger",
   "dashboardMenuIgnore": "Ignorer spil",
   "dashboardMenuRegenerate": "Regenerér skema",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Fjern fra sortliste",
   "dashboardPerfectLabel": "Perfekte spil:",
   "deleteConfigBtn": "Slet",
@@ -94,6 +96,8 @@
   "label.configList": "Vælg Konfiguration:",
   "label.configName": "Konfigurationsnavn:",
   "label.configPath": "Konfigurationssti: ! Lad feltet være tomt for at generere !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Deaktiver overv├Ñgning af procesnavn",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Ignorer indledende artikler ved sortering (A/An/The)",
   "label.exeArgs": "Argumenter (valgfrit):",
   "label.executablePath": "Kørbar (valgfri):",
   "label.languageSelect": "Vælg sprog:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Platform guide",
   "title.tab-platformGuide": "Platform & emulator guide"
 }
+

@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "编辑",
   "dashboardMenuIgnore": "忽略游戏",
   "dashboardMenuRegenerate": "重新生成模式",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "从黑名单中移除",
   "dashboardPerfectLabel": "完美游戏：",
   "deleteConfigBtn": "删除",
@@ -94,6 +96,8 @@
   "label.configList": "选择配置：",
   "label.configName": "配置名称：",
   "label.configPath": "配置路径：! 留空以生成 !",
+  "label.settings-disableProcessNameWatcherCheckbox": "þªüþö¿Þ┐øþ¿ïÕÉìþº░þøæÞºåÕÖ¿",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "排序时忽略开头冠词 (A/An/The)",
   "label.exeArgs": "参数（可选）：",
   "label.executablePath": "可执行文件（可选）：",
   "label.languageSelect": "选择语言：",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "平台指南",
   "title.tab-platformGuide": "平台和模拟器指南"
 }
+

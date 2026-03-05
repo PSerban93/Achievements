@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Επεξεργασία",
   "dashboardMenuIgnore": "Αγνοήστε το παιχνίδι",
   "dashboardMenuRegenerate": "Αναγέννηση σχήματος",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Αφαίρεση από τη μαύρη λίστα",
   "dashboardPerfectLabel": "Τέλεια παιχνίδια:",
   "deleteConfigBtn": "Διαγραφή",
@@ -94,6 +96,8 @@
   "label.configList": "Επιλέξτε Διαμόρφωση:",
   "label.configName": "Όνομα διαμόρφωσης:",
   "label.configPath": "Διαδρομή διαμόρφωσης: ! Αφήστε κενό για δημιουργία !",
+  "label.settings-disableProcessNameWatcherCheckbox": "╬æ¤Ç╬Á╬¢╬Á¤ü╬│╬┐¤Ç╬┐╬»╬À¤â╬À ¤Ç╬▒¤ü╬▒╬║╬┐╬╗╬┐¤ì╬©╬À¤â╬À¤é ╬┐╬¢¤î╬╝╬▒¤ä╬┐¤é ╬┤╬╣╬Á¤ü╬│╬▒¤â╬»╬▒¤é",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Αγνόηση αρχικών άρθρων στην ταξινόμηση (A/An/The)",
   "label.exeArgs": "Επιχειρήματα (προαιρετικά):",
   "label.executablePath": "Εκτελέσιμο (προαιρετικό):",
   "label.languageSelect": "Επιλέξτε γλώσσα:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Οδηγός πλατφόρμας",
   "title.tab-platformGuide": "Οδηγός πλατφόρμας και εξομοιωτή"
 }
+

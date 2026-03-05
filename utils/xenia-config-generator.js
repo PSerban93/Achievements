@@ -5,6 +5,7 @@ const {
   parseGpdFile,
   buildSchemaFromGpd,
   buildSnapshotFromGpd,
+  getValidAchievements,
 } = require("./xenia-gpd");
 const {
   EXOPHASE_LANG_KEYS,
@@ -500,6 +501,7 @@ function updateSchemaFromGpd(schemaDir, parsed, options = {}) {
   let updated = false;
   let added = 0;
   let changed = 0;
+  let pruned = 0;
   const incoming = buildSchemaFromGpd(parsed, { preferLocked: true });
   const entryByName = new Map();
   for (const entry of entries) {
@@ -556,8 +558,24 @@ function updateSchemaFromGpd(schemaDir, parsed, options = {}) {
     }
   }
 
+  const incomingNames = new Set(
+    incoming
+      .map((entry) => String(entry?.name || "").trim())
+      .filter((name) => !!name)
+  );
+  const beforePruneCount = entries.length;
+  entries = entries.filter((entry) => {
+    const key = String(entry?.name || "").trim();
+    if (!key) return false;
+    return incomingNames.has(key);
+  });
+  pruned = Math.max(0, beforePruneCount - entries.length);
+  if (pruned > 0) {
+    updated = true;
+    changed += pruned;
+  }
+
   for (const entry of entries) {
-    const entryName = entry?.name != null ? String(entry.name) : "";
     let imageId = entry?.imageId;
 
     if (imageId === undefined || imageId === null) {
@@ -602,6 +620,7 @@ function updateSchemaFromGpd(schemaDir, parsed, options = {}) {
       updated,
       added,
       changed,
+      pruned,
       total: entries.length,
       incoming: incoming.length,
       images: imagesSaved,
@@ -636,14 +655,30 @@ function generateConfigFromGpd(gpdPath, configsDir, options = {}) {
   }
   parsed.appid = appid;
   const title = parsed.title || appid;
-  const achievementCount = parsed.achievements?.length || 0;
+  const rawAchievementCount = parsed.achievements?.length || 0;
+  const validAchievementCount = getValidAchievements(parsed).length;
+  const filteredCount = Math.max(0, rawAchievementCount - validAchievementCount);
+  if (filteredCount > 0) {
+    schemaLogger.info("xenia:schema:filtered-invalid", {
+      appid,
+      raw: rawAchievementCount,
+      valid: validAchievementCount,
+      filtered: filteredCount,
+    });
+  }
+  const achievementCount = validAchievementCount;
   const snapshot = buildSnapshotFromGpd(parsed);
   const schemaRoot =
     options.schemaRoot || path.join(configsDir, "schema");
   const schemaDir = path.join(schemaRoot, "xenia", String(appid));
 
   if (achievementCount === 0) {
-    return { skipped: true, appid, title, reason: "no-achievements" };
+    return {
+      skipped: true,
+      appid,
+      title,
+      reason: rawAchievementCount > 0 ? "no-valid-achievements" : "no-achievements",
+    };
   }
 
   const existing = findExistingXeniaConfig(configsDir, appid);

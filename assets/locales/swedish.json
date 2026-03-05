@@ -78,6 +78,8 @@
   "dashboardMenuEdit": "Redigera",
   "dashboardMenuIgnore": "Ignorera spel",
   "dashboardMenuRegenerate": "Regenerera schema",
+  "dashboardMenuSteam": "Steam",
+  "dashboardMenuSteamDb": "SteamDB",
   "dashboardMenuRemoveBlacklist": "Ta bort från svartlista",
   "dashboardPerfectLabel": "Perfekta matcher:",
   "deleteConfigBtn": "Radera",
@@ -94,6 +96,8 @@
   "label.configList": "Välj konfiguration:",
   "label.configName": "Konfigurationsnamn:",
   "label.configPath": "Konfigurationssökväg: ! Lämna tomt för att generera !",
+  "label.settings-disableProcessNameWatcherCheckbox": "Inaktivera ├Âvervakning av processnamn",
+  "label.settings-ignoreLeadingArticlesSortCheckbox": "Ignorera inledande artiklar vid sortering (A/An/The)",
   "label.exeArgs": "Argument (valfritt):",
   "label.executablePath": "Körbar (valfritt):",
   "label.languageSelect": "Välj språk:",
@@ -542,3 +546,4 @@
   "tab-platformGuide": "Plattformsguide",
   "title.tab-platformGuide": "Plattforms- och emulatorguide"
 }
+

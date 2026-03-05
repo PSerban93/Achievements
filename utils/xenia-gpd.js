@@ -280,9 +280,72 @@ function parseGpdFile(filePath) {
   };
 }
 
+function normalizeAchievementText(value) {
+  return String(value || "").trim();
+}
+
+function isPositiveNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0;
+}
+
+function isValidAchievementPayloadForSchema(achievement) {
+  if (!achievement || typeof achievement !== "object") return false;
+  const name = normalizeAchievementText(achievement.name);
+  const lockedDescription = normalizeAchievementText(
+    achievement.lockedDescription
+  );
+  const unlockedDescription = normalizeAchievementText(
+    achievement.unlockedDescription
+  );
+  if (!name || !lockedDescription || !unlockedDescription) return false;
+  if (!isPositiveNumber(achievement.flags)) return false;
+  if (!isPositiveNumber(achievement.imageId)) return false;
+  if (!isPositiveNumber(achievement.achievementId)) return false;
+  return true;
+}
+
+function scoreAchievementPayload(achievement) {
+  const name = normalizeAchievementText(achievement?.name);
+  const lockedDescription = normalizeAchievementText(
+    achievement?.lockedDescription
+  );
+  const unlockedDescription = normalizeAchievementText(
+    achievement?.unlockedDescription
+  );
+  const flags = Number(achievement?.flags || 0);
+  const imageId = Number(achievement?.imageId || 0);
+  return (
+    name.length +
+    lockedDescription.length +
+    unlockedDescription.length +
+    (flags > 0 ? 1000 : 0) +
+    (imageId > 0 ? 1000 : 0) +
+    ((flags & ACHIEVEMENT_EARNED_FLAG) !== 0 ? 10 : 0)
+  );
+}
+
+function getValidAchievements(parsed) {
+  const byId = new Map();
+  for (const achievement of parsed?.achievements || []) {
+    if (!isValidAchievementPayloadForSchema(achievement)) continue;
+    const key = String(achievement.achievementId || "").trim();
+    if (!key) continue;
+    const existing = byId.get(key);
+    if (!existing) {
+      byId.set(key, achievement);
+      continue;
+    }
+    if (scoreAchievementPayload(achievement) > scoreAchievementPayload(existing)) {
+      byId.set(key, achievement);
+    }
+  }
+  return Array.from(byId.values());
+}
+
 function buildSnapshotFromGpd(parsed) {
   const out = {};
-  for (const ach of parsed.achievements || []) {
+  for (const ach of getValidAchievements(parsed)) {
     const key = String(ach.achievementId);
     const earned = (ach.flags & ACHIEVEMENT_EARNED_FLAG) !== 0;
     out[key] = {
@@ -297,9 +360,9 @@ function buildSchemaFromGpd(parsed, options = {}) {
   const entries = [];
   const preferLocked = options.preferLocked === true;
 
-  for (const ach of parsed.achievements || []) {
+  for (const ach of getValidAchievements(parsed)) {
     const name = String(ach.achievementId);
-    const displayName = ach.name || name;
+    const displayName = normalizeAchievementText(ach.name);
     const locked = (ach.lockedDescription || "").trim();
     const unlocked = (ach.unlockedDescription || locked || "").trim();
     const hidden = (ach.flags & 0x8) === 0 ? 1 : 0;
@@ -326,4 +389,6 @@ module.exports = {
   buildSnapshotFromGpd,
   buildSchemaFromGpd,
   normalizeUnlockTime,
+  getValidAchievements,
+  isValidAchievementPayloadForSchema,
 };

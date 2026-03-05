@@ -282,7 +282,7 @@ const resolvedAppIds = buildResolvedAppIds(APPIDS, EFFECTIVE_PLATFORM_MODE);
 
 if (!APPIDS.length) {
   error(
-    "Usage: node generate_achievements_schema.js <APPID...> [--headed] [--verbose] [--apps-concurrency=2] [--langs=english,german,...] [--key=XXXXX] [--out=ABS_OR_REL_PATH] [--platform=steam|uplay|epic|gog] [--steam-source=auto|steamdb|steamhunters] [--gog] [--gog-user=email --gog-pass=pass] [--gog-tokens-file=PATH]",
+    "Usage: node generate_achievements_schema.js <APPID...> [--headed] [--verbose] [--apps-concurrency=2] [--langs=english,german,... | --english --spanish ...] [--key=XXXXX] [--out=ABS_OR_REL_PATH] [--platform=steam|uplay|epic|gog] [--steam-source=auto|steamdb|steamhunters] [--gog] [--gog-user=email --gog-pass=pass] [--gog-tokens-file=PATH]",
   );
   process.exit(1);
 }
@@ -302,6 +302,43 @@ function normalizeSteamSource(value) {
 const STEAM_SCRAPE_SOURCE = normalizeSteamSource(steamSourceArg);
 
 /* ---------- langs ---------- */
+function normalizeLangToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function dedupeLangList(list = []) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list || []) {
+    const token = normalizeLangToken(item);
+    if (!token || seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
+  }
+  return out;
+}
+
+function parseLangList(rawList) {
+  if (!rawList) return [];
+  return dedupeLangList(String(rawList).split(","));
+}
+
+function parseLangsFromStandaloneFlags(args = [], allowedLangs = []) {
+  const allowed = new Set(dedupeLangList(allowedLangs));
+  const selected = [];
+  for (const arg of args || []) {
+    const raw = String(arg || "").trim();
+    if (!raw.startsWith("--")) continue;
+    if (raw.includes("=")) continue;
+    const token = normalizeLangToken(raw.slice(2));
+    if (!token || !allowed.has(token)) continue;
+    selected.push(token);
+  }
+  return dedupeLangList(selected);
+}
+
 const DEFAULT_LANGS = [
   "arabic",
   "bulgarian",
@@ -334,11 +371,31 @@ const DEFAULT_LANGS = [
   "ukrainian",
   "vietnamese",
 ];
+const LANGS_FROM_CSV = parseLangList(langsArg);
+const LANGS_FROM_FLAGS = parseLangsFromStandaloneFlags(ARGS, DEFAULT_LANGS);
+const HAS_CUSTOM_LANG_SELECTION =
+  LANGS_FROM_CSV.length > 0 || LANGS_FROM_FLAGS.length > 0;
+const LANGS = HAS_CUSTOM_LANG_SELECTION
+  ? LANGS_FROM_CSV.length > 0
+    ? LANGS_FROM_CSV
+    : LANGS_FROM_FLAGS
+  : [...DEFAULT_LANGS];
 const EXTENDED_STEAM_LANGS = [...DEFAULT_LANGS];
-const LANGS = (langsArg ? langsArg.split(",") : DEFAULT_LANGS)
-  .map((s) => s.trim())
-  .filter(Boolean);
-const STEAM_LANGS = langsArg ? LANGS : EXTENDED_STEAM_LANGS;
+const STEAM_LANGS = HAS_CUSTOM_LANG_SELECTION ? LANGS : EXTENDED_STEAM_LANGS;
+
+function resolveExophaseLangsToFetch() {
+  if (!HAS_CUSTOM_LANG_SELECTION) return [...EXOPHASE_LANG_KEYS];
+  const allowed = new Set(EXOPHASE_LANG_KEYS.map((lang) => normalizeLangToken(lang)));
+  const selected = [];
+  for (const lang of LANGS) {
+    const token = normalizeLangToken(lang);
+    if (!token || !allowed.has(token) || selected.includes(token)) continue;
+    selected.push(token);
+  }
+  return selected.length ? selected : ["english"];
+}
+
+const EXOPHASE_LANGS = resolveExophaseLangsToFetch();
 
 info("achschema:start", {
   uplayAppIds: resolvedAppIds.map((entry) => entry.uplayId),
@@ -347,6 +404,7 @@ info("achschema:start", {
   headed,
   verbose,
   langs: LANGS,
+  customLangSelection: HAS_CUSTOM_LANG_SELECTION,
   output: OUT_BASE,
   steamSource: STEAM_SCRAPE_SOURCE,
 });
@@ -744,6 +802,21 @@ function epicLocaleForLang(lang) {
     .toLowerCase();
   return EPIC_LOCALE_MAP[key] || EPIC_LOCALE_MAP.english;
 }
+
+function resolveEpicLangsToFetch() {
+  const supported = Object.keys(EPIC_LOCALE_MAP);
+  if (!HAS_CUSTOM_LANG_SELECTION) return [...supported];
+  const supportedSet = new Set(supported);
+  const selected = [];
+  for (const lang of LANGS) {
+    const token = normalizeLangToken(lang);
+    if (!token || !supportedSet.has(token)) continue;
+    if (!selected.includes(token)) selected.push(token);
+  }
+  return selected.length ? selected : ["english"];
+}
+
+const EPIC_LANGS = resolveEpicLangsToFetch();
 
 async function fetchEpicAchievements(appid, locale) {
   const url = `https://api.epicgames.dev/epic/achievements/v1/public/achievements/product/${appid}/locale/${locale}?includeAchievements=true`;
@@ -1848,7 +1921,7 @@ async function buildAchievementsFromScrape(
         exoData = await fetchExophaseAchievementsMultiLang({
           slug: candidate,
           platform,
-          langKeys: EXOPHASE_LANG_KEYS,
+          langKeys: EXOPHASE_LANGS,
           langMap: EXOPHASE_LANG_MAP,
           page: session?.page,
         });
@@ -1931,7 +2004,18 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
       return processGogApp(folderId, outBaseDir);
     }
     if (wantsEpic) {
-      const langsToFetch = uniqueLangsWithEnglish(Object.keys(EPIC_LOCALE_MAP));
+      const langsToFetch = [...EPIC_LANGS];
+      if (HAS_CUSTOM_LANG_SELECTION) {
+        const supportedSet = new Set(Object.keys(EPIC_LOCALE_MAP));
+        const unsupported = LANGS.filter((lang) => !supportedSet.has(lang));
+        if (unsupported.length) {
+          emit("warn", "epic:langs-unsupported", {
+            appid,
+            requested: LANGS,
+            unsupported,
+          });
+        }
+      }
       const perLangByApi = {};
 
       await Promise.all(
@@ -2214,7 +2298,7 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
           exoData = await fetchExophaseAchievementsMultiLang({
             slug: candidate,
             platform: "rpcs3",
-            langKeys: EXOPHASE_LANG_KEYS,
+            langKeys: EXOPHASE_LANGS,
             langMap: EXOPHASE_LANG_MAP,
             logger: schemaLogger,
             outputDir: outDir,
