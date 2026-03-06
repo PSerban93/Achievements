@@ -1983,8 +1983,8 @@
                     </li>
                     <li id="platformGuideTroubleshootingItem4">
                       Match privilege level between app and game
-                      (non-admin/non-admin or admin/admin) for reliable
-                      overlay shortcuts.
+                      (non-admin/non-admin or admin/admin) for reliable overlay
+                      shortcuts.
                     </li>
                     <li id="platformGuideTroubleshootingItem5">
                       If overlay hotkeys are blocked in a game, switch to a
@@ -2000,8 +2000,8 @@
                       fallback Ctrl+PageUp / Ctrl+PageDown.
                     </li>
                     <li id="platformGuideTroubleshootingItem8">
-                      If sound plays but notifications appear late, lower
-                      preset cost (blur/shadows/large transforms) and reduce
+                      If sound plays but notifications appear late, lower preset
+                      cost (blur/shadows/large transforms) and reduce
                       notification duration.
                     </li>
                   </ul>
@@ -2775,8 +2775,8 @@
       <div class="modal-content boot-onboarding-modal">
         <h3 id="bootOnboardingTitle">Choose folders for Auto-Config</h3>
         <p id="bootOnboardingMessage">
-          Was found folders with achievement data. Select which folders should be
-          scanned automatically.
+          Was found folders with achievement data. Select which folders should
+          be scanned automatically.
         </p>
         <div
           id="bootOnboardingList"
@@ -3753,7 +3753,9 @@
       }
 
       function compareAchievementRowsByCurrentSort(rowA, rowB) {
-        const fallback = getAchievementDefaultRowIndex(rowA) - getAchievementDefaultRowIndex(rowB);
+        const fallback =
+          getAchievementDefaultRowIndex(rowA) -
+          getAchievementDefaultRowIndex(rowB);
 
         if (achievementTableViewState.nameSort !== "off") {
           const aName = String(rowA?.dataset?.sortName || "");
@@ -3797,9 +3799,7 @@
       function getNextAchievementStatusFilter(current) {
         const idx = ACHIEVEMENT_TABLE_STATUS_SEQUENCE.indexOf(current);
         const nextIdx =
-          idx >= 0
-            ? (idx + 1) % ACHIEVEMENT_TABLE_STATUS_SEQUENCE.length
-            : 0;
+          idx >= 0 ? (idx + 1) % ACHIEVEMENT_TABLE_STATUS_SEQUENCE.length : 0;
         return ACHIEVEMENT_TABLE_STATUS_SEQUENCE[nextIdx];
       }
 
@@ -3986,7 +3986,10 @@
           });
         }
         if (statusFilterBtn) {
-          statusFilterBtn.addEventListener("click", cycleAchievementsStatusFilter);
+          statusFilterBtn.addEventListener(
+            "click",
+            cycleAchievementsStatusFilter,
+          );
         }
         if (sortNameBtn) {
           sortNameBtn.addEventListener("click", () => {
@@ -4024,10 +4027,15 @@
           document.getElementById("configList")?.value || "",
         ).trim();
         if (!configName) {
-          showNotification(tUi("alert.selectConfig", "Select a config!"), "#f44336");
+          showNotification(
+            tUi("alert.selectConfig", "Select a config!"),
+            "#f44336",
+          );
           return;
         }
-        const refreshBtn = document.getElementById("achievementsRefreshRarityBtn");
+        const refreshBtn = document.getElementById(
+          "achievementsRefreshRarityBtn",
+        );
         const refreshBtnLabel = document.getElementById(
           "achievementsRefreshRarityBtnLabel",
         );
@@ -4047,9 +4055,8 @@
             refreshBtn.classList.add("is-loading");
           }
           if (refreshBtnLabel) refreshBtnLabel.textContent = loadingLabel;
-          const result = await window.api?.refreshSelectedConfigRarity?.(
-            configName,
-          );
+          const result =
+            await window.api?.refreshSelectedConfigRarity?.(configName);
           if (!result?.success) {
             showNotification(
               result?.message ||
@@ -4072,7 +4079,8 @@
             document.getElementById("configList")?.value || "",
           ).trim();
           if (activeConfig === configName) {
-            const lang = document.getElementById("languageSelect")?.value || "english";
+            const lang =
+              document.getElementById("languageSelect")?.value || "english";
             await buildMainAchievementsTable(configName, lang, {
               skipPlatinumCheck: true,
             });
@@ -4116,7 +4124,8 @@
         const skipPlatinumCheck = options?.skipPlatinumCheck === true;
         const getActiveSelectedConfig = () =>
           document.getElementById("configList")?.value || "";
-        const isSelectionStale = () => getActiveSelectedConfig() !== selectedConfig;
+        const isSelectionStale = () =>
+          getActiveSelectedConfig() !== selectedConfig;
         if (isSelectionStale()) return;
         const achSearchInput = document.getElementById(
           "achievementsSearchInput",
@@ -4126,10 +4135,12 @@
           window.__achSearchConfig = selectedConfig;
         }
 
-        const achievementsDataObj =
-          await window.api.loadAchievementData(selectedConfig, {
+        const achievementsDataObj = await window.api.loadAchievementData(
+          selectedConfig,
+          {
             includeRarity: true,
-          });
+          },
+        );
         if (isSelectionStale()) return;
         if (
           !achievementsDataObj ||
@@ -4287,7 +4298,8 @@
             .trim()
             .toLowerCase();
           if (!normalized || normalized === "unknown") return "";
-          if (normalized === "p" || normalized === "platinum") return "Platinum";
+          if (normalized === "p" || normalized === "platinum")
+            return "Platinum";
           if (normalized === "g" || normalized === "gold") return "Gold";
           if (normalized === "s" || normalized === "silver") return "Silver";
           if (normalized === "b" || normalized === "bronze") return "Bronze";
@@ -4395,7 +4407,9 @@
             useTrophyTypeRaritySortFallback,
           });
           row.dataset.defaultIndex = String(defaultRowIndex++);
-          row.dataset.sortName = String(displayName || achievement.name || hiddenLabel)
+          row.dataset.sortName = String(
+            displayName || achievement.name || hiddenLabel,
+          )
             .trim()
             .replace(/\s+/g, " ")
             .toLowerCase();
@@ -5429,7 +5443,10 @@
           ? catalog
           : getSchemaLanguageCatalogFromLanguageSelect();
         if (!listEl) {
-          return getSchemaLanguageSelectionFromPrefs(getCachedPreferences(), items);
+          return getSchemaLanguageSelectionFromPrefs(
+            getCachedPreferences(),
+            items,
+          );
         }
         const selected = Array.from(
           listEl.querySelectorAll(
@@ -6470,10 +6487,12 @@
               position: positionDropdown.value,
             });
           }
-          const achievementsDataObj =
-            await window.api.loadAchievementData(selectedConfig, {
+          const achievementsDataObj = await window.api.loadAchievementData(
+            selectedConfig,
+            {
               includeRarity: true,
-            });
+            },
+          );
           if (isStaleSelection()) return;
           const savedAchievementsObj =
             await window.api.loadSavedAchievements(selectedConfig);
@@ -9449,7 +9468,10 @@
             btnEdit.className = "icon-btn edit";
             btnEdit.title = tUi("tooltip.folderEdit", "Edit folder");
             btnEdit.setAttribute("aria-label", btnEdit.title);
-            btnEdit.innerHTML = faWithFallback("fa-regular fa-pen-to-square", "✎");
+            btnEdit.innerHTML = faWithFallback(
+              "fa-regular fa-pen-to-square",
+              "✎",
+            );
             btnEdit.addEventListener("click", async () => {
               let next = null;
               if (typeof window.api?.selectFolder === "function") {
@@ -9488,7 +9510,10 @@
             btnRemove.className = "icon-btn remove";
             btnRemove.title = tUi("tooltip.folderRemove", "Remove folder");
             btnRemove.setAttribute("aria-label", btnRemove.title);
-            btnRemove.innerHTML = faWithFallback("fa-regular fa-trash-can", "🗑");
+            btnRemove.innerHTML = faWithFallback(
+              "fa-regular fa-trash-can",
+              "🗑",
+            );
             btnRemove.addEventListener("click", async () => {
               const res = await invoke("folders:remove", folderPath);
               if (res?.ok) renderFoldersList(res.folders);
@@ -10632,19 +10657,21 @@
               .toLowerCase()
               .normalize("NFD")
               .replace(/\p{Diacritic}/gu, "");
+          const buildSearchToken = (card) => {
+            if (!card) return "";
+            const name =
+              card.getAttribute("data-display") ||
+              card.getAttribute("data-name") ||
+              "";
+            const appid = card.getAttribute("data-appid") || "";
+            return norm(`${name} ${appid}`);
+          };
 
           const getCards = () => getDashCards(true);
 
           const prepareCards = () => {
             getCards().forEach((c) => {
-              if (!c.dataset._search) {
-                const name =
-                  c.getAttribute("data-display") ||
-                  c.getAttribute("data-name") ||
-                  "";
-                const appid = c.getAttribute("data-appid") || "";
-                c.dataset._search = norm(name + " " + appid);
-              }
+              c.dataset._search = buildSearchToken(c);
             });
           };
 
@@ -10933,6 +10960,16 @@
                   const appid = cfg?.appid ? String(cfg.appid) : null;
                   if (appid) {
                     meta.element.dataset.appid = appid;
+                    meta.element.dataset._search = (
+                      meta.element.dataset.display ||
+                      meta.element.dataset.name ||
+                      ""
+                    )
+                      .toString()
+                      .concat(" ", appid)
+                      .toLowerCase()
+                      .normalize("NFD")
+                      .replace(/\p{Diacritic}/gu, "");
                     meta.data.appid = appid;
                   }
                   const platform = cfg?.platform || null;
@@ -11721,14 +11758,19 @@
             shouldIgnoreLeadingArticlesInDashboardSort();
           const sortTitleCache = new WeakMap();
           const getRawTitle = (card) =>
-            card.getAttribute("data-display") || card.getAttribute("data-name") || "";
+            card.getAttribute("data-display") ||
+            card.getAttribute("data-name") ||
+            "";
           const getSortTitle = (card) => {
             if (sortTitleCache.has(card)) {
               return sortTitleCache.get(card);
             }
-            const normalized = normalizeDashboardTitleForSort(getRawTitle(card), {
-              ignoreLeadingArticles,
-            });
+            const normalized = normalizeDashboardTitleForSort(
+              getRawTitle(card),
+              {
+                ignoreLeadingArticles,
+              },
+            );
             sortTitleCache.set(card, normalized);
             return normalized;
           };
@@ -11844,6 +11886,8 @@
         window.api?.on?.("refresh-achievements-table", () => {});
         const bootLoadingEl = document.getElementById("bootLoading");
         let bootImageDrainTimer = null;
+        let bootLoadingExitTimer = null;
+        const BOOT_LOADING_EXIT_MS = 280;
         const scheduleBootImageDrain = () => {
           if (bootImageDrainTimer) return;
           bootImageDrainTimer = setTimeout(() => {
@@ -11862,17 +11906,34 @@
         };
         const setBootLoading = (visible) => {
           if (!bootLoadingEl) return;
-          document.body.classList.toggle("booting", !!visible);
-          bootLoadingEl.classList.toggle("hidden", !visible);
-          bootLoadingEl.setAttribute("aria-hidden", visible ? "false" : "true");
           if (visible) {
+            if (bootLoadingExitTimer) {
+              clearTimeout(bootLoadingExitTimer);
+              bootLoadingExitTimer = null;
+            }
+            document.body.classList.add("booting");
+            bootLoadingEl.classList.remove("hidden");
+            bootLoadingEl.classList.remove("boot-loading-exit");
+            bootLoadingEl.setAttribute("aria-hidden", "false");
             if (bootImageDrainTimer) {
               clearTimeout(bootImageDrainTimer);
               bootImageDrainTimer = null;
             }
             return;
           }
+          document.body.classList.remove("booting");
+          bootLoadingEl.classList.remove("hidden");
+          bootLoadingEl.classList.add("boot-loading-exit");
+          bootLoadingEl.setAttribute("aria-hidden", "true");
           scheduleBootImageDrain();
+          if (bootLoadingExitTimer) {
+            clearTimeout(bootLoadingExitTimer);
+          }
+          bootLoadingExitTimer = setTimeout(() => {
+            bootLoadingExitTimer = null;
+            bootLoadingEl.classList.add("hidden");
+            bootLoadingEl.classList.remove("boot-loading-exit");
+          }, BOOT_LOADING_EXIT_MS);
         };
         setBootLoading(true);
         const bootTitleEl = document.querySelector(

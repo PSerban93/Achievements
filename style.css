@@ -833,6 +833,14 @@ select {
   gap: 18px;
   text-align: center;
   cursor: progress;
+  opacity: 1;
+  visibility: visible;
+  transition: opacity 0.28s ease;
+}
+
+#bootLoading.boot-loading-exit {
+  opacity: 0;
+  pointer-events: none;
 }
 
 #bootLoading .boot-loading-card {

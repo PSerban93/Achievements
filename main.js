@@ -60,6 +60,7 @@ const {
   pickLatestUserBin,
 } = require("./utils/steam-appcache");
 const {
+  clearLumaPlayReadCache,
   readLumaPlayAchievementsSnapshot,
   startLumaPlayRegistryEventWatcher,
 } = require("./utils/lumaplay-registry");
@@ -3774,6 +3775,8 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
           appid: String(config?.appid || ""),
           configPath: config?.config_path || "",
           preferredUser: config?.lumaplay_user || config?.lumaplayUser || "",
+          preferredKeyPath:
+            config?.lumaplay_key_path || config?.lumaplayKeyPath || "",
           previousSnapshot: cached,
         });
         if (parsed?.user && parsed.user !== config?.lumaplay_user) {
@@ -5737,8 +5740,18 @@ let extraAchievementFiles = new Set();
 let achievementMonitorToken = 0;
 let achievementMonitorTimer = null;
 let activeLumaPlayRegistryWatcher = null;
+let activeLumaPlayRegistryDebounceTimer = null;
+const LUMAPLAY_ACTIVE_EVENT_DEBOUNCE_MS = Math.max(
+  150,
+  Number(process.env.LUMAPLAY_ACTIVE_EVENT_DEBOUNCE_MS) || 350,
+);
 
 function stopActiveLumaPlayRegistryWatcher() {
+  if (activeLumaPlayRegistryDebounceTimer) {
+    clearTimeout(activeLumaPlayRegistryDebounceTimer);
+    activeLumaPlayRegistryDebounceTimer = null;
+  }
+  clearLumaPlayReadCache();
   if (!activeLumaPlayRegistryWatcher) return;
   try {
     activeLumaPlayRegistryWatcher.stop();
@@ -6346,9 +6359,12 @@ async function monitorAchievementsFile(filePath) {
     return;
   }
 
+  const isLumaPlayPath =
+    typeof filePath === "string" && filePath.startsWith("lumaplay:");
   const samePathActive =
-    currentAchievementsFilePath === filePath && achievementsWatcher;
-  if (samePathActive && fs.existsSync(filePath)) {
+    currentAchievementsFilePath === filePath &&
+    (isLumaPlayPath ? !!activeLumaPlayRegistryWatcher : !!achievementsWatcher);
+  if (samePathActive && (isLumaPlayPath || fs.existsSync(filePath))) {
     if (achievementMonitorTimer) {
       clearTimeout(achievementMonitorTimer);
       achievementMonitorTimer = null;
@@ -6526,6 +6542,8 @@ async function monitorAchievementsFile(filePath) {
           configPath: configMeta?.config_path || selectedConfigPath || "",
           preferredUser:
             configMeta?.lumaplay_user || configMeta?.lumaplayUser || "",
+          preferredKeyPath:
+            configMeta?.lumaplay_key_path || configMeta?.lumaplayKeyPath || "",
           previousSnapshot: previousAchievements,
         });
         if (parsed?.user && parsed.user !== configMeta?.lumaplay_user) {
@@ -6836,9 +6854,30 @@ async function monitorAchievementsFile(filePath) {
     );
     let running = false;
     let pending = false;
+    const clearSnapshotDebounceTimer = () => {
+      if (activeLumaPlayRegistryDebounceTimer) {
+        clearTimeout(activeLumaPlayRegistryDebounceTimer);
+        activeLumaPlayRegistryDebounceTimer = null;
+      }
+    };
+    const scheduleSnapshotFromEvent = (
+      delayMs = LUMAPLAY_ACTIVE_EVENT_DEBOUNCE_MS,
+    ) => {
+      if (monitorToken !== achievementMonitorToken) return;
+      if (running) {
+        pending = true;
+        return;
+      }
+      clearSnapshotDebounceTimer();
+      activeLumaPlayRegistryDebounceTimer = setTimeout(() => {
+        activeLumaPlayRegistryDebounceTimer = null;
+        runSnapshotFromEvent();
+      }, Math.max(0, Number(delayMs) || 0));
+    };
 
     const runSnapshotFromEvent = () => {
       if (monitorToken !== achievementMonitorToken) return;
+      clearSnapshotDebounceTimer();
       if (running) {
         pending = true;
         return;
@@ -6852,6 +6891,9 @@ async function monitorAchievementsFile(filePath) {
         } while (pending && monitorToken === achievementMonitorToken);
       } finally {
         running = false;
+        if (pending && monitorToken === achievementMonitorToken) {
+          scheduleSnapshotFromEvent();
+        }
       }
     };
 
@@ -6872,7 +6914,8 @@ async function monitorAchievementsFile(filePath) {
         });
       },
       onChange: () => {
-        runSnapshotFromEvent();
+        clearLumaPlayReadCache();
+        scheduleSnapshotFromEvent();
       },
     });
 

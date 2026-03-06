@@ -4,6 +4,11 @@ const { getNameIndexFromConfigPath } = require("./achievement-data");
 const { subscribeLumaPlayRegistryEvents } = require("./process-event-watcher");
 
 const LUMAPLAY_ROOT_KEY = "HKCU\\SOFTWARE\\LumaPlay";
+const LUMAPLAY_SHARED_READ_CACHE_TTL_MS = Math.max(
+  250,
+  Number(process.env.LUMAPLAY_SHARED_READ_CACHE_TTL_MS) || 1200,
+);
+const lumaPlayResolvedQueryCache = new Map();
 
 function runRegQuery(args = []) {
   if (process.platform !== "win32") {
@@ -35,6 +40,172 @@ function runRegQuery(args = []) {
     stderr,
     code,
   };
+}
+
+function normalizeLumaPlayKeyPath(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^HKEY_CURRENT_USER\\/i, "HKCU\\")
+    .replace(/[\\/]+/g, "\\");
+}
+
+function extractLumaPlayUserFromKeyPath(keyPath) {
+  const normalized = normalizeLumaPlayKeyPath(keyPath);
+  const match = normalized.match(/^HKCU\\SOFTWARE\\LumaPlay\\([^\\]+)\\/i);
+  return match && match[1] ? String(match[1]).trim() : "";
+}
+
+function getLumaPlayReadCache(cache) {
+  return cache &&
+    typeof cache.get === "function" &&
+    typeof cache.set === "function"
+    ? cache
+    : null;
+}
+
+function unwrapLumaPlayReadCacheRecord(record) {
+  if (record?.value?.query?.ok) {
+    return {
+      value: record.value,
+      at: Number(record.at) || 0,
+    };
+  }
+  if (record?.query?.ok) {
+    return {
+      value: record,
+      at: 0,
+    };
+  }
+  return null;
+}
+
+function buildLumaPlayReadCacheKeys({
+  appid = "",
+  preferredUser = "",
+  preferredKeyPath = "",
+} = {}) {
+  const id = String(appid || "").trim().toLowerCase();
+  const user = String(preferredUser || "").trim().toLowerCase();
+  const keyPath = normalizeLumaPlayKeyPath(preferredKeyPath).toLowerCase();
+  const keys = [];
+  if (keyPath) keys.push(`path:${keyPath}`);
+  if (id) {
+    keys.push(`app:${id}:${user}`);
+    keys.push(`app:${id}:`);
+  }
+  return Array.from(new Set(keys));
+}
+
+function readLumaPlayResolvedFromCache(cache, keys = []) {
+  const targets = [];
+  const target = getLumaPlayReadCache(cache);
+  if (target) {
+    targets.push({ cache: target, enforceTtl: false });
+  }
+  if (lumaPlayResolvedQueryCache !== target) {
+    targets.push({ cache: lumaPlayResolvedQueryCache, enforceTtl: true });
+  }
+  const now = Date.now();
+  for (const { cache: cacheTarget, enforceTtl } of targets) {
+    if (!cacheTarget) continue;
+    for (const key of keys) {
+      if (!key) continue;
+      const raw = cacheTarget.get(key);
+      const record = unwrapLumaPlayReadCacheRecord(raw);
+      if (!record?.value?.query?.ok) {
+        if (raw !== undefined) {
+          try {
+            cacheTarget.delete(key);
+          } catch {}
+        }
+        continue;
+      }
+      if (
+        enforceTtl &&
+        record.at > 0 &&
+        now - record.at > LUMAPLAY_SHARED_READ_CACHE_TTL_MS
+      ) {
+        try {
+          cacheTarget.delete(key);
+        } catch {}
+        continue;
+      }
+      return record.value;
+    }
+  }
+  return null;
+}
+
+function primeLumaPlayReadCache(cache, resolved, hints = {}) {
+  if (!resolved?.query?.ok) return resolved;
+  const target = getLumaPlayReadCache(cache);
+  const keys = buildLumaPlayReadCacheKeys({
+    appid: resolved.appid || hints.appid || "",
+    preferredUser: resolved.user || hints.preferredUser || "",
+    preferredKeyPath: resolved.keyPath || hints.preferredKeyPath || "",
+  });
+  const record = {
+    value: resolved,
+    at: Date.now(),
+  };
+  for (const key of keys) {
+    if (!key) continue;
+    if (target) {
+      target.set(key, record);
+    }
+    if (lumaPlayResolvedQueryCache !== target) {
+      lumaPlayResolvedQueryCache.set(key, record);
+    }
+  }
+  return resolved;
+}
+
+function clearLumaPlayReadCache() {
+  lumaPlayResolvedQueryCache.clear();
+}
+
+function resolveLumaPlayAchievementsQuery(options = {}) {
+  const appid = String(options.appid || "").trim();
+  const preferredUser = String(options.preferredUser || "").trim();
+  const preferredKeyPath = normalizeLumaPlayKeyPath(
+    options.preferredKeyPath || options.keyPath || "",
+  );
+  const readCache = getLumaPlayReadCache(options.readCache || options.cache);
+  const cacheKeys = buildLumaPlayReadCacheKeys({
+    appid,
+    preferredUser,
+    preferredKeyPath,
+  });
+  const cached = readLumaPlayResolvedFromCache(readCache, cacheKeys);
+  if (cached?.query?.ok) {
+    return cached;
+  }
+  if (preferredKeyPath) {
+    const query = runRegQuery([preferredKeyPath]);
+    if (query.ok) {
+      return primeLumaPlayReadCache(
+        readCache,
+        {
+          appid,
+          user: extractLumaPlayUserFromKeyPath(preferredKeyPath) || preferredUser,
+          keyPath: preferredKeyPath,
+          query,
+        },
+        {
+          appid,
+          preferredUser,
+          preferredKeyPath,
+        },
+      );
+    }
+  }
+  const resolved = resolveLumaPlayAchievementsKey(appid, preferredUser);
+  if (!resolved?.query?.ok) return resolved;
+  return primeLumaPlayReadCache(readCache, resolved, {
+    appid,
+    preferredUser,
+    preferredKeyPath,
+  });
 }
 
 function resolvePowerShellPath() {
@@ -407,8 +578,29 @@ function readLumaPlayAchievementsSnapshot(options = {}) {
       : {};
   const preferredUser =
     typeof options.preferredUser === "string" ? options.preferredUser : "";
-
-  const resolved = resolveLumaPlayAchievementsKey(appid, preferredUser);
+  const preferredKeyPath =
+    typeof options.preferredKeyPath === "string"
+      ? options.preferredKeyPath
+      : typeof options.keyPath === "string"
+        ? options.keyPath
+        : "";
+  const resolved =
+    options.resolvedQuery?.query?.ok === true
+      ? primeLumaPlayReadCache(
+          options.readCache || options.cache,
+          options.resolvedQuery,
+          {
+            appid,
+            preferredUser,
+            preferredKeyPath,
+          },
+        )
+      : resolveLumaPlayAchievementsQuery({
+          appid,
+          preferredUser,
+          preferredKeyPath,
+          readCache: options.readCache || options.cache,
+        });
   if (!resolved?.query?.ok) {
     return {
       found: false,
@@ -447,8 +639,9 @@ function readLumaPlayAchievementsSnapshot(options = {}) {
   };
 }
 
-function scanLumaPlayRegistryEntries() {
+function scanLumaPlayRegistryEntries(options = {}) {
   if (process.platform !== "win32") return [];
+  const readCache = getLumaPlayReadCache(options.cache);
   const byAppId = new Map();
   const users = listLumaPlayUsers();
   for (const user of users) {
@@ -458,11 +651,18 @@ function scanLumaPlayRegistryEntries() {
       const keyPath = `${LUMAPLAY_ROOT_KEY}\\${user}\\${appid}\\Achievements`;
       const query = runRegQuery([keyPath]);
       if (!query.ok) continue;
-      byAppId.set(appid, {
+      const resolved = {
         appid,
         user,
         keyPath,
+        query,
+      };
+      primeLumaPlayReadCache(readCache, resolved, {
+        appid,
+        preferredUser: user,
+        preferredKeyPath: keyPath,
       });
+      byAppId.set(appid, resolved);
     }
   }
   return Array.from(byAppId.values());
@@ -470,6 +670,7 @@ function scanLumaPlayRegistryEntries() {
 
 module.exports = {
   LUMAPLAY_ROOT_KEY,
+  clearLumaPlayReadCache,
   listLumaPlayUsers,
   listLumaPlayAppIdsForUser,
   resolveLumaPlayAchievementsKey,
