@@ -12,9 +12,16 @@ const {
   normalizeSteamIconUrl,
   pickLatestUserBin,
 } = require("./steam-appcache");
+const {
+  RARITY_SOURCES,
+  fetchSteamGlobalAchievementPercentages,
+  buildRarityEntriesForSchema,
+  writeAchievementPercentagesSidecar,
+} = require("./achievement-rarity");
 const autoConfigLogger = createLogger("autoconfig");
 const schemaLogger = createLogger("achschema");
 const coverLogger = createLogger("covers");
+const rarityLogger = createLogger("rarity");
 
 function sanitizeFileName(name) {
   return sanitizeConfigName(name);
@@ -128,6 +135,61 @@ async function fetchSteamStoreName(appid, fetchImpl = global.fetch) {
 
 function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
+}
+
+async function writeSteamOfficialAchievementPercentages(schemaRoot, appid, schemaEntries) {
+  const source = RARITY_SOURCES.steamGlobal;
+  rarityLogger.info("rarity:steam:request", {
+    appid: String(appid),
+    source,
+  });
+  try {
+    const fetchedMap = await fetchSteamGlobalAchievementPercentages(appid, {
+      timeoutMs: 15000,
+    });
+    if (!fetchedMap.size) {
+      rarityLogger.warn("rarity:steam:empty", {
+        appid: String(appid),
+        source,
+      });
+    } else {
+      rarityLogger.info("rarity:steam:success", {
+        appid: String(appid),
+        source,
+        fetchedCount: fetchedMap.size,
+      });
+    }
+    const achievements = buildRarityEntriesForSchema(fetchedMap, schemaEntries, {
+      normalizeName: (name) => String(name ?? "").trim(),
+    });
+    const filePath = writeAchievementPercentagesSidecar(
+      schemaRoot,
+      appid,
+      achievements,
+      {
+        source,
+      },
+    );
+    rarityLogger.info("rarity:steam:written", {
+      appid: String(appid),
+      source,
+      sidecarPath: filePath,
+      fetchedCount: fetchedMap.size,
+      matchedCount: achievements.length,
+    });
+    return {
+      written: true,
+      fetched: fetchedMap.size,
+      matched: achievements.length,
+    };
+  } catch (err) {
+    rarityLogger.warn("rarity:steam:failed", {
+      appid: String(appid),
+      source,
+      error: err?.message || String(err),
+    });
+    return { written: false, fetched: 0, matched: 0 };
+  }
 }
 
 function resolveSteamOfficialLibraryCacheDir(statsDir, appid) {
@@ -546,6 +608,11 @@ async function generateConfigFromAppcacheBin(statsDir, schemaBinPath, configsDir
     schemaEntries = writeSchemaFromEntries(appid, entries, schemaRoot);
     schemaUpdated = true;
   }
+  const rarity = await writeSteamOfficialAchievementPercentages(
+    schemaRoot,
+    appid,
+    schemaEntries,
+  );
 
   const userKV = parseKVBinary(fs.readFileSync(userBin));
   const userStats = extractUserStats(userKV.data);
@@ -633,6 +700,7 @@ async function generateConfigFromAppcacheBin(statsDir, schemaBinPath, configsDir
     schemaUpdated,
     snapshot: created || schemaUpdated ? snapshot : null,
     importedImages,
+    rarity,
   };
 }
 

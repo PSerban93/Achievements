@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "自動配置讀取標題數據，產生架構/圖像，並從這些文件啟動通知流。",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "平台指南",
-  "title.tab-platformGuide": "平台和模擬器指南"
+  "title.tab-platformGuide": "平台和模擬器指南",
+  "achievementsRefreshRarityBtnLabel": "重新整理稀有度",
+  "achievementsRefreshRarityBtnLoading": "重新整理中…",
+  "title.achievementsRefreshRarityBtn": "重新整理所選設定的稀有度",
+  "aria.achievementsRefreshRarityBtn": "重新整理稀有度",
+  "notify.rarityRefreshDone": "稀有度已更新：符合 {matched}/{fetched}。",
+  "notify.rarityRefreshFailed": "重新整理稀有度失敗。",
+  "log.rarityRefreshFailed": "重新整理稀有度失敗："
 }
-

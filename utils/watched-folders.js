@@ -5271,16 +5271,31 @@ module.exports = function makeWatchedFolders({
             const steamIds = new Set();
             let steamChanged = false;
             const handleSchemaBin = async (bin) => {
+              const schemaBinPath = path.join(steamScanBase, bin);
+              const schemaInfo = parseSteamOfficialBinInfo(schemaBinPath);
+              const appidFromBin = schemaInfo?.appid
+                ? String(schemaInfo.appid)
+                : "";
+              if (
+                bootMode &&
+                appidFromBin &&
+                shouldSkipSteamOfficialGeneration(appidFromBin)
+              ) {
+                if (blacklist.has(appidFromBin)) return;
+                steamIds.add(appidFromBin);
+                knownAppIds.add(appidFromBin);
+                return;
+              }
               const result = await generateConfigFromAppcacheBin(
                 steamScanBase,
-                path.join(steamScanBase, bin),
+                schemaBinPath,
                 configsDir,
               );
               if (!result || result.skipped) return;
-              const appid = String(result.appid);
-              if (blacklist.has(appid)) return;
-              steamIds.add(appid);
-              knownAppIds.add(appid);
+              const resultAppId = String(result.appid);
+              if (blacklist.has(resultAppId)) return;
+              steamIds.add(resultAppId);
+              knownAppIds.add(resultAppId);
               if (result.created || result.schemaUpdated) steamChanged = true;
               if (
                 bootMode &&
@@ -5291,8 +5306,8 @@ module.exports = function makeWatchedFolders({
                 if (snapshot && Object.keys(snapshot).length) {
                   try {
                     onSeedCache({
-                      appid,
-                      configName: result.name || appid,
+                      appid: resultAppId,
+                      configName: result.name || resultAppId,
                       platform: result.platform || null,
                       savePath: result.save_path || null,
                       snapshot,

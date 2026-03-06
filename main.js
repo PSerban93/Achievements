@@ -63,6 +63,17 @@ const {
   readLumaPlayAchievementsSnapshot,
   startLumaPlayRegistryEventWatcher,
 } = require("./utils/lumaplay-registry");
+const {
+  RARITY_SOURCES,
+  fetchEpicGlobalAchievementPercentages,
+  fetchGogGlobalAchievementPercentages,
+  fetchSteamGlobalAchievementPercentages,
+  buildRarityEntriesForSchema,
+  writeAchievementPercentagesSidecar,
+  readAchievementPercentagesMap,
+  mergeRarityIntoAchievements,
+} = require("./utils/achievement-rarity");
+const { ensureGogAccessToken } = require("./utils/gog-auth");
 const getConfigInflight = new Map();
 const { createLogger } = require("./utils/logger");
 
@@ -76,6 +87,7 @@ const prefsLogger = createLogger("preferences");
 const persistenceLogger = createLogger("persistence");
 const execLogger = createLogger("execution");
 const schemaLogger = createLogger("achschema");
+const rarityLogger = createLogger("rarity");
 
 const PRESETS_MIGRATION_VERSION = "2026-01-12-duration";
 const PRESET_FOLDER_DEFAULT = "Default Presets";
@@ -1262,39 +1274,62 @@ function mapAchgenUiMessage(message) {
   return msg;
 }
 
+const ACHGEN_UI_SUPPRESSED_MESSAGES = new Set([
+  "rarity:steam:request",
+  "rarity:steam:success",
+  "rarity:steam:written",
+  "rarity:epic:request",
+  "rarity:epic:success",
+  "rarity:epic:written",
+  "rarity:gog:request",
+  "rarity:gog:success",
+  "rarity:gog:written",
+]);
+
+function shouldSuppressAchgenMessageInUi(message) {
+  const msg = String(message || "")
+    .trim()
+    .replace(/^[\u2705\u2139\u23ed\u23e9\u26a0]\s*/i, "");
+  if (!msg) return true;
+  return ACHGEN_UI_SUPPRESSED_MESSAGES.has(msg);
+}
+
 function pushAchgen(level, message) {
   const rawMsg = String(message || "").trim();
   if (!rawMsg) return;
   const msg = mapAchgenUiMessage(rawMsg);
+  const suppressInUi = shouldSuppressAchgenMessageInUi(rawMsg);
 
-  const payload = {
-    type: "achgen:log",
-    level,
-    message: msg,
-    ts: Date.now(),
-    rawMessage: rawMsg,
-  };
-  achgenBuffer.push(payload);
-  if (achgenBuffer.length > ACHGEN_BUFFER_MAX) achgenBuffer.shift();
+  if (!suppressInUi) {
+    const payload = {
+      type: "achgen:log",
+      level,
+      message: msg,
+      ts: Date.now(),
+      rawMessage: rawMsg,
+    };
+    achgenBuffer.push(payload);
+    if (achgenBuffer.length > ACHGEN_BUFFER_MAX) achgenBuffer.shift();
 
-  // broadcast “achgen:log”
-  for (const win of BrowserWindow.getAllWindows()) {
-    try {
-      if (!win.isDestroyed()) win.webContents.send("achgen:log", payload);
-    } catch {}
-  }
-
-  const color =
-    level === "error" ? "#f44336" : level === "warn" ? "#FFC107" : "#2196f3";
-  const suppressNotify =
-    msg.startsWith("steam-achievements:request") ||
-    msg.startsWith("steam-achievements:success");
-  if (!suppressNotify) {
+    // broadcast “achgen:log”
     for (const win of BrowserWindow.getAllWindows()) {
       try {
-        if (!win.isDestroyed())
-          win.webContents.send("notify", { message: msg, color });
+        if (!win.isDestroyed()) win.webContents.send("achgen:log", payload);
       } catch {}
+    }
+
+    const color =
+      level === "error" ? "#f44336" : level === "warn" ? "#FFC107" : "#2196f3";
+    const suppressNotify =
+      msg.startsWith("steam-achievements:request") ||
+      msg.startsWith("steam-achievements:success");
+    if (!suppressNotify) {
+      for (const win of BrowserWindow.getAllWindows()) {
+        try {
+          if (!win.isDestroyed())
+            win.webContents.send("notify", { message: msg, color });
+        } catch {}
+      }
     }
   }
 
@@ -2142,6 +2177,25 @@ configsWatcher
 
 let selectedLanguage = "english";
 let selectedUiLanguage = getUiLanguage();
+const ACH_TABLE_STATUS_VALUES = new Set(["all", "locked", "unlocked"]);
+const ACH_TABLE_SORT_VALUES = new Set(["off", "asc", "desc"]);
+let sharedAchievementTableViewState = null;
+
+function normalizeAchievementTableViewState(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  const status = String(payload.status || "").trim().toLowerCase();
+  const nameSort = String(payload.nameSort || "").trim().toLowerCase();
+  const timeSort = String(payload.timeSort || "").trim().toLowerCase();
+  const raritySort = String(payload.raritySort || "").trim().toLowerCase();
+
+  return {
+    status: ACH_TABLE_STATUS_VALUES.has(status) ? status : "all",
+    nameSort: ACH_TABLE_SORT_VALUES.has(nameSort) ? nameSort : "off",
+    timeSort: ACH_TABLE_SORT_VALUES.has(timeSort) ? timeSort : "off",
+    raritySort: ACH_TABLE_SORT_VALUES.has(raritySort) ? raritySort : "off",
+  };
+}
+
 let manualLaunchInProgress = false;
 const manualLaunchPidMap = new Map();
 cachedPreferences = ensurePreferencesFile();
@@ -3360,8 +3414,84 @@ ipcMain.handle("selectFolder", async () => {
 });
 
 // Handler for json load
-ipcMain.handle("load-achievements", async (event, configName) => {
-  ipcLogger.info("load-achievements:request", { configName });
+function resolveAchievementsSchemaPath(config = {}) {
+  const cfgDir = isNonEmptyString(config?.config_path) ? config.config_path : "";
+  if (!cfgDir) return "";
+  const p1 = path.join(cfgDir, "steam_settings", "achievements.json");
+  const p2 = path.join(cfgDir, "achievements.json");
+  const p3 =
+    config.appid != null
+      ? path.join(cfgDir, String(config.appid), "achievements.json")
+      : "";
+  if (fs.existsSync(p1)) return p1;
+  if (fs.existsSync(p2)) return p2;
+  if (p3 && fs.existsSync(p3)) return p3;
+  return "";
+}
+
+function stripAchievementPrefixForRarity(name) {
+  if (typeof name !== "string") return name;
+  const match = name.match(/Ach_(.+)$/i);
+  if (match && match[1]) return match[1];
+  return name;
+}
+
+function normalizeAchievementNameForRarity(name, shouldStrip = false) {
+  if (typeof name !== "string") return name;
+  let result = name.trim();
+  if (shouldStrip) {
+    result = stripAchievementPrefixForRarity(result);
+    const match = result.match(/^(.*)_(\d+)$/);
+    if (match && match[1] && /[A-Za-z]/.test(match[1])) {
+      result = match[2];
+    }
+  }
+  return result;
+}
+
+function resolveSteamAppIdForRarity(config = {}) {
+  const platform = normalizePlatform(config?.platform) || "steam";
+  const localAppId =
+    config?.appid != null ? String(config.appid).trim() : "";
+  if (platform === "uplay") {
+    let mapping = uplayToSteam.get(localAppId);
+    if (!mapping) {
+      try {
+        hydrateRuntimeMapping(loadRuntimeUplayMap());
+        mapping = uplayToSteam.get(localAppId);
+      } catch {}
+    }
+    const steamAppId =
+      mapping?.steam_appid != null ? String(mapping.steam_appid).trim() : "";
+    return {
+      platform,
+      steamAppId,
+      stripNames: true,
+      mapped: !!steamAppId,
+      localAppId,
+    };
+  }
+  if (platform === "steam" || platform === "steam-official") {
+    return {
+      platform,
+      steamAppId: localAppId,
+      stripNames: false,
+      mapped: !!localAppId,
+      localAppId,
+    };
+  }
+  return {
+    platform,
+    steamAppId: "",
+    stripNames: false,
+    mapped: false,
+    localAppId,
+  };
+}
+
+ipcMain.handle("load-achievements", async (event, configName, options = {}) => {
+  const includeRarity = options?.includeRarity !== false;
+  ipcLogger.info("load-achievements:request", { configName, includeRarity });
   try {
     //const configPath = path.join(process.env.APPDATA, 'Achievements', 'configs', `${configName}.json`);
     const safeName = sanitizeConfigName(configName);
@@ -3411,7 +3541,57 @@ ipcMain.handle("load-achievements", async (event, configName) => {
       return { achievements: null, config_path: cfgDir };
     }
 
-    const achievements = JSON.parse(fs.readFileSync(foundPath, "utf-8"));
+    const configDir = path.dirname(foundPath);
+    const achievementsRaw = JSON.parse(fs.readFileSync(foundPath, "utf-8"));
+    let achievements = achievementsRaw;
+    let rarityPath = path.join(configDir, "achievementpercentages.json");
+    let rarityFileExists = false;
+    let rarityMatched = 0;
+    let raritySource = RARITY_SOURCES.steamGlobal;
+    if (includeRarity) {
+      let rarityByName = new Map();
+      try {
+        const rarityInfo = readAchievementPercentagesMap(rarityPath);
+        rarityByName =
+          rarityInfo?.map instanceof Map ? rarityInfo.map : new Map();
+        rarityFileExists = rarityInfo?.fileExists === true;
+        if (typeof rarityInfo?.source === "string" && rarityInfo.source) {
+          raritySource = rarityInfo.source;
+        }
+      } catch (err) {
+        rarityLogger.warn("rarity:sidecar:read-failed", {
+          configName,
+          source: raritySource,
+          sidecarPath: rarityPath,
+          error: err?.message || String(err),
+        });
+        ipcLogger.warn("load-achievements:rarity-read-failed", {
+          configName,
+          filePath: rarityPath,
+          error: err?.message || String(err),
+        });
+      }
+      const mergedRarity = mergeRarityIntoAchievements(
+        achievementsRaw,
+        rarityByName,
+        {
+          source: raritySource,
+        },
+      );
+      achievements = mergedRarity?.achievements;
+      rarityMatched = Number(mergedRarity?.matched) || 0;
+      if (rarityFileExists) {
+        rarityLogger.info("rarity:sidecar:merged", {
+          configName,
+          source: raritySource,
+          sidecarPath: rarityPath,
+          matchedCount: rarityMatched,
+        });
+      }
+    } else {
+      rarityPath = null;
+      raritySource = null;
+    }
     ipcLogger.info("load-achievements:success", {
       configName,
       source: foundPath,
@@ -3420,8 +3600,13 @@ ipcMain.handle("load-achievements", async (event, configName) => {
         : achievements && typeof achievements === "object"
           ? Object.keys(achievements).length
           : 0,
+      includeRarity,
+      rarityFile: rarityFileExists,
+      rarityMatched,
+      rarityPath,
+      raritySource,
     });
-    return { achievements, config_path: path.dirname(foundPath) };
+    return { achievements, config_path: configDir };
   } catch (error) {
     if (error?.code !== "ENOENT") {
       notifyError(
@@ -7862,6 +8047,14 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
         visible: overlayPresented,
       });
     } catch {}
+    if (sharedAchievementTableViewState) {
+      try {
+        overlayWindow.webContents.send(
+          "ach-table:view-state",
+          sharedAchievementTableViewState,
+        );
+      } catch {}
+    }
   });
 
   overlayWindow.on("closed", () => {
@@ -8013,6 +8206,23 @@ ipcMain.on("request-current-config", (event) => {
       language: selectedLanguage,
       uiLanguage: selectedUiLanguage,
     });
+    if (sharedAchievementTableViewState) {
+      event.sender.send(
+        "ach-table:view-state",
+        sharedAchievementTableViewState,
+      );
+    }
+  }
+});
+
+ipcMain.on("ach-table:view-state", (_event, payload) => {
+  const normalized = normalizeAchievementTableViewState(payload);
+  if (!normalized) return;
+  sharedAchievementTableViewState = normalized;
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    try {
+      overlayWindow.webContents.send("ach-table:view-state", normalized);
+    } catch {}
   }
 });
 
@@ -9852,6 +10062,330 @@ ipcMain.handle("startup:set-start-with-windows", async (_e, enabled) => {
   }
   return true;
 });
+
+ipcMain.handle(
+  "rarity:refresh-selected-config",
+  async (_event, payload = {}) => {
+    const incomingName =
+      typeof payload === "string"
+        ? payload
+        : payload?.configName || payload?.name || "";
+    const configName = String(incomingName || "").trim();
+    if (!configName) {
+      return {
+        success: false,
+        code: "config-required",
+        message: "Config name is required.",
+      };
+    }
+
+    const safeName = sanitizeConfigName(configName);
+    const configPath = path.join(configsDir, `${safeName}.json`);
+    if (!fs.existsSync(configPath)) {
+      return {
+        success: false,
+        code: "config-missing",
+        message: "Selected config was not found.",
+      };
+    }
+
+    let config = null;
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    } catch (err) {
+      return {
+        success: false,
+        code: "config-read-failed",
+        message: `Failed to read config: ${err?.message || String(err)}`,
+      };
+    }
+
+    const schemaPath = resolveAchievementsSchemaPath(config);
+    if (!schemaPath) {
+      return {
+        success: false,
+        code: "schema-missing",
+        message: "Achievements schema file was not found for this config.",
+      };
+    }
+
+    let schemaAchievements = null;
+    try {
+      schemaAchievements = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+    } catch (err) {
+      return {
+        success: false,
+        code: "schema-read-failed",
+        message: `Failed to read achievements schema: ${err?.message || String(err)}`,
+      };
+    }
+    if (!Array.isArray(schemaAchievements)) {
+      return {
+        success: false,
+        code: "schema-invalid",
+        message: "Achievements schema is invalid for rarity refresh.",
+      };
+    }
+
+    const platform = normalizePlatform(config?.platform) || "steam";
+    const supportedPlatform =
+      platform === "steam" ||
+      platform === "steam-official" ||
+      platform === "uplay" ||
+      platform === "epic" ||
+      platform === "gog";
+
+    if (!supportedPlatform) {
+      return {
+        success: false,
+        code: "unsupported-platform",
+        message: `Rarity refresh is supported only for Steam/Uplay/Epic/GOG configs (current: ${platform}).`,
+      };
+    }
+
+    if (platform === "gog") {
+      const productId =
+        config?.appid != null ? String(config.appid).trim() : "";
+      if (!productId) {
+        return {
+          success: false,
+          code: "invalid-gog-product-id",
+          message: "GOG Product ID for rarity refresh is invalid.",
+        };
+      }
+      const source = RARITY_SOURCES.gogGameplay;
+      rarityLogger.info("rarity:manual-refresh:start", {
+        configName: config?.name || safeName,
+        platform,
+        appid: productId,
+        source,
+      });
+      try {
+        const token = await ensureGogAccessToken({
+          userDataDir: app.getPath("userData"),
+          timeoutMs: 15000,
+        });
+        const fetchedMap = await fetchGogGlobalAchievementPercentages(productId, {
+          accessToken: token?.access_token,
+          userId: token?.user_id,
+          timeoutMs: 15000,
+          lang: "en-US",
+        });
+        if (!fetchedMap.size) {
+          rarityLogger.warn("rarity:gog:empty", {
+            appid: productId,
+            source,
+            configName: config?.name || safeName,
+          });
+        }
+        const entries = buildRarityEntriesForSchema(fetchedMap, schemaAchievements, {
+          normalizeName: (name) =>
+            typeof name === "string" || typeof name === "number"
+              ? String(name).trim()
+              : "",
+        });
+        const sidecarPath = writeAchievementPercentagesSidecar(
+          path.dirname(schemaPath),
+          productId,
+          entries,
+          { source },
+        );
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          source,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        });
+        broadcastToAll("refresh-achievements-table", config?.name || safeName);
+        return {
+          success: true,
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          source,
+          error: err?.message || String(err),
+        });
+        return {
+          success: false,
+          code: "fetch-failed",
+          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+        };
+      }
+    }
+
+    if (platform === "epic") {
+      const productId =
+        config?.appid != null ? String(config.appid).trim() : "";
+      if (!productId) {
+        return {
+          success: false,
+          code: "invalid-epic-product-id",
+          message: "Epic Product ID for rarity refresh is invalid.",
+        };
+      }
+      const source = RARITY_SOURCES.epicPublic;
+      rarityLogger.info("rarity:manual-refresh:start", {
+        configName: config?.name || safeName,
+        platform,
+        appid: productId,
+        source,
+      });
+      try {
+        const fetchedMap = await fetchEpicGlobalAchievementPercentages(productId, {
+          locale: "en",
+          timeoutMs: 15000,
+        });
+        if (!fetchedMap.size) {
+          rarityLogger.warn("rarity:epic:empty", {
+            appid: productId,
+            source,
+            configName: config?.name || safeName,
+          });
+        }
+        const entries = buildRarityEntriesForSchema(fetchedMap, schemaAchievements, {
+          normalizeName: (name) =>
+            typeof name === "string" || typeof name === "number"
+              ? String(name).trim()
+              : "",
+        });
+        const sidecarPath = writeAchievementPercentagesSidecar(
+          path.dirname(schemaPath),
+          productId,
+          entries,
+          { source },
+        );
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          source,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        });
+        broadcastToAll("refresh-achievements-table", config?.name || safeName);
+        return {
+          success: true,
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          source,
+          error: err?.message || String(err),
+        });
+        return {
+          success: false,
+          code: "fetch-failed",
+          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+        };
+      }
+    }
+
+    const resolved = resolveSteamAppIdForRarity(config);
+    const steamAppId = String(resolved?.steamAppId || "").trim();
+    if (platform === "uplay" && !resolved?.mapped) {
+      return {
+        success: false,
+        code: "uplay-steam-mapping-missing",
+        message:
+          "Steam AppID mapping for this Uplay config is missing. Refresh mapping and try again.",
+      };
+    }
+    if (!/^\d+$/.test(steamAppId)) {
+      return {
+        success: false,
+        code: "invalid-steam-appid",
+        message: "Steam AppID for rarity refresh is invalid.",
+      };
+    }
+
+    const source = RARITY_SOURCES.steamGlobal;
+    rarityLogger.info("rarity:manual-refresh:start", {
+      configName: config?.name || safeName,
+      platform,
+      appid: steamAppId,
+      source,
+    });
+    try {
+      const fetchedMap = await fetchSteamGlobalAchievementPercentages(steamAppId, {
+        timeoutMs: 15000,
+      });
+      if (!fetchedMap.size) {
+        rarityLogger.warn("rarity:steam:empty", {
+          appid: steamAppId,
+          source,
+          configName: config?.name || safeName,
+        });
+      }
+      const entries = buildRarityEntriesForSchema(
+        fetchedMap,
+        schemaAchievements,
+        {
+          normalizeName: (name) =>
+            normalizeAchievementNameForRarity(name, resolved?.stripNames === true),
+        },
+      );
+      const sidecarPath = writeAchievementPercentagesSidecar(
+        path.dirname(schemaPath),
+        steamAppId,
+        entries,
+        { source },
+      );
+      rarityLogger.info("rarity:manual-refresh:written", {
+        configName: config?.name || safeName,
+        platform,
+        appid: steamAppId,
+        source,
+        sidecarPath,
+        fetchedCount: fetchedMap.size,
+        matchedCount: entries.length,
+      });
+      broadcastToAll("refresh-achievements-table", config?.name || safeName);
+      return {
+        success: true,
+        configName: config?.name || safeName,
+        platform,
+        appid: steamAppId,
+        sidecarPath,
+        fetchedCount: fetchedMap.size,
+        matchedCount: entries.length,
+      };
+    } catch (err) {
+      rarityLogger.warn("rarity:manual-refresh:failed", {
+        configName: config?.name || safeName,
+        platform,
+        appid: steamAppId,
+        source,
+        error: err?.message || String(err),
+      });
+      return {
+        success: false,
+        code: "fetch-failed",
+        message: `Rarity refresh failed: ${err?.message || String(err)}`,
+      };
+    }
+  },
+);
 
 ipcMain.handle("open-external-url", async (_evt, url) => {
   const raw = String(url || "").trim();

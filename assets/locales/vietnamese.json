@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Tự động định cấu hình đọc dữ liệu tiêu đề, tạo lược đồ/hình ảnh và bắt đầu luồng thông báo từ các tệp đó.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Hướng dẫn nền tảng",
-  "title.tab-platformGuide": "Hướng dẫn về nền tảng và trình mô phỏng"
+  "title.tab-platformGuide": "Hướng dẫn về nền tảng và trình mô phỏng",
+  "achievementsRefreshRarityBtnLabel": "Làm mới độ hiếm",
+  "achievementsRefreshRarityBtnLoading": "Đang làm mới…",
+  "title.achievementsRefreshRarityBtn": "Làm mới độ hiếm cho cấu hình đã chọn",
+  "aria.achievementsRefreshRarityBtn": "Làm mới độ hiếm",
+  "notify.rarityRefreshDone": "Đã làm mới độ hiếm: khớp {matched}/{fetched}.",
+  "notify.rarityRefreshFailed": "Làm mới độ hiếm thất bại.",
+  "log.rarityRefreshFailed": "Làm mới độ hiếm thất bại:"
 }
-

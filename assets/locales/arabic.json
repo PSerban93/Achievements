@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "يقرأ التكوين التلقائي بيانات العنوان، وينشئ المخطط/الصور، ويبدأ تدفق الإشعارات من تلك الملفات.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "دليل المنصة",
-  "title.tab-platformGuide": "دليل النظام الأساسي والمحاكي"
+  "title.tab-platformGuide": "دليل النظام الأساسي والمحاكي",
+  "achievementsRefreshRarityBtnLabel": "تحديث الندرة",
+  "achievementsRefreshRarityBtnLoading": "جارٍ التحديث…",
+  "title.achievementsRefreshRarityBtn": "تحديث الندرة للإعداد المحدد",
+  "aria.achievementsRefreshRarityBtn": "تحديث الندرة",
+  "notify.rarityRefreshDone": "تم تحديث الندرة: {matched}/{fetched} متطابقة.",
+  "notify.rarityRefreshFailed": "فشل تحديث الندرة.",
+  "log.rarityRefreshFailed": "فشل تحديث الندرة:"
 }
-

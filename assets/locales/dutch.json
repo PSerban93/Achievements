@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Auto-config leest titelgegevens, genereert schema's/afbeeldingen en start de meldingsstroom vanuit die bestanden.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Platformgids",
-  "title.tab-platformGuide": "Platform- en emulatorgids"
+  "title.tab-platformGuide": "Platform- en emulatorgids",
+  "achievementsRefreshRarityBtnLabel": "Zeldzaamheid vernieuwen",
+  "achievementsRefreshRarityBtnLoading": "Vernieuwen…",
+  "title.achievementsRefreshRarityBtn": "Zeldzaamheid vernieuwen voor geselecteerde configuratie",
+  "aria.achievementsRefreshRarityBtn": "Zeldzaamheid vernieuwen",
+  "notify.rarityRefreshDone": "Zeldzaamheid vernieuwd: {matched}/{fetched} overeenkomend.",
+  "notify.rarityRefreshFailed": "Vernieuwen van zeldzaamheid mislukt.",
+  "log.rarityRefreshFailed": "Vernieuwen van zeldzaamheid mislukt:"
 }
-

@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Automaattinen määritys lukee otsikkotiedot, luo skeeman/kuvat ja käynnistää ilmoitusvirran näistä tiedostoista.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Alustan opas",
-  "title.tab-platformGuide": "Alustan ja emulaattorin opas"
+  "title.tab-platformGuide": "Alustan ja emulaattorin opas",
+  "achievementsRefreshRarityBtnLabel": "Päivitä harvinaisuus",
+  "achievementsRefreshRarityBtnLoading": "Päivitetään…",
+  "title.achievementsRefreshRarityBtn": "Päivitä valitun kokoonpanon harvinaisuus",
+  "aria.achievementsRefreshRarityBtn": "Päivitä harvinaisuus",
+  "notify.rarityRefreshDone": "Harvinaisuus päivitetty: {matched}/{fetched} osumaa.",
+  "notify.rarityRefreshFailed": "Harvinaisuuden päivitys epäonnistui.",
+  "log.rarityRefreshFailed": "Harvinaisuuden päivitys epäonnistui:"
 }
-

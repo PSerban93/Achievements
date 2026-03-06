@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Автоматична конфігурація зчитує дані заголовка, генерує схеми/зображення та запускає потік сповіщень із цих файлів.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Керівництво по платформі",
-  "title.tab-platformGuide": "Посібник із платформи та емулятора"
+  "title.tab-platformGuide": "Посібник із платформи та емулятора",
+  "achievementsRefreshRarityBtnLabel": "Оновити рідкість",
+  "achievementsRefreshRarityBtnLoading": "Оновлення…",
+  "title.achievementsRefreshRarityBtn": "Оновити рідкість для вибраної конфігурації",
+  "aria.achievementsRefreshRarityBtn": "Оновити рідкість",
+  "notify.rarityRefreshDone": "Рідкість оновлено: {matched}/{fetched} збігів.",
+  "notify.rarityRefreshFailed": "Не вдалося оновити рідкість.",
+  "log.rarityRefreshFailed": "Не вдалося оновити рідкість:"
 }
-

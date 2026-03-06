@@ -38,6 +38,15 @@ const PS4_LANG_MAP = {
   "30": "ukrainian",
 };
 
+function ttypeToLabel(ttype) {
+  const t = String(ttype || "").toLowerCase().trim();
+  if (t === "p" || t === "platinum") return "platinum";
+  if (t === "g" || t === "gold") return "gold";
+  if (t === "s" || t === "silver") return "silver";
+  if (t === "b" || t === "bronze") return "bronze";
+  return t || "unknown";
+}
+
 function mapLangFromFilename(filename) {
   const base = path.basename(filename).toLowerCase();
   if (base === "trop.xml") return "english";
@@ -102,6 +111,8 @@ function parsePs4TrophySetDir(trophyDir) {
       const entry = ensureEntry(id);
       const hiddenAttr = ($(el).attr("hidden") || "no").toLowerCase();
       if (hiddenAttr === "yes") entry.hidden = 1;
+      const trophyType = ttypeToLabel($(el).attr("ttype") || entry.trophyType);
+      if (trophyType) entry.trophyType = trophyType;
       const name = $(el).children("name").first().text().trim();
       const detail = $(el).children("detail").first().text().trim();
       if (name) entry.displayName[langKey] = name;
@@ -121,6 +132,7 @@ function parsePs4TrophySetDir(trophyDir) {
     // Also ensure english exists
     if (!entry.displayName.english) entry.displayName.english = enName || "";
     if (!entry.description.english) entry.description.english = enDesc || "";
+    if (!entry.trophyType) entry.trophyType = "unknown";
   }
 
   return {
@@ -144,6 +156,7 @@ function buildSchemaFromPs4(parsed) {
       displayName: t.displayName || { english: "" },
       description: t.description || { english: "" },
       hidden: Number(t.hidden) ? 1 : 0,
+      trophyType: ttypeToLabel(t.trophyType),
       icon: iconPath,
       icon_gray: iconPath,
       imageId: Number(t.imageId ?? t.id),
@@ -194,4 +207,5 @@ module.exports = {
   buildSnapshotFromPs4,
   PS4_LANG_MAP,
   mapLangFromFilename,
+  ttypeToLabel,
 };

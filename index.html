@@ -142,6 +142,35 @@
         align-self: center;
       }
 
+      .ach-icon {
+        border-radius: 6px;
+        border: 1px solid #44475a;
+        transition:
+          box-shadow 0.2s ease,
+          border-color 0.2s ease;
+      }
+
+      .ach-icon.rarity-tier-gold {
+        border-color: #f9c74f;
+        box-shadow:
+          0 0 0 1px rgba(249, 199, 79, 0.5),
+          0 0 14px rgba(249, 199, 79, 0.75);
+      }
+
+      .ach-icon.rarity-tier-silver {
+        border-color: #c7d0d9;
+        box-shadow:
+          0 0 0 1px rgba(199, 208, 217, 0.5),
+          0 0 12px rgba(199, 208, 217, 0.65);
+      }
+
+      .ach-icon.rarity-tier-bronze {
+        border-color: #cd7f32;
+        box-shadow:
+          0 0 0 1px rgba(205, 127, 50, 0.5),
+          0 0 11px rgba(205, 127, 50, 0.65);
+      }
+
       #config-list {
         margin-top: 10px;
         margin-bottom: 20px;
@@ -161,6 +190,13 @@
         text-align: center;
         vertical-align: middle;
         font-size: 14px;
+      }
+
+      .status-rarity {
+        margin-top: 4px;
+        color: #8be9fd;
+        font-size: 12px;
+        font-weight: 600;
       }
 
       .locked {
@@ -2436,6 +2472,48 @@
         </div>
       </div>
       <div id="achievementsHeader" class="ach-header" style="display: none">
+        <div id="achievementsTableControls" class="ach-header-controls">
+          <button
+            id="achFilterStatusBtn"
+            class="ach-toolbar-btn"
+            type="button"
+            title="Status filter"
+            aria-label="Status filter"
+          >
+            <span class="label">Status</span>
+            <span id="achFilterStatusBtnState" class="state">All</span>
+          </button>
+          <button
+            id="achSortTimeBtn"
+            class="ach-toolbar-btn"
+            type="button"
+            title="Sort by unlock date (old-new / new-old / off)"
+            aria-label="Sort by unlock date"
+          >
+            <span class="label">Date</span>
+            <span id="achSortTimeBtnDir" class="dir">·</span>
+          </button>
+          <button
+            id="achSortNameBtn"
+            class="ach-toolbar-btn"
+            type="button"
+            title="Sort by name (A-Z / Z-A / off)"
+            aria-label="Sort by name"
+          >
+            <span class="label">Name</span>
+            <span id="achSortNameBtnDir" class="dir">·</span>
+          </button>
+          <button
+            id="achSortRarityBtn"
+            class="ach-toolbar-btn"
+            type="button"
+            title="Sort by rarity (rare-common / common-rare / off)"
+            aria-label="Sort by rarity"
+          >
+            <span class="label">Rarity</span>
+            <span id="achSortRarityBtnDir" class="dir">·</span>
+          </button>
+        </div>
         <div id="achievementsSearch" class="ach-header-search">
           <button
             id="achievementsSearchToggle"
@@ -2458,12 +2536,19 @@
             autocomplete="off"
             spellcheck="false"
           />
+          <button
+            id="achievementsRefreshRarityBtn"
+            class="ach-refresh-rarity-btn"
+            type="button"
+            title="Refresh rarity for selected config"
+            aria-label="Refresh rarity"
+          >
+            <i class="fa-solid fa-rotate-right fa-icon" aria-hidden="true"></i>
+            <span id="achievementsRefreshRarityBtnLabel">Refresh Rarity</span>
+          </button>
         </div>
       </div>
       <table class="achievements">
-        <thead>
-          <tr></tr>
-        </thead>
         <tbody id="achievementsTableBody"></tbody>
       </table>
       <div style="height: 50px"></div>
@@ -3565,6 +3650,255 @@
         tryNext();
       }
 
+      const ACHIEVEMENT_TABLE_STATUS_SEQUENCE = ["all", "locked", "unlocked"];
+      const ACHIEVEMENT_TABLE_SORT_SEQUENCE = ["off", "asc", "desc"];
+      const ACHIEVEMENT_TABLE_STORE = {
+        status: "achTable:status",
+        nameSort: "achTable:nameSort",
+        timeSort: "achTable:timeSort",
+        raritySort: "achTable:raritySort",
+      };
+      const achievementTableViewState = {
+        status: "all",
+        nameSort: "off",
+        timeSort: "off",
+        raritySort: "off",
+      };
+
+      function readAchievementTableStore(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch {
+          return null;
+        }
+      }
+
+      function writeAchievementTableStore(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch {}
+      }
+
+      function normalizeAchievementTableStatus(status) {
+        return ACHIEVEMENT_TABLE_STATUS_SEQUENCE.includes(status)
+          ? status
+          : "all";
+      }
+
+      function normalizeAchievementTableSort(sortState) {
+        return ACHIEVEMENT_TABLE_SORT_SEQUENCE.includes(sortState)
+          ? sortState
+          : "off";
+      }
+
+      function hydrateAchievementTableViewStateFromStorage() {
+        achievementTableViewState.status = normalizeAchievementTableStatus(
+          readAchievementTableStore(ACHIEVEMENT_TABLE_STORE.status),
+        );
+        achievementTableViewState.nameSort = normalizeAchievementTableSort(
+          readAchievementTableStore(ACHIEVEMENT_TABLE_STORE.nameSort),
+        );
+        achievementTableViewState.timeSort = normalizeAchievementTableSort(
+          readAchievementTableStore(ACHIEVEMENT_TABLE_STORE.timeSort),
+        );
+        achievementTableViewState.raritySort = normalizeAchievementTableSort(
+          readAchievementTableStore(ACHIEVEMENT_TABLE_STORE.raritySort),
+        );
+      }
+
+      function persistAchievementTableViewStateToStorage() {
+        writeAchievementTableStore(
+          ACHIEVEMENT_TABLE_STORE.status,
+          achievementTableViewState.status,
+        );
+        writeAchievementTableStore(
+          ACHIEVEMENT_TABLE_STORE.nameSort,
+          achievementTableViewState.nameSort,
+        );
+        writeAchievementTableStore(
+          ACHIEVEMENT_TABLE_STORE.timeSort,
+          achievementTableViewState.timeSort,
+        );
+        writeAchievementTableStore(
+          ACHIEVEMENT_TABLE_STORE.raritySort,
+          achievementTableViewState.raritySort,
+        );
+        try {
+          window.api?.syncAchievementTableViewState?.({
+            status: achievementTableViewState.status,
+            nameSort: achievementTableViewState.nameSort,
+            timeSort: achievementTableViewState.timeSort,
+            raritySort: achievementTableViewState.raritySort,
+          });
+        } catch {}
+      }
+
+      function getAchievementDefaultRowIndex(row) {
+        const n = Number(row?.dataset?.defaultIndex);
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function getAchievementRowNumericValue(row, key) {
+        const raw = row?.dataset?.[key];
+        if (raw === undefined || raw === null || raw === "") return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function compareNullableAchievementValues(a, b, direction = "asc") {
+        if (a === null && b === null) return 0;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return direction === "desc" ? b - a : a - b;
+      }
+
+      function compareAchievementRowsByCurrentSort(rowA, rowB) {
+        const fallback = getAchievementDefaultRowIndex(rowA) - getAchievementDefaultRowIndex(rowB);
+
+        if (achievementTableViewState.nameSort !== "off") {
+          const aName = String(rowA?.dataset?.sortName || "");
+          const bName = String(rowB?.dataset?.sortName || "");
+          const cmp = aName.localeCompare(bName, undefined, {
+            sensitivity: "base",
+          });
+          if (cmp !== 0) {
+            return achievementTableViewState.nameSort === "desc" ? -cmp : cmp;
+          }
+          return fallback;
+        }
+
+        if (achievementTableViewState.timeSort !== "off") {
+          const aValue = getAchievementRowNumericValue(rowA, "sortEarnedTime");
+          const bValue = getAchievementRowNumericValue(rowB, "sortEarnedTime");
+          const cmp = compareNullableAchievementValues(
+            aValue,
+            bValue,
+            achievementTableViewState.timeSort,
+          );
+          if (cmp !== 0) return cmp;
+          return fallback;
+        }
+
+        if (achievementTableViewState.raritySort !== "off") {
+          const aValue = getAchievementRowNumericValue(rowA, "sortRarity");
+          const bValue = getAchievementRowNumericValue(rowB, "sortRarity");
+          const cmp = compareNullableAchievementValues(
+            aValue,
+            bValue,
+            achievementTableViewState.raritySort,
+          );
+          if (cmp !== 0) return cmp;
+          return fallback;
+        }
+
+        return fallback;
+      }
+
+      function getNextAchievementStatusFilter(current) {
+        const idx = ACHIEVEMENT_TABLE_STATUS_SEQUENCE.indexOf(current);
+        const nextIdx =
+          idx >= 0
+            ? (idx + 1) % ACHIEVEMENT_TABLE_STATUS_SEQUENCE.length
+            : 0;
+        return ACHIEVEMENT_TABLE_STATUS_SEQUENCE[nextIdx];
+      }
+
+      function getNextAchievementSortState(current) {
+        const idx = ACHIEVEMENT_TABLE_SORT_SEQUENCE.indexOf(current);
+        const nextIdx =
+          idx >= 0 ? (idx + 1) % ACHIEVEMENT_TABLE_SORT_SEQUENCE.length : 0;
+        return ACHIEVEMENT_TABLE_SORT_SEQUENCE[nextIdx];
+      }
+
+      function cycleAchievementsStatusFilter() {
+        achievementTableViewState.status = getNextAchievementStatusFilter(
+          achievementTableViewState.status,
+        );
+        persistAchievementTableViewStateToStorage();
+        updateAchievementsToolbarUi();
+        applyAchievementsSearchFilter();
+      }
+
+      function cycleAchievementsSort(sortKey) {
+        if (!["nameSort", "timeSort", "raritySort"].includes(sortKey)) return;
+        const next = getNextAchievementSortState(
+          achievementTableViewState[sortKey],
+        );
+        achievementTableViewState.nameSort = "off";
+        achievementTableViewState.timeSort = "off";
+        achievementTableViewState.raritySort = "off";
+        achievementTableViewState[sortKey] = next;
+        persistAchievementTableViewStateToStorage();
+        updateAchievementsToolbarUi();
+        applyAchievementsSearchFilter();
+      }
+
+      function getAchievementStatusLabel(status) {
+        if (status === "locked") {
+          return tUi("achievements.statusFilterLocked", "Locked");
+        }
+        if (status === "unlocked") {
+          return tUi("achievements.statusFilterUnlocked", "Unlocked");
+        }
+        return tUi("achievements.statusFilterAll", "All");
+      }
+
+      function getAchievementSortDirectionLabel(sortType, state) {
+        if (state === "off") return "·";
+        if (sortType === "name") return state === "desc" ? "Z-A" : "A-Z";
+        if (sortType === "time")
+          return state === "desc" ? "New-Old" : "Old-New";
+        if (sortType === "rarity")
+          return state === "desc" ? "Common-Rare" : "Rare-Common";
+        return "·";
+      }
+
+      function updateAchievementsToolbarUi() {
+        const statusBtn = document.getElementById("achFilterStatusBtn");
+        const statusState = document.getElementById("achFilterStatusBtnState");
+        if (statusState) {
+          statusState.textContent = getAchievementStatusLabel(
+            achievementTableViewState.status,
+          );
+        }
+        if (statusBtn) {
+          statusBtn.classList.toggle(
+            "active",
+            achievementTableViewState.status !== "all",
+          );
+        }
+
+        const setSortUi = (btnId, dirId, sortType, state) => {
+          const btn = document.getElementById(btnId);
+          const dir = document.getElementById(dirId);
+          if (dir) {
+            dir.textContent = getAchievementSortDirectionLabel(sortType, state);
+          }
+          if (btn) {
+            btn.classList.toggle("active", state !== "off");
+          }
+        };
+
+        setSortUi(
+          "achSortNameBtn",
+          "achSortNameBtnDir",
+          "name",
+          achievementTableViewState.nameSort,
+        );
+        setSortUi(
+          "achSortTimeBtn",
+          "achSortTimeBtnDir",
+          "time",
+          achievementTableViewState.timeSort,
+        );
+        setSortUi(
+          "achSortRarityBtn",
+          "achSortRarityBtnDir",
+          "rarity",
+          achievementTableViewState.raritySort,
+        );
+      }
+
       function setAchievementsHeaderVisible(visible) {
         const header = document.getElementById("achievementsHeader");
         if (!header) return;
@@ -3595,27 +3929,80 @@
       }
 
       function applyAchievementsSearchFilter() {
+        const tableBody = document.getElementById("achievementsTableBody");
+        if (!tableBody) return;
         const input = document.getElementById("achievementsSearchInput");
         const query = String(input?.value || "")
           .trim()
           .toLowerCase();
-        const rows = document.querySelectorAll("#achievementsTableBody tr");
+        const rows = Array.from(tableBody.querySelectorAll("tr"));
+        if (!rows.length) return;
+
+        rows.sort(compareAchievementRowsByCurrentSort);
+        const frag = document.createDocumentFragment();
+        rows.forEach((row) => frag.appendChild(row));
+        tableBody.appendChild(frag);
+
         rows.forEach((row) => {
           const hay = String(row?.dataset?.search || "");
-          row.style.display = !query || hay.includes(query) ? "" : "none";
+          const searchMatches = !query || hay.includes(query);
+          const isUnlocked = row?.dataset?.sortUnlocked === "1";
+          const statusMatches =
+            achievementTableViewState.status === "all" ||
+            (achievementTableViewState.status === "locked" && !isUnlocked) ||
+            (achievementTableViewState.status === "unlocked" && isUnlocked);
+          row.style.display = searchMatches && statusMatches ? "" : "none";
         });
       }
 
       function ensureAchievementsSearchAttached() {
-        if (window.__achSearchAttached) return;
+        if (!window.__achTableViewStateHydrated) {
+          hydrateAchievementTableViewStateFromStorage();
+          persistAchievementTableViewStateToStorage();
+          window.__achTableViewStateHydrated = true;
+        }
+        if (window.__achSearchAttached) {
+          updateAchievementsToolbarUi();
+          return;
+        }
         const wrap = document.getElementById("achievementsSearch");
         const input = document.getElementById("achievementsSearchInput");
         const toggle = document.getElementById("achievementsSearchToggle");
+        const refreshRarityBtn = document.getElementById(
+          "achievementsRefreshRarityBtn",
+        );
+        const statusFilterBtn = document.getElementById("achFilterStatusBtn");
+        const sortNameBtn = document.getElementById("achSortNameBtn");
+        const sortTimeBtn = document.getElementById("achSortTimeBtn");
+        const sortRarityBtn = document.getElementById("achSortRarityBtn");
         if (!wrap || !input || !toggle) return;
         toggle.addEventListener("click", () => {
           const open = !wrap.classList.contains("open");
           setAchievementsSearchOpen(open, true);
         });
+        if (refreshRarityBtn) {
+          refreshRarityBtn.addEventListener("click", () => {
+            refreshSelectedConfigRarity();
+          });
+        }
+        if (statusFilterBtn) {
+          statusFilterBtn.addEventListener("click", cycleAchievementsStatusFilter);
+        }
+        if (sortNameBtn) {
+          sortNameBtn.addEventListener("click", () => {
+            cycleAchievementsSort("nameSort");
+          });
+        }
+        if (sortTimeBtn) {
+          sortTimeBtn.addEventListener("click", () => {
+            cycleAchievementsSort("timeSort");
+          });
+        }
+        if (sortRarityBtn) {
+          sortRarityBtn.addEventListener("click", () => {
+            cycleAchievementsSort("raritySort");
+          });
+        }
         if (!input) return;
         input.addEventListener("input", applyAchievementsSearchFilter);
         input.addEventListener("blur", () => {
@@ -3628,7 +4015,85 @@
             setAchievementsSearchOpen(false);
           }
         });
+        updateAchievementsToolbarUi();
         window.__achSearchAttached = true;
+      }
+
+      async function refreshSelectedConfigRarity() {
+        const configName = String(
+          document.getElementById("configList")?.value || "",
+        ).trim();
+        if (!configName) {
+          showNotification(tUi("alert.selectConfig", "Select a config!"), "#f44336");
+          return;
+        }
+        const refreshBtn = document.getElementById("achievementsRefreshRarityBtn");
+        const refreshBtnLabel = document.getElementById(
+          "achievementsRefreshRarityBtnLabel",
+        );
+        if (refreshBtn?.dataset?.loading === "1") return;
+        const idleLabel = tUi(
+          "achievementsRefreshRarityBtnLabel",
+          "Refresh Rarity",
+        );
+        const loadingLabel = tUi(
+          "achievementsRefreshRarityBtnLoading",
+          "Refreshing…",
+        );
+        try {
+          if (refreshBtn) {
+            refreshBtn.dataset.loading = "1";
+            refreshBtn.disabled = true;
+            refreshBtn.classList.add("is-loading");
+          }
+          if (refreshBtnLabel) refreshBtnLabel.textContent = loadingLabel;
+          const result = await window.api?.refreshSelectedConfigRarity?.(
+            configName,
+          );
+          if (!result?.success) {
+            showNotification(
+              result?.message ||
+                tUi("notify.rarityRefreshFailed", "Failed to refresh rarity."),
+              "#f44336",
+            );
+            return;
+          }
+          const fetched = Number(result?.fetchedCount) || 0;
+          const matched = Number(result?.matchedCount) || 0;
+          showNotification(
+            tUiFmt(
+              "notify.rarityRefreshDone",
+              { matched, fetched },
+              `Rarity refreshed: ${matched}/${fetched} matched.`,
+            ),
+            "#4CAF50",
+          );
+          const activeConfig = String(
+            document.getElementById("configList")?.value || "",
+          ).trim();
+          if (activeConfig === configName) {
+            const lang = document.getElementById("languageSelect")?.value || "english";
+            await buildMainAchievementsTable(configName, lang, {
+              skipPlatinumCheck: true,
+            });
+          }
+        } catch (err) {
+          console.error(
+            tUi("log.rarityRefreshFailed", "Rarity refresh failed:"),
+            err,
+          );
+          showNotification(
+            tUi("notify.rarityRefreshFailed", "Failed to refresh rarity."),
+            "#f44336",
+          );
+        } finally {
+          if (refreshBtn) {
+            refreshBtn.dataset.loading = "";
+            refreshBtn.disabled = false;
+            refreshBtn.classList.remove("is-loading");
+          }
+          if (refreshBtnLabel) refreshBtnLabel.textContent = idleLabel;
+        }
       }
 
       function focusAchievementsSearch(selectAll = true) {
@@ -3662,7 +4127,9 @@
         }
 
         const achievementsDataObj =
-          await window.api.loadAchievementData(selectedConfig);
+          await window.api.loadAchievementData(selectedConfig, {
+            includeRarity: true,
+          });
         if (isSelectionStale()) return;
         if (
           !achievementsDataObj ||
@@ -3736,7 +4203,121 @@
           return isNaN(d) ? "N/A" : d.toLocaleString();
         }
 
+        function parseRarityPercent(raw) {
+          if (raw === null || raw === undefined) return null;
+          if (typeof raw === "number" && Number.isFinite(raw)) {
+            return Math.min(100, Math.max(0, raw));
+          }
+          if (typeof raw === "string") {
+            const normalized = raw.replace(",", ".").trim();
+            if (!normalized) return null;
+            const m = normalized.match(/-?\d+(?:\.\d+)?/);
+            if (!m) return null;
+            const n = Number(m[0]);
+            if (!Number.isFinite(n)) return null;
+            return Math.min(100, Math.max(0, n));
+          }
+          return null;
+        }
+
+        function resolveRarityPercent(achievement) {
+          const rarityObj = achievement?.rarity;
+          if (rarityObj && typeof rarityObj === "object") {
+            const nested =
+              parseRarityPercent(rarityObj.pct) ??
+              parseRarityPercent(rarityObj.percent) ??
+              parseRarityPercent(rarityObj.value);
+            if (nested !== null) return nested;
+          }
+          const candidates = [
+            achievement?.rarityPct,
+            achievement?.rarity_percent,
+            achievement?.unlockRate,
+            achievement?.unlock_rate,
+            achievement?.globalPercent,
+            achievement?.global_percent,
+            achievement?.percent,
+            typeof achievement?.rarity === "number" ||
+            typeof achievement?.rarity === "string"
+              ? achievement.rarity
+              : null,
+          ];
+          for (const candidate of candidates) {
+            const parsed = parseRarityPercent(candidate);
+            if (parsed !== null) return parsed;
+          }
+          return null;
+        }
+
+        function mapTrophyTypeToRaritySortValue(rawType) {
+          const normalized = String(rawType || "")
+            .trim()
+            .toLowerCase();
+          if (!normalized || normalized === "unknown") return null;
+          if (normalized === "p" || normalized === "platinum") return 0;
+          if (normalized === "g" || normalized === "gold") return 1;
+          if (normalized === "s" || normalized === "silver") return 2;
+          if (normalized === "b" || normalized === "bronze") return 3;
+          return null;
+        }
+
+        function resolveRaritySortValue(
+          achievement,
+          { useTrophyTypeRaritySortFallback = false } = {},
+        ) {
+          const rarityPercent = resolveRarityPercent(achievement);
+          if (rarityPercent !== null) return rarityPercent;
+          if (!useTrophyTypeRaritySortFallback) return null;
+          return mapTrophyTypeToRaritySortValue(
+            achievement?.trophyType || achievement?.trophy_type,
+          );
+        }
+
+        function resolveRarityGlowTierClass(achievement) {
+          const rarityPct = resolveRarityPercent(achievement);
+          if (rarityPct === null) return "";
+          if (rarityPct <= 1) return "rarity-tier-gold";
+          if (rarityPct <= 5) return "rarity-tier-silver";
+          if (rarityPct <= 10) return "rarity-tier-bronze";
+          return "";
+        }
+
+        function formatTrophyTypeAsRarity(rawType) {
+          const normalized = String(rawType || "")
+            .trim()
+            .toLowerCase();
+          if (!normalized || normalized === "unknown") return "";
+          if (normalized === "p" || normalized === "platinum") return "Platinum";
+          if (normalized === "g" || normalized === "gold") return "Gold";
+          if (normalized === "s" || normalized === "silver") return "Silver";
+          if (normalized === "b" || normalized === "bronze") return "Bronze";
+          return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+        }
+
+        function formatRarityPercent(achievement) {
+          const rarityPct = resolveRarityPercent(achievement);
+          if (rarityPct !== null) {
+            const rounded = Number.isInteger(rarityPct)
+              ? String(rarityPct)
+              : String(rarityPct.toFixed(2)).replace(/\.?0+$/, "");
+            return `${rounded}%`;
+          }
+          const trophyType = formatTrophyTypeAsRarity(
+            achievement?.trophyType || achievement?.trophy_type,
+          );
+          if (trophyType) return trophyType;
+          return "N/A";
+        }
+
         setAchievementsHeaderVisible(true);
+        updateAchievementsToolbarUi();
+        let defaultRowIndex = 0;
+        const platformForRaritySort = String(currentConfig?.platform || "")
+          .trim()
+          .toLowerCase();
+        const useTrophyTypeRaritySortFallback =
+          platformForRaritySort === "rpcs3" ||
+          platformForRaritySort === "shadps4";
 
         for (const achievement of unique) {
           const displayName = getSafeLocalizedText(
@@ -3767,6 +4348,11 @@
               typeof window.i18nUi.getString === "function" &&
               window.i18nUi.getString("overlay.statusUnlocked", "Unlocked")) ||
             "Unlocked";
+          const rarityLabel =
+            (window.i18nUi &&
+              typeof window.i18nUi.getString === "function" &&
+              window.i18nUi.getString("overlay.rarityLabel", "Rarity")) ||
+            "Rarity";
           const progressLabel =
             (window.i18nUi &&
               typeof window.i18nUi.getString === "function" &&
@@ -3804,11 +4390,33 @@
           }
 
           const row = document.createElement("tr");
+          const rarityPercentValue = resolveRarityPercent(achievement);
+          const raritySortValue = resolveRaritySortValue(achievement, {
+            useTrophyTypeRaritySortFallback,
+          });
+          row.dataset.defaultIndex = String(defaultRowIndex++);
+          row.dataset.sortName = String(displayName || achievement.name || hiddenLabel)
+            .trim()
+            .replace(/\s+/g, " ")
+            .toLowerCase();
+          row.dataset.sortUnlocked = saved?.earned ? "1" : "0";
+          const earnedTimeValue = Number(saved?.earned_time);
+          row.dataset.sortEarnedTime =
+            Number.isFinite(earnedTimeValue) && earnedTimeValue > 0
+              ? String(earnedTimeValue)
+              : "";
+          row.dataset.sortRarity =
+            raritySortValue === null ? "" : String(raritySortValue);
+
           // col image
           const tdImg = document.createElement("td");
           tdImg.className = "image";
           const achImg = document.createElement("img");
           achImg.className = "ach-icon";
+          const rarityGlowTierClass = resolveRarityGlowTierClass(achievement);
+          if (rarityGlowTierClass) {
+            achImg.classList.add(rarityGlowTierClass);
+          }
           achImg.alt = "Icon";
           tdImg.appendChild(achImg);
 
@@ -3831,8 +4439,9 @@
             isHiddenInSchema && !canShowHiddenDesc
               ? hiddenLabel
               : description || "";
+          const rarityText = formatRarityPercent(achievement);
           row.dataset.search =
-            `${displayName || ""} ${descText || ""} ${achievement.name || ""}`
+            `${displayName || ""} ${descText || ""} ${achievement.name || ""} ${rarityText || ""}`
               .toLowerCase()
               .trim();
           descWrap.appendChild(document.createElement("em")).textContent =
@@ -3877,6 +4486,10 @@
               document.createTextNode(tsToLocal(saved.earned_time)),
             );
           }
+          const rarityLine = document.createElement("div");
+          rarityLine.className = "status-rarity";
+          rarityLine.textContent = `${rarityLabel}: ${rarityText}`;
+          tdStatus.appendChild(rarityLine);
 
           row.append(tdImg, tdText, tdStatus);
           tableBody.appendChild(row);
@@ -5858,7 +6471,9 @@
             });
           }
           const achievementsDataObj =
-            await window.api.loadAchievementData(selectedConfig);
+            await window.api.loadAchievementData(selectedConfig, {
+              includeRarity: true,
+            });
           if (isStaleSelection()) return;
           const savedAchievementsObj =
             await window.api.loadSavedAchievements(selectedConfig);
@@ -10755,7 +11370,9 @@
           if (dashboardSchemaCache.has(cfgName)) {
             return dashboardSchemaCache.get(cfgName);
           }
-          const achData = await window.api.loadAchievementData(cfgName);
+          const achData = await window.api.loadAchievementData(cfgName, {
+            includeRarity: false,
+          });
           const list = Array.isArray(achData?.achievements)
             ? achData.achievements
             : [];
@@ -12370,7 +12987,7 @@
           if (!cfg) return;
 
           const [achData, saved] = await Promise.all([
-            window.api.loadAchievementData(cfg),
+            window.api.loadAchievementData(cfg, { includeRarity: false }),
             window.api.loadSavedAchievements(cfg),
           ]);
 

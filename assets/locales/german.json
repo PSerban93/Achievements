@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Die automatische Konfiguration liest Titeldaten, generiert Schemata/Bilder und startet den Benachrichtigungsfluss aus diesen Dateien.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Plattformhandbuch",
-  "title.tab-platformGuide": "Plattform- und Emulatorhandbuch"
+  "title.tab-platformGuide": "Plattform- und Emulatorhandbuch",
+  "achievementsRefreshRarityBtnLabel": "Seltenheit aktualisieren",
+  "achievementsRefreshRarityBtnLoading": "Wird aktualisiert…",
+  "title.achievementsRefreshRarityBtn": "Seltenheit für die ausgewählte Konfiguration aktualisieren",
+  "aria.achievementsRefreshRarityBtn": "Seltenheit aktualisieren",
+  "notify.rarityRefreshDone": "Seltenheit aktualisiert: {matched}/{fetched} Treffer.",
+  "notify.rarityRefreshFailed": "Seltenheit konnte nicht aktualisiert werden.",
+  "log.rarityRefreshFailed": "Seltenheit konnte nicht aktualisiert werden:"
 }
-

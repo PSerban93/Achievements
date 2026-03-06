@@ -183,6 +183,11 @@ function updateSchemaFromPs4(schemaDir, parsed) {
       updated = true;
       changed += 1;
     }
+    if (existing.trophyType !== inc.trophyType) {
+      existing.trophyType = inc.trophyType;
+      updated = true;
+      changed += 1;
+    }
     if (existing.imageId !== inc.imageId) {
       existing.imageId = inc.imageId;
       updated = true;

@@ -30,9 +30,9 @@ contextBridge.exposeInMainWorld("api", {
   getConfigByAppId: (appid) => ipcRenderer.invoke("config:get-by-appid", appid),
 
   // Achievements loading
-  loadAchievementData: async (configName) => {
+  loadAchievementData: async (configName, options = {}) => {
     try {
-      return await ipcRenderer.invoke("load-achievements", configName);
+      return await ipcRenderer.invoke("load-achievements", configName, options);
     } catch (e) {
       return { achievements: null, error: String(e?.message || e) };
     }
@@ -42,6 +42,19 @@ contextBridge.exposeInMainWorld("api", {
       return await ipcRenderer.invoke("load-saved-achievements", configName);
     } catch (e) {
       return { achievements: {}, error: String(e?.message || e) };
+    }
+  },
+  refreshSelectedConfigRarity: async (configName) => {
+    try {
+      return await ipcRenderer.invoke("rarity:refresh-selected-config", {
+        configName,
+      });
+    } catch (e) {
+      return {
+        success: false,
+        code: "ipc-failed",
+        message: String(e?.message || e),
+      };
     }
   },
 
@@ -82,6 +95,8 @@ contextBridge.exposeInMainWorld("api", {
   updateConfig: (configData) => ipcRenderer.send("update-config", configData),
   toggleOverlay: (selectedConfig) =>
     ipcRenderer.send("toggle-overlay", selectedConfig),
+  syncAchievementTableViewState: (state) =>
+    ipcRenderer.send("ach-table:view-state", state),
   onLoadOverlayData: (callback) => {
     if (overlayDataHandler) {
       ipcRenderer.removeListener("load-overlay-data", overlayDataHandler);

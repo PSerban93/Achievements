@@ -654,7 +654,7 @@ select {
   margin: 10px auto 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
   background-color: transparent;
@@ -662,10 +662,51 @@ select {
   border: none;
 }
 
+.ach-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ach-toolbar-btn {
+  height: 32px;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dracula-comment);
+  background-color: transparent;
+  color: var(--dracula-cyan);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ach-toolbar-btn:hover {
+  border-color: var(--dracula-cyan);
+}
+
+.ach-toolbar-btn.active {
+  border-color: var(--dracula-purple);
+  color: var(--dracula-foreground);
+}
+
+.ach-toolbar-btn .state,
+.ach-toolbar-btn .dir {
+  font-weight: 600;
+  color: var(--dracula-foreground);
+}
+
 .ach-header-search {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-left: auto;
 }
 
 .ach-search-btn {
@@ -686,6 +727,37 @@ select {
 
 .ach-search-btn:hover {
   border-color: transparent;
+}
+
+.ach-refresh-rarity-btn {
+  height: 32px;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--dracula-comment);
+  background-color: transparent;
+  color: var(--dracula-cyan);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  line-height: 1;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.ach-refresh-rarity-btn:hover {
+  border-color: var(--dracula-cyan);
+}
+
+.ach-refresh-rarity-btn:disabled {
+  opacity: 0.65;
+  cursor: default;
+}
+
+.ach-refresh-rarity-btn.is-loading {
+  border-color: var(--dracula-purple);
 }
 
 .ach-search-input {

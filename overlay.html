@@ -308,6 +308,30 @@
         border-radius: 6px;
         object-fit: cover;
         border: 1px solid var(--dracula-comment);
+        transition:
+          box-shadow 0.2s ease,
+          border-color 0.2s ease;
+      }
+
+      .achievement-icon.rarity-tier-gold {
+        border-color: #f9c74f;
+        box-shadow:
+          0 0 0 1px rgba(249, 199, 79, 0.5),
+          0 0 12px rgba(249, 199, 79, 0.72);
+      }
+
+      .achievement-icon.rarity-tier-silver {
+        border-color: #c7d0d9;
+        box-shadow:
+          0 0 0 1px rgba(199, 208, 217, 0.5),
+          0 0 10px rgba(199, 208, 217, 0.62);
+      }
+
+      .achievement-icon.rarity-tier-bronze {
+        border-color: #cd7f32;
+        box-shadow:
+          0 0 0 1px rgba(205, 127, 50, 0.5),
+          0 0 10px rgba(205, 127, 50, 0.6);
       }
 
       .achievement-info {
@@ -338,6 +362,12 @@
         align-items: flex-end;
         gap: 4px;
         min-width: 90px;
+      }
+
+      .achievement-rarity {
+        color: var(--dracula-cyan);
+        font-size: 0.8em;
+        font-weight: 600;
       }
 
       .status-locked {
@@ -436,12 +466,113 @@
       let overlayUiLang = "english";
       let overlayPrefs = null;
       let overlayPrefsLoaded = false;
+      const OVERLAY_ACH_TABLE_STATUS_SEQUENCE = ["all", "locked", "unlocked"];
+      const OVERLAY_ACH_TABLE_SORT_SEQUENCE = ["off", "asc", "desc"];
+      const OVERLAY_ACH_TABLE_STORE = {
+        status: "achTable:status",
+        nameSort: "achTable:nameSort",
+        timeSort: "achTable:timeSort",
+        raritySort: "achTable:raritySort",
+      };
+      const overlayAchievementTableViewState = {
+        status: "all",
+        nameSort: "off",
+        timeSort: "off",
+        raritySort: "off",
+      };
       const tUi = (key, fallback) =>
         window.i18nUi && typeof window.i18nUi.getString === "function"
           ? window.i18nUi.getString(key, fallback)
           : fallback;
       const faWithFallback = (iconClasses, fallbackChar) =>
         `<i class="${iconClasses} fa-icon" aria-hidden="true"></i><span class="fa-fallback" aria-hidden="true">${fallbackChar}</span>`;
+
+      function readOverlayAchTableStore(key) {
+        try {
+          return localStorage.getItem(key);
+        } catch {
+          return null;
+        }
+      }
+
+      function writeOverlayAchTableStore(key, value) {
+        try {
+          localStorage.setItem(key, value);
+        } catch {}
+      }
+
+      function normalizeOverlayAchievementTableStatus(status) {
+        return OVERLAY_ACH_TABLE_STATUS_SEQUENCE.includes(status)
+          ? status
+          : "all";
+      }
+
+      function normalizeOverlayAchievementTableSort(sortState) {
+        return OVERLAY_ACH_TABLE_SORT_SEQUENCE.includes(sortState)
+          ? sortState
+          : "off";
+      }
+
+      function normalizeOverlayAchievementTableState(payload) {
+        if (!payload || typeof payload !== "object") return null;
+        return {
+          status: normalizeOverlayAchievementTableStatus(
+            String(payload.status || "")
+              .trim()
+              .toLowerCase(),
+          ),
+          nameSort: normalizeOverlayAchievementTableSort(
+            String(payload.nameSort || "")
+              .trim()
+              .toLowerCase(),
+          ),
+          timeSort: normalizeOverlayAchievementTableSort(
+            String(payload.timeSort || "")
+              .trim()
+              .toLowerCase(),
+          ),
+          raritySort: normalizeOverlayAchievementTableSort(
+            String(payload.raritySort || "")
+              .trim()
+              .toLowerCase(),
+          ),
+        };
+      }
+
+      function hydrateOverlayAchievementTableViewStateFromStorage() {
+        const stored = normalizeOverlayAchievementTableState({
+          status: readOverlayAchTableStore(OVERLAY_ACH_TABLE_STORE.status),
+          nameSort: readOverlayAchTableStore(OVERLAY_ACH_TABLE_STORE.nameSort),
+          timeSort: readOverlayAchTableStore(OVERLAY_ACH_TABLE_STORE.timeSort),
+          raritySort: readOverlayAchTableStore(
+            OVERLAY_ACH_TABLE_STORE.raritySort,
+          ),
+        });
+        if (!stored) return;
+        overlayAchievementTableViewState.status = stored.status;
+        overlayAchievementTableViewState.nameSort = stored.nameSort;
+        overlayAchievementTableViewState.timeSort = stored.timeSort;
+        overlayAchievementTableViewState.raritySort = stored.raritySort;
+      }
+
+      function persistOverlayAchievementTableViewStateToStorage() {
+        writeOverlayAchTableStore(
+          OVERLAY_ACH_TABLE_STORE.status,
+          overlayAchievementTableViewState.status,
+        );
+        writeOverlayAchTableStore(
+          OVERLAY_ACH_TABLE_STORE.nameSort,
+          overlayAchievementTableViewState.nameSort,
+        );
+        writeOverlayAchTableStore(
+          OVERLAY_ACH_TABLE_STORE.timeSort,
+          overlayAchievementTableViewState.timeSort,
+        );
+        writeOverlayAchTableStore(
+          OVERLAY_ACH_TABLE_STORE.raritySort,
+          overlayAchievementTableViewState.raritySort,
+        );
+      }
 
       async function loadOverlayPrefs() {
         if (overlayPrefsLoaded && overlayPrefs) return overlayPrefs;
@@ -543,14 +674,256 @@
           .map((ach) => {
             const name = ach.name;
             const display = getSafeLocalizedText(ach.displayName, lang);
+            const rarity =
+              ach?.rarityPct ??
+              ach?.rarity_percent ??
+              ach?.unlockRate ??
+              ach?.unlock_rate ??
+              ach?.globalPercent ??
+              ach?.global_percent ??
+              ach?.percent ??
+              (typeof ach?.rarity === "object"
+                ? ach?.rarity?.pct ??
+                  ach?.rarity?.percent ??
+                  ach?.rarity?.value ??
+                  ""
+                : ach?.rarity ?? "");
+            const trophyType = formatTrophyTypeAsRarity(
+              ach?.trophyType || ach?.trophy_type,
+            );
             const savedData = saved?.achievements?.[name] || {};
             const earned = savedData.earned ? "1" : "0";
             const progress = savedData.progress ?? "";
             const max = savedData.max_progress ?? "";
-            return `${name}-${display}-${earned}-${progress}-${max}`;
+            return `${name}-${display}-${rarity}-${trophyType}-${earned}-${progress}-${max}`;
           })
           .join("|");
       }
+
+      function parseRarityPercent(raw) {
+        if (raw === null || raw === undefined) return null;
+        if (typeof raw === "number" && Number.isFinite(raw)) {
+          return Math.min(100, Math.max(0, raw));
+        }
+        if (typeof raw === "string") {
+          const normalized = raw.replace(",", ".").trim();
+          if (!normalized) return null;
+          const m = normalized.match(/-?\d+(?:\.\d+)?/);
+          if (!m) return null;
+          const n = Number(m[0]);
+          if (!Number.isFinite(n)) return null;
+          return Math.min(100, Math.max(0, n));
+        }
+        return null;
+      }
+
+      function resolveRarityPercent(achievement) {
+        const rarityObj = achievement?.rarity;
+        if (rarityObj && typeof rarityObj === "object") {
+          const nested =
+            parseRarityPercent(rarityObj.pct) ??
+            parseRarityPercent(rarityObj.percent) ??
+            parseRarityPercent(rarityObj.value);
+          if (nested !== null) return nested;
+        }
+        const candidates = [
+          achievement?.rarityPct,
+          achievement?.rarity_percent,
+          achievement?.unlockRate,
+          achievement?.unlock_rate,
+          achievement?.globalPercent,
+          achievement?.global_percent,
+          achievement?.percent,
+          typeof achievement?.rarity === "number" ||
+          typeof achievement?.rarity === "string"
+            ? achievement.rarity
+            : null,
+        ];
+        for (const candidate of candidates) {
+          const parsed = parseRarityPercent(candidate);
+          if (parsed !== null) return parsed;
+        }
+        return null;
+      }
+
+      function mapTrophyTypeToRaritySortValue(rawType) {
+        const normalized = String(rawType || "")
+          .trim()
+          .toLowerCase();
+        if (!normalized || normalized === "unknown") return null;
+        if (normalized === "p" || normalized === "platinum") return 0;
+        if (normalized === "g" || normalized === "gold") return 1;
+        if (normalized === "s" || normalized === "silver") return 2;
+        if (normalized === "b" || normalized === "bronze") return 3;
+        return null;
+      }
+
+      function resolveRaritySortValue(
+        achievement,
+        { useTrophyTypeRaritySortFallback = false } = {},
+      ) {
+        const rarityPercent = resolveRarityPercent(achievement);
+        if (rarityPercent !== null) return rarityPercent;
+        if (!useTrophyTypeRaritySortFallback) return null;
+        return mapTrophyTypeToRaritySortValue(
+          achievement?.trophyType || achievement?.trophy_type,
+        );
+      }
+
+      function resolveRarityGlowTierClass(achievement) {
+        const rarityPct = resolveRarityPercent(achievement);
+        if (rarityPct === null) return "";
+        if (rarityPct <= 1) return "rarity-tier-gold";
+        if (rarityPct <= 5) return "rarity-tier-silver";
+        if (rarityPct <= 10) return "rarity-tier-bronze";
+        return "";
+      }
+
+      function formatTrophyTypeAsRarity(rawType) {
+        const normalized = String(rawType || "")
+          .trim()
+          .toLowerCase();
+        if (!normalized || normalized === "unknown") return "";
+        if (normalized === "p" || normalized === "platinum") return "Platinum";
+        if (normalized === "g" || normalized === "gold") return "Gold";
+        if (normalized === "s" || normalized === "silver") return "Silver";
+        if (normalized === "b" || normalized === "bronze") return "Bronze";
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+      }
+
+      function formatRarityPercent(achievement) {
+        const rarityPct = resolveRarityPercent(achievement);
+        if (rarityPct !== null) {
+          const rounded = Number.isInteger(rarityPct)
+            ? String(rarityPct)
+            : String(rarityPct.toFixed(2)).replace(/\.?0+$/, "");
+          return `${rounded}%`;
+        }
+        const trophyType = formatTrophyTypeAsRarity(
+          achievement?.trophyType || achievement?.trophy_type,
+        );
+        if (trophyType) return trophyType;
+        return "N/A";
+      }
+
+      function getOverlayAchievementItemDefaultIndex(item) {
+        const n = Number(item?.dataset?.defaultIndex);
+        return Number.isFinite(n) ? n : 0;
+      }
+
+      function getOverlayAchievementItemNumericValue(item, key) {
+        const raw = item?.dataset?.[key];
+        if (raw === undefined || raw === null || raw === "") return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+      }
+
+      function compareNullableOverlayAchievementValues(
+        a,
+        b,
+        direction = "asc",
+      ) {
+        if (a === null && b === null) return 0;
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return direction === "desc" ? b - a : a - b;
+      }
+
+      function compareOverlayAchievementItemsByCurrentSort(itemA, itemB) {
+        const fallback =
+          getOverlayAchievementItemDefaultIndex(itemA) -
+          getOverlayAchievementItemDefaultIndex(itemB);
+
+        if (overlayAchievementTableViewState.nameSort !== "off") {
+          const aName = String(itemA?.dataset?.sortName || "");
+          const bName = String(itemB?.dataset?.sortName || "");
+          const cmp = aName.localeCompare(bName, undefined, {
+            sensitivity: "base",
+          });
+          if (cmp !== 0) {
+            return overlayAchievementTableViewState.nameSort === "desc"
+              ? -cmp
+              : cmp;
+          }
+          return fallback;
+        }
+
+        if (overlayAchievementTableViewState.timeSort !== "off") {
+          const aValue = getOverlayAchievementItemNumericValue(
+            itemA,
+            "sortEarnedTime",
+          );
+          const bValue = getOverlayAchievementItemNumericValue(
+            itemB,
+            "sortEarnedTime",
+          );
+          const cmp = compareNullableOverlayAchievementValues(
+            aValue,
+            bValue,
+            overlayAchievementTableViewState.timeSort,
+          );
+          if (cmp !== 0) return cmp;
+          return fallback;
+        }
+
+        if (overlayAchievementTableViewState.raritySort !== "off") {
+          const aValue = getOverlayAchievementItemNumericValue(
+            itemA,
+            "sortRarity",
+          );
+          const bValue = getOverlayAchievementItemNumericValue(
+            itemB,
+            "sortRarity",
+          );
+          const cmp = compareNullableOverlayAchievementValues(
+            aValue,
+            bValue,
+            overlayAchievementTableViewState.raritySort,
+          );
+          if (cmp !== 0) return cmp;
+          return fallback;
+        }
+
+        return fallback;
+      }
+
+      function applyOverlayAchievementViewState() {
+        const achievementsList = document.getElementById("achievements-list");
+        if (!achievementsList) return;
+        const items = Array.from(
+          achievementsList.querySelectorAll("li.achievement-item"),
+        );
+        if (!items.length) return;
+
+        items.sort(compareOverlayAchievementItemsByCurrentSort);
+        const frag = document.createDocumentFragment();
+        items.forEach((item) => frag.appendChild(item));
+        achievementsList.appendChild(frag);
+
+        items.forEach((item) => {
+          const isUnlocked = item?.dataset?.sortUnlocked === "1";
+          const statusMatches =
+            overlayAchievementTableViewState.status === "all" ||
+            (overlayAchievementTableViewState.status === "locked" &&
+              !isUnlocked) ||
+            (overlayAchievementTableViewState.status === "unlocked" &&
+              isUnlocked);
+          item.style.display = statusMatches ? "" : "none";
+        });
+      }
+
+      function applyOverlayAchievementTableViewState(payload) {
+        const normalized = normalizeOverlayAchievementTableState(payload);
+        if (!normalized) return;
+        overlayAchievementTableViewState.status = normalized.status;
+        overlayAchievementTableViewState.nameSort = normalized.nameSort;
+        overlayAchievementTableViewState.timeSort = normalized.timeSort;
+        overlayAchievementTableViewState.raritySort = normalized.raritySort;
+        persistOverlayAchievementTableViewStateToStorage();
+        applyOverlayAchievementViewState();
+      }
+
+      hydrateOverlayAchievementTableViewStateFromStorage();
 
       function updateStats(achievements, savedData) {
         const total = achievements.length;
@@ -597,8 +970,17 @@
 
         try {
           await applyOverlayLanguage();
+          const configMeta = await window.api.getConfigByName?.(configName);
+          const platformForRaritySort = String(configMeta?.platform || "")
+            .trim()
+            .toLowerCase();
+          const useTrophyTypeRaritySortFallback =
+            platformForRaritySort === "rpcs3" ||
+            platformForRaritySort === "shadps4";
           const achievementsDataObj =
-            await window.api.loadAchievementData(configName);
+            await window.api.loadAchievementData(configName, {
+              includeRarity: true,
+            });
           const savedAchievementsObj =
             await window.api.loadSavedAchievements(configName);
           const lang = overlayLang;
@@ -656,6 +1038,7 @@
             return bUnlocked - aUnlocked;
           });
 
+          let defaultItemIndex = 0;
           achievements.forEach((achievement) => {
             const displayName = getSafeLocalizedText(
               achievement.displayName,
@@ -678,6 +1061,7 @@
             )}</div>`;
             let earnedTimeHTML = "";
             let progressHTML = "";
+            const rarityHTML = `<div class="achievement-rarity">${tUi("overlay.rarityLabel", "Rarity")}: ${formatRarityPercent(achievement)}</div>`;
             const saved =
               savedAchievementsObj?.achievements?.[achievement.name];
             const isUnlocked = !!saved?.earned;
@@ -687,6 +1071,7 @@
               isHidden && !isUnlocked && !showHidden
                 ? tUi("overlay.hiddenFallback", "Hidden")
                 : description;
+            const rarityPercentValue = resolveRarityPercent(achievement);
 
             if (saved?.earned) {
               statusHTML = `<div class="status-unlocked">${faWithFallback(
@@ -721,6 +1106,23 @@
 
             const listItem = document.createElement("li");
             listItem.className = "achievement-item";
+            const rarityGlowTierClass = resolveRarityGlowTierClass(achievement);
+            listItem.dataset.defaultIndex = String(defaultItemIndex++);
+            listItem.dataset.sortName = String(
+              displayName || achievement.name || "",
+            )
+              .trim()
+              .replace(/\s+/g, " ")
+              .toLowerCase();
+            listItem.dataset.sortUnlocked = isUnlocked ? "1" : "0";
+            listItem.dataset.sortEarnedTime = String(
+              normalizeEarnedTime(saved?.earned_time),
+            );
+            const raritySortValue = resolveRaritySortValue(achievement, {
+              useTrophyTypeRaritySortFallback,
+            });
+            listItem.dataset.sortRarity =
+              raritySortValue === null ? "" : String(raritySortValue);
             listItem.innerHTML = `
           <img class="achievement-icon" alt="Icon">
             <div class="achievement-info">
@@ -731,13 +1133,18 @@
           <div class="achievement-status">
             ${statusHTML}
             ${earnedTimeHTML}
+            ${rarityHTML}
           </div>
         `;
             achievementsList.appendChild(listItem);
 
             const imgEl = listItem.querySelector("img.achievement-icon");
+            if (imgEl && rarityGlowTierClass) {
+              imgEl.classList.add(rarityGlowTierClass);
+            }
             resolveAchievementIcon(imgEl, achievementsDataObj.config_path, rel);
           });
+          applyOverlayAchievementViewState();
 
           currentConfigName = configName;
           currentDataHash = newHash;
@@ -810,6 +1217,10 @@
         if (currentConfigName) {
           loadAchievements(currentConfigName);
         }
+      });
+
+      window.api.on("ach-table:view-state", (payload) => {
+        applyOverlayAchievementTableViewState(payload);
       });
 
       window.api.on("overlay-preferences-updated", (payload) => {

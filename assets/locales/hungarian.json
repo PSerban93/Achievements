@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Az automatikus konfiguráció beolvassa a címadatokat, sémát/képeket generál, és elindítja az értesítések áramlását ezekből a fájlokból.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Platform útmutató",
-  "title.tab-platformGuide": "Platform és emulátor útmutató"
+  "title.tab-platformGuide": "Platform és emulátor útmutató",
+  "achievementsRefreshRarityBtnLabel": "Ritkaság frissítése",
+  "achievementsRefreshRarityBtnLoading": "Frissítés…",
+  "title.achievementsRefreshRarityBtn": "Ritkaság frissítése a kiválasztott konfigurációhoz",
+  "aria.achievementsRefreshRarityBtn": "Ritkaság frissítése",
+  "notify.rarityRefreshDone": "Ritkaság frissítve: {matched}/{fetched} egyezés.",
+  "notify.rarityRefreshFailed": "A ritkaság frissítése sikertelen.",
+  "log.rarityRefreshFailed": "A ritkaság frissítése sikertelen:"
 }
-

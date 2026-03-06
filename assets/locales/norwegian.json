@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Auto-config leser titteldata, genererer skjema/bilder og starter varslingsflyt fra disse filene.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Plattformveiledning",
-  "title.tab-platformGuide": "Plattform- og emulatorveiledning"
+  "title.tab-platformGuide": "Plattform- og emulatorveiledning",
+  "achievementsRefreshRarityBtnLabel": "Oppdater sjeldenhet",
+  "achievementsRefreshRarityBtnLoading": "Oppdaterer…",
+  "title.achievementsRefreshRarityBtn": "Oppdater sjeldenhet for valgt konfigurasjon",
+  "aria.achievementsRefreshRarityBtn": "Oppdater sjeldenhet",
+  "notify.rarityRefreshDone": "Sjeldenhet oppdatert: {matched}/{fetched} treff.",
+  "notify.rarityRefreshFailed": "Kunne ikke oppdatere sjeldenhet.",
+  "log.rarityRefreshFailed": "Kunne ikke oppdatere sjeldenhet:"
 }
-

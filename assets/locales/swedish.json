@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Auto-config läser titeldata, genererar schema/bilder och startar meddelandeflöde från dessa filer.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Plattformsguide",
-  "title.tab-platformGuide": "Plattforms- och emulatorguide"
+  "title.tab-platformGuide": "Plattforms- och emulatorguide",
+  "achievementsRefreshRarityBtnLabel": "Uppdatera sällsynthet",
+  "achievementsRefreshRarityBtnLoading": "Uppdaterar…",
+  "title.achievementsRefreshRarityBtn": "Uppdatera sällsynthet för vald konfiguration",
+  "aria.achievementsRefreshRarityBtn": "Uppdatera sällsynthet",
+  "notify.rarityRefreshDone": "Sällsynthet uppdaterad: {matched}/{fetched} träffar.",
+  "notify.rarityRefreshFailed": "Kunde inte uppdatera sällsynthet.",
+  "log.rarityRefreshFailed": "Kunde inte uppdatera sällsynthet:"
 }
-

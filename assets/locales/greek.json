@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Η αυτόματη ρύθμιση παραμέτρων διαβάζει δεδομένα τίτλου, δημιουργεί σχήματα/εικόνες και ξεκινά τη ροή ειδοποιήσεων από αυτά τα αρχεία.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Οδηγός πλατφόρμας",
-  "title.tab-platformGuide": "Οδηγός πλατφόρμας και εξομοιωτή"
+  "title.tab-platformGuide": "Οδηγός πλατφόρμας και εξομοιωτή",
+  "achievementsRefreshRarityBtnLabel": "Ανανέωση σπανιότητας",
+  "achievementsRefreshRarityBtnLoading": "Γίνεται ανανέωση…",
+  "title.achievementsRefreshRarityBtn": "Ανανέωση σπανιότητας για την επιλεγμένη διαμόρφωση",
+  "aria.achievementsRefreshRarityBtn": "Ανανέωση σπανιότητας",
+  "notify.rarityRefreshDone": "Η σπανιότητα ενημερώθηκε: {matched}/{fetched} αντιστοιχίσεις.",
+  "notify.rarityRefreshFailed": "Αποτυχία ανανέωσης σπανιότητας.",
+  "log.rarityRefreshFailed": "Αποτυχία ανανέωσης σπανιότητας:"
 }
-

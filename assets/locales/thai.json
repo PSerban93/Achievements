@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "การกำหนดค่าอัตโนมัติจะอ่านข้อมูลชื่อ สร้างสคีมา/รูปภาพ และเริ่มโฟลว์การแจ้งเตือนจากไฟล์เหล่านั้น",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "คู่มือแพลตฟอร์ม",
-  "title.tab-platformGuide": "คู่มือแพลตฟอร์มและโปรแกรมจำลอง"
+  "title.tab-platformGuide": "คู่มือแพลตฟอร์มและโปรแกรมจำลอง",
+  "achievementsRefreshRarityBtnLabel": "รีเฟรชความหายาก",
+  "achievementsRefreshRarityBtnLoading": "กำลังรีเฟรช…",
+  "title.achievementsRefreshRarityBtn": "รีเฟรชความหายากสำหรับคอนฟิกที่เลือก",
+  "aria.achievementsRefreshRarityBtn": "รีเฟรชความหายาก",
+  "notify.rarityRefreshDone": "รีเฟรชความหายากแล้ว: ตรงกัน {matched}/{fetched}",
+  "notify.rarityRefreshFailed": "รีเฟรชความหายากไม่สำเร็จ",
+  "log.rarityRefreshFailed": "รีเฟรชความหายากไม่สำเร็จ:"
 }
-

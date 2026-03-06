@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Konfigurasi otomatis membaca data judul, menghasilkan skema/gambar, dan memulai aliran notifikasi dari file tersebut.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Panduan Platform",
-  "title.tab-platformGuide": "Panduan Platform & Emulator"
+  "title.tab-platformGuide": "Panduan Platform & Emulator",
+  "achievementsRefreshRarityBtnLabel": "Perbarui kelangkaan",
+  "achievementsRefreshRarityBtnLoading": "Memperbarui…",
+  "title.achievementsRefreshRarityBtn": "Perbarui kelangkaan untuk konfigurasi yang dipilih",
+  "aria.achievementsRefreshRarityBtn": "Perbarui kelangkaan",
+  "notify.rarityRefreshDone": "Kelangkaan diperbarui: {matched}/{fetched} cocok.",
+  "notify.rarityRefreshFailed": "Gagal memperbarui kelangkaan.",
+  "log.rarityRefreshFailed": "Gagal memperbarui kelangkaan:"
 }
-

@@ -30,6 +30,15 @@ const {
   buildExophaseSlugVariants,
   fetchExophaseAchievementsMultiLang,
 } = require("./exophase-scraper");
+const {
+  RARITY_SOURCES,
+  fetchSteamGlobalAchievementPercentages,
+  fetchEpicGlobalAchievementPercentages,
+  normalizeRarityPercent,
+  buildGogGlobalAchievementPercentagesMap,
+  buildRarityEntriesForSchema,
+  writeAchievementPercentagesSidecar: writeRaritySidecar,
+} = require("./achievement-rarity");
 const DEFAULT_UPLAY_MAP_PATH = path.join(
   __dirname,
   "..",
@@ -88,6 +97,7 @@ function configureUplayMapping(userDataDir) {
   hydrateUplayMap(uplaySteamMap);
 }
 const schemaLogger = createLogger("achschema");
+const rarityLogger = createLogger("rarity");
 
 // --- bridge log/IPC (Electron main) ---
 const HAS_IPC = typeof process.send === "function";
@@ -141,6 +151,33 @@ function normalizeAchievementName(name, shouldStrip = false) {
 const info = (m, d) => emit("info", m, d);
 const warn = (m, d) => emit("warn", m, d);
 const error = (m, d) => emit("error", m, d);
+
+function emitRarity(level, message, data = {}) {
+  if (HAS_IPC) {
+    try {
+      process.send({ type: "achgen:log", level, message, ...data });
+    } catch {}
+  }
+  try {
+    const meta = Object.keys(data || {}).length ? data : undefined;
+    if (level === "error") {
+      rarityLogger.error(message, meta);
+    } else if (level === "warn") {
+      rarityLogger.warn(message, meta);
+    } else {
+      rarityLogger.info(message, meta);
+    }
+  } catch {}
+  if (!HAS_IPC) {
+    const fn =
+      level === "error"
+        ? console.error
+        : level === "warn"
+          ? console.warn
+          : console.log;
+    fn(message);
+  }
+}
 
 function reloadUplayMappingFromDisk() {
   try {
@@ -483,6 +520,14 @@ async function download(url, dest, ms = 20000) {
     const ab = await r.arrayBuffer();
     await fs.writeFile(dest, Buffer.from(ab));
     return true;
+  } catch (err) {
+    warn("asset:download-failed", {
+      url,
+      dest,
+      timeoutMs: ms,
+      error: err?.message || String(err),
+    });
+    return false;
   } finally {
     clearTimeout(t);
   }
@@ -754,7 +799,7 @@ async function processGogApp(productId, outBaseDir) {
       `${fallbackBase}_icon`,
     );
     const grayRel = await downloadImageIfNeeded(locked, `${fallbackBase}_gray`);
-    const hidden = entry?.visible ? 1 : 0;
+    const hidden = entry?.visible ? 0 : 1;
     results.push({
       hidden,
       displayName: { english: entry?.name || "" },
@@ -770,6 +815,9 @@ async function processGogApp(productId, outBaseDir) {
     JSON.stringify(results, null, 2),
     "utf8",
   );
+  if (results.length) {
+    await writeGogAchievementPercentagesSidecar(outDir, appid, results, items);
+  }
 
   if (!results.length) {
     emit("info", `⏭ [${appid}] (GOG) No Achievements found!`);
@@ -846,6 +894,9 @@ function parseEpicAchievement(entry) {
     ach.unlockedIconLink || ach.unlockedIcon || ach.unlockedIconUrl || "";
   const iconGray =
     ach.lockedIconLink || ach.lockedIcon || ach.lockedIconUrl || "";
+  const rarityPercent = normalizeRarityPercent(
+    ach?.rarity?.percent ?? entry?.rarity?.percent,
+  );
   return {
     apiName,
     displayName,
@@ -853,6 +904,7 @@ function parseEpicAchievement(entry) {
     hidden,
     icon,
     icon_gray: iconGray,
+    rarityPercent,
   };
 }
 
@@ -1293,6 +1345,143 @@ async function fetchAchievementsLang(appid, key, lang) {
 
   if (lastErr) throw lastErr;
   return new Map();
+}
+
+async function writeAchievementPercentagesSidecar(
+  outDir,
+  appid,
+  finalAchievements,
+  strip,
+) {
+  const source = RARITY_SOURCES.steamGlobal;
+  try {
+    emitRarity("info", "rarity:steam:request", { appid, source });
+    const rawMap = await fetchSteamGlobalAchievementPercentages(appid, {
+      timeoutMs: STEAM_API_TIMEOUT_MS,
+    });
+    if (!rawMap.size) {
+      emitRarity("warn", "rarity:steam:empty", { appid, source });
+    } else {
+      emitRarity("info", "rarity:steam:success", {
+        appid,
+        source,
+        fetchedCount: rawMap.size,
+      });
+    }
+    const entries = buildRarityEntriesForSchema(rawMap, finalAchievements, {
+      normalizeName: (name) => normalizeAchievementName(name, strip),
+    });
+    const filePath = writeRaritySidecar(outDir, appid, entries, {
+      source,
+    });
+    emitRarity("info", "rarity:steam:written", {
+      appid,
+      source,
+      sidecarPath: filePath,
+      fetchedCount: rawMap.size,
+      matchedCount: entries.length,
+    });
+  } catch (err) {
+    emitRarity("warn", "rarity:steam:failed", {
+      appid,
+      source,
+      error: err?.message || String(err),
+    });
+  }
+}
+
+async function writeEpicAchievementPercentagesSidecar(
+  outDir,
+  appid,
+  finalAchievements,
+  rawMap = null,
+) {
+  const source = RARITY_SOURCES.epicPublic;
+  try {
+    emitRarity("info", "rarity:epic:request", { appid, source });
+    let rarityMap = rawMap instanceof Map ? rawMap : null;
+    if (!rarityMap) {
+      rarityMap = await fetchEpicGlobalAchievementPercentages(appid, {
+        locale: "en",
+        timeoutMs: STEAM_API_TIMEOUT_MS,
+      });
+    }
+    if (!rarityMap.size) {
+      emitRarity("warn", "rarity:epic:empty", { appid, source });
+    } else {
+      emitRarity("info", "rarity:epic:success", {
+        appid,
+        source,
+        fetchedCount: rarityMap.size,
+      });
+    }
+    const entries = buildRarityEntriesForSchema(rarityMap, finalAchievements, {
+      normalizeName: (name) =>
+        typeof name === "string" || typeof name === "number"
+          ? String(name).trim()
+          : "",
+    });
+    const filePath = writeRaritySidecar(outDir, appid, entries, {
+      source,
+    });
+    emitRarity("info", "rarity:epic:written", {
+      appid,
+      source,
+      sidecarPath: filePath,
+      fetchedCount: rarityMap.size,
+      matchedCount: entries.length,
+    });
+  } catch (err) {
+    emitRarity("warn", "rarity:epic:failed", {
+      appid,
+      source,
+      error: err?.message || String(err),
+    });
+  }
+}
+
+async function writeGogAchievementPercentagesSidecar(
+  outDir,
+  appid,
+  finalAchievements,
+  rawItems = null,
+) {
+  const source = RARITY_SOURCES.gogGameplay;
+  try {
+    emitRarity("info", "rarity:gog:request", { appid, source });
+    const rarityMap = buildGogGlobalAchievementPercentagesMap(rawItems);
+    if (!rarityMap.size) {
+      emitRarity("warn", "rarity:gog:empty", { appid, source });
+    } else {
+      emitRarity("info", "rarity:gog:success", {
+        appid,
+        source,
+        fetchedCount: rarityMap.size,
+      });
+    }
+    const entries = buildRarityEntriesForSchema(rarityMap, finalAchievements, {
+      normalizeName: (name) =>
+        typeof name === "string" || typeof name === "number"
+          ? String(name).trim()
+          : "",
+    });
+    const filePath = writeRaritySidecar(outDir, appid, entries, {
+      source,
+    });
+    emitRarity("info", "rarity:gog:written", {
+      appid,
+      source,
+      sidecarPath: filePath,
+      fetchedCount: rarityMap.size,
+      matchedCount: entries.length,
+    });
+  } catch (err) {
+    emitRarity("warn", "rarity:gog:failed", {
+      appid,
+      source,
+      error: err?.message || String(err),
+    });
+  }
 }
 
 /* ---------- Scraping SteamDB ---------- */
@@ -1986,6 +2175,7 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
   await fs.mkdir(imgDir, { recursive: true });
 
   const achievements = [];
+  const epicRarityByApi = new Map();
   let steamSession = null;
   const ensureSteamSession = async () => {
     if (!steamSession) {
@@ -2051,6 +2241,7 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
         const displayName = {};
         const description = {};
         let hidden = enEntry.hidden ? 1 : 0;
+        let rarityPercent = normalizeRarityPercent(enEntry?.rarityPercent);
 
         displayName.english = enEntry.displayName || "";
         description.english = enEntry.description || "";
@@ -2061,6 +2252,9 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
           if (entry?.displayName) displayName[lang] = entry.displayName;
           if (entry?.description) description[lang] = entry.description;
           if (entry?.hidden) hidden = 1;
+          if (rarityPercent === null) {
+            rarityPercent = normalizeRarityPercent(entry?.rarityPercent);
+          }
         }
 
         let iconUrl = enEntry.icon || "";
@@ -2106,6 +2300,9 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
           icon_gray: iconGrayRel,
           name: apiName,
         });
+        if (rarityPercent !== null) {
+          epicRarityByApi.set(String(apiName), rarityPercent);
+        }
       }
     } else if (apiKey) {
       // ===== API-ONLY =====
@@ -2265,6 +2462,23 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
   );
 
   const count = finalAchievements.length;
+
+  if (
+    count > 0 &&
+    !wantsGog &&
+    !wantsEpic &&
+    /^\d+$/.test(String(appid || ""))
+  ) {
+    await writeAchievementPercentagesSidecar(outDir, appid, finalAchievements, strip);
+  }
+  if (count > 0 && wantsEpic) {
+    await writeEpicAchievementPercentagesSidecar(
+      outDir,
+      appid,
+      finalAchievements,
+      epicRarityByApi,
+    );
+  }
 
   if (count === 0) {
     emit(

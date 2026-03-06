@@ -101,6 +101,24 @@ const SCHEMA_LANGUAGE_VALUES = [
   "ukrainian",
   "vietnamese",
 ];
+const ACHGEN_UI_SUPPRESSED_MESSAGES = new Set([
+  "rarity:steam:request",
+  "rarity:steam:success",
+  "rarity:steam:written",
+  "rarity:epic:request",
+  "rarity:epic:success",
+  "rarity:epic:written",
+  "rarity:gog:request",
+  "rarity:gog:success",
+  "rarity:gog:written",
+]);
+function shouldSuppressAchgenMessageInUi(message) {
+  const msg = String(message || "")
+    .trim()
+    .replace(/^[\u2705\u2139\u23ed\u23e9\u26a0]\s*/i, "");
+  if (!msg) return true;
+  return ACHGEN_UI_SUPPRESSED_MESSAGES.has(msg);
+}
 const gogNameFallbackAppIds = new Set();
 function reloadUplayMappingFromDisk() {
   try {
@@ -811,7 +829,8 @@ function runAchievementsGenerator(
     // IPC messages
     cp.on("message", (msg) => {
       if (msg && msg.type === "achgen:log") {
-        if (global.mainWindow) {
+        const suppressUi = shouldSuppressAchgenMessageInUi(msg.message);
+        if (global.mainWindow && !suppressUi) {
           global.mainWindow.webContents.send("achgen:log", msg);
         }
         const level =

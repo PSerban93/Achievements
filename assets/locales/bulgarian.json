@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Автоматичното конфигуриране чете данни за заглавие, генерира схема/изображения и стартира поток от известия от тези файлове.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Ръководство за платформата",
-  "title.tab-platformGuide": "Ръководство за платформа и емулатор"
+  "title.tab-platformGuide": "Ръководство за платформа и емулатор",
+  "achievementsRefreshRarityBtnLabel": "Обнови рядкостта",
+  "achievementsRefreshRarityBtnLoading": "Обновяване…",
+  "title.achievementsRefreshRarityBtn": "Обнови рядкостта за избраната конфигурация",
+  "aria.achievementsRefreshRarityBtn": "Обнови рядкостта",
+  "notify.rarityRefreshDone": "Рядкостта е обновена: {matched}/{fetched} съвпадения.",
+  "notify.rarityRefreshFailed": "Обновяването на рядкостта е неуспешно.",
+  "log.rarityRefreshFailed": "Обновяването на рядкостта е неуспешно:"
 }
-

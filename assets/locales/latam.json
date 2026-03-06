@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "La configuración automática lee los datos del título, genera esquemas/imágenes e inicia el flujo de notificaciones desde esos archivos.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Guía de plataforma",
-  "title.tab-platformGuide": "Guía de plataforma y emulador"
+  "title.tab-platformGuide": "Guía de plataforma y emulador",
+  "achievementsRefreshRarityBtnLabel": "Actualizar rareza",
+  "achievementsRefreshRarityBtnLoading": "Actualizando…",
+  "title.achievementsRefreshRarityBtn": "Actualizar rareza de la configuración seleccionada",
+  "aria.achievementsRefreshRarityBtn": "Actualizar rareza",
+  "notify.rarityRefreshDone": "Rareza actualizada: {matched}/{fetched} coincidencias.",
+  "notify.rarityRefreshFailed": "Error al actualizar la rareza.",
+  "log.rarityRefreshFailed": "Error al actualizar la rareza:"
 }
-

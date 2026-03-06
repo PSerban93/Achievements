@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "A configuração automática lê os dados do título, gera esquemas/imagens e inicia o fluxo de notificação desses arquivos.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Guia da plataforma",
-  "title.tab-platformGuide": "Guia de plataforma e emulador"
+  "title.tab-platformGuide": "Guia de plataforma e emulador",
+  "achievementsRefreshRarityBtnLabel": "Atualizar raridade",
+  "achievementsRefreshRarityBtnLoading": "A atualizar…",
+  "title.achievementsRefreshRarityBtn": "Atualizar raridade para a configuração selecionada",
+  "aria.achievementsRefreshRarityBtn": "Atualizar raridade",
+  "notify.rarityRefreshDone": "Raridade atualizada: {matched}/{fetched} correspondências.",
+  "notify.rarityRefreshFailed": "Falha ao atualizar a raridade.",
+  "log.rarityRefreshFailed": "Falha ao atualizar a raridade:"
 }
-

@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "自動構成は、タイトル データを読み取り、スキーマ/イメージを生成し、それらのファイルから通知フローを開始します。",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "プラットフォームガイド",
-  "title.tab-platformGuide": "プラットフォームとエミュレータのガイド"
+  "title.tab-platformGuide": "プラットフォームとエミュレータのガイド",
+  "achievementsRefreshRarityBtnLabel": "レア度を更新",
+  "achievementsRefreshRarityBtnLoading": "更新中…",
+  "title.achievementsRefreshRarityBtn": "選択した設定のレア度を更新",
+  "aria.achievementsRefreshRarityBtn": "レア度を更新",
+  "notify.rarityRefreshDone": "レア度を更新しました: {matched}/{fetched} 件一致。",
+  "notify.rarityRefreshFailed": "レア度の更新に失敗しました。",
+  "log.rarityRefreshFailed": "レア度の更新に失敗しました:"
 }
-

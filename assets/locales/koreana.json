@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "자동 구성은 제목 데이터를 읽고, 스키마/이미지를 생성하고, 해당 파일에서 알림 흐름을 시작합니다.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "플랫폼 가이드",
-  "title.tab-platformGuide": "플랫폼 및 에뮬레이터 가이드"
+  "title.tab-platformGuide": "플랫폼 및 에뮬레이터 가이드",
+  "achievementsRefreshRarityBtnLabel": "희귀도 새로고침",
+  "achievementsRefreshRarityBtnLoading": "새로고침 중…",
+  "title.achievementsRefreshRarityBtn": "선택한 구성의 희귀도 새로고침",
+  "aria.achievementsRefreshRarityBtn": "희귀도 새로고침",
+  "notify.rarityRefreshDone": "희귀도 업데이트 완료: {matched}/{fetched}개 일치.",
+  "notify.rarityRefreshFailed": "희귀도 업데이트에 실패했습니다.",
+  "log.rarityRefreshFailed": "희귀도 업데이트에 실패했습니다:"
 }
-

@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Otomatik yapılandırma, başlık verilerini okur, şema/görüntüler oluşturur ve bu dosyalardan bildirim akışını başlatır.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Platform Rehberi",
-  "title.tab-platformGuide": "Platform ve Emülatör Kılavuzu"
+  "title.tab-platformGuide": "Platform ve Emülatör Kılavuzu",
+  "achievementsRefreshRarityBtnLabel": "Nadirliği yenile",
+  "achievementsRefreshRarityBtnLoading": "Yenileniyor…",
+  "title.achievementsRefreshRarityBtn": "Seçili yapılandırma için nadirliği yenile",
+  "aria.achievementsRefreshRarityBtn": "Nadirliği yenile",
+  "notify.rarityRefreshDone": "Nadirlik yenilendi: {matched}/{fetched} eşleşme.",
+  "notify.rarityRefreshFailed": "Nadirlik yenilenemedi.",
+  "log.rarityRefreshFailed": "Nadirlik yenilenemedi:"
 }
-

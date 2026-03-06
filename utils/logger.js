@@ -25,6 +25,11 @@ const LEVELS = {
   warn: 2,
   error: 3,
 };
+const RARITY_LOG_DEDUP_WINDOW_MS = parsePositiveInt(
+  process.env.RARITY_LOG_DEDUP_WINDOW_MS,
+  15000
+);
+const logDedupState = new Map();
 
 function parsePositiveInt(value, fallback) {
   const num = Number(value);
@@ -348,6 +353,30 @@ function rotateIfNeeded(entry, bytes) {
   entry.size = entry.stream ? getFileSize(entry.filePath) : 0;
 }
 
+function shouldSkipDuplicateLog(loggerName, level, text, metaText, nowMs) {
+  if (loggerName !== "rarity" || RARITY_LOG_DEDUP_WINDOW_MS <= 0) return false;
+  const dedupKey = `${level}|${text}|${metaText || ""}`;
+  let state = logDedupState.get(loggerName);
+  if (!state) {
+    state = new Map();
+    logDedupState.set(loggerName, state);
+  }
+  const lastSeen = state.get(dedupKey);
+  if (
+    typeof lastSeen === "number" &&
+    nowMs - lastSeen < RARITY_LOG_DEDUP_WINDOW_MS
+  ) {
+    return true;
+  }
+  state.set(dedupKey, nowMs);
+  if (state.size > 500) {
+    for (const [key, ts] of state) {
+      if (nowMs - ts > RARITY_LOG_DEDUP_WINDOW_MS) state.delete(key);
+    }
+  }
+  return false;
+}
+
 function write(loggerName, level, message, meta, config, clock = new Date()) {
   const localTimestamp = new Intl.DateTimeFormat("default", {
     year: "numeric",
@@ -364,6 +393,17 @@ function write(loggerName, level, message, meta, config, clock = new Date()) {
   const enrichedMeta = enrichMeta(message, meta);
   const metaText =
     enrichedMeta !== undefined ? ` ${serializeMeta(enrichedMeta)}` : "";
+  if (
+    shouldSkipDuplicateLog(
+      loggerName,
+      level,
+      text,
+      metaText,
+      clock instanceof Date ? clock.getTime() : Date.now()
+    )
+  ) {
+    return;
+  }
   const line = `[${localTimestamp}] [${level.toUpperCase()}] ${text}${metaText}\n`;
 
   const entry = ensureStream(loggerName, config);

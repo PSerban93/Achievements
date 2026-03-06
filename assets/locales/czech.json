@@ -544,6 +544,12 @@
   "platformGuideXeniaItem2": "Automatická konfigurace čte data názvu, generuje schéma/obrazy a zahajuje tok upozornění z těchto souborů.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Průvodce platformou",
-  "title.tab-platformGuide": "Průvodce platformou a emulátorem"
+  "title.tab-platformGuide": "Průvodce platformou a emulátorem",
+  "achievementsRefreshRarityBtnLabel": "Aktualizovat vzácnost",
+  "achievementsRefreshRarityBtnLoading": "Aktualizace…",
+  "title.achievementsRefreshRarityBtn": "Aktualizovat vzácnost pro vybranou konfiguraci",
+  "aria.achievementsRefreshRarityBtn": "Aktualizovat vzácnost",
+  "notify.rarityRefreshDone": "Vzácnost aktualizována: {matched}/{fetched} shod.",
+  "notify.rarityRefreshFailed": "Aktualizace vzácnosti selhala.",
+  "log.rarityRefreshFailed": "Aktualizace vzácnosti selhala:"
 }
-
