@@ -1115,9 +1115,11 @@
               .replace(/\s+/g, " ")
               .toLowerCase();
             listItem.dataset.sortUnlocked = isUnlocked ? "1" : "0";
-            listItem.dataset.sortEarnedTime = String(
-              normalizeEarnedTime(saved?.earned_time),
-            );
+            const earnedTimeValue = Number(saved?.earned_time);
+            listItem.dataset.sortEarnedTime =
+              Number.isFinite(earnedTimeValue) && earnedTimeValue > 0
+                ? String(earnedTimeValue)
+                : "";
             const raritySortValue = resolveRaritySortValue(achievement, {
               useTrophyTypeRaritySortFallback,
             });
