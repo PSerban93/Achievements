@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Päivitä harvinaisuus",
   "notify.rarityRefreshDone": "Harvinaisuus päivitetty: {matched}/{fetched} osumaa.",
   "notify.rarityRefreshFailed": "Harvinaisuuden päivitys epäonnistui.",
-  "log.rarityRefreshFailed": "Harvinaisuuden päivitys epäonnistui:"
+  "log.rarityRefreshFailed": "Harvinaisuuden päivitys epäonnistui:",
+  "settings-schemaLanguagesTitle": "Saavutuskaavion kielet",
+  "settings-schemaLanguagesSelectAllBtn": "Valitse kaikki",
+  "settings-schemaLanguagesDeselectAllBtn": "Poista kaikkien valinta"
 }

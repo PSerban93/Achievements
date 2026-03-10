@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "희귀도 새로고침",
   "notify.rarityRefreshDone": "희귀도 업데이트 완료: {matched}/{fetched}개 일치.",
   "notify.rarityRefreshFailed": "희귀도 업데이트에 실패했습니다.",
-  "log.rarityRefreshFailed": "희귀도 업데이트에 실패했습니다:"
+  "log.rarityRefreshFailed": "희귀도 업데이트에 실패했습니다:",
+  "settings-schemaLanguagesTitle": "도전과제 스키마 언어",
+  "settings-schemaLanguagesSelectAllBtn": "모두 선택",
+  "settings-schemaLanguagesDeselectAllBtn": "모두 선택 해제"
 }

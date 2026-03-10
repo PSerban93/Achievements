@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "รีเฟรชความหายาก",
   "notify.rarityRefreshDone": "รีเฟรชความหายากแล้ว: ตรงกัน {matched}/{fetched}",
   "notify.rarityRefreshFailed": "รีเฟรชความหายากไม่สำเร็จ",
-  "log.rarityRefreshFailed": "รีเฟรชความหายากไม่สำเร็จ:"
+  "log.rarityRefreshFailed": "รีเฟรชความหายากไม่สำเร็จ:",
+  "settings-schemaLanguagesTitle": "ภาษาของสคีมาความสำเร็จ",
+  "settings-schemaLanguagesSelectAllBtn": "เลือกทั้งหมด",
+  "settings-schemaLanguagesDeselectAllBtn": "ยกเลิกการเลือกทั้งหมด"
 }

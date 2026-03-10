@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "刷新稀有度",
   "notify.rarityRefreshDone": "稀有度已刷新：匹配 {matched}/{fetched}。",
   "notify.rarityRefreshFailed": "刷新稀有度失败。",
-  "log.rarityRefreshFailed": "刷新稀有度失败："
+  "log.rarityRefreshFailed": "刷新稀有度失败：",
+  "settings-schemaLanguagesTitle": "成就架构语言",
+  "settings-schemaLanguagesSelectAllBtn": "全选",
+  "settings-schemaLanguagesDeselectAllBtn": "取消全选"
 }

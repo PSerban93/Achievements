@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "تحديث الندرة",
   "notify.rarityRefreshDone": "تم تحديث الندرة: {matched}/{fetched} متطابقة.",
   "notify.rarityRefreshFailed": "فشل تحديث الندرة.",
-  "log.rarityRefreshFailed": "فشل تحديث الندرة:"
+  "log.rarityRefreshFailed": "فشل تحديث الندرة:",
+  "settings-schemaLanguagesTitle": "لغات مخطط الإنجازات",
+  "settings-schemaLanguagesSelectAllBtn": "تحديد الكل",
+  "settings-schemaLanguagesDeselectAllBtn": "إلغاء تحديد الكل"
 }

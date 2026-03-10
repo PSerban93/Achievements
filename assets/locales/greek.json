@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Ανανέωση σπανιότητας",
   "notify.rarityRefreshDone": "Η σπανιότητα ενημερώθηκε: {matched}/{fetched} αντιστοιχίσεις.",
   "notify.rarityRefreshFailed": "Αποτυχία ανανέωσης σπανιότητας.",
-  "log.rarityRefreshFailed": "Αποτυχία ανανέωσης σπανιότητας:"
+  "log.rarityRefreshFailed": "Αποτυχία ανανέωσης σπανιότητας:",
+  "settings-schemaLanguagesTitle": "Γλώσσες σχήματος επιτευγμάτων",
+  "settings-schemaLanguagesSelectAllBtn": "Επιλογή όλων",
+  "settings-schemaLanguagesDeselectAllBtn": "Αποεπιλογή όλων"
 }

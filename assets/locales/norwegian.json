@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Oppdater sjeldenhet",
   "notify.rarityRefreshDone": "Sjeldenhet oppdatert: {matched}/{fetched} treff.",
   "notify.rarityRefreshFailed": "Kunne ikke oppdatere sjeldenhet.",
-  "log.rarityRefreshFailed": "Kunne ikke oppdatere sjeldenhet:"
+  "log.rarityRefreshFailed": "Kunne ikke oppdatere sjeldenhet:",
+  "settings-schemaLanguagesTitle": "Språk for prestasjonsskjema",
+  "settings-schemaLanguagesSelectAllBtn": "Velg alle",
+  "settings-schemaLanguagesDeselectAllBtn": "Fjern valg for alle"
 }

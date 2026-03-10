@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Atualizar raridade",
   "notify.rarityRefreshDone": "Raridade atualizada: {matched}/{fetched} correspondidas.",
   "notify.rarityRefreshFailed": "Falha ao atualizar a raridade.",
-  "log.rarityRefreshFailed": "Falha ao atualizar a raridade:"
+  "log.rarityRefreshFailed": "Falha ao atualizar a raridade:",
+  "settings-schemaLanguagesTitle": "Idiomas do esquema de conquistas",
+  "settings-schemaLanguagesSelectAllBtn": "Selecionar tudo",
+  "settings-schemaLanguagesDeselectAllBtn": "Desmarcar tudo"
 }

@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Ritkaság frissítése",
   "notify.rarityRefreshDone": "Ritkaság frissítve: {matched}/{fetched} egyezés.",
   "notify.rarityRefreshFailed": "A ritkaság frissítése sikertelen.",
-  "log.rarityRefreshFailed": "A ritkaság frissítése sikertelen:"
+  "log.rarityRefreshFailed": "A ritkaság frissítése sikertelen:",
+  "settings-schemaLanguagesTitle": "Achievement-séma nyelvei",
+  "settings-schemaLanguagesSelectAllBtn": "Összes kijelölése",
+  "settings-schemaLanguagesDeselectAllBtn": "Összes kijelölésének megszüntetése"
 }

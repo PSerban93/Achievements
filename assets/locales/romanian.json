@@ -551,5 +551,8 @@
   "platformGuideXeniaItem2": "Auto-config citește datele de titlu, generează schema/imagini și pornește fluxul de notificări din acele fișiere.",
   "platformGuideXeniaSummary": "Xenia",
   "tab-platformGuide": "Ghidul platformei",
-  "title.tab-platformGuide": "Ghid de platformă și emulator"
+  "title.tab-platformGuide": "Ghid de platformă și emulator",
+  "settings-schemaLanguagesTitle": "Limbi pentru schema realizărilor",
+  "settings-schemaLanguagesSelectAllBtn": "Selectează tot",
+  "settings-schemaLanguagesDeselectAllBtn": "Deselectează tot"
 }

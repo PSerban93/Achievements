@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "重新整理稀有度",
   "notify.rarityRefreshDone": "稀有度已更新：符合 {matched}/{fetched}。",
   "notify.rarityRefreshFailed": "重新整理稀有度失敗。",
-  "log.rarityRefreshFailed": "重新整理稀有度失敗："
+  "log.rarityRefreshFailed": "重新整理稀有度失敗：",
+  "settings-schemaLanguagesTitle": "成就結構語言",
+  "settings-schemaLanguagesSelectAllBtn": "全選",
+  "settings-schemaLanguagesDeselectAllBtn": "取消全選"
 }

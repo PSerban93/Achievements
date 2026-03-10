@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Actualiser la rareté",
   "notify.rarityRefreshDone": "Rareté actualisée : {matched}/{fetched} correspondances.",
   "notify.rarityRefreshFailed": "Échec de l’actualisation de la rareté.",
-  "log.rarityRefreshFailed": "Échec de l’actualisation de la rareté :"
+  "log.rarityRefreshFailed": "Échec de l’actualisation de la rareté :",
+  "settings-schemaLanguagesTitle": "Langues du schéma des succès",
+  "settings-schemaLanguagesSelectAllBtn": "Tout sélectionner",
+  "settings-schemaLanguagesDeselectAllBtn": "Tout désélectionner"
 }

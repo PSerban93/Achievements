@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Aktualizovat vzácnost",
   "notify.rarityRefreshDone": "Vzácnost aktualizována: {matched}/{fetched} shod.",
   "notify.rarityRefreshFailed": "Aktualizace vzácnosti selhala.",
-  "log.rarityRefreshFailed": "Aktualizace vzácnosti selhala:"
+  "log.rarityRefreshFailed": "Aktualizace vzácnosti selhala:",
+  "settings-schemaLanguagesTitle": "Jazyky schématu achievementů",
+  "settings-schemaLanguagesSelectAllBtn": "Vybrat vše",
+  "settings-schemaLanguagesDeselectAllBtn": "Zrušit výběr všeho"
 }

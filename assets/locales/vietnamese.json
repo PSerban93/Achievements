@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Làm mới độ hiếm",
   "notify.rarityRefreshDone": "Đã làm mới độ hiếm: khớp {matched}/{fetched}.",
   "notify.rarityRefreshFailed": "Làm mới độ hiếm thất bại.",
-  "log.rarityRefreshFailed": "Làm mới độ hiếm thất bại:"
+  "log.rarityRefreshFailed": "Làm mới độ hiếm thất bại:",
+  "settings-schemaLanguagesTitle": "Ngôn ngữ sơ đồ thành tựu",
+  "settings-schemaLanguagesSelectAllBtn": "Chọn tất cả",
+  "settings-schemaLanguagesDeselectAllBtn": "Bỏ chọn tất cả"
 }

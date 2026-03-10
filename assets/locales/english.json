@@ -552,5 +552,8 @@
   "notify.bootOnboardingResumeSuccess": "Startup resumed. Auto-config was skipped and discovered folders were muted.",
   "notify.bootOnboardingResumeFailed": "Failed to resume startup: {error}",
   "boot.onboarding.apiUnavailable": "Boot onboarding API unavailable.",
-  "boot.onboarding.listAriaLabel": "Auto-config folder selection"
+  "boot.onboarding.listAriaLabel": "Auto-config folder selection",
+  "settings-schemaLanguagesTitle": "Achievements Schema Languages",
+  "settings-schemaLanguagesSelectAllBtn": "Select All",
+  "settings-schemaLanguagesDeselectAllBtn": "Deselect All"
 }

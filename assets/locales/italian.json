@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Aggiorna rarità",
   "notify.rarityRefreshDone": "Rarità aggiornata: {matched}/{fetched} corrispondenze.",
   "notify.rarityRefreshFailed": "Aggiornamento della rarità non riuscito.",
-  "log.rarityRefreshFailed": "Aggiornamento della rarità non riuscito:"
+  "log.rarityRefreshFailed": "Aggiornamento della rarità non riuscito:",
+  "settings-schemaLanguagesTitle": "Lingue dello schema degli obiettivi",
+  "settings-schemaLanguagesSelectAllBtn": "Seleziona tutto",
+  "settings-schemaLanguagesDeselectAllBtn": "Deseleziona tutto"
 }

@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Seltenheit aktualisieren",
   "notify.rarityRefreshDone": "Seltenheit aktualisiert: {matched}/{fetched} Treffer.",
   "notify.rarityRefreshFailed": "Seltenheit konnte nicht aktualisiert werden.",
-  "log.rarityRefreshFailed": "Seltenheit konnte nicht aktualisiert werden:"
+  "log.rarityRefreshFailed": "Seltenheit konnte nicht aktualisiert werden:",
+  "settings-schemaLanguagesTitle": "Sprachen des Erfolgsschemas",
+  "settings-schemaLanguagesSelectAllBtn": "Alle auswählen",
+  "settings-schemaLanguagesDeselectAllBtn": "Auswahl aufheben"
 }

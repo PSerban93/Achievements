@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Opdater sjældenhed",
   "notify.rarityRefreshDone": "Sjældenhed opdateret: {matched}/{fetched} matchede.",
   "notify.rarityRefreshFailed": "Kunne ikke opdatere sjældenhed.",
-  "log.rarityRefreshFailed": "Kunne ikke opdatere sjældenhed:"
+  "log.rarityRefreshFailed": "Kunne ikke opdatere sjældenhed:",
+  "settings-schemaLanguagesTitle": "Sprog for achievements-skema",
+  "settings-schemaLanguagesSelectAllBtn": "Vælg alle",
+  "settings-schemaLanguagesDeselectAllBtn": "Fravælg alle"
 }

@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Uppdatera sällsynthet",
   "notify.rarityRefreshDone": "Sällsynthet uppdaterad: {matched}/{fetched} träffar.",
   "notify.rarityRefreshFailed": "Kunde inte uppdatera sällsynthet.",
-  "log.rarityRefreshFailed": "Kunde inte uppdatera sällsynthet:"
+  "log.rarityRefreshFailed": "Kunde inte uppdatera sällsynthet:",
+  "settings-schemaLanguagesTitle": "Språk för achievements-schema",
+  "settings-schemaLanguagesSelectAllBtn": "Markera alla",
+  "settings-schemaLanguagesDeselectAllBtn": "Avmarkera alla"
 }

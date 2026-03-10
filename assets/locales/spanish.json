@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Actualizar rareza",
   "notify.rarityRefreshDone": "Rareza actualizada: {matched}/{fetched} coincidencias.",
   "notify.rarityRefreshFailed": "Error al actualizar la rareza.",
-  "log.rarityRefreshFailed": "Error al actualizar la rareza:"
+  "log.rarityRefreshFailed": "Error al actualizar la rareza:",
+  "settings-schemaLanguagesTitle": "Idiomas del esquema de logros",
+  "settings-schemaLanguagesSelectAllBtn": "Seleccionar todo",
+  "settings-schemaLanguagesDeselectAllBtn": "Deseleccionar todo"
 }

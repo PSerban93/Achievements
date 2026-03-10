@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "レア度を更新",
   "notify.rarityRefreshDone": "レア度を更新しました: {matched}/{fetched} 件一致。",
   "notify.rarityRefreshFailed": "レア度の更新に失敗しました。",
-  "log.rarityRefreshFailed": "レア度の更新に失敗しました:"
+  "log.rarityRefreshFailed": "レア度の更新に失敗しました:",
+  "settings-schemaLanguagesTitle": "実績スキーマの言語",
+  "settings-schemaLanguagesSelectAllBtn": "すべて選択",
+  "settings-schemaLanguagesDeselectAllBtn": "すべて選択解除"
 }

@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Nadirliği yenile",
   "notify.rarityRefreshDone": "Nadirlik yenilendi: {matched}/{fetched} eşleşme.",
   "notify.rarityRefreshFailed": "Nadirlik yenilenemedi.",
-  "log.rarityRefreshFailed": "Nadirlik yenilenemedi:"
+  "log.rarityRefreshFailed": "Nadirlik yenilenemedi:",
+  "settings-schemaLanguagesTitle": "Başarım şeması dilleri",
+  "settings-schemaLanguagesSelectAllBtn": "Tümünü seç",
+  "settings-schemaLanguagesDeselectAllBtn": "Tüm seçimleri kaldır"
 }

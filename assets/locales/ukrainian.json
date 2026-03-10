@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Оновити рідкість",
   "notify.rarityRefreshDone": "Рідкість оновлено: {matched}/{fetched} збігів.",
   "notify.rarityRefreshFailed": "Не вдалося оновити рідкість.",
-  "log.rarityRefreshFailed": "Не вдалося оновити рідкість:"
+  "log.rarityRefreshFailed": "Не вдалося оновити рідкість:",
+  "settings-schemaLanguagesTitle": "Мови схеми досягнень",
+  "settings-schemaLanguagesSelectAllBtn": "Вибрати все",
+  "settings-schemaLanguagesDeselectAllBtn": "Зняти вибір з усього"
 }

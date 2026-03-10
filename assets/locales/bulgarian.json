@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Обнови рядкостта",
   "notify.rarityRefreshDone": "Рядкостта е обновена: {matched}/{fetched} съвпадения.",
   "notify.rarityRefreshFailed": "Обновяването на рядкостта е неуспешно.",
-  "log.rarityRefreshFailed": "Обновяването на рядкостта е неуспешно:"
+  "log.rarityRefreshFailed": "Обновяването на рядкостта е неуспешно:",
+  "settings-schemaLanguagesTitle": "Езици на схемата за постижения",
+  "settings-schemaLanguagesSelectAllBtn": "Избери всички",
+  "settings-schemaLanguagesDeselectAllBtn": "Премахни избора на всички"
 }

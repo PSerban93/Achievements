@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Perbarui kelangkaan",
   "notify.rarityRefreshDone": "Kelangkaan diperbarui: {matched}/{fetched} cocok.",
   "notify.rarityRefreshFailed": "Gagal memperbarui kelangkaan.",
-  "log.rarityRefreshFailed": "Gagal memperbarui kelangkaan:"
+  "log.rarityRefreshFailed": "Gagal memperbarui kelangkaan:",
+  "settings-schemaLanguagesTitle": "Bahasa skema achievement",
+  "settings-schemaLanguagesSelectAllBtn": "Pilih semua",
+  "settings-schemaLanguagesDeselectAllBtn": "Batalkan semua"
 }

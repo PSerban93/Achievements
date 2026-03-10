@@ -551,5 +551,8 @@
   "aria.achievementsRefreshRarityBtn": "Zeldzaamheid vernieuwen",
   "notify.rarityRefreshDone": "Zeldzaamheid vernieuwd: {matched}/{fetched} overeenkomend.",
   "notify.rarityRefreshFailed": "Vernieuwen van zeldzaamheid mislukt.",
-  "log.rarityRefreshFailed": "Vernieuwen van zeldzaamheid mislukt:"
+  "log.rarityRefreshFailed": "Vernieuwen van zeldzaamheid mislukt:",
+  "settings-schemaLanguagesTitle": "Talen voor achievements-schema",
+  "settings-schemaLanguagesSelectAllBtn": "Alles selecteren",
+  "settings-schemaLanguagesDeselectAllBtn": "Alles deselecteren"
 }
