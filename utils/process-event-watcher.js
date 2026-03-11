@@ -3,6 +3,8 @@ const { spawn } = require("child_process");
 
 const DEFAULT_RESTART_DELAY_MS = 1500;
 const DEFAULT_HOST_TAG = "ACH_EVENTS_HOST_V1";
+const WARN_DEDUP_WINDOW_MS = 5000;
+const MAX_WARN_CACHE_SIZE = 128;
 
 const CHANNEL_PROCESS = "process";
 const CHANNEL_LUMAPLAY = "lumaplay";
@@ -13,6 +15,7 @@ const hubState = {
   launching: false,
   restartTimer: null,
   ready: false,
+  warnCache: new Map(),
 };
 
 function resolvePowerShellPath() {
@@ -96,24 +99,36 @@ function buildUnifiedEventWatchScript(options = {}) {
     "    $event = Wait-Event -Timeout 3600",
     "    if (-not $event) { continue }",
     "    try {",
-      "      $src = [string]$event.SourceIdentifier",
-      "      $evt = $event.SourceEventArgs.NewEvent",
-      "      if ($procEnabled -and $src -eq $procStartSource) {",
-      "        $pid = [int]$evt.ProcessID",
-      "        $name = [string]$evt.ProcessName",
-      "        $cmd = ''",
-      "        $ppid = 0",
-      "        try {",
-    "          $proc = Get-CimInstance Win32_Process -Filter \"ProcessId=$pid\" -ErrorAction Stop",
-    "          if ($proc -and $proc.CommandLine) { $cmd = [string]$proc.CommandLine }",
-    "          if ($proc -and $proc.ParentProcessId) { $ppid = [int]$proc.ParentProcessId }",
-    "        } catch {}",
-    "        Emit @{ kind='process'; type='start'; pid=$pid; name=$name; cmd=$cmd; ppid=$ppid; tag=$hostTag }",
-      "      } elseif ($procEnabled -and $src -eq $procStopSource) {",
-      "        Emit @{ kind='process'; type='stop'; pid=[int]$evt.ProcessID; name=[string]$evt.ProcessName; tag=$hostTag }",
-      "      } elseif ($lumaEnabled -and $src -eq $lumaSource) {",
-      "        Emit @{ kind='lumaplay'; type='change'; tag=$hostTag }",
-      "      }",
+    "      $src = [string]$event.SourceIdentifier",
+    "      $evt = $event.SourceEventArgs.NewEvent",
+    "      if ($procEnabled -and $src -eq $procStartSource) {",
+    "        try {",
+    "          $procId = [int]$evt.ProcessID",
+    "          $name = [string]$evt.ProcessName",
+    "          $cmd = ''",
+    "          $ppid = 0",
+    "          try {",
+    "            $proc = Get-CimInstance Win32_Process -Filter \"ProcessId=$procId\" -ErrorAction Stop",
+    "            if ($proc -and $proc.CommandLine) { $cmd = [string]$proc.CommandLine }",
+    "            if ($proc -and $proc.ParentProcessId) { $ppid = [int]$proc.ParentProcessId }",
+    "          } catch {}",
+    "          Emit @{ kind='process'; type='start'; pid=$procId; name=$name; cmd=$cmd; ppid=$ppid; tag=$hostTag }",
+    "        } catch {",
+    "          [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:process:$($_.Exception.Message)\")",
+    "        }",
+    "      } elseif ($procEnabled -and $src -eq $procStopSource) {",
+    "        try {",
+    "          Emit @{ kind='process'; type='stop'; pid=[int]$evt.ProcessID; name=[string]$evt.ProcessName; tag=$hostTag }",
+    "        } catch {",
+    "          [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:process:$($_.Exception.Message)\")",
+    "        }",
+    "      } elseif ($lumaEnabled -and $src -eq $lumaSource) {",
+    "        try {",
+    "          Emit @{ kind='lumaplay'; type='change'; tag=$hostTag }",
+    "        } catch {",
+    "          [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:lumaplay:$($_.Exception.Message)\")",
+    "        }",
+    "      }",
     "    } catch {",
     "      [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:$($_.Exception.Message)\")",
     "    } finally {",
@@ -185,9 +200,29 @@ function clearRestartTimer() {
   }
 }
 
+function pruneWarnCache(now) {
+  if (hubState.warnCache.size <= MAX_WARN_CACHE_SIZE) return;
+  for (const [key, lastAt] of hubState.warnCache) {
+    if (now - lastAt > WARN_DEDUP_WINDOW_MS) {
+      hubState.warnCache.delete(key);
+    }
+  }
+  while (hubState.warnCache.size > MAX_WARN_CACHE_SIZE) {
+    const firstKey = hubState.warnCache.keys().next().value;
+    if (!firstKey) break;
+    hubState.warnCache.delete(firstKey);
+  }
+}
+
 function notifyWarn(message, channel = "") {
   const msg = String(message || "").trim() || "Windows event host warning";
   const normalizedChannel = String(channel || "").trim().toLowerCase();
+  const now = Date.now();
+  const dedupKey = `${normalizedChannel || "*"}:${msg}`;
+  const lastAt = hubState.warnCache.get(dedupKey);
+  if (Number.isFinite(lastAt) && now - lastAt < WARN_DEDUP_WINDOW_MS) return;
+  hubState.warnCache.set(dedupKey, now);
+  pruneWarnCache(now);
   for (const sub of Array.from(hubState.subscriptions)) {
     if (normalizedChannel && sub?.channel !== normalizedChannel) continue;
     try {

@@ -82,6 +82,17 @@
           window.electronAPI?.closeNotificationWindow?.();
         }
 
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
+
         function restartAnimation() {
           if (!container) return;
           container.classList.remove("is-active");
@@ -115,6 +126,7 @@
             applyScale(notificationData?.scale ?? 1);
 
             restartAnimation();
+            notifyScreenshotReady(360);
 
             const closeDelay = getCloseDelay();
             docEl.style.setProperty("--displaytime", `${closeDelay}ms`);

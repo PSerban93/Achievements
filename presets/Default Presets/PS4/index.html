@@ -53,6 +53,16 @@
         const baseTotal = Math.max(1, Number(metaDur?.content || 5000));
         let closeTimer = null;
         let notificationSeq = 0;
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
 
         function toFileSrc(iconPath) {
           if (!iconPath) return "";
@@ -172,6 +182,7 @@
             );
             ach?.style?.setProperty("--timeline-scale", String(timelineScale));
             restartAnimation(ach, total);
+            notifyScreenshotReady(inDur + 120);
 
             // Defer marquee measurements until entry animation has settled.
             setTimeout(() => {

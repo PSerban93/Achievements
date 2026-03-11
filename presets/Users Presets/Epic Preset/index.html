@@ -47,6 +47,7 @@
       const metaDur = document.querySelector('meta[name="duration"]');
       const baseTotal = Math.max(1, Number(metaDur?.content || 5000));
       const MIN_TOTAL = 1200;
+      let screenshotReadyDelayMs = 0;
 
       // timeline
       const tIconIn   = 820;
@@ -82,6 +83,7 @@
         const dClose = dOpen + sOpen + hold;
         const dSlideBk = dClose + sClose;
         const dFade = dSlideBk + sSlideBk;
+        screenshotReadyDelayMs = dOpen + sOpen + 120;
 
         const setVar = (k, v) => dock.style.setProperty(k, v + "ms");
         setVar("--tIconIn", sIconIn);
@@ -96,6 +98,17 @@
         setVar("--dClose", dClose);
         setVar("--dSlideBk", dSlideBk);
         setVar("--dFade", dFade);
+      };
+
+      const notifyScreenshotReady = (delayMs = 0) => {
+        const safeDelay = Math.max(0, Number(delayMs) || 0);
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              window.api?.notificationRenderReady?.();
+            });
+          });
+        }, safeDelay);
       };
 
       function fileUrl(p) {
@@ -162,6 +175,7 @@
         dock.classList.remove('active');
         void dock.offsetWidth;        
         dock.classList.add('active');
+        notifyScreenshotReady(screenshotReadyDelayMs);
 
         requestAnimationFrame(() => {
           applyMarquee(titleWrap, titleInner, {

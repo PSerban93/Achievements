@@ -51,6 +51,16 @@
         const getCloseDelay = () =>
           Math.max(0, Number(durationMeta?.content || 8000));
         docEl.style.setProperty("--displaytime", `${getCloseDelay()}ms`);
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
 
         applyScale(1);
 
@@ -114,6 +124,7 @@
             applyScale(notificationData?.scale ?? 1);
 
             restartAnimation();
+            notifyScreenshotReady(340);
 
             const closeDelay = getCloseDelay();
             docEl.style.setProperty("--displaytime", `${closeDelay}ms`);

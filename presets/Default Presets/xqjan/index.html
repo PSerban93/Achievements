@@ -242,6 +242,16 @@
 window.addEventListener('DOMContentLoaded', () => {
   const metaDur = document.querySelector('meta[name="duration"]');
   const baseTotal = Math.max(1, Number(metaDur?.content || 10000));
+  function notifyScreenshotReady(delayMs = 0) {
+    const safeDelay = Math.max(0, Number(delayMs) || 0);
+    setTimeout(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.api?.notificationRenderReady?.();
+        });
+      });
+    }, safeDelay);
+  }
   window.api?.onNotification?.((notificationData) => {
     if (notificationData &&
         notificationData.displayName &&
@@ -258,6 +268,7 @@ window.addEventListener('DOMContentLoaded', () => {
         "--timeline-scale",
         timelineScale.toFixed(4)
       );
+      notifyScreenshotReady(Math.max(700, Math.round(2100 * timelineScale)));
 
       const root = document.body;
       const scale = parseFloat(notificationData.scale || 1);

@@ -116,6 +116,17 @@
           }
         }
 
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
+
         function startAnimation(ach, inner, placement, totalMs) {
           // Only slide for left/right; no vertical animation
           inner.style.animation = "none";
@@ -150,6 +161,7 @@
 
           // Close slightly after the out animation completes for visibility
           const closeAfter = outDelayMs + OUT_DUR + Math.round(80 * scale);
+          notifyScreenshotReady(IN_DUR + Math.round(60 * scale));
           setTimeout(() => {
             window.api?.closeNotificationWindow?.();
           }, closeAfter);

@@ -45,6 +45,16 @@
       const baseTotal = Math.max(1, Number(metaDur?.content || 5000));
       const titleEl = document.querySelector(".title");
       const detailEl = document.querySelector(".detail");
+      function notifyScreenshotReady(delayMs = 0) {
+        const safeDelay = Math.max(0, Number(delayMs) || 0);
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              window.api?.notificationRenderReady?.();
+            });
+          });
+        }, safeDelay);
+      }
 
       window.api.onNotification((notificationData) => {
         if (notificationData &&
@@ -86,6 +96,7 @@
           `${total}ms`
         );
 				container.classList.add("active");
+        notifyScreenshotReady(Math.max(350, Math.round(total * 0.12)));
 
         requestAnimationFrame(() => {
           if (titleEl) {

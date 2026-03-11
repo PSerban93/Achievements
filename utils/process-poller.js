@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 const { startProcessEventWatcher } = require("./process-event-watcher");
+const { createLogger } = require("./logger");
 
 const DEFAULT_INTERVAL_MS = 2000;
 const WINDOWS_EVENT_FALLBACK_INTERVAL_MS = 12000;
@@ -9,6 +10,7 @@ const WINDOWS_EVENT_RESTART_DELAY_MS = 1500;
 const EVENT_WATCHER_ENABLED =
   process.platform === "win32" && process.env.ACH_PROCESS_EVENT_WATCHER !== "0";
 let pollerEnabled = process.env.ACH_DISABLE_PROCESS_WATCHER !== "1";
+const appLogger = createLogger("app");
 
 function parseInterval(value, fallback) {
   const next = Number(value);
@@ -225,7 +227,13 @@ function startEventWatcherIfNeeded() {
       eventWatcherReady = true;
     },
     onWarn: (message) => {
-      lastError = new Error(String(message || "process event watcher warning"));
+      const normalizedMessage = String(
+        message || "process event watcher warning",
+      );
+      lastError = new Error(normalizedMessage);
+      appLogger.warn("process-poller:event-warning", {
+        error: normalizedMessage,
+      });
     },
     onEvent: (payload) => {
       const changed = applyProcessEvent(payload);

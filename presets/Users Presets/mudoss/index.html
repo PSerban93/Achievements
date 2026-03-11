@@ -54,6 +54,16 @@
         return s.startsWith('file://') ? s : `file:///${s}`;
       };
       const safe = (t) => (t ?? '').toString().trim();
+      const notifyScreenshotReady = (delayMs = 0) => {
+        const safeDelay = Math.max(0, Number(delayMs) || 0);
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              window.api?.notificationRenderReady?.();
+            });
+          });
+        }, safeDelay);
+      };
 
       function computeFromTopFallback() {
         try {
@@ -73,7 +83,7 @@
         card.classList.add(fromTop ? 'from-top' : 'from-bottom');
       }
 
-      function restartAnimation(totalMs) {
+      function restartAnimation(totalMs, entryDelayMs) {
         // remove + reflow + add to restart CSS animations
         card.classList.remove('active');
         // two rafs ensures styles are flushed in all engines
@@ -82,6 +92,7 @@
           void card.offsetWidth;
           requestAnimationFrame(() => {
             card.classList.add('active');
+            notifyScreenshotReady(entryDelayMs);
             setTimeout(() => {
               card.classList.remove('active');
               window.api?.closeNotificationWindow?.();
@@ -119,7 +130,7 @@
         card.style.setProperty('--outMs',    outMs + 'ms');
         card.style.setProperty('--outDelay', outDelay + 'ms');
 
-        restartAnimation(total);
+        restartAnimation(total, inMs + 60);
       });
     })();
   </script>

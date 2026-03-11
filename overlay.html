@@ -1242,14 +1242,34 @@
         }
       });
 
-      function setOverlayVisible(visible) {
+      function setOverlayVisible(visible, source = null) {
         document.body.classList.toggle("overlay-hidden", !visible);
+        const ackPayload = {
+          visible: !!visible,
+          source: source || null,
+          cssHidden: document.body.classList.contains("overlay-hidden"),
+          documentHidden: !!document.hidden,
+        };
+        try {
+          window.api?.logOverlayEvent?.(
+            "info",
+            "overlay:renderer:set-visible",
+            ackPayload,
+          );
+        } catch {}
+        try {
+          window.api?.overlayVisibilityAck?.(ackPayload);
+        } catch {}
       }
 
       window.api.on("overlay:set-visible", (payload) => {
         const visible =
           payload && typeof payload === "object" ? payload.visible : payload;
-        setOverlayVisible(!!visible);
+        const source =
+          payload && typeof payload === "object" && payload.source
+            ? String(payload.source)
+            : null;
+        setOverlayVisible(!!visible, source);
       });
 
       function setupOverlayDrag() {

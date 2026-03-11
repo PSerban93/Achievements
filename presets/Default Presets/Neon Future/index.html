@@ -62,6 +62,16 @@
     window.addEventListener('DOMContentLoaded', () => {
       const metaDur = document.querySelector('meta[name="duration"]');
       const baseTotal = Math.max(1, Number(metaDur?.content || 5000));
+      function notifyScreenshotReady(delayMs = 0) {
+        const safeDelay = Math.max(0, Number(delayMs) || 0);
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              window.api?.notificationRenderReady?.();
+            });
+          });
+        }, safeDelay);
+      }
       window.api.onNotification((notificationData) => {
         if (notificationData &&
             notificationData.displayName &&
@@ -97,6 +107,7 @@
         );
         const container = document.querySelector(".achievement");
         container.classList.add("active");
+        notifyScreenshotReady(560);
 
         // Add glow animation
         const glowElement = document.querySelector(".neon-glow");

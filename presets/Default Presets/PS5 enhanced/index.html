@@ -48,6 +48,16 @@
       window.addEventListener("DOMContentLoaded", () => {
         const metaDur = document.querySelector('meta[name="duration"]');
         const baseTotal = Math.max(1, Number(metaDur?.content || 4000));
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
         window.api.onNotification((notificationData) => {
           const titleEl = document.querySelector(".title");
           const titleInnerEl = document.querySelector(".title-inner");
@@ -81,6 +91,7 @@
           container?.style?.setProperty("--outDelay", `${outDelay}ms`);
           container?.style?.setProperty("--timeline-scale", String(timelineScale));
           container.classList.add("active");
+          notifyScreenshotReady(inDur + 80);
 
           // Title marquee only if overflows
           requestAnimationFrame(() => {

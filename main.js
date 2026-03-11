@@ -38,6 +38,7 @@ const ini = require("ini");
 const chokidar = require("chokidar");
 const CRC32 = require("crc-32");
 const { copyFolderOnce, copyFolderOverwrite } = require("./utils/fileCopy");
+const { computeFolderContentVersion } = require("./utils/content-version");
 const {
   defaultSoundsFolder,
   defaultPresetsFolder,
@@ -90,11 +91,31 @@ const execLogger = createLogger("execution");
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
 
-const PRESETS_MIGRATION_VERSION = "2026-01-12-duration";
+const PRESETS_MIGRATION_VERSION_FALLBACK = "2026-01-12-duration";
+let cachedPresetsMigrationVersion = "";
 const PRESET_FOLDER_DEFAULT = "Default Presets";
 const PRESET_FOLDER_USERS = "Users Presets";
 const PRESET_FOLDER_DEFAULT_LEGACY = "Scalable";
 const PRESET_FOLDER_USERS_LEGACY = "Non-scalable";
+
+function getPresetsMigrationVersion() {
+  if (cachedPresetsMigrationVersion) return cachedPresetsMigrationVersion;
+
+  try {
+    cachedPresetsMigrationVersion = computeFolderContentVersion(
+      defaultPresetsFolder,
+      { prefix: "presets" },
+    );
+  } catch (err) {
+    cachedPresetsMigrationVersion = PRESETS_MIGRATION_VERSION_FALLBACK;
+    appLogger.warn("presets:version-compute-failed", {
+      error: err?.message || String(err),
+      fallbackVersion: PRESETS_MIGRATION_VERSION_FALLBACK,
+    });
+  }
+
+  return cachedPresetsMigrationVersion;
+}
 
 function getPresetCategoryRoots(baseFolder, category) {
   const names =
@@ -256,6 +277,7 @@ function runWindowsConfirm({ title, message }) {
 }
 
 function migrateDefaultPresetsIfNeeded() {
+  const targetVersion = getPresetsMigrationVersion();
   const versionFile = path.join(userPresetsFolder, ".presets-version");
   let currentVersion = "";
   try {
@@ -266,7 +288,7 @@ function migrateDefaultPresetsIfNeeded() {
     appLogger.warn("presets:version-read-failed", { error: err.message });
   }
 
-  if (currentVersion === PRESETS_MIGRATION_VERSION) return;
+  if (currentVersion === targetVersion) return;
 
   try {
     fs.mkdirSync(userPresetsFolder, { recursive: true });
@@ -281,13 +303,13 @@ function migrateDefaultPresetsIfNeeded() {
         const baseUserDir = path.dirname(userPresetsFolder);
         const backupDir = path.join(
           baseUserDir,
-          `presets_backup_${PRESETS_MIGRATION_VERSION}`,
+          `presets_backup_${targetVersion}`,
         );
         if (!fs.existsSync(backupDir)) {
           copyFolderOnce(userPresetsFolder, backupDir);
           appLogger.info("presets:backup-created", {
             backupDir,
-            version: PRESETS_MIGRATION_VERSION,
+            version: targetVersion,
           });
         }
       }
@@ -299,7 +321,7 @@ function migrateDefaultPresetsIfNeeded() {
   try {
     copyFolderOverwrite(defaultPresetsFolder, userPresetsFolder);
     appLogger.info("presets:migrated", {
-      version: PRESETS_MIGRATION_VERSION,
+      version: targetVersion,
       source: defaultPresetsFolder,
       target: userPresetsFolder,
     });
@@ -308,7 +330,7 @@ function migrateDefaultPresetsIfNeeded() {
   }
 
   try {
-    fs.writeFileSync(versionFile, PRESETS_MIGRATION_VERSION, "utf8");
+    fs.writeFileSync(versionFile, targetVersion, "utf8");
   } catch (err) {
     appLogger.warn("presets:version-write-failed", { error: err.message });
   }
@@ -1529,6 +1551,18 @@ function registerOverlayShortcut(newShortcut) {
     if (!newShortcut || typeof newShortcut !== "string") return;
 
     const registered = globalShortcut.register(newShortcut, () => {
+      const onboardingBlocked =
+        isBootOnboardingGatePending() || global.bootOnboardingRequired;
+      windowLogger.info("overlay:shortcut-trigger", {
+        shortcut: newShortcut,
+        onboardingBlocked,
+        hasWindow: !!overlayWindow && !overlayWindow.isDestroyed(),
+        overlayPresented,
+        overlayVisible:
+          !!overlayWindow &&
+          !overlayWindow.isDestroyed() &&
+          overlayWindow.isVisible(),
+      });
       console.log(
         tUi(
           "main.notify.overlayShortcutPressed",
@@ -1536,12 +1570,22 @@ function registerOverlayShortcut(newShortcut) {
           `Overlay Shortcut Pressed : ${newShortcut}`,
         ),
       );
-      if (isBootOnboardingGatePending() || global.bootOnboardingRequired) {
+      if (onboardingBlocked) {
         return;
       }
       if (overlayWindow && !overlayWindow.isDestroyed()) {
+        windowLogger.info("overlay:present-path", {
+          path: "reuse-existing-window",
+          nextPresented: !overlayPresented,
+          state: getOverlayWindowLogState(),
+        });
         setOverlayPresented(!overlayPresented);
       } else {
+        windowLogger.info("overlay:present-path", {
+          path: "create-new-window",
+          nextPresented: true,
+          state: getOverlayWindowLogState(),
+        });
         createOverlayWindow(selectedConfig);
       }
     });
@@ -1589,6 +1633,229 @@ function applyOverlayFocusMode() {
   } catch {}
 }
 
+function getOverlayWindowLogState() {
+  const hasWindow = !!overlayWindow && !overlayWindow.isDestroyed();
+  const state = {
+    hasWindow,
+    overlayPresented,
+    overlayInteractive,
+  };
+  if (!hasWindow) return state;
+  try {
+    state.windowId = overlayWindow.id;
+  } catch {}
+  try {
+    state.visible = overlayWindow.isVisible();
+  } catch {}
+  try {
+    state.focused = overlayWindow.isFocused();
+  } catch {}
+  try {
+    state.bounds = overlayWindow.getBounds();
+  } catch {}
+  try {
+    if (typeof overlayWindow.isAlwaysOnTop === "function") {
+      state.alwaysOnTop = overlayWindow.isAlwaysOnTop();
+    }
+  } catch {}
+  try {
+    if (overlayWindow.webContents && !overlayWindow.webContents.isDestroyed()) {
+      state.webContentsId = overlayWindow.webContents.id;
+      state.webContentsLoading = overlayWindow.webContents.isLoading();
+      state.webContentsUrl = overlayWindow.webContents.getURL() || null;
+    }
+  } catch {}
+  return state;
+}
+
+function clearOverlayVisibilityAckTimeout() {
+  if (overlayVisibilityAckTimer) {
+    clearTimeout(overlayVisibilityAckTimer);
+    overlayVisibilityAckTimer = null;
+  }
+  overlayVisibilityAckState = null;
+}
+
+function clearOverlayTopmostBoostTimer() {
+  if (overlayTopmostBoostTimer) {
+    clearTimeout(overlayTopmostBoostTimer);
+    overlayTopmostBoostTimer = null;
+  }
+}
+
+function armOverlayVisibilityAckTimeout(visible, source) {
+  clearOverlayVisibilityAckTimeout();
+  overlayVisibilityAckState = {
+    visible: !!visible,
+    source: String(source || "unknown"),
+    startedAt: Date.now(),
+  };
+  overlayVisibilityAckTimer = setTimeout(() => {
+    const elapsedMs = overlayVisibilityAckState?.startedAt
+      ? Date.now() - overlayVisibilityAckState.startedAt
+      : null;
+    windowLogger.warn("overlay:renderer-ack-timeout", {
+      requestedVisible: overlayVisibilityAckState?.visible ?? !!visible,
+      source: overlayVisibilityAckState?.source || String(source || "unknown"),
+      elapsedMs,
+      state: getOverlayWindowLogState(),
+    });
+    clearOverlayVisibilityAckTimeout();
+  }, OVERLAY_RENDERER_ACK_TIMEOUT_MS);
+}
+
+function sendOverlayVisibility(visible, source) {
+  const requestedVisible = !!visible;
+  const resolvedSource = String(source || "unknown");
+  if (!overlayWindow || overlayWindow.isDestroyed()) {
+    windowLogger.warn("overlay:visibility-dispatch:skipped", {
+      requestedVisible,
+      source: resolvedSource,
+      state: getOverlayWindowLogState(),
+    });
+    return false;
+  }
+  armOverlayVisibilityAckTimeout(requestedVisible, resolvedSource);
+  try {
+    windowLogger.info("overlay:visibility-dispatch", {
+      visible: requestedVisible,
+      source: resolvedSource,
+      state: getOverlayWindowLogState(),
+    });
+    overlayWindow.webContents.send("overlay:set-visible", {
+      visible: requestedVisible,
+      source: resolvedSource,
+    });
+    return true;
+  } catch (err) {
+    windowLogger.warn("overlay:visibility-dispatch:failed", {
+      requestedVisible,
+      source: resolvedSource,
+      error: err?.message || String(err),
+      state: getOverlayWindowLogState(),
+    });
+    clearOverlayVisibilityAckTimeout();
+    return false;
+  }
+}
+
+function reassertOverlayAlwaysOnTop(reason) {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const resolvedReason = String(reason || "unknown");
+  let before = null;
+  try {
+    if (typeof overlayWindow.isAlwaysOnTop === "function") {
+      before = overlayWindow.isAlwaysOnTop();
+    }
+  } catch {}
+  try {
+    if (before === false) {
+      overlayWindow.setAlwaysOnTop(false);
+    }
+  } catch {}
+  try {
+    overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  } catch {}
+  try {
+    overlayWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+    });
+  } catch {}
+  let after = null;
+  try {
+    if (typeof overlayWindow.isAlwaysOnTop === "function") {
+      after = overlayWindow.isAlwaysOnTop();
+    }
+  } catch {}
+  windowLogger.info("overlay:always-on-top:reasserted", {
+    level: "screen-saver",
+    reason: resolvedReason,
+    before,
+    after,
+  });
+  setTimeout(() => {
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    let verified = null;
+    try {
+      if (typeof overlayWindow.isAlwaysOnTop === "function") {
+        verified = overlayWindow.isAlwaysOnTop();
+      }
+    } catch {}
+    if (verified !== false) {
+      windowLogger.info("overlay:always-on-top:verify", {
+        reason: resolvedReason,
+        verified,
+      });
+      return;
+    }
+    windowLogger.warn("overlay:always-on-top:verify-failed", {
+      reason: resolvedReason,
+      verified,
+    });
+    try {
+      overlayWindow.setAlwaysOnTop(false);
+    } catch {}
+    try {
+      overlayWindow.setAlwaysOnTop(true, "screen-saver");
+    } catch {}
+    try {
+      overlayWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+      });
+    } catch {}
+    let afterRetry = null;
+    try {
+      if (typeof overlayWindow.isAlwaysOnTop === "function") {
+        afterRetry = overlayWindow.isAlwaysOnTop();
+      }
+    } catch {}
+    windowLogger.info("overlay:always-on-top:retry", {
+      reason: resolvedReason,
+      afterRetry,
+    });
+  }, 50);
+}
+
+/*
+function boostOverlayTopmost(reason) {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  const resolvedReason = String(reason || "unknown");
+  let before = null;
+  try {
+    if (typeof overlayWindow.isAlwaysOnTop === "function") {
+      before = overlayWindow.isAlwaysOnTop();
+    }
+  } catch {}
+  try {
+    overlayWindow.setAlwaysOnTop(true, "screen-saver");
+  } catch {}
+  try {
+    overlayWindow.setVisibleOnAllWorkspaces(true, {
+      visibleOnFullScreen: true,
+    });
+  } catch {}
+  let after = null;
+  try {
+    if (typeof overlayWindow.isAlwaysOnTop === "function") {
+      after = overlayWindow.isAlwaysOnTop();
+    }
+  } catch {}
+  windowLogger.info("overlay:always-on-top:boost", {
+    level: "screen-saver",
+    reason: resolvedReason,
+    before,
+    after,
+  });
+  clearOverlayTopmostBoostTimer();
+  overlayTopmostBoostTimer = setTimeout(() => {
+    overlayTopmostBoostTimer = null;
+    if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    if (!overlayPresented) return;
+    reassertOverlayAlwaysOnTop(`${resolvedReason}:settle`);
+  }, 150);
+}
+*/
+
 // Overlay focus safety contract (keep this for drag/snap/reposition fallback logic):
 // 1) Do not call `overlayWindow.show()` or `overlayWindow.focus()` from move/snap paths.
 // 2) Reposition only an already-created overlay via `setPosition`/`setBounds`.
@@ -1596,13 +1863,44 @@ function applyOverlayFocusMode() {
 // 4) Avoid aggressive `setAlwaysOnTop` retoggles during movement (z-order churn/focus side effects).
 function setOverlayPresented(next) {
   overlayPresented = !!next;
+  windowLogger.info("overlay:presented:set", {
+    next: overlayPresented,
+    hasWindow: !!overlayWindow && !overlayWindow.isDestroyed(),
+    windowVisible:
+      !!overlayWindow &&
+      !overlayWindow.isDestroyed() &&
+      overlayWindow.isVisible(),
+  });
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
 
   if (overlayPresented) {
     // Always start in click-through mode when presenting.
     setOverlayInteractive(false);
 
+    let windowVisible = false;
+    let alreadyTopmost = false;
+    try {
+      windowVisible = overlayWindow.isVisible();
+    } catch {}
+    try {
+      if (typeof overlayWindow.isAlwaysOnTop === "function") {
+        alreadyTopmost = overlayWindow.isAlwaysOnTop() === true;
+      }
+    } catch {}
+
     // Keep overlay non-focusable even if something outside toggles it.
+    if (!windowVisible || !alreadyTopmost) {
+      reassertOverlayAlwaysOnTop("setOverlayPresented:true:pre-show");
+    } else {
+      windowLogger.info("overlay:always-on-top:reassert-skipped", {
+        reason: "setOverlayPresented:true:already-visible-and-topmost",
+      });
+    }
+    try {
+      overlayWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+      });
+    } catch {}
     try {
       overlayWindow.setSkipTaskbar(true);
     } catch {}
@@ -1610,17 +1908,50 @@ function setOverlayPresented(next) {
       overlayWindow.setFocusable(false);
     } catch {}
     try {
-      if (!overlayWindow.isVisible()) {
+      if (!overlayShownAtLeastOnce || !windowVisible) {
+        windowLogger.info("overlay:showInactive:attempt", {
+          reason:
+            !overlayShownAtLeastOnce && !windowVisible
+              ? "presented-true-first-open"
+              : "presented-true-window-hidden",
+        });
         if (typeof overlayWindow.showInactive === "function") {
           overlayWindow.showInactive();
         } else {
           // Keep fallback intentionally non-activating; do not use overlayWindow.show() here.
+          windowLogger.info("overlay:showInactive:unavailable", {
+            reason: "no-showInactive-api",
+          });
         }
+      } else {
+        windowLogger.info("overlay:showInactive:skipped", {
+          reason: "presented-true-window-already-visible",
+        });
+        // boostOverlayTopmost("setOverlayPresented:true:already-visible");
+      }
+    } catch (err) {
+      windowLogger.warn("overlay:present-raise:failed", {
+        error: err?.message || String(err),
+      });
+    }
+    try {
+      if (!overlayWindow.isVisible()) {
+        windowLogger.info("overlay:visibility-check:after-showInactive", {
+          visible: false,
+        });
+      } else {
+        windowLogger.info("overlay:visibility-check:after-showInactive", {
+          visible: true,
+        });
       }
     } catch {}
-    try {
-      overlayWindow.webContents.send("overlay:set-visible", { visible: true });
-    } catch {}
+    setTimeout(() => {
+      windowLogger.info("overlay:post-present-state", {
+        source: "setOverlayPresented:true",
+        state: getOverlayWindowLogState(),
+      });
+    }, 75);
+    sendOverlayVisibility(true, "setOverlayPresented:true");
     applyOverlayInteractShortcutRegistration();
     applyOverlayKeyboardScrollShortcutRegistration();
     applyOverlayPositionShortcutRegistration();
@@ -1634,12 +1965,15 @@ function setOverlayPresented(next) {
   clearOverlayPositionShortcuts();
   overlaySnapCycleIndex = -1;
   stopOverlayGlobalDrag();
-  try {
-    overlayWindow.webContents.send("overlay:set-visible", { visible: false });
-  } catch {}
+  sendOverlayVisibility(false, "setOverlayPresented:false");
   try {
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   } catch {}
+  clearOverlayTopmostBoostTimer();
+  windowLogger.info("overlay:hide:skipped-os-window", {
+    reason: "keep-window-visible-for-reopen",
+    state: getOverlayWindowLogState(),
+  });
 }
 
 function clearOverlayKeyboardScrollShortcuts() {
@@ -5474,6 +5808,53 @@ let isProgressShowing = false;
 let pendingPlatinumNotification = null;
 let platinumAwaitingNormal = false;
 let platinumFallbackTimer = null;
+const pendingNotificationScreenshots = new Map();
+
+function computeNotificationScreenshotFallbackDelay(durationMs) {
+  const safeDuration =
+    Number.isFinite(Number(durationMs)) && Number(durationMs) > 0
+      ? Number(durationMs)
+      : 4000;
+  return Math.max(450, Math.min(1600, Math.round(safeDuration * 0.35)));
+}
+
+function clearPendingNotificationScreenshot(webContentsId) {
+  const state = pendingNotificationScreenshots.get(webContentsId);
+  if (!state) return;
+  if (state.timer) clearTimeout(state.timer);
+  pendingNotificationScreenshots.delete(webContentsId);
+}
+
+function armPendingNotificationScreenshot(notificationWindow, doShot, durationMs) {
+  if (!notificationWindow || notificationWindow.isDestroyed()) return;
+  const webContentsId = notificationWindow.webContents.id;
+  clearPendingNotificationScreenshot(webContentsId);
+
+  const state = {
+    fired: false,
+    timer: null,
+    run: async (reason) => {
+      if (state.fired) return;
+      state.fired = true;
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
+      }
+      pendingNotificationScreenshots.delete(webContentsId);
+      notificationLogger.info("notification:screenshot-trigger", {
+        reason,
+        webContentsId,
+      });
+      await doShot();
+    },
+  };
+
+  state.timer = setTimeout(() => {
+    void state.run("fallback-timeout");
+  }, computeNotificationScreenshotFallbackDelay(durationMs));
+
+  pendingNotificationScreenshots.set(webContentsId, state);
+}
 
 function queueAchievementNotification(achievement) {
   const prefs = cachedPreferences || {};
@@ -5584,6 +5965,7 @@ function processNextNotification() {
     overrideDurationMs || getPresetAnimationDuration(presetFolder);
   notificationData.durationMs = duration;
   const notificationWindow = createNotificationWindow(notificationData);
+  const notificationWebContentsId = notificationWindow.webContents.id;
 
   if (
     mainWindow &&
@@ -5632,16 +6014,21 @@ function processNextNotification() {
   };
 
   if (shouldScreenshot) {
+    const armScreenshot = () =>
+      armPendingNotificationScreenshot(
+        notificationWindow,
+        doShot,
+        notificationData.durationMs,
+      );
     if (notificationWindow.webContents.isLoading()) {
-      notificationWindow.webContents.once("did-finish-load", () => {
-        setTimeout(doShot, 250);
-      });
+      notificationWindow.webContents.once("did-finish-load", armScreenshot);
     } else {
-      setTimeout(doShot, 250);
+      armScreenshot();
     }
   }
 
   notificationWindow.on("closed", () => {
+    clearPendingNotificationScreenshot(notificationWebContentsId);
     windowLogger.info("create-notification-window:closed", {
       preset: notificationData.preset || "default",
       position: notificationData.position || "center-bottom",
@@ -7705,6 +8092,10 @@ ipcMain.on("close-notification-window", (event) => {
 let overlayWindow = null;
 let overlayInteractive = false;
 let overlayPresented = false;
+let overlayVisibilityAckTimer = null;
+let overlayVisibilityAckState = null;
+let overlayShownAtLeastOnce = false;
+let overlayTopmostBoostTimer = null;
 let registeredOverlayShortcut = null;
 let registeredOverlayInteractShortcut = null;
 let registeredOverlayScrollPageUpShortcuts = [];
@@ -7718,6 +8109,7 @@ let overlayDragHook = null;
 let overlayDragHookStarted = false;
 let overlayDragHookInitAttempted = false;
 let overlayDragHookBootWaitTimer = null;
+const OVERLAY_RENDERER_ACK_TIMEOUT_MS = 1200;
 const OVERLAY_NUDGE_STEP_PX = 20;
 const OVERLAY_SNAP5_PRESETS = [
   { accelerator: "Control+Alt+Shift+1", x: 0, y: 0 },
@@ -7999,31 +8391,42 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
   const { width, height } =
     require("electron").screen.getPrimaryDisplay().workAreaSize;
-
-  overlayWindow = new BrowserWindow({
-    width: 450,
-    height: 950,
-    // Create hidden; apply click-through + non-focusable first, then show via `showInactive()`.
-    // Some borderless games minimize if a new top-level window briefly activates.
-    show: false,
-    x: width - 470,
-    y: 20,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable: true,
-    movable: true,
-    focusable: false,
-    hasShadow: false,
-    fullscreenable: false,
-    webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      backgroundThrottling: false,
-    },
-  });
+  try {
+    overlayWindow = new BrowserWindow({
+      width: 450,
+      height: 950,
+      // Create hidden; apply click-through + non-focusable first, then show via `showInactive()`.
+      // Some borderless games minimize if a new top-level window briefly activates.
+      show: false,
+      x: width - 470,
+      y: 20,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      movable: true,
+      focusable: false,
+      hasShadow: false,
+      fullscreenable: false,
+      type: "notification",
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        backgroundThrottling: false,
+      },
+    });
+  } catch (err) {
+    overlayWindow = null;
+    windowLogger.error("create-overlay:create-failed", {
+      error: err?.message || String(err),
+      stack: err?.stack,
+      selectedConfig: selectedConfig || null,
+      initialPresented: !!initialPresented,
+    });
+    throw err;
+  }
   overlayPresented = !!initialPresented;
   windowLogger.info("create-overlay:browserwindow-created", {
     width: 450,
@@ -8031,7 +8434,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
     position: { x: width - 470, y: 20 },
   });
 
-  overlayWindow.setAlwaysOnTop(true, "floating");
+  overlayWindow.setAlwaysOnTop(true, "screen-saver");
   // Keep this as one-time setup; avoid frequent retoggles during runtime moves/snaps.
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   overlayWindow.setFullScreenable(false);
@@ -8039,35 +8442,53 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   overlayWindow.setSkipTaskbar(true);
   //setOverlayInteractive(false);
   const iconUrl = pathToFileURL(ICON_PNG_PATH).toString();
-  overlayWindow.loadFile("overlay.html", { query: { icon: iconUrl } });
+  overlayWindow
+    .loadFile("overlay.html", { query: { icon: iconUrl } })
+    .catch((err) => {
+      windowLogger.error("create-overlay:load-file-failed", {
+        error: err?.message || String(err),
+        stack: err?.stack,
+        icon: iconUrl,
+        state: getOverlayWindowLogState(),
+      });
+    });
   windowLogger.info("create-overlay:load-file", { icon: iconUrl });
 
   // Defensive: re-apply click-through after the window is actually visible (race safety).
   overlayWindow.once("ready-to-show", () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    windowLogger.info("create-overlay:ready-to-show", {
+      initialPresented: overlayPresented,
+    });
     try {
       setOverlayInteractive(false);
     } catch {}
-    try {
-      if (typeof overlayWindow.showInactive === "function") {
-        overlayWindow.showInactive();
-      } else {
-        // Keep fallback intentionally non-activating; do not use overlayWindow.show() here.
-      }
-    } catch {}
-    try {
-      overlayWindow.blur();
-    } catch {}
-    // Keep the window shown (inactive) and rely on CSS visibility to avoid OS-level hidden state.
+    if (overlayPresented) {
+      try {
+        if (typeof overlayWindow.showInactive === "function") {
+          overlayWindow.showInactive();
+        } else {
+          // Keep fallback intentionally non-activating; do not use overlayWindow.show() here.
+        }
+      } catch {}
+      try {
+        overlayWindow.blur();
+      } catch {}
+    } else {
+      windowLogger.info("create-overlay:ready-hidden", {
+        initialPresented: false,
+      });
+    }
     setTimeout(() => {
       if (!overlayWindow || overlayWindow.isDestroyed()) return;
-      if (!overlayInteractive) applyOverlayInputMode();
-      applyOverlayFocusMode();
       if (overlayPresented) {
+        if (!overlayInteractive) applyOverlayInputMode();
+        applyOverlayFocusMode();
         applyOverlayInteractShortcutRegistration();
         applyOverlayKeyboardScrollShortcutRegistration();
         applyOverlayPositionShortcutRegistration();
       } else {
+        if (!overlayInteractive) applyOverlayInputMode();
         clearOverlayInteractShortcut();
         clearOverlayKeyboardScrollShortcuts();
         clearOverlayPositionShortcuts();
@@ -8085,11 +8506,10 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       language: selectedLanguage,
       uiLanguage: selectedUiLanguage,
     });
-    try {
-      overlayWindow.webContents.send("overlay:set-visible", {
-        visible: overlayPresented,
-      });
-    } catch {}
+    sendOverlayVisibility(
+      overlayPresented,
+      "createOverlayWindow:did-finish-load",
+    );
     if (sharedAchievementTableViewState) {
       try {
         overlayWindow.webContents.send(
@@ -8102,10 +8522,13 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
 
   overlayWindow.on("closed", () => {
     windowLogger.info("create-overlay:closed");
+    clearOverlayVisibilityAckTimeout();
+    clearOverlayTopmostBoostTimer();
     stopOverlayGlobalDrag();
     overlayWindow = null;
     overlayInteractive = false;
     overlayPresented = false;
+    overlayShownAtLeastOnce = false;
     clearOverlayInteractShortcut();
     clearOverlayKeyboardScrollShortcuts();
     clearOverlayPositionShortcuts();
@@ -8113,6 +8536,12 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("show", () => {
+    overlayShownAtLeastOnce = true;
+    windowLogger.info("create-overlay:show", {
+      presented: overlayPresented,
+      visible: overlayWindow?.isVisible?.() || false,
+    });
+    reassertOverlayAlwaysOnTop("overlay-window:show");
     // Always start in click-through mode when the overlay is shown.
     setOverlayInteractive(false);
     applyOverlayInteractShortcutRegistration();
@@ -8132,12 +8561,64 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("hide", () => {
+    windowLogger.info("create-overlay:hide", {
+      presented: overlayPresented,
+    });
     setOverlayInteractive(false);
     applyOverlayInteractShortcutRegistration();
     clearOverlayKeyboardScrollShortcuts();
     clearOverlayPositionShortcuts();
     overlaySnapCycleIndex = -1;
     stopOverlayGlobalDrag();
+  });
+
+  overlayWindow.on("unresponsive", () => {
+    windowLogger.warn("create-overlay:unresponsive", {
+      state: getOverlayWindowLogState(),
+    });
+  });
+
+  overlayWindow.on("responsive", () => {
+    windowLogger.info("create-overlay:responsive", {
+      state: getOverlayWindowLogState(),
+    });
+  });
+
+  overlayWindow.webContents.on("dom-ready", () => {
+    windowLogger.info("create-overlay:dom-ready", {
+      state: getOverlayWindowLogState(),
+    });
+  });
+
+  overlayWindow.webContents.on(
+    "did-fail-load",
+    (
+      _event,
+      errorCode,
+      errorDescription,
+      validatedURL,
+      isMainFrame,
+      frameProcessId,
+      frameRoutingId,
+    ) => {
+      windowLogger.error("create-overlay:did-fail-load", {
+        errorCode,
+        errorDescription,
+        validatedURL,
+        isMainFrame,
+        frameProcessId,
+        frameRoutingId,
+        state: getOverlayWindowLogState(),
+      });
+    },
+  );
+
+  overlayWindow.webContents.on("render-process-gone", (_event, details) => {
+    windowLogger.error("create-overlay:render-gone", {
+      reason: details?.reason,
+      exitCode: details?.exitCode,
+      state: getOverlayWindowLogState(),
+    });
   });
 
   // Intentionally avoid blur-driven state changes here. The overlay is designed to be non-focusable.
@@ -8886,6 +9367,49 @@ ipcMain.on("notify-from-child", (_event, message) => {
   if (typeof message === "string" && message.trim()) {
     notifyInfo(message);
   }
+});
+
+ipcMain.on("notification-render-ready", (event) => {
+  const state = pendingNotificationScreenshots.get(event.sender.id);
+  if (!state) return;
+  void state.run("renderer-ready");
+});
+
+ipcMain.on("overlay:visibility-ack", (event, payload = {}) => {
+  const senderId = event.sender?.id || null;
+  const currentWebContentsId =
+    overlayWindow &&
+    !overlayWindow.isDestroyed() &&
+    overlayWindow.webContents &&
+    !overlayWindow.webContents.isDestroyed()
+      ? overlayWindow.webContents.id
+      : null;
+  const ackMeta = {
+    senderId,
+    currentWebContentsId,
+    requestedVisible:
+      payload && typeof payload === "object" ? !!payload.visible : null,
+    source:
+      payload && typeof payload === "object" && payload.source
+        ? String(payload.source)
+        : null,
+    cssHidden:
+      payload && typeof payload === "object" ? !!payload.cssHidden : null,
+    documentHidden:
+      payload && typeof payload === "object" ? !!payload.documentHidden : null,
+    elapsedMs: overlayVisibilityAckState?.startedAt
+      ? Date.now() - overlayVisibilityAckState.startedAt
+      : null,
+    expectedVisible: overlayVisibilityAckState?.visible ?? null,
+    expectedSource: overlayVisibilityAckState?.source || null,
+    state: getOverlayWindowLogState(),
+  };
+  if (!currentWebContentsId || currentWebContentsId !== senderId) {
+    windowLogger.warn("overlay:renderer-ack:stale", ackMeta);
+    return;
+  }
+  windowLogger.info("overlay:renderer-ack", ackMeta);
+  clearOverlayVisibilityAckTimeout();
 });
 
 const { pathToFileURL } = require("url");
@@ -10540,6 +11064,24 @@ ipcMain.handle("ui:log", async (_event, payload = {}) => {
   try {
     uiLogger[level](
       message || "ui:log",
+      Object.keys(meta).length ? meta : undefined,
+    );
+  } catch {}
+  return true;
+});
+
+ipcMain.handle("overlay:log", async (_event, payload = {}) => {
+  const level = ["debug", "info", "warn", "error"].includes(
+    String(payload.level || "").toLowerCase(),
+  )
+    ? String(payload.level || "").toLowerCase()
+    : "info";
+  const message = String(payload.message || "").trim();
+  const meta =
+    payload.meta && typeof payload.meta === "object" ? payload.meta : {};
+  try {
+    windowLogger[level](
+      message || "overlay:log",
       Object.keys(meta).length ? meta : undefined,
     );
   } catch {}

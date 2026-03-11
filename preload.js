@@ -123,6 +123,8 @@ contextBridge.exposeInMainWorld("api", {
   onProgressUpdate: (callback) =>
     ipcRenderer.on("show-progress", (event, data) => callback(data)),
   closeNotificationWindow: () => ipcRenderer.send("close-notification-window"),
+  notificationRenderReady: () =>
+    ipcRenderer.send("notification-render-ready"),
   parseStatsBin: (filePath) => ipcRenderer.invoke("parse-stats-bin", filePath),
   selectFile: () => ipcRenderer.invoke("select-file"),
   getConfigByName: async (name) => {
@@ -147,6 +149,10 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("covers:ui-log", { level, message, meta }),
   logUiEvent: (level, message, meta) =>
     ipcRenderer.invoke("ui:log", { level, message, meta }),
+  logOverlayEvent: (level, message, meta) =>
+    ipcRenderer.invoke("overlay:log", { level, message, meta }),
+  overlayVisibilityAck: (payload) =>
+    ipcRenderer.send("overlay:visibility-ack", payload),
   checkLocalGameImage: (appid, platform) =>
     ipcRenderer.invoke("checkLocalGameImage", appid, platform),
   saveGameImage: (appid, buffer, platform) =>

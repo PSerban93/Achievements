@@ -68,6 +68,16 @@
         }
 
         const baseTotal = Math.max(1, Number(metaDur?.content || 6000));
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
 
         function onPayload(displayName, description, iconPath, scale) {
           const ach = document.querySelector(".ach");
@@ -98,6 +108,7 @@
 
           // Start expand
           ach.classList.add("active");
+          notifyScreenshotReady(inMs + 80);
           // After expand finishes (Default uses ~1.3s), measure + start marquee if needed
           setTimeout(() => {
             startMarqueeIfOverflow(titleEl);

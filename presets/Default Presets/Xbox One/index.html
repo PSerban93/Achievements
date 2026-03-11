@@ -69,6 +69,16 @@
         const MARGIN_BOTTOM = 0;
         const MARGIN_TOP = 0;
         const TOP_TRANSLATE_ADJUST_PX = -50;
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
         const rootFontSize =
           parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 
@@ -386,6 +396,7 @@
             });
             updateContainerWidth();
             restartAnimation();
+            notifyScreenshotReady(Math.max(700, Math.round(2600 * scale)));
             scheduleClose();
           });
         };
