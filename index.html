@@ -2010,6 +2010,8 @@
             </div>
           </div>
         </div>
+
+        <div id="settingsVersion" class="settings-version" aria-live="polite"></div>
       </div>
     </div>
 
@@ -5573,6 +5575,31 @@
         }
       }
 
+      let cachedAppVersion = "";
+
+      function refreshSettingsVersionText() {
+        const el = document.getElementById("settingsVersion");
+        if (!el) return;
+        if (!cachedAppVersion) {
+          el.textContent = "";
+          return;
+        }
+        const label = tUi("settings.versionLabel", "Version");
+        el.textContent = `${label} ${cachedAppVersion}`;
+        el.title = `${label} ${cachedAppVersion}`;
+        el.setAttribute("aria-label", `${label} ${cachedAppVersion}`);
+      }
+
+      async function loadAppVersionLabel() {
+        try {
+          const version = await window.api?.getAppVersion?.();
+          cachedAppVersion = typeof version === "string" ? version.trim() : "";
+        } catch {
+          cachedAppVersion = "";
+        }
+        refreshSettingsVersionText();
+      }
+
       async function applyUiLanguage(lang) {
         const prevLang = uiLanguage;
         uiLanguage = normalizeLangValue(lang);
@@ -5607,6 +5634,7 @@
         if (typeof window.refreshBootLoadingText === "function") {
           window.refreshBootLoadingText();
         }
+        refreshSettingsVersionText();
         if (window.__dashboardOpen && typeof buildDashboard === "function") {
           await buildDashboard();
         }
@@ -7491,6 +7519,7 @@
           );
           achievementLanguageManual = prefs.achievementLanguageManual === true;
           await applyUiLanguage(storedUiLang);
+          await loadAppVersionLabel();
           const storedAchLang = normalizeLangValue(
             prefs.language ||
               localStorage.getItem("preferredLanguage") ||

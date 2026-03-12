@@ -76,12 +76,22 @@ const {
   mergeRarityIntoAchievements,
 } = require("./utils/achievement-rarity");
 const { ensureGogAccessToken } = require("./utils/gog-auth");
+const {
+  bindingsCanConflict: overlayBindingsCanConflict,
+  createOverlayShortcutManager,
+  getShortcutBindingSignature: getOverlayShortcutBindingSignature,
+  normalizeShortcutAccelerator: normalizeOverlayShortcutAccelerator,
+  parseShortcutAccelerator: parseOverlayShortcutAccelerator,
+} = require("./utils/overlay-shortcut-manager");
 const getConfigInflight = new Map();
 const { createLogger } = require("./utils/logger");
 
 const appLogger = createLogger("app");
 const notificationLogger = createLogger("notifications");
 const windowLogger = createLogger("windows");
+const overlayLogger = createLogger("overlay", {
+  level: process.env.OVERLAY_LOG_LEVEL || "warn",
+});
 const ipcLogger = createLogger("ipc");
 const uiLogger = createLogger("ui");
 const coverUiLogger = createLogger("covers");
@@ -90,6 +100,13 @@ const persistenceLogger = createLogger("persistence");
 const execLogger = createLogger("execution");
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
+const overlayShortcutManager = createOverlayShortcutManager({
+  loadHook: () => {
+    const { uIOhook, UiohookKey } = require("uiohook-napi");
+    return { hook: uIOhook, keyMap: UiohookKey };
+  },
+  logger: overlayLogger,
+});
 
 const PRESETS_MIGRATION_VERSION_FALLBACK = "2026-01-12-duration";
 let cachedPresetsMigrationVersion = "";
@@ -1544,16 +1561,78 @@ async function queueXeniaNotificationWhenIconReady(achievement) {
 
 function registerOverlayShortcut(newShortcut) {
   try {
-    if (registeredOverlayShortcut) {
-      globalShortcut.unregister(registeredOverlayShortcut);
-      registeredOverlayShortcut = null;
-    }
     if (!newShortcut || typeof newShortcut !== "string") return;
 
-    const registered = globalShortcut.register(newShortcut, () => {
+    const interactShortcut =
+      global.overlayInteractShortcut ||
+      (cachedPreferences && cachedPreferences.overlayInteractShortcut);
+    const ownShortcut = normalizeOverlayShortcutAccelerator(newShortcut, {
+      allowSingle: false,
+    });
+    const normalizedInteractShortcut = normalizeOverlayShortcutAccelerator(
+      interactShortcut,
+      { allowSingle: true },
+    );
+    const shortcutConflicts = findOverlayShortcutConflicts(newShortcut, {
+      allowSingle: false,
+      matchMode: "required",
+      otherShortcuts: interactShortcut
+        ? [
+            {
+              id: "overlay-interact",
+              source: "overlay-interact",
+              scope: "user",
+              shortcut: interactShortcut,
+              allowSingle: true,
+              matchMode: "required",
+              priority: OVERLAY_SHORTCUT_PRIORITY_INTERACT,
+              target: "overlay-interact",
+            },
+          ]
+        : [],
+    });
+    if (
+      shortcutConflicts.conflicts.length ||
+      (!shortcutConflicts.parsed &&
+        ownShortcut &&
+        normalizedInteractShortcut &&
+        ownShortcut === normalizedInteractShortcut)
+    ) {
+      const firstConflict =
+        shortcutConflicts.conflicts[0] ||
+        createOverlayShortcutConflictSummary(
+          {
+            normalized: normalizedInteractShortcut,
+            keyName: null,
+            triggerKey: null,
+            matchMode: "required",
+          },
+          {
+            id: "overlay-interact",
+            source: "overlay-interact",
+            scope: "user",
+            shortcut: interactShortcut,
+            target: "overlay-interact",
+          },
+        );
+      overlayLogger.warn("overlay:shortcut:user-conflict", {
+        shortcut: newShortcut,
+        conflictWith: getOverlayShortcutConflictDisplayValue(firstConflict),
+        target: firstConflict?.target || firstConflict?.source || null,
+        conflicts: shortcutConflicts.conflicts,
+      });
+      notifyError(
+        tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
+      );
+      return;
+    }
+
+    clearOverlayShortcutRegistration();
+
+    const onFire = () => {
       const onboardingBlocked =
         isBootOnboardingGatePending() || global.bootOnboardingRequired;
-      windowLogger.info("overlay:shortcut-trigger", {
+      overlayLogger.info("overlay:shortcut-trigger", {
         shortcut: newShortcut,
         onboardingBlocked,
         hasWindow: !!overlayWindow && !overlayWindow.isDestroyed(),
@@ -1574,28 +1653,49 @@ function registerOverlayShortcut(newShortcut) {
         return;
       }
       if (overlayWindow && !overlayWindow.isDestroyed()) {
-        windowLogger.info("overlay:present-path", {
+        overlayLogger.debug("overlay:present-path", {
           path: "reuse-existing-window",
           nextPresented: !overlayPresented,
           state: getOverlayWindowLogState(),
         });
         setOverlayPresented(!overlayPresented);
       } else {
-        windowLogger.info("overlay:present-path", {
+        overlayLogger.debug("overlay:present-path", {
           path: "create-new-window",
           nextPresented: true,
           state: getOverlayWindowLogState(),
         });
         createOverlayWindow(selectedConfig);
       }
-    });
+    };
 
-    if (!registered) {
-      notifyError(
-        tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
-      );
-    } else {
+    const directResult = tryRegisterDirectOverlayShortcut(
+      "overlay-shortcut",
+      newShortcut,
+      {
+        allowSingle: false,
+        cooldownMs: OVERLAY_SHORTCUT_REPEAT_COOLDOWN_MS,
+        source: "overlay-shortcut",
+        onFire,
+        getLastTriggeredAt: () => overlayShortcutLastTriggeredAt,
+        setLastTriggeredAt: (value) => {
+          overlayShortcutLastTriggeredAt = value;
+        },
+        setListener: (listener) => {
+          overlayShortcutKeydownListener = listener;
+        },
+        setHook: (hook) => {
+          overlayShortcutKeydownHook = hook;
+        },
+        setBinding: (binding) => {
+          overlayShortcutDirectBinding = binding;
+        },
+      },
+    );
+
+    if (directResult.ok) {
       registeredOverlayShortcut = newShortcut;
+      registeredOverlayShortcutMode = "direct";
       console.log(
         tUi(
           "main.notify.overlayShortcutSaved",
@@ -1603,7 +1703,48 @@ function registerOverlayShortcut(newShortcut) {
           `Overlay shortcut saved: ${newShortcut}`,
         ),
       );
+      return;
     }
+
+    if (directResult.reason !== "hook-unavailable") {
+      notifyError(
+        tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
+      );
+      return;
+    }
+
+    const candidates = buildElectronAcceleratorCandidates(newShortcut, {
+      allowSingle: false,
+    });
+    const fallbackResult = tryRegisterGlobalShortcutCandidates(candidates, onFire);
+    if (!fallbackResult.ok) {
+      overlayLogger.warn("overlay:shortcut:fallback-failed", {
+        id: "overlay-shortcut",
+        shortcut: newShortcut,
+        candidates,
+        error: fallbackResult.error?.message || null,
+      });
+      notifyError(
+        tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
+      );
+      return;
+    }
+
+    overlayLogger.warn("overlay:shortcut:fallback-registered", {
+      id: "overlay-shortcut",
+      shortcut: newShortcut,
+      accelerator: fallbackResult.accelerator,
+      candidates,
+    });
+    registeredOverlayShortcut = fallbackResult.accelerator;
+    registeredOverlayShortcutMode = "global";
+    console.log(
+      tUi(
+        "main.notify.overlayShortcutSaved",
+        { shortcut: newShortcut },
+        `Overlay shortcut saved: ${newShortcut}`,
+      ),
+    );
   } catch (err) {
     notifyError(
       tUi("main.notify.shortcutSaveFailed", {
@@ -1694,7 +1835,7 @@ function armOverlayVisibilityAckTimeout(visible, source) {
     const elapsedMs = overlayVisibilityAckState?.startedAt
       ? Date.now() - overlayVisibilityAckState.startedAt
       : null;
-    windowLogger.warn("overlay:renderer-ack-timeout", {
+    overlayLogger.warn("overlay:renderer-ack-timeout", {
       requestedVisible: overlayVisibilityAckState?.visible ?? !!visible,
       source: overlayVisibilityAckState?.source || String(source || "unknown"),
       elapsedMs,
@@ -1708,7 +1849,7 @@ function sendOverlayVisibility(visible, source) {
   const requestedVisible = !!visible;
   const resolvedSource = String(source || "unknown");
   if (!overlayWindow || overlayWindow.isDestroyed()) {
-    windowLogger.warn("overlay:visibility-dispatch:skipped", {
+    overlayLogger.warn("overlay:visibility-dispatch:skipped", {
       requestedVisible,
       source: resolvedSource,
       state: getOverlayWindowLogState(),
@@ -1717,7 +1858,7 @@ function sendOverlayVisibility(visible, source) {
   }
   armOverlayVisibilityAckTimeout(requestedVisible, resolvedSource);
   try {
-    windowLogger.info("overlay:visibility-dispatch", {
+    overlayLogger.debug("overlay:visibility-dispatch", {
       visible: requestedVisible,
       source: resolvedSource,
       state: getOverlayWindowLogState(),
@@ -1728,7 +1869,7 @@ function sendOverlayVisibility(visible, source) {
     });
     return true;
   } catch (err) {
-    windowLogger.warn("overlay:visibility-dispatch:failed", {
+    overlayLogger.warn("overlay:visibility-dispatch:failed", {
       requestedVisible,
       source: resolvedSource,
       error: err?.message || String(err),
@@ -1767,7 +1908,7 @@ function reassertOverlayAlwaysOnTop(reason) {
       after = overlayWindow.isAlwaysOnTop();
     }
   } catch {}
-  windowLogger.info("overlay:always-on-top:reasserted", {
+  overlayLogger.debug("overlay:always-on-top:reasserted", {
     level: "screen-saver",
     reason: resolvedReason,
     before,
@@ -1782,13 +1923,13 @@ function reassertOverlayAlwaysOnTop(reason) {
       }
     } catch {}
     if (verified !== false) {
-      windowLogger.info("overlay:always-on-top:verify", {
+      overlayLogger.debug("overlay:always-on-top:verify", {
         reason: resolvedReason,
         verified,
       });
       return;
     }
-    windowLogger.warn("overlay:always-on-top:verify-failed", {
+    overlayLogger.warn("overlay:always-on-top:verify-failed", {
       reason: resolvedReason,
       verified,
     });
@@ -1809,7 +1950,7 @@ function reassertOverlayAlwaysOnTop(reason) {
         afterRetry = overlayWindow.isAlwaysOnTop();
       }
     } catch {}
-    windowLogger.info("overlay:always-on-top:retry", {
+    overlayLogger.debug("overlay:always-on-top:retry", {
       reason: resolvedReason,
       afterRetry,
     });
@@ -1840,7 +1981,7 @@ function boostOverlayTopmost(reason) {
       after = overlayWindow.isAlwaysOnTop();
     }
   } catch {}
-  windowLogger.info("overlay:always-on-top:boost", {
+  overlayLogger.debug("overlay:always-on-top:boost", {
     level: "screen-saver",
     reason: resolvedReason,
     before,
@@ -1863,7 +2004,7 @@ function boostOverlayTopmost(reason) {
 // 4) Avoid aggressive `setAlwaysOnTop` retoggles during movement (z-order churn/focus side effects).
 function setOverlayPresented(next) {
   overlayPresented = !!next;
-  windowLogger.info("overlay:presented:set", {
+  overlayLogger.info("overlay:presented:set", {
     next: overlayPresented,
     hasWindow: !!overlayWindow && !overlayWindow.isDestroyed(),
     windowVisible:
@@ -1892,7 +2033,7 @@ function setOverlayPresented(next) {
     if (!windowVisible || !alreadyTopmost) {
       reassertOverlayAlwaysOnTop("setOverlayPresented:true:pre-show");
     } else {
-      windowLogger.info("overlay:always-on-top:reassert-skipped", {
+      overlayLogger.debug("overlay:always-on-top:reassert-skipped", {
         reason: "setOverlayPresented:true:already-visible-and-topmost",
       });
     }
@@ -1909,7 +2050,7 @@ function setOverlayPresented(next) {
     } catch {}
     try {
       if (!overlayShownAtLeastOnce || !windowVisible) {
-        windowLogger.info("overlay:showInactive:attempt", {
+        overlayLogger.debug("overlay:showInactive:attempt", {
           reason:
             !overlayShownAtLeastOnce && !windowVisible
               ? "presented-true-first-open"
@@ -1919,34 +2060,34 @@ function setOverlayPresented(next) {
           overlayWindow.showInactive();
         } else {
           // Keep fallback intentionally non-activating; do not use overlayWindow.show() here.
-          windowLogger.info("overlay:showInactive:unavailable", {
+          overlayLogger.debug("overlay:showInactive:unavailable", {
             reason: "no-showInactive-api",
           });
         }
       } else {
-        windowLogger.info("overlay:showInactive:skipped", {
+        overlayLogger.debug("overlay:showInactive:skipped", {
           reason: "presented-true-window-already-visible",
         });
         // boostOverlayTopmost("setOverlayPresented:true:already-visible");
       }
     } catch (err) {
-      windowLogger.warn("overlay:present-raise:failed", {
+      overlayLogger.warn("overlay:present-raise:failed", {
         error: err?.message || String(err),
       });
     }
     try {
       if (!overlayWindow.isVisible()) {
-        windowLogger.info("overlay:visibility-check:after-showInactive", {
+        overlayLogger.debug("overlay:visibility-check:after-showInactive", {
           visible: false,
         });
       } else {
-        windowLogger.info("overlay:visibility-check:after-showInactive", {
+        overlayLogger.debug("overlay:visibility-check:after-showInactive", {
           visible: true,
         });
       }
     } catch {}
     setTimeout(() => {
-      windowLogger.info("overlay:post-present-state", {
+      overlayLogger.debug("overlay:post-present-state", {
         source: "setOverlayPresented:true",
         state: getOverlayWindowLogState(),
       });
@@ -1955,10 +2096,14 @@ function setOverlayPresented(next) {
     applyOverlayInteractShortcutRegistration();
     applyOverlayKeyboardScrollShortcutRegistration();
     applyOverlayPositionShortcutRegistration();
+    logOverlayShortcutRegistrationSummary("overlay:shortcuts-applied", "info", {
+      source: "setOverlayPresented:true",
+    });
     return;
   }
 
   // Hide completely + click-through, and unregister shortcuts.
+  const clearedShortcuts = summarizeOverlayShortcutRegistrationState();
   setOverlayInteractive(false);
   clearOverlayInteractShortcut();
   clearOverlayKeyboardScrollShortcuts();
@@ -1970,48 +2115,25 @@ function setOverlayPresented(next) {
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   } catch {}
   clearOverlayTopmostBoostTimer();
-  windowLogger.info("overlay:hide:skipped-os-window", {
+  overlayLogger.debug("overlay:hide:skipped-os-window", {
     reason: "keep-window-visible-for-reopen",
     state: getOverlayWindowLogState(),
+  });
+  overlayLogger.info("overlay:shortcuts-cleared", {
+    ...clearedShortcuts,
+    source: "setOverlayPresented:false",
   });
 }
 
 function clearOverlayKeyboardScrollShortcuts() {
-  if (
-    Array.isArray(registeredOverlayScrollPageUpShortcuts) &&
-    registeredOverlayScrollPageUpShortcuts.length
-  ) {
-    for (const accelerator of registeredOverlayScrollPageUpShortcuts) {
-      try {
-        globalShortcut.unregister(accelerator);
-      } catch {}
-    }
-  }
-  if (
-    Array.isArray(registeredOverlayScrollPageDownShortcuts) &&
-    registeredOverlayScrollPageDownShortcuts.length
-  ) {
-    for (const accelerator of registeredOverlayScrollPageDownShortcuts) {
-      try {
-        globalShortcut.unregister(accelerator);
-      } catch {}
-    }
-  }
+  clearRegisteredShortcutEntries(registeredOverlayScrollPageUpShortcuts);
+  clearRegisteredShortcutEntries(registeredOverlayScrollPageDownShortcuts);
   registeredOverlayScrollPageUpShortcuts = [];
   registeredOverlayScrollPageDownShortcuts = [];
 }
 
 function clearOverlayPositionShortcuts() {
-  if (
-    Array.isArray(registeredOverlayPositionShortcuts) &&
-    registeredOverlayPositionShortcuts.length
-  ) {
-    for (const accelerator of registeredOverlayPositionShortcuts) {
-      try {
-        globalShortcut.unregister(accelerator);
-      } catch {}
-    }
-  }
+  clearRegisteredShortcutEntries(registeredOverlayPositionShortcuts);
   registeredOverlayPositionShortcuts = [];
 }
 
@@ -2110,39 +2232,48 @@ function applyOverlayPositionShortcutRegistration() {
     return;
   }
 
-  const registerAll = (accelerators, onFire) => {
-    const seen = new Set();
-    for (const accelerator of accelerators) {
-      if (typeof accelerator !== "string" || !accelerator.trim()) continue;
-      if (seen.has(accelerator)) continue;
-      seen.add(accelerator);
-      try {
-        const ok = globalShortcut.register(accelerator, onFire);
-        if (ok) registeredOverlayPositionShortcuts.push(accelerator);
-      } catch {}
+  const registerAll = (baseId, accelerators, onFire) => {
+    let bindingIndex = 0;
+    const uniqueAccelerators = dedupeOverlayShortcutAccelerators(accelerators, {
+      allowSingle: false,
+      matchMode: "exact",
+      source: baseId,
+    });
+    for (const accelerator of uniqueAccelerators) {
+      const bindingId = `${baseId}:${bindingIndex++}`;
+      const result = registerOverlayBindingWithFallback({
+        id: bindingId,
+        shortcut: accelerator,
+        allowSingle: false,
+        onFire,
+        priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+        scope: "builtin",
+        source: "overlay-position",
+      });
+      if (result.ok) registeredOverlayPositionShortcuts.push(result.entry);
     }
   };
 
   clearOverlayPositionShortcuts();
 
   OVERLAY_SNAP5_PRESETS.forEach((preset, index) => {
-    registerAll([preset.accelerator], () => {
+    registerAll(`overlay-position:snap5:${index}`, [preset.accelerator], () => {
       overlaySnapCycleIndex = index;
       snapOverlayByFactors(preset.x, preset.y);
     });
   });
 
-  OVERLAY_SNAP9_NUMPAD_PRESETS.forEach((preset) => {
-    registerAll(preset.accelerators, () => {
+  OVERLAY_SNAP9_NUMPAD_PRESETS.forEach((preset, index) => {
+    registerAll(`overlay-position:snap9:${index}`, preset.accelerators, () => {
       snapOverlayByFactors(preset.x, preset.y);
     });
   });
 
-  registerAll(["Control+Alt+Shift+M"], () => {
+  registerAll("overlay-position:cycle", ["Control+Alt+Shift+M"], () => {
     cycleOverlaySnapPreset();
   });
 
-  registerAll(["Control+Alt+Shift+Left"], () => {
+  registerAll("overlay-position:nudge-left", ["Control+Alt+Shift+Left"], () => {
     const ctx = getOverlayPositionContext();
     if (!ctx) return;
     setOverlayPositionClamped(
@@ -2151,7 +2282,7 @@ function applyOverlayPositionShortcutRegistration() {
     );
   });
 
-  registerAll(["Control+Alt+Shift+Right"], () => {
+  registerAll("overlay-position:nudge-right", ["Control+Alt+Shift+Right"], () => {
     const ctx = getOverlayPositionContext();
     if (!ctx) return;
     setOverlayPositionClamped(
@@ -2160,7 +2291,7 @@ function applyOverlayPositionShortcutRegistration() {
     );
   });
 
-  registerAll(["Control+Alt+Shift+Up"], () => {
+  registerAll("overlay-position:nudge-up", ["Control+Alt+Shift+Up"], () => {
     const ctx = getOverlayPositionContext();
     if (!ctx) return;
     setOverlayPositionClamped(
@@ -2169,7 +2300,7 @@ function applyOverlayPositionShortcutRegistration() {
     );
   });
 
-  registerAll(["Control+Alt+Shift+Down"], () => {
+  registerAll("overlay-position:nudge-down", ["Control+Alt+Shift+Down"], () => {
     const ctx = getOverlayPositionContext();
     if (!ctx) return;
     setOverlayPositionClamped(
@@ -2196,17 +2327,26 @@ function applyOverlayKeyboardScrollShortcutRegistration() {
     }
   } catch {}
 
-  const registerAll = (accelerators, onFire) => {
-    const seen = new Set();
+  const registerAll = (baseId, accelerators, onFire) => {
     const registered = [];
-    for (const accelerator of accelerators) {
-      if (typeof accelerator !== "string" || !accelerator.trim()) continue;
-      if (seen.has(accelerator)) continue;
-      seen.add(accelerator);
-      try {
-        const ok = globalShortcut.register(accelerator, onFire);
-        if (ok) registered.push(accelerator);
-      } catch {}
+    let bindingIndex = 0;
+    const uniqueAccelerators = dedupeOverlayShortcutAccelerators(accelerators, {
+      allowSingle: true,
+      matchMode: "exact",
+      source: baseId,
+    });
+    for (const accelerator of uniqueAccelerators) {
+      const bindingId = `${baseId}:${bindingIndex++}`;
+      const result = registerOverlayBindingWithFallback({
+        id: bindingId,
+        shortcut: accelerator,
+        allowSingle: true,
+        onFire,
+        priority: OVERLAY_SHORTCUT_PRIORITY_SCROLL,
+        scope: "builtin",
+        source: baseId,
+      });
+      if (result.ok) registered.push(result.entry);
     }
     return registered;
   };
@@ -2214,6 +2354,7 @@ function applyOverlayKeyboardScrollShortcutRegistration() {
   clearOverlayKeyboardScrollShortcuts();
 
   registeredOverlayScrollPageUpShortcuts = registerAll(
+    "overlay-scroll-up",
     ["PageUp", "Control+PageUp"],
     () => {
       if (
@@ -2230,6 +2371,7 @@ function applyOverlayKeyboardScrollShortcutRegistration() {
   );
 
   registeredOverlayScrollPageDownShortcuts = registerAll(
+    "overlay-scroll-down",
     ["PageDown", "Control+PageDown"],
     () => {
       if (
@@ -2252,6 +2394,14 @@ function setOverlayInteractive(next) {
   applyOverlayInputMode();
   applyOverlayFocusMode();
   applyOverlayKeyboardScrollShortcutRegistration();
+  overlayLogger.info("overlay:interactive:set", {
+    next: overlayInteractive,
+    presented: overlayPresented,
+    visible:
+      !!overlayWindow &&
+      !overlayWindow.isDestroyed() &&
+      overlayWindow.isVisible(),
+  });
 }
 
 function toggleOverlayInteractive() {
@@ -2261,10 +2411,32 @@ function toggleOverlayInteractive() {
 }
 
 function clearOverlayInteractShortcut() {
-  if (registeredOverlayInteractShortcut) {
-    globalShortcut.unregister(registeredOverlayInteractShortcut);
-    registeredOverlayInteractShortcut = null;
+  if (overlayInteractDirectBinding) {
+    overlayLogger.debug("overlay:shortcut:unregistered", {
+      id: "overlay-interact",
+      normalized: overlayInteractDirectBinding.normalized,
+      mode: "direct",
+    });
   }
+  removeOverlayDirectKeydownListener(
+    overlayInteractKeydownHook,
+    overlayInteractKeydownListener,
+  );
+  overlayInteractKeydownListener = null;
+  overlayInteractKeydownHook = null;
+  overlayInteractDirectBinding = null;
+  overlayInteractLastTriggeredAt = 0;
+  unregisterOverlayLowLevelBinding("overlay-interact");
+  if (
+    registeredOverlayInteractShortcutMode === "global" &&
+    registeredOverlayInteractShortcut
+  ) {
+    try {
+      globalShortcut.unregister(registeredOverlayInteractShortcut);
+    } catch {}
+  }
+  registeredOverlayInteractShortcut = null;
+  registeredOverlayInteractShortcutMode = null;
 }
 
 function applyOverlayInteractShortcutRegistration() {
@@ -2288,101 +2460,141 @@ function applyOverlayInteractShortcutRegistration() {
 }
 
 function normalizeOverlayInteractAccelerator(shortcut) {
-  if (!shortcut || typeof shortcut !== "string") return null;
-  const trimmed = shortcut.trim();
-  if (!trimmed) return null;
-  const parts = trimmed
-    .split("+")
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const seen = new Set();
-  const out = [];
-  const pushToken = (token) => {
-    if (seen.has(token)) return;
-    seen.add(token);
-    out.push(token);
-  };
-  for (const part of parts) {
-    if (/^altgr$/i.test(part) || /^altgraph$/i.test(part)) {
-      pushToken("Control");
-      pushToken("Alt");
-    } else {
-      pushToken(part);
-    }
-  }
-  if (!out.length) return null;
-  const modifierTokens = new Set([
-    "control",
-    "ctrl",
-    "shift",
-    "alt",
-    "altgr",
-    "altgraph",
-    "meta",
-    "super",
-    "command",
-    "cmd",
-    "cmdorctrl",
-    "commandorcontrol",
-    "option",
-  ]);
-  const hasNonModifier = out.some(
-    (token) => !modifierTokens.has(token.toLowerCase()),
-  );
-  return hasNonModifier ? out.join("+") : null;
+  return normalizeOverlayLowLevelAccelerator(shortcut, { allowSingle: true });
 }
 
 function registerOverlayInteractShortcut(newShortcut) {
   try {
-    clearOverlayInteractShortcut();
     if (!newShortcut || typeof newShortcut !== "string") return;
 
     const accelerator = normalizeOverlayInteractAccelerator(newShortcut);
     if (!accelerator) return;
-
-    const candidates = (() => {
-      const parts = accelerator
-        .split("+")
-        .map((part) => part.trim())
-        .filter(Boolean);
-      if (!parts.length) return [];
-
-      const out = [];
-      const push = (value) => {
-        if (!value) return;
-        if (!out.includes(value)) out.push(value);
-      };
-      const join = (arr) => arr.join("+");
-
-      push(join(parts));
-      push(join(parts.map((p) => (p === "\\" ? "Backslash" : p))));
-      push(join(parts.map((p) => (/^backslash$/i.test(p) ? "\\" : p))));
-      push(join(parts.map((p) => (p === "\\" ? "Oem5" : p))));
-      push(join(parts.map((p) => (p === "\\" ? "OEM_5" : p))));
-
-      return out;
-    })();
-
-    let lastErr = null;
-    for (const candidate of candidates) {
-      try {
-        const registered = globalShortcut.register(candidate, () => {
-          toggleOverlayInteractive();
-        });
-        if (registered) {
-          registeredOverlayInteractShortcut = candidate;
-          return;
-        }
-      } catch (err) {
-        lastErr = err;
-      }
+    const overlayShortcut =
+      global.overlayShortcut || (cachedPreferences && cachedPreferences.overlayShortcut);
+    const normalizedOverlayShortcut = normalizeOverlayShortcutAccelerator(
+      overlayShortcut,
+      { allowSingle: false },
+    );
+    const shortcutConflicts = findOverlayShortcutConflicts(accelerator, {
+      allowSingle: true,
+      matchMode: "required",
+      otherShortcuts: overlayShortcut
+        ? [
+            {
+              id: "overlay-shortcut",
+              source: "overlay-shortcut",
+              scope: "user",
+              shortcut: overlayShortcut,
+              allowSingle: false,
+              matchMode: "required",
+              priority: OVERLAY_SHORTCUT_PRIORITY_TOGGLE,
+              target: "overlay-shortcut",
+            },
+          ]
+        : [],
+    });
+    if (
+      shortcutConflicts.conflicts.length ||
+      (!shortcutConflicts.parsed &&
+        accelerator &&
+        normalizedOverlayShortcut &&
+        accelerator === normalizedOverlayShortcut)
+    ) {
+      const firstConflict =
+        shortcutConflicts.conflicts[0] ||
+        createOverlayShortcutConflictSummary(
+          {
+            normalized: normalizedOverlayShortcut,
+            keyName: null,
+            triggerKey: null,
+            matchMode: "required",
+          },
+          {
+            id: "overlay-shortcut",
+            source: "overlay-shortcut",
+            scope: "user",
+            shortcut: overlayShortcut,
+            target: "overlay-shortcut",
+          },
+        );
+      overlayLogger.warn("overlay:shortcut:user-conflict", {
+        shortcut: newShortcut,
+        conflictWith: getOverlayShortcutConflictDisplayValue(firstConflict),
+        target: firstConflict?.target || firstConflict?.source || null,
+        conflicts: shortcutConflicts.conflicts,
+      });
+      notifyError(
+        tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
+      );
+      return;
     }
 
-    if (lastErr) throw lastErr;
+    clearOverlayInteractShortcut();
 
-    notifyError(
-      tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
+    const directResult = tryRegisterDirectOverlayShortcut(
+      "overlay-interact",
+      accelerator,
+      {
+        allowSingle: true,
+        cooldownMs: OVERLAY_SHORTCUT_REPEAT_COOLDOWN_MS,
+        source: "overlay-interact",
+        onFire: () => {
+          toggleOverlayInteractive();
+        },
+        getLastTriggeredAt: () => overlayInteractLastTriggeredAt,
+        setLastTriggeredAt: (value) => {
+          overlayInteractLastTriggeredAt = value;
+        },
+        setListener: (listener) => {
+          overlayInteractKeydownListener = listener;
+        },
+        setHook: (hook) => {
+          overlayInteractKeydownHook = hook;
+        },
+        setBinding: (binding) => {
+          overlayInteractDirectBinding = binding;
+        },
+      },
     );
+    if (directResult.ok) {
+      registeredOverlayInteractShortcut = accelerator;
+      registeredOverlayInteractShortcutMode = "direct";
+      return;
+    }
+    if (directResult.reason !== "hook-unavailable") {
+      notifyError(
+        tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
+      );
+      return;
+    }
+
+    const candidates = buildElectronAcceleratorCandidates(accelerator, {
+      allowSingle: true,
+    });
+    const fallbackResult = tryRegisterGlobalShortcutCandidates(candidates, () => {
+      toggleOverlayInteractive();
+    });
+    if (!fallbackResult.ok) {
+      overlayLogger.warn("overlay:shortcut:fallback-failed", {
+        id: "overlay-interact",
+        shortcut: accelerator,
+        candidates,
+        error: fallbackResult.error?.message || null,
+      });
+      notifyError(
+        tUi("main.notify.shortcutSaveRejected", { shortcut: newShortcut }),
+      );
+      return;
+    }
+
+    overlayLogger.warn("overlay:shortcut:fallback-registered", {
+      id: "overlay-interact",
+      shortcut: accelerator,
+      accelerator: fallbackResult.accelerator,
+      candidates,
+    });
+    registeredOverlayInteractShortcut = fallbackResult.accelerator;
+    registeredOverlayInteractShortcutMode = "global";
   } catch (err) {
     notifyError(
       tUi("main.notify.shortcutSaveFailed", {
@@ -2729,6 +2941,25 @@ function updatePreferences(patch = {}) {
     });
     if (removeSteamKey) delete merged.steamApiKey;
 
+    const overlayShortcutValidation =
+      validateOverlayShortcutPreferencePair(merged);
+    if (overlayShortcutValidation) {
+      prefsLogger.warn("preferences:update:overlay-shortcut-rejected", {
+        key: overlayShortcutValidation.key,
+        reason: overlayShortcutValidation.reason,
+        shortcut: overlayShortcutValidation.shortcut,
+        conflictWith: overlayShortcutValidation.conflictWith || null,
+        conflictSource: overlayShortcutValidation.conflictSource || null,
+        resetKey: overlayShortcutValidation.resetKey || null,
+      });
+      notifyError(
+        tUi("main.notify.shortcutSaveRejected", {
+          shortcut: overlayShortcutValidation.shortcut,
+        }),
+      );
+      return current;
+    }
+
     const keysSet = new Set([
       ...Object.keys(current || {}),
       ...Object.keys(merged || {}),
@@ -3045,6 +3276,15 @@ async function saveFullScreenShot(gameName, achDisplayName) {
 ipcMain.handle("load-preferences", () => {
   cachedPreferences = readPrefsSafe();
   if (
+    typeof cachedPreferences.overlayShortcut === "string" &&
+    cachedPreferences.overlayShortcut.trim() &&
+    !normalizeOverlayShortcutAccelerator(cachedPreferences.overlayShortcut, {
+      allowSingle: false,
+    })
+  ) {
+    cachedPreferences.overlayShortcut = DEFAULT_PREFERENCES.overlayShortcut;
+  }
+  if (
     !Object.prototype.hasOwnProperty.call(
       cachedPreferences || {},
       "overlayInteractShortcut",
@@ -3061,6 +3301,17 @@ ipcMain.handle("load-preferences", () => {
   ) {
     cachedPreferences.overlayInteractShortcut =
       DEFAULT_PREFERENCES.overlayInteractShortcut;
+  }
+  const overlayShortcutPreferenceValidation =
+    validateOverlayShortcutPreferencePair(cachedPreferences);
+  if (overlayShortcutPreferenceValidation?.reason === "conflict") {
+    const resolvedOverlayShortcutPrefs = resolveOverlayShortcutPreferenceConflicts(
+      cachedPreferences,
+    );
+    cachedPreferences.overlayShortcut =
+      resolvedOverlayShortcutPrefs.resolved.overlayShortcut;
+    cachedPreferences.overlayInteractShortcut =
+      resolvedOverlayShortcutPrefs.resolved.overlayInteractShortcut;
   }
   const fileKey = readSteamApiKeyFromFile();
   if (fileKey && !cachedPreferences.steamApiKey) {
@@ -3257,6 +3508,7 @@ ipcMain.handle("boot:status", () => ({
   bootOnboardingGateOpen: global.bootOnboardingGateOpen !== false,
   bootOnboardingRequired: global.bootOnboardingRequired === true,
 }));
+ipcMain.handle("app:get-version", () => app.getVersion());
 ipcMain.on("boot:overlay-hidden", () => {
   if (global.bootOverlayHidden === true) return;
   global.bootOverlayHidden = true;
@@ -8097,7 +8349,17 @@ let overlayVisibilityAckState = null;
 let overlayShownAtLeastOnce = false;
 let overlayTopmostBoostTimer = null;
 let registeredOverlayShortcut = null;
+let registeredOverlayShortcutMode = null;
 let registeredOverlayInteractShortcut = null;
+let registeredOverlayInteractShortcutMode = null;
+let overlayShortcutKeydownListener = null;
+let overlayShortcutKeydownHook = null;
+let overlayShortcutDirectBinding = null;
+let overlayShortcutLastTriggeredAt = 0;
+let overlayInteractKeydownListener = null;
+let overlayInteractKeydownHook = null;
+let overlayInteractDirectBinding = null;
+let overlayInteractLastTriggeredAt = 0;
 let registeredOverlayScrollPageUpShortcuts = [];
 let registeredOverlayScrollPageDownShortcuts = [];
 let registeredOverlayPositionShortcuts = [];
@@ -8105,12 +8367,18 @@ let overlaySnapCycleIndex = -1;
 let overlayDragRegionHeight = 90;
 let overlayDragActive = false;
 let overlayDragOffset = null;
-let overlayDragHook = null;
-let overlayDragHookStarted = false;
-let overlayDragHookInitAttempted = false;
+let overlayGlobalMouseHandlersAttached = false;
+let overlayDragMouseDownListener = null;
+let overlayDragMouseMoveListener = null;
+let overlayDragMouseUpListener = null;
 let overlayDragHookBootWaitTimer = null;
 const OVERLAY_RENDERER_ACK_TIMEOUT_MS = 1200;
 const OVERLAY_NUDGE_STEP_PX = 20;
+const OVERLAY_SHORTCUT_PRIORITY_TOGGLE = 100;
+const OVERLAY_SHORTCUT_PRIORITY_INTERACT = 90;
+const OVERLAY_SHORTCUT_PRIORITY_SCROLL = 40;
+const OVERLAY_SHORTCUT_PRIORITY_POSITION = 30;
+const OVERLAY_SHORTCUT_REPEAT_COOLDOWN_MS = 200;
 const OVERLAY_SNAP5_PRESETS = [
   { accelerator: "Control+Alt+Shift+1", x: 0, y: 0 },
   { accelerator: "Control+Alt+Shift+2", x: 1, y: 0 },
@@ -8203,6 +8471,848 @@ function stopOverlayGlobalDrag() {
   overlayDragOffset = null;
 }
 
+function isOverlayUserDefinedShortcutConflict(conflict) {
+  return conflict?.scope === "user";
+}
+
+function createRegisteredShortcutEntry(mode, token) {
+  return { mode, token };
+}
+
+function clearRegisteredShortcutEntry(entry) {
+  if (!entry) return;
+  if (entry.mode === "low-level") {
+    unregisterOverlayLowLevelBinding(entry.token);
+    return;
+  }
+  if (entry.mode === "global" && entry.token) {
+    try {
+      globalShortcut.unregister(entry.token);
+    } catch {}
+  }
+}
+
+function clearRegisteredShortcutEntries(entries) {
+  if (!Array.isArray(entries) || !entries.length) return;
+  for (const entry of entries) {
+    clearRegisteredShortcutEntry(entry);
+  }
+}
+
+function summarizeOverlayShortcutRegistrationState() {
+  return {
+    interact:
+      overlayInteractDirectBinding?.normalized ||
+      (registeredOverlayInteractShortcutMode === "global"
+        ? registeredOverlayInteractShortcut
+        : null),
+    scrollUp: registeredOverlayScrollPageUpShortcuts.length,
+    scrollDown: registeredOverlayScrollPageDownShortcuts.length,
+    position: registeredOverlayPositionShortcuts.length,
+  };
+}
+
+function logOverlayShortcutRegistrationSummary(event, level = "info", extra = {}) {
+  const log =
+    overlayLogger && typeof overlayLogger[level] === "function"
+      ? overlayLogger[level].bind(overlayLogger)
+      : overlayLogger.info.bind(overlayLogger);
+  log(event, {
+    ...summarizeOverlayShortcutRegistrationState(),
+    ...extra,
+  });
+}
+
+function normalizeOverlayLowLevelAccelerator(
+  shortcut,
+  { allowSingle = false } = {},
+) {
+  return normalizeOverlayShortcutAccelerator(shortcut, { allowSingle });
+}
+
+function parseOverlayShortcutConflictBinding(
+  shortcut,
+  { allowSingle = false, matchMode = "required" } = {},
+) {
+  const deps = getOverlayDirectKeyboardHookDeps();
+  if (!deps?.keyMap) return null;
+  return parseOverlayShortcutAccelerator(shortcut, {
+    allowSingle,
+    keyMap: deps.keyMap,
+    matchMode,
+  });
+}
+
+function createOverlayShortcutConflictSummary(
+  binding,
+  {
+    id,
+    source = id,
+    scope = "builtin",
+    priority = 0,
+    shortcut = null,
+    target = source,
+  } = {},
+) {
+  if (!binding) return null;
+  return {
+    id,
+    source,
+    scope,
+    shortcut: shortcut || binding.normalized,
+    normalized: binding.normalized,
+    keyName: binding.keyName,
+    keycode: binding.triggerKey,
+    priority: Number(priority) || 0,
+    matchMode: binding.matchMode || "exact",
+    target,
+  };
+}
+
+function getOverlayShortcutConflictDisplayValue(conflict) {
+  if (!conflict) return null;
+  return (
+    conflict.shortcut ||
+    conflict.normalized ||
+    conflict.target ||
+    conflict.source ||
+    null
+  );
+}
+
+function getOverlayReservedBuiltInShortcutSpecs() {
+  const specs = [];
+  const pushMany = (
+    source,
+    accelerators,
+    { allowSingle = false, priority = 0 } = {},
+  ) => {
+    if (!Array.isArray(accelerators) || !accelerators.length) return;
+    accelerators.forEach((shortcut, index) => {
+      specs.push({
+        id: `${source}:${index}`,
+        source,
+        scope: "builtin",
+        shortcut,
+        allowSingle,
+        matchMode: "exact",
+        priority,
+        target: source,
+      });
+    });
+  };
+
+  pushMany("overlay-scroll-up", ["PageUp", "Control+PageUp"], {
+    allowSingle: true,
+    priority: OVERLAY_SHORTCUT_PRIORITY_SCROLL,
+  });
+  pushMany("overlay-scroll-down", ["PageDown", "Control+PageDown"], {
+    allowSingle: true,
+    priority: OVERLAY_SHORTCUT_PRIORITY_SCROLL,
+  });
+
+  OVERLAY_SNAP5_PRESETS.forEach((preset, index) => {
+    pushMany(`overlay-position:snap5:${index}`, [preset.accelerator], {
+      allowSingle: false,
+      priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+    });
+  });
+  OVERLAY_SNAP9_NUMPAD_PRESETS.forEach((preset, index) => {
+    pushMany(`overlay-position:snap9:${index}`, preset.accelerators, {
+      allowSingle: false,
+      priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+    });
+  });
+
+  pushMany("overlay-position:cycle", ["Control+Alt+Shift+M"], {
+    allowSingle: false,
+    priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+  });
+  pushMany("overlay-position:nudge-left", ["Control+Alt+Shift+Left"], {
+    allowSingle: false,
+    priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+  });
+  pushMany("overlay-position:nudge-right", ["Control+Alt+Shift+Right"], {
+    allowSingle: false,
+    priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+  });
+  pushMany("overlay-position:nudge-up", ["Control+Alt+Shift+Up"], {
+    allowSingle: false,
+    priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+  });
+  pushMany("overlay-position:nudge-down", ["Control+Alt+Shift+Down"], {
+    allowSingle: false,
+    priority: OVERLAY_SHORTCUT_PRIORITY_POSITION,
+  });
+
+  return specs;
+}
+
+function getOverlayReservedBuiltInConflictCandidates() {
+  const seen = new Set();
+  const candidates = [];
+  for (const spec of getOverlayReservedBuiltInShortcutSpecs()) {
+    const binding = parseOverlayShortcutConflictBinding(spec.shortcut, {
+      allowSingle: spec.allowSingle === true,
+      matchMode: spec.matchMode || "exact",
+    });
+    if (!binding) continue;
+    const signature = getOverlayShortcutBindingSignature(binding);
+    const dedupeKey = `${spec.source}:${signature || binding.normalized}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    candidates.push({
+      binding,
+      summary: createOverlayShortcutConflictSummary(binding, spec),
+    });
+  }
+  return candidates;
+}
+
+function dedupeOverlayShortcutAccelerators(
+  accelerators,
+  { allowSingle = false, matchMode = "exact", source = "" } = {},
+) {
+  if (!Array.isArray(accelerators) || !accelerators.length) return [];
+  const seen = new Set();
+  const deduped = [];
+  for (const accelerator of accelerators) {
+    if (typeof accelerator !== "string" || !accelerator.trim()) continue;
+    const normalized = normalizeOverlayShortcutAccelerator(accelerator, {
+      allowSingle,
+    });
+    if (!normalized) continue;
+    const binding = parseOverlayShortcutConflictBinding(normalized, {
+      allowSingle,
+      matchMode,
+    });
+    const signature = binding
+      ? getOverlayShortcutBindingSignature(binding)
+      : `${matchMode}:${normalized}`;
+    const dedupeKey = `${source}:${signature}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    deduped.push(accelerator);
+  }
+  return deduped;
+}
+
+function findOverlayShortcutConflicts(
+  shortcut,
+  {
+    allowSingle = false,
+    matchMode = "required",
+    otherShortcuts = [],
+    includeReservedBuiltins = true,
+  } = {},
+) {
+  const parsed = parseOverlayShortcutConflictBinding(shortcut, {
+    allowSingle,
+    matchMode,
+  });
+  if (!parsed) return { parsed: null, conflicts: [] };
+
+  const conflicts = [];
+  const seen = new Set();
+  const pushConflict = (binding, meta) => {
+    if (!binding || !meta) return;
+    const signature = getOverlayShortcutBindingSignature(binding);
+    const conflictKey = `${meta.scope || "builtin"}:${meta.source || meta.id}:${signature || binding.normalized}`;
+    if (seen.has(conflictKey)) return;
+    seen.add(conflictKey);
+    conflicts.push(createOverlayShortcutConflictSummary(binding, meta));
+  };
+
+  for (const other of otherShortcuts) {
+    if (!other?.shortcut) continue;
+    const otherBinding = parseOverlayShortcutConflictBinding(other.shortcut, {
+      allowSingle: other.allowSingle === true,
+      matchMode: other.matchMode || "required",
+    });
+    if (!otherBinding) continue;
+    if (!overlayBindingsCanConflict(parsed, otherBinding)) continue;
+    pushConflict(otherBinding, {
+      id: other.id,
+      source: other.source || other.id,
+      scope: other.scope || "user",
+      priority: Number(other.priority) || 0,
+      shortcut: other.shortcut,
+      target: other.target || other.source || other.id,
+    });
+  }
+
+  if (includeReservedBuiltins) {
+    for (const reserved of getOverlayReservedBuiltInConflictCandidates()) {
+      if (!overlayBindingsCanConflict(parsed, reserved.binding)) continue;
+      pushConflict(reserved.binding, reserved.summary);
+    }
+  }
+
+  return { parsed, conflicts };
+}
+
+function getOverlayDirectKeyboardHookDeps() {
+  const deps = overlayShortcutManager.getHookDeps();
+  if (!deps?.hook || !deps?.keyMap) return null;
+  return deps;
+}
+
+function ensureOverlayDirectKeyboardHookStarted(reason = "overlay-direct") {
+  const deps = getOverlayDirectKeyboardHookDeps();
+  if (!deps) return null;
+  if (!overlayShortcutManager.ensureStarted(reason)) return null;
+  return deps;
+}
+
+function getOverlayDirectBindingTriggerKeys(binding) {
+  if (!binding) return [];
+  if (Array.isArray(binding.triggerKeys) && binding.triggerKeys.length) {
+    return binding.triggerKeys
+      .map((keycode) => Number(keycode))
+      .filter((keycode) => Number.isFinite(keycode));
+  }
+  const triggerKey = Number(binding.triggerKey);
+  return Number.isFinite(triggerKey) ? [triggerKey] : [];
+}
+
+function matchesOverlayDirectKeyboardShortcut(binding, event) {
+  if (!binding || !event) return false;
+  if (!getOverlayDirectBindingTriggerKeys(binding).includes(Number(event.keycode))) {
+    return false;
+  }
+  if (binding.requireCtrl && !event.ctrlKey) return false;
+  if (binding.requireShift && !event.shiftKey) return false;
+  if (binding.requireAlt && !event.altKey) return false;
+  if (binding.requireMeta && !event.metaKey) return false;
+  return true;
+}
+
+function summarizeOverlayDirectKeyboardBinding(binding, id, source) {
+  if (!binding) return null;
+  return {
+    id,
+    source,
+    normalized: binding.normalized,
+    keyName: binding.keyName,
+    keycode: binding.triggerKey,
+    keycodes: getOverlayDirectBindingTriggerKeys(binding),
+    matchMode: binding.matchMode,
+  };
+}
+
+function summarizeOverlayDirectKeyboardEvent(event) {
+  return {
+    keycode: Number(event?.keycode),
+    ctrlKey: !!event?.ctrlKey,
+    shiftKey: !!event?.shiftKey,
+    altKey: !!event?.altKey,
+    metaKey: !!event?.metaKey,
+  };
+}
+
+function removeOverlayDirectKeydownListener(hook, listener) {
+  if (!hook || typeof listener !== "function") return;
+  try {
+    hook.off("keydown", listener);
+  } catch {}
+}
+
+function tryRegisterDirectOverlayShortcut(
+  id,
+  shortcut,
+  {
+    allowSingle = false,
+    cooldownMs = 0,
+    source = id,
+    onFire,
+    getLastTriggeredAt = () => 0,
+    setLastTriggeredAt = () => {},
+    setListener = () => {},
+    setHook = () => {},
+    setBinding = () => {},
+  } = {},
+) {
+  const deps = ensureOverlayDirectKeyboardHookStarted(source);
+  if (!deps) return { ok: false, reason: "hook-unavailable" };
+
+  const parsed = parseOverlayShortcutAccelerator(shortcut, {
+    allowSingle,
+    keyMap: deps.keyMap,
+    matchMode: "required",
+  });
+  if (!parsed) {
+    overlayLogger.warn("overlay:shortcut:parse-failed", {
+      id,
+      shortcut,
+      allowSingle,
+      matchMode: "required",
+    });
+    return { ok: false, reason: "invalid-shortcut" };
+  }
+
+  const listener = (event) => {
+    if (!getOverlayDirectBindingTriggerKeys(parsed).includes(Number(event?.keycode))) {
+      return;
+    }
+
+    overlayLogger.debug("overlay:input-hook:keydown", {
+      source,
+      event: summarizeOverlayDirectKeyboardEvent(event),
+      candidates: [summarizeOverlayDirectKeyboardBinding(parsed, id, source)],
+    });
+
+    if (!matchesOverlayDirectKeyboardShortcut(parsed, event)) {
+      overlayLogger.debug("overlay:input-hook:keydown-result", {
+        source,
+        event: summarizeOverlayDirectKeyboardEvent(event),
+        matchedIds: [],
+        skippedActiveIds: [],
+        skippedCooldownIds: [],
+        whenRejectedIds: [],
+        firedIds: [],
+      });
+      return;
+    }
+
+    const now = Date.now();
+    if (cooldownMs > 0 && now - (Number(getLastTriggeredAt()) || 0) < cooldownMs) {
+      overlayLogger.debug("overlay:input-hook:keydown-result", {
+        source,
+        event: summarizeOverlayDirectKeyboardEvent(event),
+        matchedIds: [id],
+        skippedActiveIds: [],
+        skippedCooldownIds: [id],
+        whenRejectedIds: [],
+        firedIds: [],
+      });
+      return;
+    }
+
+    setLastTriggeredAt(now);
+    try {
+      onFire?.(event, parsed);
+      overlayLogger.debug("overlay:input-hook:keydown-result", {
+        source,
+        event: summarizeOverlayDirectKeyboardEvent(event),
+        matchedIds: [id],
+        skippedActiveIds: [],
+        skippedCooldownIds: [],
+        whenRejectedIds: [],
+        firedIds: [id],
+      });
+    } catch (err) {
+      overlayLogger.warn("overlay:shortcut:fire-failed", {
+        id,
+        error: err?.message || String(err),
+      });
+    }
+  };
+
+  deps.hook.on("keydown", listener);
+  setListener(listener);
+  setHook(deps.hook);
+  setBinding(parsed);
+  overlayLogger.debug("overlay:shortcut:registered", {
+    id,
+    shortcut,
+    normalized: parsed.normalized,
+    keyName: parsed.keyName,
+    keycode: parsed.triggerKey,
+    keycodes: getOverlayDirectBindingTriggerKeys(parsed),
+    priority: null,
+    matchMode: parsed.matchMode,
+    mode: "direct",
+    conflicts: [],
+  });
+  return { ok: true, parsed };
+}
+
+function registerOverlayLowLevelBinding(id, shortcut, options = {}) {
+  return overlayShortcutManager.registerBinding(id, shortcut, {
+    allowSingle: options.allowSingle === true,
+    continueOnMatch: options.continueOnMatch === true,
+    cooldownMs: Number(options.cooldownMs) || 0,
+    matchMode: options.matchMode || "exact",
+    onFire: options.onFire,
+    priority: Number(options.priority) || 0,
+    rejectOnConflict: options.rejectOnConflict,
+    scope: options.scope || "builtin",
+    source: options.source || id,
+    when: options.when,
+  });
+}
+
+function unregisterOverlayLowLevelBinding(id) {
+  overlayShortcutManager.unregisterBinding(id);
+}
+
+function buildElectronAcceleratorCandidates(
+  shortcut,
+  { allowSingle = false } = {},
+) {
+  const normalized = normalizeOverlayShortcutAccelerator(shortcut, {
+    allowSingle,
+  });
+  if (!normalized) return [];
+
+  const parts = normalized
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (!parts.length) return [];
+
+  const out = [];
+  const push = (value) => {
+    if (!value || out.includes(value)) return;
+    out.push(value);
+  };
+  const join = (mapper) => parts.map(mapper).join("+");
+  const translateElectronToken = (token) => {
+    switch (token) {
+      case "ArrowLeft":
+        return "Left";
+      case "ArrowRight":
+        return "Right";
+      case "ArrowUp":
+        return "Up";
+      case "ArrowDown":
+        return "Down";
+      case "Meta":
+        return "Super";
+      default:
+        return token;
+    }
+  };
+
+  push(parts.join("+"));
+  push(join((token) => translateElectronToken(token)));
+  push(join((token) => (token === "\\" ? "Backslash" : token)));
+  push(join((token) => (/^backslash$/i.test(token) ? "\\" : token)));
+  push(
+    join((token) =>
+      token === "\\" || /^backslash$/i.test(token) ? "Oem5" : token,
+    ),
+  );
+  push(
+    join((token) =>
+      token === "\\" || /^backslash$/i.test(token) ? "OEM_5" : token,
+    ),
+  );
+
+  return out;
+}
+
+function tryRegisterGlobalShortcutCandidates(candidates, onFire) {
+  let lastErr = null;
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "string") continue;
+    try {
+      const registered = globalShortcut.register(candidate, onFire);
+      if (registered) {
+        return { ok: true, accelerator: candidate };
+      }
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  return { ok: false, error: lastErr };
+}
+
+function registerOverlayBindingWithFallback({
+  id,
+  shortcut,
+  allowSingle = false,
+  priority = 0,
+  cooldownMs = 0,
+  scope = "builtin",
+  source = id,
+  rejectOnConflict = false,
+  onFire,
+  matchMode = "exact",
+  fallbackCandidates = null,
+}) {
+  const lowLevelResult = registerOverlayLowLevelBinding(id, shortcut, {
+    allowSingle,
+    cooldownMs,
+    matchMode,
+    onFire,
+    priority,
+    rejectOnConflict,
+    scope,
+    source,
+  });
+
+  if (lowLevelResult.ok) {
+    return {
+      ...lowLevelResult,
+      entry: createRegisteredShortcutEntry("low-level", id),
+    };
+  }
+
+  if (lowLevelResult.reason !== "hook-unavailable") {
+    return lowLevelResult;
+  }
+
+  const candidates =
+    Array.isArray(fallbackCandidates) && fallbackCandidates.length
+      ? fallbackCandidates
+      : buildElectronAcceleratorCandidates(shortcut, { allowSingle });
+  const fallbackResult = tryRegisterGlobalShortcutCandidates(candidates, onFire);
+  if (!fallbackResult.ok) {
+    overlayLogger.warn("overlay:shortcut:fallback-failed", {
+      id,
+      shortcut,
+      candidates,
+      error: fallbackResult.error?.message || null,
+    });
+    return {
+      ok: false,
+      reason: "hook-unavailable",
+      error: fallbackResult.error || null,
+    };
+  }
+
+  overlayLogger.warn("overlay:shortcut:fallback-registered", {
+    id,
+    shortcut,
+    accelerator: fallbackResult.accelerator,
+    candidates,
+  });
+  return {
+    ok: true,
+    entry: createRegisteredShortcutEntry("global", fallbackResult.accelerator),
+    parsed: null,
+    conflicts: [],
+    fallback: true,
+  };
+}
+
+function clearOverlayShortcutRegistration() {
+  if (overlayShortcutDirectBinding) {
+    overlayLogger.debug("overlay:shortcut:unregistered", {
+      id: "overlay-shortcut",
+      normalized: overlayShortcutDirectBinding.normalized,
+      mode: "direct",
+    });
+  }
+  removeOverlayDirectKeydownListener(
+    overlayShortcutKeydownHook,
+    overlayShortcutKeydownListener,
+  );
+  overlayShortcutKeydownListener = null;
+  overlayShortcutKeydownHook = null;
+  overlayShortcutDirectBinding = null;
+  overlayShortcutLastTriggeredAt = 0;
+  unregisterOverlayLowLevelBinding("overlay-shortcut");
+  if (
+    registeredOverlayShortcutMode === "global" &&
+    registeredOverlayShortcut &&
+    typeof registeredOverlayShortcut === "string"
+  ) {
+    try {
+      globalShortcut.unregister(registeredOverlayShortcut);
+    } catch {}
+  }
+  registeredOverlayShortcut = null;
+  registeredOverlayShortcutMode = null;
+}
+
+function validateOverlayShortcutPreferencePair(preferences) {
+  const overlayShortcutValue =
+    typeof preferences?.overlayShortcut === "string"
+      ? preferences.overlayShortcut.trim()
+      : "";
+  const overlayInteractValue =
+    typeof preferences?.overlayInteractShortcut === "string"
+      ? preferences.overlayInteractShortcut.trim()
+      : "";
+
+  const normalizedOverlayShortcut = overlayShortcutValue
+    ? normalizeOverlayShortcutAccelerator(overlayShortcutValue, {
+        allowSingle: false,
+      })
+    : null;
+  const normalizedOverlayInteract = overlayInteractValue
+    ? normalizeOverlayShortcutAccelerator(overlayInteractValue, {
+        allowSingle: true,
+      })
+    : null;
+
+  if (overlayShortcutValue && !normalizedOverlayShortcut) {
+    return {
+      key: "overlayShortcut",
+      reason: "invalid",
+      shortcut: overlayShortcutValue,
+    };
+  }
+  if (overlayInteractValue && !normalizedOverlayInteract) {
+    return {
+      key: "overlayInteractShortcut",
+      reason: "invalid",
+      shortcut: overlayInteractValue,
+    };
+  }
+
+  const overlayShortcutConflict = overlayShortcutValue
+    ? findOverlayShortcutConflicts(overlayShortcutValue, {
+        allowSingle: false,
+        matchMode: "required",
+        otherShortcuts: overlayInteractValue
+          ? [
+              {
+                id: "overlay-interact",
+                source: "overlay-interact",
+                scope: "user",
+                shortcut: overlayInteractValue,
+                allowSingle: true,
+                matchMode: "required",
+                priority: OVERLAY_SHORTCUT_PRIORITY_INTERACT,
+                target: "overlayInteractShortcut",
+              },
+            ]
+          : [],
+      })
+    : null;
+  if (overlayShortcutConflict?.conflicts?.length) {
+    const firstConflict = overlayShortcutConflict.conflicts[0];
+    return {
+      key: "overlayShortcut",
+      reason: "conflict",
+      shortcut: overlayShortcutValue,
+      conflictWith: getOverlayShortcutConflictDisplayValue(firstConflict),
+      conflictSource: firstConflict?.source || null,
+      conflicts: overlayShortcutConflict.conflicts,
+      resetKey:
+        firstConflict?.scope === "user"
+          ? "overlayInteractShortcut"
+          : "overlayShortcut",
+    };
+  }
+
+  const overlayInteractConflict = overlayInteractValue
+    ? findOverlayShortcutConflicts(overlayInteractValue, {
+        allowSingle: true,
+        matchMode: "required",
+        otherShortcuts: overlayShortcutValue
+          ? [
+              {
+                id: "overlay-shortcut",
+                source: "overlay-shortcut",
+                scope: "user",
+                shortcut: overlayShortcutValue,
+                allowSingle: false,
+                matchMode: "required",
+                priority: OVERLAY_SHORTCUT_PRIORITY_TOGGLE,
+                target: "overlayShortcut",
+              },
+            ]
+          : [],
+      })
+    : null;
+  if (overlayInteractConflict?.conflicts?.length) {
+    const firstConflict = overlayInteractConflict.conflicts[0];
+    return {
+      key: "overlayInteractShortcut",
+      reason: "conflict",
+      shortcut: overlayInteractValue,
+      conflictWith: getOverlayShortcutConflictDisplayValue(firstConflict),
+      conflictSource: firstConflict?.source || null,
+      conflicts: overlayInteractConflict.conflicts,
+      resetKey: "overlayInteractShortcut",
+    };
+  }
+
+  if (
+    !getOverlayDirectKeyboardHookDeps() &&
+    normalizedOverlayShortcut &&
+    normalizedOverlayInteract &&
+    normalizedOverlayShortcut === normalizedOverlayInteract
+  ) {
+    return {
+      key: "overlayShortcut",
+      reason: "conflict",
+      shortcut: overlayShortcutValue,
+      conflictWith: overlayInteractValue,
+      conflictSource: "overlay-interact",
+      resetKey: "overlayInteractShortcut",
+    };
+  }
+
+  return null;
+}
+
+function applyOverlayShortcutConflictFallback(preferences, validation) {
+  if (!preferences || !validation || validation.reason !== "conflict") {
+    return preferences;
+  }
+
+  const resolved = { ...preferences };
+  const primaryResetKey =
+    validation.resetKey || validation.key || "overlayInteractShortcut";
+  const alternateResetKey =
+    primaryResetKey === "overlayShortcut"
+      ? "overlayInteractShortcut"
+      : primaryResetKey === "overlayInteractShortcut"
+        ? "overlayShortcut"
+        : null;
+
+  const primaryDefault = Object.prototype.hasOwnProperty.call(
+    DEFAULT_PREFERENCES,
+    primaryResetKey,
+  )
+    ? DEFAULT_PREFERENCES[primaryResetKey]
+    : "";
+  if (resolved[primaryResetKey] !== primaryDefault) {
+    resolved[primaryResetKey] = primaryDefault;
+    return resolved;
+  }
+
+  if (!alternateResetKey) return resolved;
+  const alternateDefault = Object.prototype.hasOwnProperty.call(
+    DEFAULT_PREFERENCES,
+    alternateResetKey,
+  )
+    ? DEFAULT_PREFERENCES[alternateResetKey]
+    : "";
+  resolved[alternateResetKey] = alternateDefault;
+  return resolved;
+}
+
+function resolveOverlayShortcutPreferenceConflicts(preferences) {
+  let resolved = {
+    overlayShortcut:
+      typeof preferences?.overlayShortcut === "string"
+        ? preferences.overlayShortcut
+        : "",
+    overlayInteractShortcut:
+      typeof preferences?.overlayInteractShortcut === "string"
+        ? preferences.overlayInteractShortcut
+        : DEFAULT_PREFERENCES.overlayInteractShortcut,
+  };
+  let validation = validateOverlayShortcutPreferencePair(resolved);
+
+  for (
+    let attempt = 0;
+    attempt < 3 && validation?.reason === "conflict";
+    attempt += 1
+  ) {
+    const nextResolved = applyOverlayShortcutConflictFallback(
+      resolved,
+      validation,
+    );
+    if (
+      nextResolved.overlayShortcut === resolved.overlayShortcut &&
+      nextResolved.overlayInteractShortcut === resolved.overlayInteractShortcut
+    ) {
+      break;
+    }
+    resolved = nextResolved;
+    validation = validateOverlayShortcutPreferencePair(resolved);
+  }
+
+  return { resolved, validation };
+}
+
 function isOverlayDragEligible(point) {
   if (
     !overlayWindow ||
@@ -8236,19 +9346,12 @@ function isOverlayDragEligible(point) {
 }
 
 function initOverlayGlobalDragHook() {
-  if (overlayDragHookStarted || overlayDragHookInitAttempted) return;
-  overlayDragHookInitAttempted = true;
-  try {
-    const { uIOhook } = require("uiohook-napi");
-    overlayDragHook = uIOhook;
-  } catch (err) {
-    windowLogger.warn("overlay:drag-hook:load-failed", {
-      error: err?.message || String(err),
-    });
+  if (overlayGlobalMouseHandlersAttached) {
+    overlayShortcutManager.ensureStarted("mouse");
     return;
   }
 
-  overlayDragHook.on("mousedown", (event) => {
+  overlayDragMouseDownListener = (event) => {
     if (event?.button !== 1) return;
     const point = { x: Number(event.x), y: Number(event.y) };
     if (!isOverlayDragEligible(point)) return;
@@ -8263,9 +9366,9 @@ function initOverlayGlobalDragHook() {
       x: point.x - bounds.x,
       y: point.y - bounds.y,
     };
-  });
+  };
 
-  overlayDragHook.on("mousemove", (event) => {
+  overlayDragMouseMoveListener = (event) => {
     if (!overlayDragActive || !overlayDragOffset) return;
     if (
       !overlayWindow ||
@@ -8285,22 +9388,31 @@ function initOverlayGlobalDragHook() {
       // Reposition only; do not activate/focus the window while dragging.
       overlayWindow.setPosition(nextX, nextY, false);
     } catch {}
-  });
+  };
 
-  overlayDragHook.on("mouseup", (event) => {
+  overlayDragMouseUpListener = (event) => {
     if (event?.button !== 1) return;
     stopOverlayGlobalDrag();
-  });
+  };
 
-  try {
-    overlayDragHook.start();
-    overlayDragHookStarted = true;
-    windowLogger.info("overlay:drag-hook:started");
-  } catch (err) {
-    windowLogger.warn("overlay:drag-hook:start-failed", {
-      error: err?.message || String(err),
-    });
+  const attached = [
+    overlayShortcutManager.on("mousedown", overlayDragMouseDownListener),
+    overlayShortcutManager.on("mousemove", overlayDragMouseMoveListener),
+    overlayShortcutManager.on("mouseup", overlayDragMouseUpListener),
+  ];
+  if (attached.some((result) => result !== true)) {
+    overlayShortcutManager.off("mousedown", overlayDragMouseDownListener);
+    overlayShortcutManager.off("mousemove", overlayDragMouseMoveListener);
+    overlayShortcutManager.off("mouseup", overlayDragMouseUpListener);
+    overlayDragMouseDownListener = null;
+    overlayDragMouseMoveListener = null;
+    overlayDragMouseUpListener = null;
+    overlayLogger.warn("overlay:drag-hook:attach-failed");
+    return;
   }
+
+  overlayGlobalMouseHandlersAttached = true;
+  overlayShortcutManager.ensureStarted("mouse");
 }
 
 function isOverlayDragHookEligible() {
@@ -8311,10 +9423,10 @@ function isOverlayDragHookEligible() {
 }
 
 function scheduleOverlayDragHookAfterBootComplete() {
-  if (overlayDragHookStarted || overlayDragHookInitAttempted) return;
+  if (overlayGlobalMouseHandlersAttached) return;
   if (overlayDragHookBootWaitTimer) return;
   const waitAndStart = () => {
-    if (overlayDragHookStarted || overlayDragHookInitAttempted) {
+    if (overlayGlobalMouseHandlersAttached) {
       overlayDragHookBootWaitTimer = null;
       return;
     }
@@ -8385,7 +9497,7 @@ function schedulePostBootUiInitialization() {
 }
 
 function createOverlayWindow(selectedConfig, initialPresented = true) {
-  windowLogger.info("create-overlay:start", {
+  overlayLogger.debug("create-overlay:start", {
     selectedConfig: selectedConfig || null,
     initialPresented: !!initialPresented,
   });
@@ -8419,7 +9531,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
     });
   } catch (err) {
     overlayWindow = null;
-    windowLogger.error("create-overlay:create-failed", {
+    overlayLogger.error("create-overlay:create-failed", {
       error: err?.message || String(err),
       stack: err?.stack,
       selectedConfig: selectedConfig || null,
@@ -8428,7 +9540,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
     throw err;
   }
   overlayPresented = !!initialPresented;
-  windowLogger.info("create-overlay:browserwindow-created", {
+  overlayLogger.debug("create-overlay:browserwindow-created", {
     width: 450,
     height: 950,
     position: { x: width - 470, y: 20 },
@@ -8445,19 +9557,19 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   overlayWindow
     .loadFile("overlay.html", { query: { icon: iconUrl } })
     .catch((err) => {
-      windowLogger.error("create-overlay:load-file-failed", {
+      overlayLogger.error("create-overlay:load-file-failed", {
         error: err?.message || String(err),
         stack: err?.stack,
         icon: iconUrl,
         state: getOverlayWindowLogState(),
       });
     });
-  windowLogger.info("create-overlay:load-file", { icon: iconUrl });
+  overlayLogger.debug("create-overlay:load-file", { icon: iconUrl });
 
   // Defensive: re-apply click-through after the window is actually visible (race safety).
   overlayWindow.once("ready-to-show", () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    windowLogger.info("create-overlay:ready-to-show", {
+    overlayLogger.debug("create-overlay:ready-to-show", {
       initialPresented: overlayPresented,
     });
     try {
@@ -8475,7 +9587,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
         overlayWindow.blur();
       } catch {}
     } else {
-      windowLogger.info("create-overlay:ready-hidden", {
+      overlayLogger.debug("create-overlay:ready-hidden", {
         initialPresented: false,
       });
     }
@@ -8498,7 +9610,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.webContents.on("did-finish-load", () => {
-    windowLogger.info("create-overlay:did-finish-load", {
+    overlayLogger.debug("create-overlay:did-finish-load", {
       selectedConfig: selectedConfig || null,
     });
     overlayWindow.webContents.send("load-overlay-data", selectedConfig);
@@ -8521,7 +9633,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("closed", () => {
-    windowLogger.info("create-overlay:closed");
+    overlayLogger.debug("create-overlay:closed");
     clearOverlayVisibilityAckTimeout();
     clearOverlayTopmostBoostTimer();
     stopOverlayGlobalDrag();
@@ -8537,7 +9649,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
 
   overlayWindow.on("show", () => {
     overlayShownAtLeastOnce = true;
-    windowLogger.info("create-overlay:show", {
+    overlayLogger.debug("create-overlay:show", {
       presented: overlayPresented,
       visible: overlayWindow?.isVisible?.() || false,
     });
@@ -8561,7 +9673,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("hide", () => {
-    windowLogger.info("create-overlay:hide", {
+    overlayLogger.debug("create-overlay:hide", {
       presented: overlayPresented,
     });
     setOverlayInteractive(false);
@@ -8573,19 +9685,19 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("unresponsive", () => {
-    windowLogger.warn("create-overlay:unresponsive", {
+    overlayLogger.warn("create-overlay:unresponsive", {
       state: getOverlayWindowLogState(),
     });
   });
 
   overlayWindow.on("responsive", () => {
-    windowLogger.info("create-overlay:responsive", {
+    overlayLogger.debug("create-overlay:responsive", {
       state: getOverlayWindowLogState(),
     });
   });
 
   overlayWindow.webContents.on("dom-ready", () => {
-    windowLogger.info("create-overlay:dom-ready", {
+    overlayLogger.debug("create-overlay:dom-ready", {
       state: getOverlayWindowLogState(),
     });
   });
@@ -8601,7 +9713,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       frameProcessId,
       frameRoutingId,
     ) => {
-      windowLogger.error("create-overlay:did-fail-load", {
+      overlayLogger.error("create-overlay:did-fail-load", {
         errorCode,
         errorDescription,
         validatedURL,
@@ -8614,7 +9726,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   );
 
   overlayWindow.webContents.on("render-process-gone", (_event, details) => {
-    windowLogger.error("create-overlay:render-gone", {
+    overlayLogger.error("create-overlay:render-gone", {
       reason: details?.reason,
       exitCode: details?.exitCode,
       state: getOverlayWindowLogState(),
@@ -8638,7 +9750,6 @@ ipcMain.handle("launchExecutable", async (_event, exePath, argsString) => {
       return;
     }
     const args = splitArgsString(argsString);
-
     const child = spawn(exePath, args, {
       cwd: path.dirname(exePath),
       detached: true,
@@ -8924,10 +10035,15 @@ app.whenReady().then(async () => {
       : {};
 
     selectedLanguage = prefs.language || selectedLanguage;
-    const overlayShortcut = prefs.overlayShortcut || null;
-    global.overlayShortcut = overlayShortcut;
-    if (overlayShortcut) {
-      registerOverlayShortcut(overlayShortcut);
+    let overlayShortcut = prefs.overlayShortcut || null;
+    if (
+      typeof overlayShortcut === "string" &&
+      overlayShortcut.trim() &&
+      !normalizeOverlayShortcutAccelerator(overlayShortcut, {
+        allowSingle: false,
+      })
+    ) {
+      overlayShortcut = null;
     }
     let overlayInteractShortcut = Object.prototype.hasOwnProperty.call(
       prefs,
@@ -8941,6 +10057,29 @@ app.whenReady().then(async () => {
       !normalizeOverlayInteractAccelerator(overlayInteractShortcut)
     ) {
       overlayInteractShortcut = DEFAULT_PREFERENCES.overlayInteractShortcut;
+    }
+    const resolvedOverlayStartupShortcuts =
+      resolveOverlayShortcutPreferenceConflicts({
+        overlayShortcut,
+        overlayInteractShortcut,
+      });
+    overlayShortcut = resolvedOverlayStartupShortcuts.resolved.overlayShortcut;
+    overlayInteractShortcut =
+      resolvedOverlayStartupShortcuts.resolved.overlayInteractShortcut;
+    const overlayStartupShortcutValidation =
+      resolvedOverlayStartupShortcuts.validation;
+    if (overlayStartupShortcutValidation?.reason === "conflict") {
+      prefsLogger.warn("preferences:start:overlay-shortcut-conflict", {
+        key: overlayStartupShortcutValidation.key,
+        shortcut: overlayStartupShortcutValidation.shortcut,
+        conflictWith: overlayStartupShortcutValidation.conflictWith || null,
+        conflictSource: overlayStartupShortcutValidation.conflictSource || null,
+        resetKey: overlayStartupShortcutValidation.resetKey || null,
+      });
+    }
+    global.overlayShortcut = overlayShortcut;
+    if (overlayShortcut) {
+      registerOverlayShortcut(overlayShortcut);
     }
     global.overlayInteractShortcut = overlayInteractShortcut;
     applyOverlayInteractShortcutRegistration();
@@ -8974,11 +10113,21 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
-  if (overlayDragHook && overlayDragHookStarted) {
-    try {
-      overlayDragHook.stop();
-    } catch {}
+  clearOverlayShortcutRegistration();
+  clearOverlayInteractShortcut();
+  if (overlayDragMouseDownListener) {
+    overlayShortcutManager.off("mousedown", overlayDragMouseDownListener);
+    overlayDragMouseDownListener = null;
   }
+  if (overlayDragMouseMoveListener) {
+    overlayShortcutManager.off("mousemove", overlayDragMouseMoveListener);
+    overlayDragMouseMoveListener = null;
+  }
+  if (overlayDragMouseUpListener) {
+    overlayShortcutManager.off("mouseup", overlayDragMouseUpListener);
+    overlayDragMouseUpListener = null;
+  }
+  overlayShortcutManager.shutdown();
 });
 
 function showProgressNotification(data) {
@@ -9405,10 +10554,10 @@ ipcMain.on("overlay:visibility-ack", (event, payload = {}) => {
     state: getOverlayWindowLogState(),
   };
   if (!currentWebContentsId || currentWebContentsId !== senderId) {
-    windowLogger.warn("overlay:renderer-ack:stale", ackMeta);
+    overlayLogger.warn("overlay:renderer-ack:stale", ackMeta);
     return;
   }
-  windowLogger.info("overlay:renderer-ack", ackMeta);
+  overlayLogger.debug("overlay:renderer-ack", ackMeta);
   clearOverlayVisibilityAckTimeout();
 });
 

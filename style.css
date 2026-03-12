@@ -1098,6 +1098,19 @@ body::-webkit-scrollbar {
   -ms-overflow-style: none;
 }
 
+.settings-version {
+  position: absolute;
+  left: 24px;
+  bottom: 14px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--dracula-comment);
+  letter-spacing: 0.02em;
+  opacity: 0.95;
+  pointer-events: none;
+  user-select: text;
+}
+
 .settings-tabs-content::-webkit-scrollbar {
   width: 0 !important;
   height: 0 !important;

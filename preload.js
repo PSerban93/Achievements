@@ -182,6 +182,7 @@ contextBridge.exposeInMainWorld("api", {
   onAutoSelectConfig: (handler) =>
     ipcRenderer.on("auto-select-config", (_e, name) => handler(name)),
   getBootStatus: () => ipcRenderer.invoke("boot:status"),
+  getAppVersion: () => ipcRenderer.invoke("app:get-version"),
   bootOverlayHidden: () => ipcRenderer.send("boot:overlay-hidden"),
   getBootOnboardingState: () => ipcRenderer.invoke("boot:onboarding:get-state"),
   discoverBootOnboardingFolders: () =>

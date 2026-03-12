@@ -4,3 +4,5 @@ dist/
 /.vs
 /.vscode
 /my_login.txt
+tests/
+tests/overlay-shortcut-manager.test.js
