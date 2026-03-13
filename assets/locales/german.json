@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Overlay-Verknüpfung",
   "settings-panelTitle": "Einstellungsfeld",
   "settings-platinumTitle": "Platin-Benachrichtigung",
+  "main.notify.platinumCompleteTitle": "100 % abgeschlossen",
+  "main.notify.platinumCompleteDescription": "Du hast alle Erfolge freigeschaltet!",
   "settings-resetBlacklistBtn": "Blacklist zurücksetzen",
   "settings-screenshotsTitle": "Erfolge Screenshots",
   "settings-soundVolumeInfo": "i",

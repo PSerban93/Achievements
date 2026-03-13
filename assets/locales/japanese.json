@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "オーバーレイショートカット",
   "settings-panelTitle": "設定パネル",
   "settings-platinumTitle": "プラチナ通知",
+  "main.notify.platinumCompleteTitle": "100%達成",
+  "main.notify.platinumCompleteDescription": "すべての実績を解除しました！",
   "settings-resetBlacklistBtn": "ブラックリストをリセット",
   "settings-screenshotsTitle": "実績 スクリーンショット",
   "settings-soundVolumeInfo": "i",

@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Ярлик накладення",
   "settings-panelTitle": "Панель налаштувань",
   "settings-platinumTitle": "Платинове повідомлення",
+  "main.notify.platinumCompleteTitle": "100% завершено",
+  "main.notify.platinumCompleteDescription": "Ви розблокували всі досягнення!",
   "settings-resetBlacklistBtn": "Скинути чорний список",
   "settings-screenshotsTitle": "Досягнення Скріншоти",
   "settings-soundVolumeInfo": "i",

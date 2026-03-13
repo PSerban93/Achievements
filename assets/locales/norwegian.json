@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Overlay-snarvei",
   "settings-panelTitle": "Innstillingspanel",
   "settings-platinumTitle": "Platinavarsel",
+  "main.notify.platinumCompleteTitle": "100 % fullført",
+  "main.notify.platinumCompleteDescription": "Du har låst opp alle prestasjoner!",
   "settings-resetBlacklistBtn": "Tilbakestill svarteliste",
   "settings-screenshotsTitle": "Prestasjoner Skjermbilder",
   "settings-soundVolumeInfo": "i",

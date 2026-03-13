@@ -5952,8 +5952,16 @@ function handlePlatinumComplete({
   const safeName = configName ? sanitizeConfigName(configName) : "";
 
   const message = {
-    displayName: "100% Completed",
-    description: "You've unlocked all achievements!",
+    displayName: tUi(
+      "main.notify.platinumCompleteTitle",
+      {},
+      "100% Completed",
+    ),
+    description: tUi(
+      "main.notify.platinumCompleteDescription",
+      {},
+      "You've unlocked all achievements!",
+    ),
     preset,
     position,
     sound,

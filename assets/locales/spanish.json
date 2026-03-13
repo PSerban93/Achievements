@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Acceso directo superpuesto",
   "settings-panelTitle": "Panel de configuración",
   "settings-platinumTitle": "Notificación Platino",
+  "main.notify.platinumCompleteTitle": "100% completado",
+  "main.notify.platinumCompleteDescription": "¡Has desbloqueado todos los logros!",
   "settings-resetBlacklistBtn": "Restablecer lista negra",
   "settings-screenshotsTitle": "Logros Capturas de pantalla",
   "settings-soundVolumeInfo": "i",

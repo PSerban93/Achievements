@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "疊加快捷方式",
   "settings-panelTitle": "設定面板",
   "settings-platinumTitle": "白金通知",
+  "main.notify.platinumCompleteTitle": "100% 完成",
+  "main.notify.platinumCompleteDescription": "你已解鎖所有成就！",
   "settings-resetBlacklistBtn": "重設黑名單",
   "settings-screenshotsTitle": "成就 截圖",
   "settings-soundVolumeInfo": "i",

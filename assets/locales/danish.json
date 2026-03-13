@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Overlay-genvej",
   "settings-panelTitle": "Indstillingspanel",
   "settings-platinumTitle": "Platin-meddelelse",
+  "main.notify.platinumCompleteTitle": "100 % gennemført",
+  "main.notify.platinumCompleteDescription": "Du har låst op for alle achievements!",
   "settings-resetBlacklistBtn": "Nulstil sortliste",
   "settings-screenshotsTitle": "Præstationer Skærmbilleder",
   "settings-soundVolumeInfo": "i",

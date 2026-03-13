@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Препоръчителни преки пътища",
   "settings-panelTitle": "Панел с настройки",
   "settings-platinumTitle": "Платинено уведомление",
+  "main.notify.platinumCompleteTitle": "100% завършено",
+  "main.notify.platinumCompleteDescription": "Отключихте всички постижения!",
   "settings-resetBlacklistBtn": "Нулиране на черния списък",
   "settings-screenshotsTitle": "Постижения Снимки на екрана",
   "settings-soundVolumeInfo": "i",

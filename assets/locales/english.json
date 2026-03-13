@@ -467,6 +467,8 @@
   "aria.overlay-interact-shortcut-info": "Toggle interaction: press once to enable drag/scroll, press again to return to click-through. Requires a non-modifier key (e.g. \\).",
   "settings-panelTitle": "Settings panel",
   "settings-platinumTitle": "Platinum Notification",
+  "main.notify.platinumCompleteTitle": "100% Completed",
+  "main.notify.platinumCompleteDescription": "You've unlocked all achievements!",
   "settings-resetBlacklistBtn": "Reset Blacklist",
   "settings-screenshotsTitle": "Achievements Screenshots",
   "settings-soundVolumeInfo": "i",

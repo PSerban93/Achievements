@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Overlay gyorsbillentyű",
   "settings-panelTitle": "Beállítások panel",
   "settings-platinumTitle": "Platina értesítés",
+  "main.notify.platinumCompleteTitle": "100%-ban teljesítve",
+  "main.notify.platinumCompleteDescription": "Feloldottad az összes achievementet!",
   "settings-resetBlacklistBtn": "Feketelista visszaállítása",
   "settings-screenshotsTitle": "Eredmények Képernyőképek",
   "settings-soundVolumeInfo": "i",

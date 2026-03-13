@@ -388,6 +388,8 @@
   "settings-overlayShortcutTitle": "Scurtatura overlay",
   "settings-panelTitle": "Panou setari",
   "settings-platinumTitle": "Notificare platinum",
+  "main.notify.platinumCompleteTitle": "100% complet",
+  "main.notify.platinumCompleteDescription": "Ai deblocat toate achievement-urile!",
   "settings-resetBlacklistBtn": "Reseteaza lista neagra",
   "settings-screenshotsTitle": "Capturi realizari",
   "settings-soundVolumeInfo": "i",

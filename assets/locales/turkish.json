@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Kaplama Kısayolu",
   "settings-panelTitle": "Ayarlar paneli",
   "settings-platinumTitle": "Platin Bildirimi",
+  "main.notify.platinumCompleteTitle": "%100 Tamamlandı",
+  "main.notify.platinumCompleteDescription": "Tüm başarımların kilidini açtın!",
   "settings-resetBlacklistBtn": "Kara Listeyi Sıfırla",
   "settings-screenshotsTitle": "Başarılar Ekran Görüntüleri",
   "settings-soundVolumeInfo": "i",

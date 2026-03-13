@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Συντόμευση επικάλυψης",
   "settings-panelTitle": "Πίνακας ρυθμίσεων",
   "settings-platinumTitle": "Ειδοποίηση Platinum",
+  "main.notify.platinumCompleteTitle": "100% ολοκληρώθηκε",
+  "main.notify.platinumCompleteDescription": "Ξεκλείδωσες όλα τα achievements!",
   "settings-resetBlacklistBtn": "Επαναφορά μαύρης λίστας",
   "settings-screenshotsTitle": "Επιτεύγματα Στιγμιότυπα",
   "settings-soundVolumeInfo": "i",

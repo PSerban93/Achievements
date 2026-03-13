@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Ярлык наложения",
   "settings-panelTitle": "Панель настроек",
   "settings-platinumTitle": "Уведомление о платине",
+  "main.notify.platinumCompleteTitle": "100% завершено",
+  "main.notify.platinumCompleteDescription": "Вы открыли все достижения!",
   "settings-resetBlacklistBtn": "Сбросить черный список",
   "settings-screenshotsTitle": "Достижения Скриншоты",
   "settings-soundVolumeInfo": "в",

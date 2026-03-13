@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "اختصار التراكب",
   "settings-panelTitle": "لوحة الإعدادات",
   "settings-platinumTitle": "إشعار بلاتيني",
+  "main.notify.platinumCompleteTitle": "اكتمل بنسبة 100%",
+  "main.notify.platinumCompleteDescription": "لقد فتحت جميع الإنجازات!",
   "settings-resetBlacklistBtn": "إعادة تعيين القائمة السوداء",
   "settings-screenshotsTitle": "الإنجازات لقطات الشاشة",
   "settings-soundVolumeInfo": "i",

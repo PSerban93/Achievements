@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Atalho de sobreposição",
   "settings-panelTitle": "Painel de configurações",
   "settings-platinumTitle": "Notificação Platina",
+  "main.notify.platinumCompleteTitle": "100% concluído",
+  "main.notify.platinumCompleteDescription": "Desbloqueaste todas as conquistas!",
   "settings-resetBlacklistBtn": "Redefinir lista negra",
   "settings-screenshotsTitle": "Conquistas Capturas de ecrã",
   "settings-soundVolumeInfo": "i",

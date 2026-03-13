@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Raccourci superposé",
   "settings-panelTitle": "Panneau Paramètres",
   "settings-platinumTitle": "Notification Platine",
+  "main.notify.platinumCompleteTitle": "100 % terminé",
+  "main.notify.platinumCompleteDescription": "Vous avez débloqué tous les succès !",
   "settings-resetBlacklistBtn": "Réinitialiser la liste noire",
   "settings-screenshotsTitle": "Réalisations Captures d'écran",
   "settings-soundVolumeInfo": "i",

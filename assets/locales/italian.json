@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Scorciatoia sovrapposizione",
   "settings-panelTitle": "Pannello delle impostazioni",
   "settings-platinumTitle": "Notifica Platino",
+  "main.notify.platinumCompleteTitle": "Completato al 100%",
+  "main.notify.platinumCompleteDescription": "Hai sbloccato tutti gli achievement!",
   "settings-resetBlacklistBtn": "Reimposta lista nera",
   "settings-screenshotsTitle": "Risultati Screenshot",
   "settings-soundVolumeInfo": "i",

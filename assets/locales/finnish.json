@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Päällekkäisen pikakuvakkeen",
   "settings-panelTitle": "Asetukset-paneeli",
   "settings-platinumTitle": "Platina-ilmoitus",
+  "main.notify.platinumCompleteTitle": "100 % suoritettu",
+  "main.notify.platinumCompleteDescription": "Olet avannut kaikki saavutukset!",
   "settings-resetBlacklistBtn": "Nollaa musta lista",
   "settings-screenshotsTitle": "Saavutukset Kuvakaappaukset",
   "settings-soundVolumeInfo": "i",

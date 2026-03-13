@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Skrót nakładki",
   "settings-panelTitle": "Panel ustawień",
   "settings-platinumTitle": "Powiadomienie platynowe",
+  "main.notify.platinumCompleteTitle": "Ukończono w 100%",
+  "main.notify.platinumCompleteDescription": "Odblokowano wszystkie osiągnięcia!",
   "settings-resetBlacklistBtn": "Zresetuj czarną listę",
   "settings-screenshotsTitle": "Osiągnięcia Zrzuty ekranu",
   "settings-soundVolumeInfo": "i",

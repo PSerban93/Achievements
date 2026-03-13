@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Overlay-snelkoppeling",
   "settings-panelTitle": "Instellingenpaneel",
   "settings-platinumTitle": "Platina-melding",
+  "main.notify.platinumCompleteTitle": "100% voltooid",
+  "main.notify.platinumCompleteDescription": "Je hebt alle achievements ontgrendeld!",
   "settings-resetBlacklistBtn": "Zwarte lijst resetten",
   "settings-screenshotsTitle": "Prestaties Screenshots",
   "settings-soundVolumeInfo": "i",

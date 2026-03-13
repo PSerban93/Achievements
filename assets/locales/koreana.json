@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "오버레이 바로 가기",
   "settings-panelTitle": "설정 패널",
   "settings-platinumTitle": "플래티넘 알림",
+  "main.notify.platinumCompleteTitle": "100% 완료",
+  "main.notify.platinumCompleteDescription": "모든 도전 과제를 잠금 해제했습니다!",
   "settings-resetBlacklistBtn": "블랙리스트 초기화",
   "settings-screenshotsTitle": "업적 스크린샷",
   "settings-soundVolumeInfo": "i",

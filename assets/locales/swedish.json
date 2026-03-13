@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Genväg för överlägg",
   "settings-panelTitle": "Inställningspanel",
   "settings-platinumTitle": "Platinavisering",
+  "main.notify.platinumCompleteTitle": "100 % slutfört",
+  "main.notify.platinumCompleteDescription": "Du har låst upp alla achievements!",
   "settings-resetBlacklistBtn": "Återställ svartlista",
   "settings-screenshotsTitle": "Prestationer Skärmdumpar",
   "settings-soundVolumeInfo": "i",

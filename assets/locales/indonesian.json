@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Pintas Overlay",
   "settings-panelTitle": "Panel Pengaturan",
   "settings-platinumTitle": "Pemberitahuan Platinum",
+  "main.notify.platinumCompleteTitle": "100% Selesai",
+  "main.notify.platinumCompleteDescription": "Anda telah membuka semua achievement!",
   "settings-resetBlacklistBtn": "Reset Daftar Hitam",
   "settings-screenshotsTitle": "Prestasi Screenshot",
   "settings-soundVolumeInfo": "i",

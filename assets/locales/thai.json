@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "ทางลัดซ้อนทับ",
   "settings-panelTitle": "แผงการตั้งค่า",
   "settings-platinumTitle": "การแจ้งเตือนแพลทินัม",
+  "main.notify.platinumCompleteTitle": "สำเร็จ 100%",
+  "main.notify.platinumCompleteDescription": "คุณปลดล็อกความสำเร็จทั้งหมดแล้ว!",
   "settings-resetBlacklistBtn": "รีเซ็ตบัญชีดำ",
   "settings-screenshotsTitle": "ผลงาน ภาพหน้าจอ",
   "settings-soundVolumeInfo": "i",

@@ -372,6 +372,8 @@
   "settings-overlayShortcutTitle": "Zkratka překrytí",
   "settings-panelTitle": "Panel nastavení",
   "settings-platinumTitle": "Oznámení o platině",
+  "main.notify.platinumCompleteTitle": "100 % dokončeno",
+  "main.notify.platinumCompleteDescription": "Odemkli jste všechny achievementy!",
   "settings-resetBlacklistBtn": "Obnovit černou listinu",
   "settings-screenshotsTitle": "Úspěchy Screenshoty",
   "settings-soundVolumeInfo": "i",
