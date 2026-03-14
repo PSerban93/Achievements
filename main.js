@@ -90,7 +90,7 @@ const appLogger = createLogger("app");
 const notificationLogger = createLogger("notifications");
 const windowLogger = createLogger("windows");
 const overlayLogger = createLogger("overlay", {
-  level: process.env.OVERLAY_LOG_LEVEL || "warn",
+  level: process.env.OVERLAY_LOG_LEVEL || "info",
 });
 const ipcLogger = createLogger("ipc");
 const uiLogger = createLogger("ui");
@@ -577,6 +577,7 @@ const DEFAULT_PREFERENCES = {
   watchedFolders: [],
   lumaPlayWatcherEnabled: false,
   disableProcessNameWatcher: false,
+  forceGlobalOverlayShortcuts: false,
   ignoreLeadingArticlesSort: true,
   schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
@@ -1632,6 +1633,7 @@ function registerOverlayShortcut(newShortcut) {
     const onFire = () => {
       const onboardingBlocked =
         isBootOnboardingGatePending() || global.bootOnboardingRequired;
+      const currentlyPresented = isOverlayEffectivelyPresented();
       overlayLogger.info("overlay:shortcut-trigger", {
         shortcut: newShortcut,
         onboardingBlocked,
@@ -1655,10 +1657,10 @@ function registerOverlayShortcut(newShortcut) {
       if (overlayWindow && !overlayWindow.isDestroyed()) {
         overlayLogger.debug("overlay:present-path", {
           path: "reuse-existing-window",
-          nextPresented: !overlayPresented,
+          nextPresented: !currentlyPresented,
           state: getOverlayWindowLogState(),
         });
-        setOverlayPresented(!overlayPresented);
+        setOverlayPresented(!currentlyPresented);
       } else {
         overlayLogger.debug("overlay:present-path", {
           path: "create-new-window",
@@ -1716,7 +1718,10 @@ function registerOverlayShortcut(newShortcut) {
     const candidates = buildElectronAcceleratorCandidates(newShortcut, {
       allowSingle: false,
     });
-    const fallbackResult = tryRegisterGlobalShortcutCandidates(candidates, onFire);
+    const fallbackResult = tryRegisterGlobalShortcutCandidates(
+      candidates,
+      onFire,
+    );
     if (!fallbackResult.ok) {
       overlayLogger.warn("overlay:shortcut:fallback-failed", {
         id: "overlay-shortcut",
@@ -1774,6 +1779,15 @@ function applyOverlayFocusMode() {
   } catch {}
 }
 
+function isOverlayEffectivelyPresented() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return false;
+  try {
+    return overlayWindow.isVisible();
+  } catch {
+    return false;
+  }
+}
+
 function getOverlayWindowLogState() {
   const hasWindow = !!overlayWindow && !overlayWindow.isDestroyed();
   const state = {
@@ -1824,6 +1838,106 @@ function clearOverlayTopmostBoostTimer() {
   }
 }
 
+function clearOverlayPendingShowState() {
+  overlayPendingVisibleAckShow = false;
+  overlayVisibleAckSatisfied = false;
+}
+
+function maybeShowOverlayAfterRendererReady(reason = "unknown") {
+  if (!overlayPendingVisibleAckShow) return false;
+  if (!overlayPresented) return false;
+  if (!overlayWindow || overlayWindow.isDestroyed()) return false;
+  if (!overlayReadyToShow) {
+    overlayLogger.debug("overlay:showInactive:deferred", {
+      reason,
+      waitFor: "ready-to-show",
+      state: getOverlayWindowLogState(),
+    });
+    return false;
+  }
+  if (!overlayVisibleAckSatisfied) {
+    overlayLogger.debug("overlay:showInactive:deferred", {
+      reason,
+      waitFor: "renderer-ack",
+      state: getOverlayWindowLogState(),
+    });
+    return false;
+  }
+
+  let windowVisible = false;
+  try {
+    windowVisible = overlayWindow.isVisible();
+  } catch {}
+
+  clearOverlayPendingShowState();
+
+  try {
+    if (!windowVisible) {
+      try {
+        overlayWindow.setOpacity(0);
+      } catch {}
+      overlayLogger.debug("overlay:showInactive:attempt", {
+        reason,
+        state: getOverlayWindowLogState(),
+      });
+      if (typeof overlayWindow.showInactive === "function") {
+        overlayWindow.showInactive();
+      } else {
+        overlayLogger.debug("overlay:showInactive:unavailable", {
+          reason: `${reason}:no-showInactive-api`,
+        });
+      }
+    } else {
+      overlayLogger.debug("overlay:showInactive:skipped", {
+        reason: `${reason}:window-already-visible`,
+      });
+    }
+  } catch (err) {
+    overlayLogger.warn("overlay:present-raise:failed", {
+      reason,
+      error: err?.message || String(err),
+    });
+  }
+
+  try {
+    overlayWindow.blur();
+  } catch {}
+  try {
+    overlayLogger.debug("overlay:visibility-check:after-showInactive", {
+      reason,
+      visible: !!overlayWindow.isVisible(),
+    });
+  } catch {}
+  setTimeout(() => {
+    overlayLogger.debug("overlay:post-present-state", {
+      source: `maybeShowOverlayAfterRendererReady:${reason}`,
+      state: getOverlayWindowLogState(),
+    });
+  }, 75);
+  return true;
+}
+
+function setOverlayWindowOpacitySafely(value, reason = "unknown") {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return false;
+  const nextOpacity = Math.max(0, Math.min(1, Number(value)));
+  try {
+    overlayWindow.setOpacity(nextOpacity);
+    overlayLogger.debug("overlay:opacity:set", {
+      reason,
+      opacity: nextOpacity,
+      state: getOverlayWindowLogState(),
+    });
+    return true;
+  } catch (err) {
+    overlayLogger.debug("overlay:opacity:set-failed", {
+      reason,
+      opacity: nextOpacity,
+      error: err?.message || String(err),
+    });
+    return false;
+  }
+}
+
 function armOverlayVisibilityAckTimeout(visible, source) {
   clearOverlayVisibilityAckTimeout();
   overlayVisibilityAckState = {
@@ -1841,6 +1955,21 @@ function armOverlayVisibilityAckTimeout(visible, source) {
       elapsedMs,
       state: getOverlayWindowLogState(),
     });
+    if (
+      (overlayVisibilityAckState?.visible ?? !!visible) &&
+      overlayPendingVisibleAckShow &&
+      overlayPresented
+    ) {
+      overlayVisibleAckSatisfied = true;
+      overlayLogger.warn("overlay:renderer-ack-timeout:fallback-show", {
+        source: overlayVisibilityAckState?.source || String(source || "unknown"),
+        elapsedMs,
+        state: getOverlayWindowLogState(),
+      });
+      maybeShowOverlayAfterRendererReady(
+        `${overlayVisibilityAckState?.source || String(source || "unknown")}:ack-timeout`,
+      );
+    }
     clearOverlayVisibilityAckTimeout();
   }, OVERLAY_RENDERER_ACK_TIMEOUT_MS);
 }
@@ -1883,6 +2012,7 @@ function sendOverlayVisibility(visible, source) {
 function reassertOverlayAlwaysOnTop(reason) {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   const resolvedReason = String(reason || "unknown");
+  overlayLastTopmostReassertAt = Date.now();
   let before = null;
   try {
     if (typeof overlayWindow.isAlwaysOnTop === "function") {
@@ -2048,51 +2178,25 @@ function setOverlayPresented(next) {
     try {
       overlayWindow.setFocusable(false);
     } catch {}
-    try {
-      if (!overlayShownAtLeastOnce || !windowVisible) {
-        overlayLogger.debug("overlay:showInactive:attempt", {
-          reason:
-            !overlayShownAtLeastOnce && !windowVisible
-              ? "presented-true-first-open"
-              : "presented-true-window-hidden",
-        });
-        if (typeof overlayWindow.showInactive === "function") {
-          overlayWindow.showInactive();
-        } else {
-          // Keep fallback intentionally non-activating; do not use overlayWindow.show() here.
-          overlayLogger.debug("overlay:showInactive:unavailable", {
-            reason: "no-showInactive-api",
-          });
-        }
-      } else {
-        overlayLogger.debug("overlay:showInactive:skipped", {
-          reason: "presented-true-window-already-visible",
-        });
-        // boostOverlayTopmost("setOverlayPresented:true:already-visible");
-      }
-    } catch (err) {
-      overlayLogger.warn("overlay:present-raise:failed", {
-        error: err?.message || String(err),
-      });
+    if (!windowVisible) {
+      setOverlayWindowOpacitySafely(
+        0,
+        "setOverlayPresented:true:prepare-hidden-show",
+      );
     }
-    try {
-      if (!overlayWindow.isVisible()) {
-        overlayLogger.debug("overlay:visibility-check:after-showInactive", {
-          visible: false,
-        });
-      } else {
-        overlayLogger.debug("overlay:visibility-check:after-showInactive", {
-          visible: true,
-        });
-      }
-    } catch {}
-    setTimeout(() => {
-      overlayLogger.debug("overlay:post-present-state", {
-        source: "setOverlayPresented:true",
-        state: getOverlayWindowLogState(),
-      });
-    }, 75);
-    sendOverlayVisibility(true, "setOverlayPresented:true");
+    if (!windowVisible) {
+      overlayPendingVisibleAckShow = true;
+      overlayVisibleAckSatisfied = false;
+    } else {
+      clearOverlayPendingShowState();
+    }
+    const dispatched = sendOverlayVisibility(true, "setOverlayPresented:true");
+    if (!dispatched && !windowVisible) {
+      overlayVisibleAckSatisfied = true;
+      maybeShowOverlayAfterRendererReady(
+        "setOverlayPresented:true:visibility-dispatch-failed",
+      );
+    }
     applyOverlayInteractShortcutRegistration();
     applyOverlayKeyboardScrollShortcutRegistration();
     applyOverlayPositionShortcutRegistration();
@@ -2110,13 +2214,29 @@ function setOverlayPresented(next) {
   clearOverlayPositionShortcuts();
   overlaySnapCycleIndex = -1;
   stopOverlayGlobalDrag();
-  sendOverlayVisibility(false, "setOverlayPresented:false");
+  clearOverlayPendingShowState();
+  clearOverlayVisibilityAckTimeout();
   try {
+    setOverlayWindowOpacitySafely(0, "setOverlayPresented:false:pre-hide");
     overlayWindow.setIgnoreMouseEvents(true, { forward: true });
   } catch {}
+  try {
+    if (overlayWindow.isVisible()) {
+      overlayWindow.hide();
+    }
+  } catch {}
+  try {
+    overlayWindow.setVisibleOnAllWorkspaces(false);
+  } catch {}
+  try {
+    overlayWindow.setAlwaysOnTop(false);
+  } catch {}
+  try {
+    overlayWindow.blur();
+  } catch {}
   clearOverlayTopmostBoostTimer();
-  overlayLogger.debug("overlay:hide:skipped-os-window", {
-    reason: "keep-window-visible-for-reopen",
+  overlayLogger.debug("overlay:hide:os-window-hidden", {
+    reason: "compatibility-first-hide",
     state: getOverlayWindowLogState(),
   });
   overlayLogger.info("overlay:shortcuts-cleared", {
@@ -2282,14 +2402,18 @@ function applyOverlayPositionShortcutRegistration() {
     );
   });
 
-  registerAll("overlay-position:nudge-right", ["Control+Alt+Shift+Right"], () => {
-    const ctx = getOverlayPositionContext();
-    if (!ctx) return;
-    setOverlayPositionClamped(
-      ctx.bounds.x + OVERLAY_NUDGE_STEP_PX,
-      ctx.bounds.y,
-    );
-  });
+  registerAll(
+    "overlay-position:nudge-right",
+    ["Control+Alt+Shift+Right"],
+    () => {
+      const ctx = getOverlayPositionContext();
+      if (!ctx) return;
+      setOverlayPositionClamped(
+        ctx.bounds.x + OVERLAY_NUDGE_STEP_PX,
+        ctx.bounds.y,
+      );
+    },
+  );
 
   registerAll("overlay-position:nudge-up", ["Control+Alt+Shift+Up"], () => {
     const ctx = getOverlayPositionContext();
@@ -2394,7 +2518,7 @@ function setOverlayInteractive(next) {
   applyOverlayInputMode();
   applyOverlayFocusMode();
   applyOverlayKeyboardScrollShortcutRegistration();
-  overlayLogger.info("overlay:interactive:set", {
+  overlayLogger.debug("overlay:interactive:set", {
     next: overlayInteractive,
     presented: overlayPresented,
     visible:
@@ -2470,7 +2594,8 @@ function registerOverlayInteractShortcut(newShortcut) {
     const accelerator = normalizeOverlayInteractAccelerator(newShortcut);
     if (!accelerator) return;
     const overlayShortcut =
-      global.overlayShortcut || (cachedPreferences && cachedPreferences.overlayShortcut);
+      global.overlayShortcut ||
+      (cachedPreferences && cachedPreferences.overlayShortcut);
     const normalizedOverlayShortcut = normalizeOverlayShortcutAccelerator(
       overlayShortcut,
       { allowSingle: false },
@@ -2571,9 +2696,12 @@ function registerOverlayInteractShortcut(newShortcut) {
     const candidates = buildElectronAcceleratorCandidates(accelerator, {
       allowSingle: true,
     });
-    const fallbackResult = tryRegisterGlobalShortcutCandidates(candidates, () => {
-      toggleOverlayInteractive();
-    });
+    const fallbackResult = tryRegisterGlobalShortcutCandidates(
+      candidates,
+      () => {
+        toggleOverlayInteractive();
+      },
+    );
     if (!fallbackResult.ok) {
       overlayLogger.warn("overlay:shortcut:fallback-failed", {
         id: "overlay-interact",
@@ -2730,10 +2858,18 @@ let sharedAchievementTableViewState = null;
 
 function normalizeAchievementTableViewState(payload) {
   if (!payload || typeof payload !== "object") return null;
-  const status = String(payload.status || "").trim().toLowerCase();
-  const nameSort = String(payload.nameSort || "").trim().toLowerCase();
-  const timeSort = String(payload.timeSort || "").trim().toLowerCase();
-  const raritySort = String(payload.raritySort || "").trim().toLowerCase();
+  const status = String(payload.status || "")
+    .trim()
+    .toLowerCase();
+  const nameSort = String(payload.nameSort || "")
+    .trim()
+    .toLowerCase();
+  const timeSort = String(payload.timeSort || "")
+    .trim()
+    .toLowerCase();
+  const raritySort = String(payload.raritySort || "")
+    .trim()
+    .toLowerCase();
 
   return {
     status: ACH_TABLE_STATUS_VALUES.has(status) ? status : "all",
@@ -2845,6 +2981,11 @@ function applyPreferenceSideEffects(
   if (Object.prototype.hasOwnProperty.call(patch, "overlayInteractShortcut")) {
     global.overlayInteractShortcut = patch.overlayInteractShortcut;
     applyOverlayInteractShortcutRegistration();
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(patch, "forceGlobalOverlayShortcuts")
+  ) {
+    refreshOverlayInputBackend("preferences:force-global-overlay-shortcuts");
   }
   if (Object.prototype.hasOwnProperty.call(patch, "showHiddenDescription")) {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
@@ -3305,9 +3446,8 @@ ipcMain.handle("load-preferences", () => {
   const overlayShortcutPreferenceValidation =
     validateOverlayShortcutPreferencePair(cachedPreferences);
   if (overlayShortcutPreferenceValidation?.reason === "conflict") {
-    const resolvedOverlayShortcutPrefs = resolveOverlayShortcutPreferenceConflicts(
-      cachedPreferences,
-    );
+    const resolvedOverlayShortcutPrefs =
+      resolveOverlayShortcutPreferenceConflicts(cachedPreferences);
     cachedPreferences.overlayShortcut =
       resolvedOverlayShortcutPrefs.resolved.overlayShortcut;
     cachedPreferences.overlayInteractShortcut =
@@ -4002,7 +4142,9 @@ ipcMain.handle("selectFolder", async () => {
 
 // Handler for json load
 function resolveAchievementsSchemaPath(config = {}) {
-  const cfgDir = isNonEmptyString(config?.config_path) ? config.config_path : "";
+  const cfgDir = isNonEmptyString(config?.config_path)
+    ? config.config_path
+    : "";
   if (!cfgDir) return "";
   const p1 = path.join(cfgDir, "steam_settings", "achievements.json");
   const p2 = path.join(cfgDir, "achievements.json");
@@ -4038,8 +4180,7 @@ function normalizeAchievementNameForRarity(name, shouldStrip = false) {
 
 function resolveSteamAppIdForRarity(config = {}) {
   const platform = normalizePlatform(config?.platform) || "steam";
-  const localAppId =
-    config?.appid != null ? String(config.appid).trim() : "";
+  const localAppId = config?.appid != null ? String(config.appid).trim() : "";
   if (platform === "uplay") {
     let mapping = uplayToSteam.get(localAppId);
     if (!mapping) {
@@ -5952,11 +6093,7 @@ function handlePlatinumComplete({
   const safeName = configName ? sanitizeConfigName(configName) : "";
 
   const message = {
-    displayName: tUi(
-      "main.notify.platinumCompleteTitle",
-      {},
-      "100% Completed",
-    ),
+    displayName: tUi("main.notify.platinumCompleteTitle", {}, "100% Completed"),
     description: tUi(
       "main.notify.platinumCompleteDescription",
       {},
@@ -6085,7 +6222,11 @@ function clearPendingNotificationScreenshot(webContentsId) {
   pendingNotificationScreenshots.delete(webContentsId);
 }
 
-function armPendingNotificationScreenshot(notificationWindow, doShot, durationMs) {
+function armPendingNotificationScreenshot(
+  notificationWindow,
+  doShot,
+  durationMs,
+) {
   if (!notificationWindow || notificationWindow.isDestroyed()) return;
   const webContentsId = notificationWindow.webContents.id;
   clearPendingNotificationScreenshot(webContentsId);
@@ -7516,10 +7657,13 @@ async function monitorAchievementsFile(filePath) {
         return;
       }
       clearSnapshotDebounceTimer();
-      activeLumaPlayRegistryDebounceTimer = setTimeout(() => {
-        activeLumaPlayRegistryDebounceTimer = null;
-        runSnapshotFromEvent();
-      }, Math.max(0, Number(delayMs) || 0));
+      activeLumaPlayRegistryDebounceTimer = setTimeout(
+        () => {
+          activeLumaPlayRegistryDebounceTimer = null;
+          runSnapshotFromEvent();
+        },
+        Math.max(0, Number(delayMs) || 0),
+      );
     };
 
     const runSnapshotFromEvent = () => {
@@ -8354,8 +8498,12 @@ let overlayInteractive = false;
 let overlayPresented = false;
 let overlayVisibilityAckTimer = null;
 let overlayVisibilityAckState = null;
+let overlayPendingVisibleAckShow = false;
+let overlayVisibleAckSatisfied = false;
+let overlayReadyToShow = false;
 let overlayShownAtLeastOnce = false;
 let overlayTopmostBoostTimer = null;
+let overlayLastTopmostReassertAt = 0;
 let registeredOverlayShortcut = null;
 let registeredOverlayShortcutMode = null;
 let registeredOverlayInteractShortcut = null;
@@ -8380,13 +8528,18 @@ let overlayDragMouseDownListener = null;
 let overlayDragMouseMoveListener = null;
 let overlayDragMouseUpListener = null;
 let overlayDragHookBootWaitTimer = null;
-const OVERLAY_RENDERER_ACK_TIMEOUT_MS = 1200;
+const OVERLAY_RENDERER_ACK_TIMEOUT_MS = 2500;
 const OVERLAY_NUDGE_STEP_PX = 20;
 const OVERLAY_SHORTCUT_PRIORITY_TOGGLE = 100;
 const OVERLAY_SHORTCUT_PRIORITY_INTERACT = 90;
 const OVERLAY_SHORTCUT_PRIORITY_SCROLL = 40;
 const OVERLAY_SHORTCUT_PRIORITY_POSITION = 30;
 const OVERLAY_SHORTCUT_REPEAT_COOLDOWN_MS = 200;
+
+function isForceGlobalOverlayShortcutsEnabled(preferences = cachedPreferences) {
+  return preferences?.forceGlobalOverlayShortcuts === true;
+}
+
 const OVERLAY_SNAP5_PRESETS = [
   { accelerator: "Control+Alt+Shift+1", x: 0, y: 0 },
   { accelerator: "Control+Alt+Shift+2", x: 1, y: 0 },
@@ -8472,7 +8625,6 @@ const POST_BOOT_UI_INITIAL_DELAY_MS = 350;
 const POST_BOOT_UI_STEP_DELAY_MS = 300;
 const POST_BOOT_ZOOM_DELAY_MS = 200;
 let postBootUiInitScheduled = false;
-let postBootOverlayCreateDeferredTimer = null;
 
 function stopOverlayGlobalDrag() {
   overlayDragActive = false;
@@ -8507,6 +8659,60 @@ function clearRegisteredShortcutEntries(entries) {
   }
 }
 
+function clearOverlayGlobalDragHookRegistration() {
+  stopOverlayGlobalDrag();
+  if (overlayDragHookBootWaitTimer) {
+    clearTimeout(overlayDragHookBootWaitTimer);
+    overlayDragHookBootWaitTimer = null;
+  }
+  if (overlayDragMouseDownListener) {
+    overlayShortcutManager.off("mousedown", overlayDragMouseDownListener);
+    overlayDragMouseDownListener = null;
+  }
+  if (overlayDragMouseMoveListener) {
+    overlayShortcutManager.off("mousemove", overlayDragMouseMoveListener);
+    overlayDragMouseMoveListener = null;
+  }
+  if (overlayDragMouseUpListener) {
+    overlayShortcutManager.off("mouseup", overlayDragMouseUpListener);
+    overlayDragMouseUpListener = null;
+  }
+  overlayGlobalMouseHandlersAttached = false;
+}
+
+function refreshOverlayInputBackend(reason = "unknown") {
+  const forcedGlobal = isForceGlobalOverlayShortcutsEnabled();
+  overlayLogger.info("overlay:input-backend:refresh", {
+    reason,
+    forcedGlobal,
+    overlayPresented: isOverlayEffectivelyPresented(),
+  });
+
+  clearOverlayShortcutRegistration();
+  clearOverlayInteractShortcut();
+  clearOverlayKeyboardScrollShortcuts();
+  clearOverlayPositionShortcuts();
+  clearOverlayGlobalDragHookRegistration();
+  overlayShortcutManager.shutdown();
+
+  const overlayShortcut =
+    typeof global.overlayShortcut === "string"
+      ? global.overlayShortcut
+      : cachedPreferences?.overlayShortcut;
+  if (typeof overlayShortcut === "string" && overlayShortcut.trim()) {
+    registerOverlayShortcut(overlayShortcut);
+  }
+
+  applyOverlayInteractShortcutRegistration();
+  if (!forcedGlobal && overlayWindow && !overlayWindow.isDestroyed()) {
+    scheduleOverlayDragHookAfterBootComplete();
+  }
+  if (!isOverlayEffectivelyPresented()) return;
+
+  applyOverlayKeyboardScrollShortcutRegistration();
+  applyOverlayPositionShortcutRegistration();
+}
+
 function summarizeOverlayShortcutRegistrationState() {
   return {
     interact:
@@ -8520,7 +8726,11 @@ function summarizeOverlayShortcutRegistrationState() {
   };
 }
 
-function logOverlayShortcutRegistrationSummary(event, level = "info", extra = {}) {
+function logOverlayShortcutRegistrationSummary(
+  event,
+  level = "info",
+  extra = {},
+) {
   const log =
     overlayLogger && typeof overlayLogger[level] === "function"
       ? overlayLogger[level].bind(overlayLogger)
@@ -8760,6 +8970,7 @@ function findOverlayShortcutConflicts(
 }
 
 function getOverlayDirectKeyboardHookDeps() {
+  if (isForceGlobalOverlayShortcutsEnabled()) return null;
   const deps = overlayShortcutManager.getHookDeps();
   if (!deps?.hook || !deps?.keyMap) return null;
   return deps;
@@ -8785,7 +8996,9 @@ function getOverlayDirectBindingTriggerKeys(binding) {
 
 function matchesOverlayDirectKeyboardShortcut(binding, event) {
   if (!binding || !event) return false;
-  if (!getOverlayDirectBindingTriggerKeys(binding).includes(Number(event.keycode))) {
+  if (
+    !getOverlayDirectBindingTriggerKeys(binding).includes(Number(event.keycode))
+  ) {
     return false;
   }
   if (binding.requireCtrl && !event.ctrlKey) return false;
@@ -8859,7 +9072,11 @@ function tryRegisterDirectOverlayShortcut(
   }
 
   const listener = (event) => {
-    if (!getOverlayDirectBindingTriggerKeys(parsed).includes(Number(event?.keycode))) {
+    if (
+      !getOverlayDirectBindingTriggerKeys(parsed).includes(
+        Number(event?.keycode),
+      )
+    ) {
       return;
     }
 
@@ -8883,7 +9100,10 @@ function tryRegisterDirectOverlayShortcut(
     }
 
     const now = Date.now();
-    if (cooldownMs > 0 && now - (Number(getLastTriggeredAt()) || 0) < cooldownMs) {
+    if (
+      cooldownMs > 0 &&
+      now - (Number(getLastTriggeredAt()) || 0) < cooldownMs
+    ) {
       overlayLogger.debug("overlay:input-hook:keydown-result", {
         source,
         event: summarizeOverlayDirectKeyboardEvent(event),
@@ -8936,6 +9156,9 @@ function tryRegisterDirectOverlayShortcut(
 }
 
 function registerOverlayLowLevelBinding(id, shortcut, options = {}) {
+  if (isForceGlobalOverlayShortcutsEnabled()) {
+    return { ok: false, reason: "hook-unavailable" };
+  }
   return overlayShortcutManager.registerBinding(id, shortcut, {
     allowSingle: options.allowSingle === true,
     continueOnMatch: options.continueOnMatch === true,
@@ -9065,7 +9288,10 @@ function registerOverlayBindingWithFallback({
     Array.isArray(fallbackCandidates) && fallbackCandidates.length
       ? fallbackCandidates
       : buildElectronAcceleratorCandidates(shortcut, { allowSingle });
-  const fallbackResult = tryRegisterGlobalShortcutCandidates(candidates, onFire);
+  const fallbackResult = tryRegisterGlobalShortcutCandidates(
+    candidates,
+    onFire,
+  );
   if (!fallbackResult.ok) {
     overlayLogger.warn("overlay:shortcut:fallback-failed", {
       id,
@@ -9354,6 +9580,7 @@ function isOverlayDragEligible(point) {
 }
 
 function initOverlayGlobalDragHook() {
+  if (isForceGlobalOverlayShortcutsEnabled()) return;
   if (overlayGlobalMouseHandlersAttached) {
     overlayShortcutManager.ensureStarted("mouse");
     return;
@@ -9424,6 +9651,7 @@ function initOverlayGlobalDragHook() {
 }
 
 function isOverlayDragHookEligible() {
+  if (isForceGlobalOverlayShortcutsEnabled()) return false;
   if (!overlayWindow || overlayWindow.isDestroyed()) return false;
   if (global.bootDone !== true || global.bootUiReady !== true) return false;
   if (global.bootManualSeedComplete !== true) return false;
@@ -9431,7 +9659,9 @@ function isOverlayDragHookEligible() {
 }
 
 function scheduleOverlayDragHookAfterBootComplete() {
+  if (isForceGlobalOverlayShortcutsEnabled()) return;
   if (overlayGlobalMouseHandlersAttached) return;
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
   if (overlayDragHookBootWaitTimer) return;
   const waitAndStart = () => {
     if (overlayGlobalMouseHandlersAttached) {
@@ -9453,27 +9683,11 @@ function schedulePostBootUiInitialization() {
   postBootUiInitScheduled = true;
 
   const runSteps = () => {
-    const scheduleOverlayCreate = () => {
-      if (overlayWindow && !overlayWindow.isDestroyed()) return;
-      if (isBootOnboardingGatePending() || global.bootOnboardingRequired) {
-        if (postBootOverlayCreateDeferredTimer) return;
-        postBootOverlayCreateDeferredTimer = setTimeout(() => {
-          postBootOverlayCreateDeferredTimer = null;
-          scheduleOverlayCreate();
-        }, 500);
-        return;
-      }
-      createOverlayWindow(selectedConfig || null, false);
-    };
-
     const steps = [
       () => {
         if (!tray || tray.isDestroyed?.()) {
           createTray();
         }
-      },
-      () => {
-        scheduleOverlayCreate();
       },
     ];
 
@@ -9515,8 +9729,8 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
     overlayWindow = new BrowserWindow({
       width: 450,
       height: 950,
-      // Create hidden; apply click-through + non-focusable first, then show via `showInactive()`.
-      // Some borderless games minimize if a new top-level window briefly activates.
+      // Create hidden; keep it non-focusable and only present it after the
+      // renderer confirms it is ready to render visible content.
       show: false,
       x: width - 470,
       y: 20,
@@ -9548,6 +9762,9 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
     throw err;
   }
   overlayPresented = !!initialPresented;
+  overlayReadyToShow = false;
+  overlayVisibleAckSatisfied = false;
+  overlayPendingVisibleAckShow = overlayPresented;
   overlayLogger.debug("create-overlay:browserwindow-created", {
     width: 450,
     height: 950,
@@ -9560,6 +9777,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   overlayWindow.setFullScreenable(false);
   overlayWindow.setFocusable(false);
   overlayWindow.setSkipTaskbar(true);
+  setOverlayWindowOpacitySafely(0, "createOverlayWindow:initial");
   //setOverlayInteractive(false);
   const iconUrl = pathToFileURL(ICON_PNG_PATH).toString();
   overlayWindow
@@ -9577,6 +9795,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   // Defensive: re-apply click-through after the window is actually visible (race safety).
   overlayWindow.once("ready-to-show", () => {
     if (!overlayWindow || overlayWindow.isDestroyed()) return;
+    overlayReadyToShow = true;
     overlayLogger.debug("create-overlay:ready-to-show", {
       initialPresented: overlayPresented,
     });
@@ -9584,16 +9803,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       setOverlayInteractive(false);
     } catch {}
     if (overlayPresented) {
-      try {
-        if (typeof overlayWindow.showInactive === "function") {
-          overlayWindow.showInactive();
-        } else {
-          // Keep fallback intentionally non-activating; do not use overlayWindow.show() here.
-        }
-      } catch {}
-      try {
-        overlayWindow.blur();
-      } catch {}
+      maybeShowOverlayAfterRendererReady("createOverlayWindow:ready-to-show");
     } else {
       overlayLogger.debug("create-overlay:ready-hidden", {
         initialPresented: false,
@@ -9626,10 +9836,16 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       language: selectedLanguage,
       uiLanguage: selectedUiLanguage,
     });
-    sendOverlayVisibility(
+    const dispatched = sendOverlayVisibility(
       overlayPresented,
       "createOverlayWindow:did-finish-load",
     );
+    if (overlayPresented && !dispatched) {
+      overlayVisibleAckSatisfied = true;
+      maybeShowOverlayAfterRendererReady(
+        "createOverlayWindow:did-finish-load:visibility-dispatch-failed",
+      );
+    }
     if (sharedAchievementTableViewState) {
       try {
         overlayWindow.webContents.send(
@@ -9641,13 +9857,15 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("closed", () => {
-    overlayLogger.debug("create-overlay:closed");
+    overlayLogger.info("create-overlay:closed");
     clearOverlayVisibilityAckTimeout();
     clearOverlayTopmostBoostTimer();
     stopOverlayGlobalDrag();
     overlayWindow = null;
     overlayInteractive = false;
     overlayPresented = false;
+    overlayReadyToShow = false;
+    clearOverlayPendingShowState();
     overlayShownAtLeastOnce = false;
     clearOverlayInteractShortcut();
     clearOverlayKeyboardScrollShortcuts();
@@ -9656,12 +9874,21 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("show", () => {
+    overlayPresented = true;
     overlayShownAtLeastOnce = true;
-    overlayLogger.debug("create-overlay:show", {
+    clearOverlayPendingShowState();
+    overlayLogger.info("create-overlay:show", {
       presented: overlayPresented,
       visible: overlayWindow?.isVisible?.() || false,
     });
-    reassertOverlayAlwaysOnTop("overlay-window:show");
+    if (Date.now() - overlayLastTopmostReassertAt > 250) {
+      reassertOverlayAlwaysOnTop("overlay-window:show");
+    } else {
+      overlayLogger.debug("overlay:always-on-top:show-skip-reassert", {
+        reason: "recent-pre-show-reassert",
+        elapsedMs: Date.now() - overlayLastTopmostReassertAt,
+      });
+    }
     // Always start in click-through mode when the overlay is shown.
     setOverlayInteractive(false);
     applyOverlayInteractShortcutRegistration();
@@ -9673,6 +9900,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
         !overlayWindow.isVisible()
       )
         return;
+      setOverlayWindowOpacitySafely(1, "overlay-window:show:reveal");
       if (!overlayInteractive) applyOverlayInputMode();
       applyOverlayFocusMode();
       applyOverlayKeyboardScrollShortcutRegistration();
@@ -9681,7 +9909,10 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   });
 
   overlayWindow.on("hide", () => {
-    overlayLogger.debug("create-overlay:hide", {
+    overlayPresented = false;
+    clearOverlayPendingShowState();
+    clearOverlayVisibilityAckTimeout();
+    overlayLogger.info("create-overlay:hide", {
       presented: overlayPresented,
     });
     setOverlayInteractive(false);
@@ -9730,6 +9961,12 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
         frameRoutingId,
         state: getOverlayWindowLogState(),
       });
+      if (isMainFrame === false) return;
+      try {
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.destroy();
+        }
+      } catch {}
     },
   );
 
@@ -9739,7 +9976,14 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       exitCode: details?.exitCode,
       state: getOverlayWindowLogState(),
     });
+    try {
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.destroy();
+      }
+    } catch {}
   });
+
+  scheduleOverlayDragHookAfterBootComplete();
 
   // Intentionally avoid blur-driven state changes here. The overlay is designed to be non-focusable.
 }
@@ -9825,7 +10069,12 @@ ipcMain.handle("launchExecutable", async (_event, exePath, argsString) => {
 let currentAppId = null;
 
 ipcMain.on("toggle-overlay", (_event, selectedConfig) => {
-  if (!selectedConfig) return;
+  if (!selectedConfig) {
+    if (isOverlayEffectivelyPresented()) {
+      setOverlayPresented(false);
+    }
+    return;
+  }
   if (isBootOnboardingGatePending() || global.bootOnboardingRequired) return;
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     createOverlayWindow(selectedConfig);
@@ -9835,7 +10084,7 @@ ipcMain.on("toggle-overlay", (_event, selectedConfig) => {
       language: selectedLanguage,
       uiLanguage: selectedUiLanguage,
     });
-    if (!overlayPresented) {
+    if (!isOverlayEffectivelyPresented()) {
       setOverlayPresented(true);
     }
   }
@@ -10123,18 +10372,7 @@ app.whenReady().then(async () => {
 app.on("will-quit", () => {
   clearOverlayShortcutRegistration();
   clearOverlayInteractShortcut();
-  if (overlayDragMouseDownListener) {
-    overlayShortcutManager.off("mousedown", overlayDragMouseDownListener);
-    overlayDragMouseDownListener = null;
-  }
-  if (overlayDragMouseMoveListener) {
-    overlayShortcutManager.off("mousemove", overlayDragMouseMoveListener);
-    overlayDragMouseMoveListener = null;
-  }
-  if (overlayDragMouseUpListener) {
-    overlayShortcutManager.off("mouseup", overlayDragMouseUpListener);
-    overlayDragMouseUpListener = null;
-  }
+  clearOverlayGlobalDragHookRegistration();
   overlayShortcutManager.shutdown();
 });
 
@@ -10566,7 +10804,15 @@ ipcMain.on("overlay:visibility-ack", (event, payload = {}) => {
     return;
   }
   overlayLogger.debug("overlay:renderer-ack", ackMeta);
+  if (ackMeta.requestedVisible === true) {
+    overlayVisibleAckSatisfied = true;
+  }
   clearOverlayVisibilityAckTimeout();
+  if (ackMeta.requestedVisible === true) {
+    maybeShowOverlayAfterRendererReady(
+      ackMeta.source || "overlay:visibility-ack",
+    );
+  }
 });
 
 const { pathToFileURL } = require("url");
@@ -10621,7 +10867,8 @@ function removeAutoSelectIndexEntry(configName) {
     const set = autoSelectIndex.exeToConfigs.get(existing.exeLower);
     if (set) {
       set.delete(safeName);
-      if (set.size === 0) autoSelectIndex.exeToConfigs.delete(existing.exeLower);
+      if (set.size === 0)
+        autoSelectIndex.exeToConfigs.delete(existing.exeLower);
     }
   }
   autoSelectIndex.configEntries.delete(safeName);
@@ -10659,7 +10906,8 @@ async function upsertAutoSelectIndexEntryFromPath(filePath) {
     const prevSet = autoSelectIndex.exeToConfigs.get(prev.exeLower);
     if (prevSet) {
       prevSet.delete(safeName);
-      if (prevSet.size === 0) autoSelectIndex.exeToConfigs.delete(prev.exeLower);
+      if (prevSet.size === 0)
+        autoSelectIndex.exeToConfigs.delete(prev.exeLower);
     }
   }
 
@@ -10720,7 +10968,11 @@ async function rebuildAutoSelectIndex(reason = "manual") {
   }
 
   const fullPaths = (Array.isArray(files) ? files : [])
-    .filter((f) => String(f || "").toLowerCase().endsWith(".json"))
+    .filter((f) =>
+      String(f || "")
+        .toLowerCase()
+        .endsWith(".json"),
+    )
     .map((f) => path.join(configsDir, f));
 
   const max = Math.max(1, Math.floor(AUTO_SELECT_INDEX_BUILD_CONCURRENCY));
@@ -10908,7 +11160,11 @@ function getConfigProcessArgTokens(configData) {
         ? configData.args
         : "";
   const tokens = splitArgsString(rawArgs)
-    .map((token) => String(token || "").trim().toLowerCase())
+    .map((token) =>
+      String(token || "")
+        .trim()
+        .toLowerCase(),
+    )
     .filter(Boolean);
   configData.__processArgsTokens = tokens;
   return tokens;
@@ -11001,7 +11257,8 @@ async function autoSelectRunningGameConfig(processes) {
             }),
           );
           activePlaytimeConfigs.delete(entry?.data?.name || detectedConfigName);
-          if (detectedConfigName === entry?.data?.name) detectedConfigName = null;
+          if (detectedConfigName === entry?.data?.name)
+            detectedConfigName = null;
         }
       }
     }
@@ -11889,12 +12146,15 @@ ipcMain.handle(
           userDataDir: app.getPath("userData"),
           timeoutMs: 15000,
         });
-        const fetchedMap = await fetchGogGlobalAchievementPercentages(productId, {
-          accessToken: token?.access_token,
-          userId: token?.user_id,
-          timeoutMs: 15000,
-          lang: "en-US",
-        });
+        const fetchedMap = await fetchGogGlobalAchievementPercentages(
+          productId,
+          {
+            accessToken: token?.access_token,
+            userId: token?.user_id,
+            timeoutMs: 15000,
+            lang: "en-US",
+          },
+        );
         if (!fetchedMap.size) {
           rarityLogger.warn("rarity:gog:empty", {
             appid: productId,
@@ -11902,12 +12162,16 @@ ipcMain.handle(
             configName: config?.name || safeName,
           });
         }
-        const entries = buildRarityEntriesForSchema(fetchedMap, schemaAchievements, {
-          normalizeName: (name) =>
-            typeof name === "string" || typeof name === "number"
-              ? String(name).trim()
-              : "",
-        });
+        const entries = buildRarityEntriesForSchema(
+          fetchedMap,
+          schemaAchievements,
+          {
+            normalizeName: (name) =>
+              typeof name === "string" || typeof name === "number"
+                ? String(name).trim()
+                : "",
+          },
+        );
         const sidecarPath = writeAchievementPercentagesSidecar(
           path.dirname(schemaPath),
           productId,
@@ -11967,10 +12231,13 @@ ipcMain.handle(
         source,
       });
       try {
-        const fetchedMap = await fetchEpicGlobalAchievementPercentages(productId, {
-          locale: "en",
-          timeoutMs: 15000,
-        });
+        const fetchedMap = await fetchEpicGlobalAchievementPercentages(
+          productId,
+          {
+            locale: "en",
+            timeoutMs: 15000,
+          },
+        );
         if (!fetchedMap.size) {
           rarityLogger.warn("rarity:epic:empty", {
             appid: productId,
@@ -11978,12 +12245,16 @@ ipcMain.handle(
             configName: config?.name || safeName,
           });
         }
-        const entries = buildRarityEntriesForSchema(fetchedMap, schemaAchievements, {
-          normalizeName: (name) =>
-            typeof name === "string" || typeof name === "number"
-              ? String(name).trim()
-              : "",
-        });
+        const entries = buildRarityEntriesForSchema(
+          fetchedMap,
+          schemaAchievements,
+          {
+            normalizeName: (name) =>
+              typeof name === "string" || typeof name === "number"
+                ? String(name).trim()
+                : "",
+          },
+        );
         const sidecarPath = writeAchievementPercentagesSidecar(
           path.dirname(schemaPath),
           productId,
@@ -12051,9 +12322,12 @@ ipcMain.handle(
       source,
     });
     try {
-      const fetchedMap = await fetchSteamGlobalAchievementPercentages(steamAppId, {
-        timeoutMs: 15000,
-      });
+      const fetchedMap = await fetchSteamGlobalAchievementPercentages(
+        steamAppId,
+        {
+          timeoutMs: 15000,
+        },
+      );
       if (!fetchedMap.size) {
         rarityLogger.warn("rarity:steam:empty", {
           appid: steamAppId,
@@ -12066,7 +12340,10 @@ ipcMain.handle(
         schemaAchievements,
         {
           normalizeName: (name) =>
-            normalizeAchievementNameForRarity(name, resolved?.stripNames === true),
+            normalizeAchievementNameForRarity(
+              name,
+              resolved?.stripNames === true,
+            ),
         },
       );
       const sidecarPath = writeAchievementPercentagesSidecar(
@@ -12237,7 +12514,7 @@ ipcMain.handle("overlay:log", async (_event, payload = {}) => {
   const meta =
     payload.meta && typeof payload.meta === "object" ? payload.meta : {};
   try {
-    windowLogger[level](
+    overlayLogger[level](
       message || "overlay:log",
       Object.keys(meta).length ? meta : undefined,
     );

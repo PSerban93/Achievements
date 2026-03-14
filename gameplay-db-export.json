@@ -1,0 +1,1545 @@
+{
+  "exported_at_utc": "2026-03-14T12:26:47.235772+00:00",
+  "source": {
+    "path": "C:\\Users\\Serban\\AppData\\Local\\GOG.com\\Galaxy\\Applications\\52472569771423029\\Gameplay\\53351751154534946\\gameplay.db",
+    "file_size_bytes": 69632,
+    "last_write_time_utc": "2026-03-14T12:15:38.540137+00:00",
+    "sqlite_magic": "SQLite format 3\u0000",
+    "path_context": {
+      "gog_application_id_from_path": "52472569771423029",
+      "gameplay_profile_id_from_path": "53351751154534946"
+    }
+  },
+  "appid_search": {
+    "found_in_db": false,
+    "hits": [],
+    "note": "No appid/product id style field was found in the SQLite schema or raw database content. The only IDs available here are the ones inferred from the folder path."
+  },
+  "schema": [
+    {
+      "type": "index",
+      "name": "is_achievement_changed",
+      "tbl_name": "achievement",
+      "sql": "CREATE INDEX `is_achievement_changed` ON achievement (changed)"
+    },
+    {
+      "type": "index",
+      "name": "is_leaderboard_score_changed",
+      "tbl_name": "leaderboard",
+      "sql": "CREATE INDEX `is_leaderboard_score_changed` on leaderboard (changed)"
+    },
+    {
+      "type": "index",
+      "name": "is_statistic_changed",
+      "tbl_name": "statistic",
+      "sql": "CREATE INDEX `is_statistic_changed` ON statistic (changed)"
+    },
+    {
+      "type": "index",
+      "name": "sqlite_autoindex_achievement_1",
+      "tbl_name": "achievement",
+      "sql": null
+    },
+    {
+      "type": "index",
+      "name": "sqlite_autoindex_database_info_1",
+      "tbl_name": "database_info",
+      "sql": null
+    },
+    {
+      "type": "index",
+      "name": "sqlite_autoindex_leaderboard_1",
+      "tbl_name": "leaderboard",
+      "sql": null
+    },
+    {
+      "type": "index",
+      "name": "sqlite_autoindex_statistic_1",
+      "tbl_name": "statistic",
+      "sql": null
+    },
+    {
+      "type": "table",
+      "name": "achievement",
+      "tbl_name": "achievement",
+      "sql": "CREATE TABLE `achievement` (`id` INTEGER PRIMARY KEY NOT NULL,`key` TEXT UNIQUE NOT NULL,`name` TEXT NOT NULL,`description` TEXT NOT NULL,`visible_while_locked` INTEGER CHECK ( visible_while_locked IN ( 0, 1 ) ) NOT NULL,`unlock_time` TEXT,`image_url_locked` TEXT NOT NULL,`image_url_unlocked` TEXT NOT NULL,`changed` INTEGER CHECK ( changed IN ( 0, 1 ) ) NOT NULL, rarity REAL NOT NULL DEFAULT 0.0, rarity_level_description TEXT NOT NULL DEFAULT \"\", rarity_level_slug TEXT NOT NULL DEFAULT \"\")"
+    },
+    {
+      "type": "table",
+      "name": "database_info",
+      "tbl_name": "database_info",
+      "sql": "CREATE TABLE `database_info` (`key` TEXT PRIMARY KEY NOT NULL,`value` TEXT NOT NULL)"
+    },
+    {
+      "type": "table",
+      "name": "float_statistic",
+      "tbl_name": "float_statistic",
+      "sql": "CREATE TABLE `float_statistic` (`id` INTEGER REFERENCES statistic ( id ) NOT NULL,`value` REAL NOT NULL DEFAULT 0,`default_value` REAL NOT NULL DEFAULT 0,`min_value` REAL,`max_value` REAL,`max_change` REAL,`window` REAL DEFAULT NULL)"
+    },
+    {
+      "type": "table",
+      "name": "game_info",
+      "tbl_name": "game_info",
+      "sql": "CREATE TABLE `game_info` (`time_played` INTEGER NOT NULL)"
+    },
+    {
+      "type": "table",
+      "name": "int_statistic",
+      "tbl_name": "int_statistic",
+      "sql": "CREATE TABLE `int_statistic` (`id` INTEGER REFERENCES statistic ( id ) NOT NULL,`value` INTEGER NOT NULL DEFAULT 0,`default_value` INTEGER NOT NULL DEFAULT 0,`min_value` INTEGER,`max_value` INTEGER,`max_change` INTEGER)"
+    },
+    {
+      "type": "table",
+      "name": "leaderboard",
+      "tbl_name": "leaderboard",
+      "sql": "CREATE TABLE `leaderboard` (`id` INTEGER PRIMARY KEY NOT NULL,`key` TEXT UNIQUE NOT NULL,`name` TEXT NOT NULL,`sort_method` TEXT CHECK ( sort_method IN ( 'SORT_METHOD_ASCENDING', 'SORT_METHOD_DESCENDING' ) ) NOT NULL,`display_type` TEXT CHECK ( display_type IN ( 'DISPLAY_TYPE_NUMERIC', 'DISPLAY_TYPE_TIME_SECONDS', 'DISPLAY_TYPE_TIME_MILLISECONDS' ) ) NOT NULL,`score` INTEGER NOT NULL DEFAULT 0,`rank` INTEGER NOT NULL DEFAULT 0,`force_update` INTEGER CHECK ( force_update IN ( 0, 1 ) ) NOT NULL DEFAULT 0,`changed` INTEGER CHECK ( changed IN ( 0, 1 ) ) NOT NULL, entry_total_count INTEGER NOT NULL DEFAULT 0, details TEXT NOT NULL DEFAULT \"\")"
+    },
+    {
+      "type": "table",
+      "name": "statistic",
+      "tbl_name": "statistic",
+      "sql": "CREATE TABLE `statistic` (`id` INTEGER PRIMARY KEY NOT NULL,`key` TEXT UNIQUE NOT NULL,`type` TEXT CHECK ( type IN ( 'INT', 'FLOAT', 'AVGRATE' ) ) NOT NULL,`increment_only` INTEGER CHECK ( increment_only IN ( 0, 1 ) ) NOT NULL,`changed` INTEGER CHECK ( changed IN ( 0, 1 ) ) NOT NULL)"
+    }
+  ],
+  "tables": {
+    "achievement": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "key",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "name",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "description",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "visible_while_locked",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "unlock_time",
+          "type": "TEXT",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "image_url_locked",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 7,
+          "name": "image_url_unlocked",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 8,
+          "name": "changed",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 9,
+          "name": "rarity",
+          "type": "REAL",
+          "notnull": 1,
+          "dflt_value": "0.0",
+          "pk": 0
+        },
+        {
+          "cid": 10,
+          "name": "rarity_level_description",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        },
+        {
+          "cid": 11,
+          "name": "rarity_level_slug",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        }
+      ],
+      "row_count": 20,
+      "rows": [
+        {
+          "id": 54412598519805094,
+          "key": "ACH_SPIN_DOCTOR",
+          "name": "Spin Doctor",
+          "description": "Complete 5 spin-zones in Driftkhana.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/04d79a232f09356cd5ec7812b07d84e92c43fa5fb14fbbd3b7754b71a2711fd1_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/aa2b26843b3f6d5568bdca7f38d0273a73dc0ccce2397d3a420ab6bbad9d800a_gac_60.jpg",
+          "changed": 0,
+          "rarity": 8.5,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598520667504,
+          "key": "ACH_DRIFT_LINE_APPRENTICE",
+          "name": "Drift Line Apprentice",
+          "description": "Complete a perfect drift line.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/65c2b922b79986dd314897b42a0f738999558afdea85c9f52a618fcdd51efdf2_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/e44eebdc4d299f5b48162e63adf1853fb1e3fd2d0e392378e34b5d595b88217b_gac_60.jpg",
+          "changed": 0,
+          "rarity": 16.6,
+          "rarity_level_description": "Uncommon",
+          "rarity_level_slug": "uncommon"
+        },
+        {
+          "id": 54412598521841401,
+          "key": "ACH_MAD_SKILLS",
+          "name": "Mad Skills",
+          "description": "Score over 1,000,000 points in any event.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/b476df59a69d51066ba09eab27fed8a56b5922a7f23f0c2263d858447168f95d_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/b9171fa5e16f615035c335fa992c1d7e7656e49f6ebf78f457299ffc9f4fd03b_gac_60.jpg",
+          "changed": 0,
+          "rarity": 5.5,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598524360110,
+          "key": "ACH_BACON_DONUTS",
+          "name": "Bacon Donuts",
+          "description": "Complete 25 donuts in Driftkhana.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/1a19ea9a8d70faa40c35f403300a2366d165da066c31b3fe4c757e3c799ae1e3_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/381520404fe4f68ba344ad2251b9041eaa7757997d8b083cf80aa79742c308bb_gac_60.jpg",
+          "changed": 0,
+          "rarity": 2.7,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598527070909,
+          "key": "ACH_WASHING_MACHINE",
+          "name": "Washing Machine",
+          "description": "Complete 25 spin-zones in Driftkhana.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/df93828a1dd6f8ac9a92984605c6d02642ec5e73959bcfa7eddec35f21f0cffa_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/69e6ba53bc4a5b3575b639bbf324b328914b7b1e9a9970dcd6777bc95eb9b897_gac_60.jpg",
+          "changed": 0,
+          "rarity": 1.7,
+          "rarity_level_description": "Epic",
+          "rarity_level_slug": "epic"
+        },
+        {
+          "id": 54412598530481423,
+          "key": "ACH_JELLY_FILLED_DONUTS",
+          "name": "Jelly Donuts",
+          "description": "Complete 5 donuts in Driftkhana.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/3ba27a8a0c9937306b2eab318da7d4d350f8333c075256b28bdf9d334de66570_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/76c72594b37e4504f5a2ed4caa132640deb0efd9566698fb5f972b28b0db50fd_gac_60.jpg",
+          "changed": 0,
+          "rarity": 9.2,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598530688442,
+          "key": "ACH_GOOD_SKILLS",
+          "name": "Good Skills",
+          "description": "Score over 500,000 points in any event.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/7e1a026bc60cc0e67674355988a938c795a20abe2655fd734883e09b5a60708d_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/bd7ddaaff7f180ad84b5442a99128f1de486d284c318dc94de4276c6c45e10db_gac_60.jpg",
+          "changed": 0,
+          "rarity": 15.5,
+          "rarity_level_description": "Uncommon",
+          "rarity_level_slug": "uncommon"
+        },
+        {
+          "id": 54412598534542651,
+          "key": "ACH_INSANE_SKILLS",
+          "name": "Insane Skills",
+          "description": "Score over 2,000,000 points in any event.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/aa3b51b05416963b27147f420234dcfc7e6137a4856d113d68b239d24deac459_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/d6d9f72f13e958ec48944685fe536d9111c04de777127f0c9beaf09ef6011809_gac_60.jpg",
+          "changed": 0,
+          "rarity": 1.8,
+          "rarity_level_description": "Epic",
+          "rarity_level_slug": "epic"
+        },
+        {
+          "id": 54412598540219419,
+          "key": "ACH_MASTER_DRIFTER",
+          "name": "Master Drifter",
+          "description": "Completed the game.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/934734af079af1ec0db2e998930add1cb1c2c7cfa2108091dfc1afa8fe95af45_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/dc3108f3e82d6e9ec683e65b41edd43ab0a28155953b0af0c9c45b5cb06da094_gac_60.jpg",
+          "changed": 0,
+          "rarity": 1.9,
+          "rarity_level_description": "Epic",
+          "rarity_level_slug": "epic"
+        },
+        {
+          "id": 54412598541305092,
+          "key": "ACH_DOUBLE_RAINBOW",
+          "name": "Double Rainbow",
+          "description": "Paint your car 20 times in Free-Roam.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/7c68feee739f2118357f743a9e864eecc4ffb5ee99a819c82cbc03706a354458_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/192eaf4c6af839a25ad22a6c3ec2cf7c0e0c19e9877d30a54d09e17c98ad24a6_gac_60.jpg",
+          "changed": 0,
+          "rarity": 1.6,
+          "rarity_level_description": "Epic",
+          "rarity_level_slug": "epic"
+        },
+        {
+          "id": 54412598542526366,
+          "key": "ACH_SAKE_BOMBS",
+          "name": "Sake Bombs",
+          "description": "Fall into the water 5 times.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/0339804e8ed726f2574a632a74168fcd48fffcbd417eba5aa711a579f2851b2a_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/5cd02140824ce62710d23e7585d1f9a04faf2d68507268e315fe53325877cee9_gac_60.jpg",
+          "changed": 0,
+          "rarity": 2.5,
+          "rarity_level_description": "Epic",
+          "rarity_level_slug": "epic"
+        },
+        {
+          "id": 54412598543640850,
+          "key": "ACH_CUBIC_RUCKUS",
+          "name": "Bring the Cubic Ruckus",
+          "description": "Smash 100 blocks in Driftkhana & MTN Drift Tracks.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/8a84b6814da2d9fb373401fad60c16e1d3c4dcffcaabc26298dcc3affba2a0f6_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/faeccb8c5cfba66773bb82df2f09ffae5ea619d370631a0e8f59b86d355c8dde_gac_60.jpg",
+          "changed": 0,
+          "rarity": 6.9,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598543847104,
+          "key": "ACH_BUZZ_CONTROL_TOWER",
+          "name": "Maverick",
+          "description": "Buzz the control tower in World 1.",
+          "visible_while_locked": 1,
+          "unlock_time": "2026-03-14T11:59:03+00:00",
+          "image_url_locked": "https://images.gog.com/4b6724e68a30eac1cec72283b2883fad1294e524d64c7e7a824c4c0c4ea508e1_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/38f027b4847aaa43186077241c239dea2a7ce4896b93a892102f92a0173554a8_gac_60.jpg",
+          "changed": 0,
+          "rarity": 6.4,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598544108127,
+          "key": "ACH_THE_COMPLETIONIST",
+          "name": "The Completionist",
+          "description": "Complete all event challenges in the game.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/8dece9cd506daaac547bd1239672dea977cd21e77ab791f56af1bb44a68a2376_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/98c090862929a9463032a18769252c1521311c4c6765ed658e51cd03efb9553f_gac_60.jpg",
+          "changed": 0,
+          "rarity": 0.6,
+          "rarity_level_description": "Epic",
+          "rarity_level_slug": "epic"
+        },
+        {
+          "id": 54412598544391655,
+          "key": "ACH_MULTIPLIER_MASTER",
+          "name": "Multiplier Master",
+          "description": "Reach a 15x multiplier.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/fd0641b2b9abe686c14d8c410738657e6d53db921212bb0ef188b7d770294267_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/c5de8a1f99ef2f42aa9e12a5473d838d5d887bff59508c86d6947eb534778873_gac_60.jpg",
+          "changed": 0,
+          "rarity": 14.1,
+          "rarity_level_description": "Uncommon",
+          "rarity_level_slug": "uncommon"
+        },
+        {
+          "id": 54412598546795487,
+          "key": "ACH_THE_LONG_DRIFT",
+          "name": "The Long Drift",
+          "description": "Do a 10 second continuous drift.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/8b9727bf3eb3e00f0d7b23acb6abb313c5f7d62534e1102beb9de0e409b60ea6_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/042116f2a5911445fa440cb29291399f78b5b2080d843b5bc193f9a9eddb16b8_gac_60.jpg",
+          "changed": 0,
+          "rarity": 6.1,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598549711514,
+          "key": "ACH_HOON_AIRLINES",
+          "name": "Hoon Airlines",
+          "description": "Spend 2 minutes airborne in Free-Roam.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/9e6cddaa586a96adb0275ad2265246559eb7ad2a90343802b9af229cb1eecd84_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/63f85ff382eb516e8c9a7c680387327da0315eca00dcc5435410f670df2b1aa6_gac_60.jpg",
+          "changed": 0,
+          "rarity": 5.6,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598550371668,
+          "key": "ACH_MIDNIGHT_DRIFTER",
+          "name": "Midnight Drifter",
+          "description": "Unlock a midnight event.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/93f79e93d7c717ff1f62b8c89fdfb94bd182f62608e6f37d2bcb7c093b08b0d1_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/4313196d151b9c540bb8beba7ec39e31dfb3246b735654fe0c1ee759291cc325_gac_60.jpg",
+          "changed": 0,
+          "rarity": 14.0,
+          "rarity_level_description": "Uncommon",
+          "rarity_level_slug": "uncommon"
+        },
+        {
+          "id": 54412598551171952,
+          "key": "ACH_DRIFT_LINE_MASTER",
+          "name": "Drift Line Master",
+          "description": "Complete 10 perfect drift lines.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/14be0042d80db9baec3134f345c9608cf7724dda13bc3c0b112a7944c4e06fa0_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/875b8e912aece400cf595ec68bb35c02c9bfa4709b3cbd717d1ccb44fa4cab84_gac_60.jpg",
+          "changed": 0,
+          "rarity": 3.5,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        },
+        {
+          "id": 54412598551441803,
+          "key": "ACH_MIDNIGHT_MASTER",
+          "name": "Midnight Master",
+          "description": "Complete all 5 event challenges in a midnight event.",
+          "visible_while_locked": 1,
+          "unlock_time": null,
+          "image_url_locked": "https://images.gog.com/bcaeba3b1121844bf4afe4246079061f40f730f7cc1bab52416715aa1039b5bd_gac_60.jpg",
+          "image_url_unlocked": "https://images.gog.com/45225d30953ac73614d609a933bdad427bf745b3cd7b6251eb52f5d696e2b902_gac_60.jpg",
+          "changed": 0,
+          "rarity": 2.6,
+          "rarity_level_description": "Rare",
+          "rarity_level_slug": "rare"
+        }
+      ]
+    },
+    "database_info": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "key",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "value",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "row_count": 4,
+      "rows": [
+        {
+          "key": "achievements_retrieved",
+          "value": "1"
+        },
+        {
+          "key": "achievements_mode",
+          "value": "all_visible"
+        },
+        {
+          "key": "language",
+          "value": "en-US"
+        },
+        {
+          "key": "stats_retrieved",
+          "value": "1"
+        }
+      ]
+    },
+    "float_statistic": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 1,
+          "name": "value",
+          "type": "REAL",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "default_value",
+          "type": "REAL",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "min_value",
+          "type": "REAL",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "max_value",
+          "type": "REAL",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "max_change",
+          "type": "REAL",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "window",
+          "type": "REAL",
+          "notnull": 0,
+          "dflt_value": "NULL",
+          "pk": 0
+        }
+      ],
+      "row_count": 2,
+      "rows": [
+        {
+          "id": 54412809591938088,
+          "value": 27.505552,
+          "default_value": 1.0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1.0,
+          "window": null
+        },
+        {
+          "id": 54412811123156424,
+          "value": 0.0,
+          "default_value": 0.0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1.0,
+          "window": null
+        }
+      ]
+    },
+    "game_info": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "time_played",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "row_count": 0,
+      "rows": []
+    },
+    "int_statistic": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 1,
+          "name": "value",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "default_value",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "min_value",
+          "type": "INTEGER",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "max_value",
+          "type": "INTEGER",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "max_change",
+          "type": "INTEGER",
+          "notnull": 0,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "row_count": 10,
+      "rows": [
+        {
+          "id": 54412711019036090,
+          "value": 16,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": null
+        },
+        {
+          "id": 54412789094419473,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        },
+        {
+          "id": 54412789647467085,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        },
+        {
+          "id": 54412790163103928,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        },
+        {
+          "id": 54412809033125722,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        },
+        {
+          "id": 54412810263579380,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        },
+        {
+          "id": 54412810652749711,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        },
+        {
+          "id": 54412811616003817,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        },
+        {
+          "id": 54412812005637895,
+          "value": 33,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": null
+        },
+        {
+          "id": 54412812447566301,
+          "value": 0,
+          "default_value": 0,
+          "min_value": null,
+          "max_value": null,
+          "max_change": 1
+        }
+      ]
+    },
+    "leaderboard": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "key",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "name",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "sort_method",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "display_type",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 5,
+          "name": "score",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 6,
+          "name": "rank",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 7,
+          "name": "force_update",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 8,
+          "name": "changed",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 9,
+          "name": "entry_total_count",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": "0",
+          "pk": 0
+        },
+        {
+          "cid": 10,
+          "name": "details",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": "\"\"",
+          "pk": 0
+        }
+      ],
+      "row_count": 33,
+      "rows": [
+        {
+          "id": 54412869676804475,
+          "key": "Drift_Tutorial_1",
+          "name": "Drift_Tutorial_1",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 139660,
+          "rank": 10997,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 30396,
+          "details": {
+            "__type": "bytes",
+            "base64": "AA==",
+            "hex": "00"
+          }
+        },
+        {
+          "id": 54412869936782225,
+          "key": "Drift_Tutorial_2",
+          "name": "Drift_Tutorial_2",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 6400,
+          "rank": 7986,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 19163,
+          "details": {
+            "__type": "bytes",
+            "base64": "AA==",
+            "hex": "00"
+          }
+        },
+        {
+          "id": 54412870125398805,
+          "key": "Drift_Tutorial_3",
+          "name": "Drift_Tutorial_3",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 1100,
+          "rank": 6359,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 14995,
+          "details": {
+            "__type": "bytes",
+            "base64": "AA==",
+            "hex": "00"
+          }
+        },
+        {
+          "id": 54412870320004641,
+          "key": "Driftkhana_Tutorial_1",
+          "name": "Driftkhana_Tutorial_1",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412870523033899,
+          "key": "Driftkhana_Tutorial_2",
+          "name": "Driftkhana_Tutorial_2",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412870769112528,
+          "key": "Driftkhana_Track_1",
+          "name": "Driftkhana_Track_1",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412870967957714,
+          "key": "Driftkhana_Track_2",
+          "name": "Driftkhana_Track_2",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412871131560845,
+          "key": "Driftkhana_Track_3",
+          "name": "Driftkhana_Track_3",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412872670688039,
+          "key": "Driftkhana_Track_4",
+          "name": "Driftkhana_Track_4",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412872897072933,
+          "key": "Driftkhana_Track_5",
+          "name": "Driftkhana_Track_5",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412873110910300,
+          "key": "Driftkhana_Track_6",
+          "name": "Driftkhana_Track_6",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412873276436845,
+          "key": "Driftkhana_Track_7",
+          "name": "Driftkhana_Track_7",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412873434714298,
+          "key": "Driftkhana_Track_8",
+          "name": "Driftkhana_Track_8",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412873625119797,
+          "key": "Driftkhana_Track_9",
+          "name": "Driftkhana_Track_9",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412873849396040,
+          "key": "Drift_Track_1",
+          "name": "Drift_Track_1",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412874001401449,
+          "key": "Drift_Track_2",
+          "name": "Drift_Track_2",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412874217954113,
+          "key": "Drift_Track_3",
+          "name": "Drift_Track_3",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412874389053180,
+          "key": "Drift_Track_4",
+          "name": "Drift_Track_4",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412874539229879,
+          "key": "Drift_Track_5",
+          "name": "Drift_Track_5",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412874735899150,
+          "key": "Drift_Track_6",
+          "name": "Drift_Track_6",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412874890159621,
+          "key": "Drift_Track_7",
+          "name": "Drift_Track_7",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412875079833947,
+          "key": "Drift_Track_8",
+          "name": "Drift_Track_8",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412875298254449,
+          "key": "Drift_Track_9",
+          "name": "Drift_Track_9",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412875452919131,
+          "key": "Drift_Track_10",
+          "name": "Drift_Track_10",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412875612966709,
+          "key": "Mountain_Drift_Track_1",
+          "name": "Mountain_Drift_Track_1",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412875824033887,
+          "key": "Mountain_Drift_Track_2",
+          "name": "Mountain_Drift_Track_2",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412876021931475,
+          "key": "Mountain_Drift_Track_3",
+          "name": "Mountain_Drift_Track_3",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412876181713225,
+          "key": "Mountain_Drift_Track_4",
+          "name": "Mountain_Drift_Track_4",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412876353266054,
+          "key": "Night_Drift_Track_1",
+          "name": "Night_Drift_Track_1",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412876548544483,
+          "key": "Night_Drift_Track_2",
+          "name": "Night_Drift_Track_2",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412876742324183,
+          "key": "Night_Drift_Track_3",
+          "name": "Night_Drift_Track_3",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412877034792005,
+          "key": "Night_Drift_Track_4",
+          "name": "Night_Drift_Track_4",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        },
+        {
+          "id": 54412877156757063,
+          "key": "Night_Drift_Track_5",
+          "name": "Night_Drift_Track_5",
+          "sort_method": "SORT_METHOD_DESCENDING",
+          "display_type": "DISPLAY_TYPE_NUMERIC",
+          "score": 0,
+          "rank": 0,
+          "force_update": 0,
+          "changed": 0,
+          "entry_total_count": 0,
+          "details": {
+            "__type": "bytes",
+            "base64": "",
+            "hex": ""
+          }
+        }
+      ]
+    },
+    "statistic": {
+      "columns": [
+        {
+          "cid": 0,
+          "name": "id",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 1
+        },
+        {
+          "cid": 1,
+          "name": "key",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 2,
+          "name": "type",
+          "type": "TEXT",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 3,
+          "name": "increment_only",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        },
+        {
+          "cid": 4,
+          "name": "changed",
+          "type": "INTEGER",
+          "notnull": 1,
+          "dflt_value": null,
+          "pk": 0
+        }
+      ],
+      "row_count": 12,
+      "rows": [
+        {
+          "id": 54412711019036090,
+          "key": "TotalLevelsPlayed",
+          "type": "INT",
+          "increment_only": 0,
+          "changed": 0
+        },
+        {
+          "id": 54412789094419473,
+          "key": "DriftTracksPlayed",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412789647467085,
+          "key": "DriftkhanasPlayed",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412790163103928,
+          "key": "MtnLevelsPlayed",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412809033125722,
+          "key": "FellIntoWaterCount",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412809591938088,
+          "key": "TimeAirborneInFreeRoam",
+          "type": "FLOAT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412810263579380,
+          "key": "SpinZoneCount",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412810652749711,
+          "key": "DonutCount",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412811123156424,
+          "key": "DriftDistanceFreeRoam",
+          "type": "FLOAT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412811616003817,
+          "key": "PaintJobCount",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412812005637895,
+          "key": "BlocksSmashedCount",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        },
+        {
+          "id": 54412812447566301,
+          "key": "PerfectDriftLineCount",
+          "type": "INT",
+          "increment_only": 1,
+          "changed": 0
+        }
+      ]
+    }
+  }
+}

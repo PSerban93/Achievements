@@ -1243,6 +1243,9 @@ body::-webkit-scrollbar {
 .checkbox-control input[type="checkbox"] {
   width: 18px;
   height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  flex: 0 0 18px;
   accent-color: var(--dracula-cyan);
 }
 

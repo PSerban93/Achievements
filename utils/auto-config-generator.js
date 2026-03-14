@@ -481,51 +481,104 @@ async function getGameNameFromSteamHunters(appid) {
   }
 }
 
-async function getGameNameFromGogDb(appid) {
-  try {
-    const url = `https://gamesdb.gog.com/platforms/gog/external_releases/${appid}`;
-    const res = await axios.get(url, { timeout: 15000 });
-    const payload = res.data;
-    let title = "";
-    if (payload) {
-      if (typeof payload === "string") {
-        title = payload;
-      } else if (Array.isArray(payload)) {
-        title =
-          payload.find((entry) => entry && entry.title)?.title ||
-          payload[0]?.title ||
-          "";
-      } else if (typeof payload === "object") {
-        const rawTitle =
-          payload.title ||
-          payload.name ||
-          payload.productTitle ||
-          payload.game?.title ||
-          payload.product?.title ||
-          "";
-        if (rawTitle && typeof rawTitle === "object" && rawTitle["*"]) {
-          title = rawTitle["*"];
-        } else if (typeof rawTitle === "string") {
-          title = rawTitle;
-        } else if (payload.title && payload.title.value) {
-          title = payload.title.value;
-        }
+function firstLocalizedText(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "object") {
+    if (typeof value["*"] === "string" && value["*"].trim()) {
+      return value["*"].trim();
+    }
+    if (typeof value.value === "string" && value.value.trim()) {
+      return value.value.trim();
+    }
+    for (const candidate of Object.values(value)) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
       }
     }
-    if (title) {
-      gogNameFallbackAppIds.add(String(appid));
-      autoConfigLogger.info("gog-db:name-resolved", { appid, title });
-      return title;
-    }
-    autoConfigLogger.warn("gog-db:title-missing", { appid });
-    return null;
-  } catch (err) {
-    autoConfigLogger.warn("gog-db:request-failed", {
-      appid,
-      error: err?.message || String(err),
-    });
-    return null;
   }
+  return "";
+}
+
+function extractGogTitle(payload) {
+  if (!payload) return "";
+  if (typeof payload === "string") return payload.trim();
+  if (Array.isArray(payload)) {
+    for (const entry of payload) {
+      const title = extractGogTitle(entry);
+      if (title) return title;
+    }
+    return "";
+  }
+  if (typeof payload !== "object") return "";
+
+  const candidates = [
+    payload.title,
+    payload.name,
+    payload.productTitle,
+    payload.game?.title,
+    payload.game?.name,
+    payload.product?.title,
+    payload.product?.name,
+    payload.products?.[0]?.name,
+  ];
+
+  for (const candidate of candidates) {
+    const title = firstLocalizedText(candidate);
+    if (title) return title;
+  }
+  return "";
+}
+
+async function getGameNameFromGogDb(appid) {
+  const normalizedAppId = String(appid || "").trim();
+  const attempts = [
+    {
+      source: "gamesdb.external_releases",
+      url: `https://gamesdb.gog.com/platforms/gog/external_releases/${normalizedAppId}`,
+    },
+    {
+      source: "api.gog.com/products",
+      url: `https://api.gog.com/products/${normalizedAppId}?locale=en_US`,
+    },
+    {
+      source: "api.gog.com/v2/games",
+      url: `https://api.gog.com/v2/games/${normalizedAppId}?locale=en-US`,
+    },
+  ];
+  const failures = [];
+
+  for (const attempt of attempts) {
+    try {
+      const res = await axios.get(attempt.url, { timeout: 15000 });
+      const title = extractGogTitle(res.data);
+      if (title) {
+        gogNameFallbackAppIds.add(normalizedAppId);
+        autoConfigLogger.info("gog:name-resolved", {
+          appid: normalizedAppId,
+          title,
+          source: attempt.source,
+        });
+        return title;
+      }
+      failures.push({
+        source: attempt.source,
+        reason: "title-missing",
+      });
+    } catch (err) {
+      failures.push({
+        source: attempt.source,
+        status: err?.response?.status || null,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  autoConfigLogger.warn("gog:name-lookup-failed", {
+    appid: normalizedAppId,
+    attempts: failures,
+  });
+  return null;
 }
 
 // Epic name resolution helpers
@@ -774,10 +827,10 @@ async function getGameName(appid, opts = {}, retries = 2) {
   const shName = await getGameNameFromSteamHunters(appid);
   if (shName) return shName;
   autoConfigLogger.warn("fallback:steam-hunters-failed", { appid });
-  autoConfigLogger.info("fallback:gog-db", { appid });
+  autoConfigLogger.info("fallback:gog-name", { appid });
   const gogName = await getGameNameFromGogDb(appid);
   if (gogName) return gogName;
-  autoConfigLogger.warn("fallback:gog-db-failed", { appid });
+  autoConfigLogger.warn("fallback:gog-name-failed", { appid });
   return null;
 }
 // run generate_achievements_schema.js

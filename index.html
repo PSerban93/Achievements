@@ -775,7 +775,12 @@
                     />
                     <label for="settings-disableHardwareAccelerationCheckbox">
                       Disable Hardware Acceleration
-                      <span class="hint">(restart required)</span>
+                      <span
+                        class="hint"
+                        id="settings-disableHardwareAccelerationHint"
+                      >
+                        (restart required)
+                      </span>
                     </label>
                   </div>
                   <div class="checkbox-control">
@@ -785,6 +790,21 @@
                     />
                     <label for="settings-disableProcessNameWatcherCheckbox">
                       Disable Process Name Watcher
+                    </label>
+                  </div>
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
+                      id="settings-forceGlobalOverlayShortcutsCheckbox"
+                    />
+                    <label for="settings-forceGlobalOverlayShortcutsCheckbox">
+                      Force globalShortcut for overlay
+                      <span
+                        class="hint"
+                        id="settings-forceGlobalOverlayShortcutsHint"
+                      >
+                        (disables hook-based drag)
+                      </span>
                     </label>
                   </div>
                   <div class="checkbox-control">
@@ -2004,6 +2024,13 @@
                       cost (blur/shadows/large transforms) and reduce
                       notification duration.
                     </li>
+                    <li id="platformGuideTroubleshootingItem9">
+                      If overlay display/presentation issues appear, especially
+                      with Special K active, enable Force globalShortcut for
+                      overlay in Advanced &gt; Rendering. This disables
+                      hook-based drag and can improve compatibility on some
+                      systems.
+                    </li>
                   </ul>
                 </details>
               </div>
@@ -2011,7 +2038,11 @@
           </div>
         </div>
 
-        <div id="settingsVersion" class="settings-version" aria-live="polite"></div>
+        <div
+          id="settingsVersion"
+          class="settings-version"
+          aria-live="polite"
+        ></div>
       </div>
     </div>
 
@@ -6375,8 +6406,6 @@
                 preset: null,
                 position: null,
               });
-              window.api.toggleOverlay(null);
-              window.api.onLoadOverlayData(null);
               window.__showFallbackLogo?.();
               window.__setEmbeddedPlatinumBadgeByConfig?.(null);
             }
@@ -6874,8 +6903,6 @@
                   preset: null,
                   position: null,
                 });
-                window.api.toggleOverlay(null);
-                window.api.onLoadOverlayData(null);
               } catch {}
               window.__showFallbackLogo?.();
             } else {
@@ -7098,8 +7125,6 @@
               preset: null,
               position: null,
             });
-            window.api.toggleOverlay(null);
-            window.api.onLoadOverlayData(null);
           } catch {}
 
           window.__showFallbackLogo?.();
@@ -7931,6 +7956,23 @@
               disableHardwareAcceleration: e.target.checked,
             });
           });
+        }
+
+        const forceGlobalOverlayShortcutsEl = document.getElementById(
+          "settings-forceGlobalOverlayShortcutsCheckbox",
+        );
+        if (forceGlobalOverlayShortcutsEl) {
+          forceGlobalOverlayShortcutsEl.checked =
+            prefs?.forceGlobalOverlayShortcuts === true;
+          forceGlobalOverlayShortcutsEl.addEventListener(
+            "change",
+            async (e) => {
+              await window.api.savePreferences({
+                forceGlobalOverlayShortcuts: e.target.checked,
+              });
+              await loadPreferencesCached().catch(() => {});
+            },
+          );
         }
 
         const showDashEl = document.getElementById(

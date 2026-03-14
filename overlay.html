@@ -589,6 +589,31 @@
       let currentDataHash = null;
       let isLoading = false;
       let pendingConfigName = null;
+      let pendingVisibilityAckPayload = null;
+
+      function dispatchOverlayVisibilityAck(payload, reason = "immediate") {
+        if (!payload) return;
+        const ackPayload = {
+          ...payload,
+          cssHidden: document.body.classList.contains("overlay-hidden"),
+          documentHidden: !!document.hidden,
+          reason,
+        };
+        requestAnimationFrame(() => {
+          try {
+            window.api?.overlayVisibilityAck?.(ackPayload);
+          } catch {}
+        });
+      }
+
+      function flushOverlayVisibilityAck(reason = "flush") {
+        if (!pendingVisibilityAckPayload) return;
+        if (pendingVisibilityAckPayload.visible && isLoading) return;
+        const payload = pendingVisibilityAckPayload;
+        pendingVisibilityAckPayload = null;
+        dispatchOverlayVisibilityAck(payload, reason);
+      }
+
       function getAppIconUrl() {
         const q = new URLSearchParams(location.search).get("icon");
         return q ? decodeURIComponent(q) : "";
@@ -1154,19 +1179,27 @@
           isLoading = false;
           const next = pendingConfigName;
           pendingConfigName = null;
-          if (next) loadAchievements(next);
+          if (next) {
+            loadAchievements(next);
+          } else {
+            flushOverlayVisibilityAck("loadAchievements:finally");
+          }
         }
       }
 
       window.api.onSetLanguage((payload) => {
+        let contentLanguageChanged = false;
         let uiLanguageChanged = false;
         if (payload && typeof payload === "object") {
           if (payload.language) {
-            overlayLang = payload.language;
+            const nextOverlayLang = String(payload.language || "english");
+            contentLanguageChanged = nextOverlayLang !== overlayLang;
+            overlayLang = nextOverlayLang;
           }
           if (payload.uiLanguage) {
-            overlayUiLang = String(payload.uiLanguage || "english");
-            uiLanguageChanged = true;
+            const nextUiLanguage = String(payload.uiLanguage || "english");
+            uiLanguageChanged = nextUiLanguage !== overlayUiLang;
+            overlayUiLang = nextUiLanguage;
             overlayPrefs = {
               ...(overlayPrefs || {}),
               uiLanguage: overlayUiLang,
@@ -1179,12 +1212,14 @@
             }
           }
         } else {
-          overlayLang = payload;
+          const nextOverlayLang = String(payload || "english");
+          contentLanguageChanged = nextOverlayLang !== overlayLang;
+          overlayLang = nextOverlayLang;
         }
-        if (uiLanguageChanged) {
+        if (uiLanguageChanged || contentLanguageChanged) {
           currentDataHash = null;
         }
-        if (currentConfigName) {
+        if (currentConfigName && (uiLanguageChanged || contentLanguageChanged)) {
           loadAchievements(currentConfigName);
         }
       });
@@ -1247,19 +1282,25 @@
         const ackPayload = {
           visible: !!visible,
           source: source || null,
-          cssHidden: document.body.classList.contains("overlay-hidden"),
-          documentHidden: !!document.hidden,
         };
         try {
           window.api?.logOverlayEvent?.(
-            "info",
+            "debug",
             "overlay:renderer:set-visible",
-            ackPayload,
+            {
+              ...ackPayload,
+              cssHidden: document.body.classList.contains("overlay-hidden"),
+              documentHidden: !!document.hidden,
+              deferred: !!visible && isLoading,
+            },
           );
         } catch {}
-        try {
-          window.api?.overlayVisibilityAck?.(ackPayload);
-        } catch {}
+        if (visible && isLoading) {
+          pendingVisibilityAckPayload = ackPayload;
+          return;
+        }
+        pendingVisibilityAckPayload = null;
+        dispatchOverlayVisibilityAck(ackPayload, "setOverlayVisible");
       }
 
       window.api.on("overlay:set-visible", (payload) => {
