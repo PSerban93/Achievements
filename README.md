@@ -187,7 +187,7 @@ Creates a standalone `.exe` installer in the `dist/` folder.
 **Config JSON fields (reference):**
 
 - `appid` (string) – game id
-- `platform` (string) – steam/uplay/gog/gog-official/epic/xenia/rpcs3/shadps4/steam-official
+- `platform` (string) – steam/uplay/gog/gog-official/epic/xenia/rpcs3/shadps4/steam-official/ubisoft-official
 - `config_path` (string) – folder containing `achievements.json` and `img/`
 - `save_path` (string) – location of save/achievement progress
 - `process_name` (string) – executable name for process tracking
@@ -278,6 +278,25 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - The config is created only after `gameplay.db` exists and the achievement table is populated and stable, to avoid generating an empty schema.
 - If a game only has `Storage\...` data and no `Gameplay\<userId>\gameplay.db` yet, the app will detect the install path but will wait before creating the config.
 - After creation, the config `save_path` points to the concrete `Gameplay\<userId>` folder, while runtime progress is read from `gameplay.db`.
+
+#### Ubisoft Connect Support
+
+1. Install and sign in to **Ubisoft Connect**.
+2. Use **Watched Folders** add the `%LOCALAPPDATA%\Ubisoft Game Launcher\spool` folder manually.
+3. Start and play the game via Ubisoft Connect at least once so the local spool/cache files exist.
+4. The app will:
+   - detect `%LOCALAPPDATA%\Ubisoft Game Launcher\spool\<userId>\<productId>.spool`,
+   - generate `achievements.json`, `achievementpercentages.json` and local images from `%ProgramData%\Ubisoft\Ubisoft Game Launcher\cache\achievements`,
+   - generate a `ubisoft-official` config automatically,
+   - use the local `uplay-steam` mapping when a Steam AppID is available for rarity,
+   - monitor later `.spool` changes and display notifications when new achievements are unlocked.
+
+**Important notes:**
+
+- `ubisoft-official` is auto-generated from manually watched Ubisoft Connect spool roots. It is not meant to be created manually from the platform dropdown.
+- The app does not assume the Ubisoft spool path automatically; the spool root must be added manually in **Settings → Folders**.
+- The config is created only after both the `.spool` file and the local achievements archive are available, so the schema can be generated first.
+- After creation, the config `save_path` points to the concrete `spool\<userId>` folder, while runtime progress is read from `<productId>.spool`.
 
 ### Dashboard
 

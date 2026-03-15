@@ -44,6 +44,13 @@ const {
   resolveGogGalaxyProductByClientId,
   resolveGogOfficialGameplayDbForConfig,
 } = require("./gog-galaxy-local");
+const {
+  buildUbisoftOfficialSnapshot,
+  listUbisoftOfficialSpoolEntries,
+  readUbisoftSpoolFile,
+  resolveUbisoftOfficialSpoolFileForConfig,
+  resolveUbisoftSpoolRoots,
+} = require("./ubisoft-connect-local");
 const GAMEPLAY_DB_WAL_NAME = `${GAMEPLAY_DB_NAME}-wal`;
 const GAMEPLAY_DB_SHM_NAME = `${GAMEPLAY_DB_NAME}-shm`;
 
@@ -726,6 +733,7 @@ module.exports = function makeWatchedFolders({
     if (!meta?.save_path) return null;
     if (
       isSteamOfficialMeta(meta) ||
+      isUbisoftOfficialMeta(meta) ||
       isXeniaMeta(meta) ||
       isRpcs3Meta(meta) ||
       isPs4Meta(meta)
@@ -1854,6 +1862,10 @@ module.exports = function makeWatchedFolders({
     return normalizePlatform(meta?.platform) === "gog-official";
   }
 
+  function isUbisoftOfficialMeta(meta) {
+    return normalizePlatform(meta?.platform) === "ubisoft-official";
+  }
+
   function isPs4Meta(meta) {
     return normalizePlatform(meta?.platform) === "shadps4";
   }
@@ -1964,6 +1976,108 @@ module.exports = function makeWatchedFolders({
     }
 
     return null;
+  }
+
+  function resolveUbisoftOfficialSpoolEvent(rootPath, targetPath) {
+    if (!targetPath) return null;
+    const spoolRoots = resolveUbisoftSpoolRoots(rootPath);
+    if (!spoolRoots.length) return null;
+
+    let resolvedTarget = "";
+    try {
+      resolvedTarget = fs.realpathSync(targetPath);
+    } catch {
+      try {
+        resolvedTarget = path.resolve(String(targetPath || ""));
+      } catch {
+        resolvedTarget = "";
+      }
+    }
+    if (!resolvedTarget) return null;
+
+    for (const spoolRoot of spoolRoots) {
+      let relative = "";
+      try {
+        relative = path.relative(spoolRoot, resolvedTarget);
+      } catch {
+        relative = "";
+      }
+      if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+        continue;
+      }
+      return {
+        spoolRoot,
+        targetPath: resolvedTarget,
+        relativeSegments: relative.split(/[\\/]+/).filter(Boolean),
+      };
+    }
+
+    return null;
+  }
+
+  async function handleUbisoftOfficialRootFileEvent(rootPath, filePath) {
+    const event = resolveUbisoftOfficialSpoolEvent(rootPath, filePath);
+    if (!event) return false;
+
+    const baseName = path.basename(event.targetPath).toLowerCase();
+    if (!baseName.endsWith(".spool")) {
+      return true;
+    }
+
+    const rel = event.relativeSegments;
+    if (rel.length !== 2 || !/^\d+\.spool$/i.test(String(rel[1] || ""))) {
+      return true;
+    }
+
+    const appid = String(path.basename(baseName, ".spool") || "").trim();
+    if (!appid || hasPlatformVariant(appid, "ubisoft-official")) {
+      return true;
+    }
+
+    watcherLogger.info("ubisoft-official:live-discovery", {
+      root: event.spoolRoot,
+      appid,
+      userId: rel[0] || null,
+      spoolFilePath: event.targetPath,
+    });
+
+    try {
+      await scanRootOnce(event.spoolRoot, {
+        suppressInitialNotify: true,
+      });
+    } catch (err) {
+      watcherLogger.warn("ubisoft-official:live-discovery-failed", {
+        root: event.spoolRoot,
+        appid,
+        error: err?.message || String(err),
+      });
+    }
+
+    return true;
+  }
+
+  function handleUbisoftOfficialRootDirEvent(rootPath, dirPath, scheduleScan) {
+    const event = resolveUbisoftOfficialSpoolEvent(rootPath, dirPath);
+    if (!event) return false;
+
+    const rel = event.relativeSegments;
+    const userId =
+      rel.length && /^[0-9a-f-]+$/i.test(String(rel[0] || ""))
+        ? String(rel[0] || "")
+        : "";
+    const shouldSchedule = !rel.length || (rel.length === 1 && !!userId);
+
+    watcherLogger.info("ubisoft-official:root-dir-discovered", {
+      root: event.spoolRoot,
+      userId: userId || null,
+      relativePath: rel.join(path.sep),
+      scheduled: shouldSchedule,
+    });
+
+    if (shouldSchedule && typeof scheduleScan === "function") {
+      scheduleScan();
+    }
+    return true;
   }
 
   async function handleGogOfficialRootFileEvent(rootPath, filePath) {
@@ -2595,6 +2709,24 @@ module.exports = function makeWatchedFolders({
             : typeof data?.gogGameplayDb === "string"
               ? data.gogGameplayDb
               : "",
+        ubisoft_user_id:
+          typeof data?.ubisoft_user_id === "string"
+            ? data.ubisoft_user_id
+            : typeof data?.ubisoftUserId === "string"
+              ? data.ubisoftUserId
+              : "",
+        ubisoft_spool_file:
+          typeof data?.ubisoft_spool_file === "string"
+            ? data.ubisoft_spool_file
+            : typeof data?.ubisoftSpoolFile === "string"
+              ? data.ubisoftSpoolFile
+              : "",
+        ubisoft_achievements_archive:
+          typeof data?.ubisoft_achievements_archive === "string"
+            ? data.ubisoft_achievements_archive
+            : typeof data?.ubisoftAchievementsArchive === "string"
+              ? data.ubisoftAchievementsArchive
+              : "",
         normalizedSavePath,
         platinum: data?.platinum === true,
         __tenoke: data?.emu === "tenoke" || false,
@@ -2825,6 +2957,18 @@ module.exports = function makeWatchedFolders({
       return Array.from(out);
     }
 
+    if (isUbisoftOfficialMeta(meta)) {
+      const resolved = resolveUbisoftOfficialSpoolFileForConfig(meta);
+      const spoolDir = resolved?.spoolDir || meta.save_path || "";
+      const spoolFilePath =
+        resolved?.spoolFilePath ||
+        meta.ubisoft_spool_file ||
+        (spoolDir && meta.appid ? path.join(spoolDir, `${meta.appid}.spool`) : "");
+      if (spoolDir) out.add(spoolDir);
+      if (spoolFilePath) out.add(spoolFilePath);
+      return Array.from(out);
+    }
+
     if (isPs4Meta(meta)) {
       const trophyDir = resolvePs4TrophyDirForMeta(meta);
       if (trophyDir) {
@@ -2903,6 +3047,7 @@ module.exports = function makeWatchedFolders({
     const isPs4 = isPs4Meta(meta);
     const isSteamOfficial = isSteamOfficialMeta(meta);
     const isGogOfficial = isGogOfficialMeta(meta);
+    const isUbisoftOfficial = isUbisoftOfficialMeta(meta);
     if (isLumaPlay) {
       // Registry-backed source; no file suffix checks.
     } else if (isXenia) {
@@ -2913,6 +3058,10 @@ module.exports = function makeWatchedFolders({
       if (base !== "trop.xml") return;
     } else if (isGogOfficial) {
       if (base !== GAMEPLAY_DB_NAME) return;
+    } else if (isUbisoftOfficial) {
+      if (!base.endsWith(".spool")) return;
+      const appidStr = String(meta?.appid || appid || "").toLowerCase();
+      if (appidStr && base !== `${appidStr}.spool`) return;
     } else if (isSteamOfficial) {
       if (!base.endsWith(".bin") || !base.startsWith("usergamestats_")) return;
       const appidStr = String(meta?.appid || appid || "").toLowerCase();
@@ -3091,6 +3240,14 @@ module.exports = function makeWatchedFolders({
         const parsedPs4 = parsePs4TrophySetDir(trophyDir);
         parsedPs4.appid = String(meta?.appid || appid || "");
         cur = buildSnapshotFromPs4(parsedPs4, prev);
+      } catch {
+        parseOk = false;
+        cur = prev;
+      }
+    } else if (isUbisoftOfficial) {
+      try {
+        const parsed = readUbisoftSpoolFile(filePath);
+        cur = buildUbisoftOfficialSnapshot(parsed?.records || []);
       } catch {
         parseOk = false;
         cur = prev;
@@ -4164,6 +4321,49 @@ module.exports = function makeWatchedFolders({
             }
             resolvedPath = expectedDbPathRaw;
           }
+        } else if (isUbisoftOfficialMeta(meta)) {
+          const normFile = path.normalize(filePath).toLowerCase();
+          const resolved = resolveUbisoftOfficialSpoolFileForConfig(meta);
+          const expectedSpoolFileRaw =
+            resolved?.spoolFilePath ||
+            meta?.ubisoft_spool_file ||
+            path.join(meta?.save_path || "", `${meta?.appid || appid}.spool`);
+          const expectedSpoolFile = path
+            .normalize(
+              expectedSpoolFileRaw,
+            )
+            .toLowerCase();
+          const expectedDirRaw =
+            resolved?.spoolDir ||
+            meta?.save_path ||
+            path.dirname(expectedSpoolFileRaw);
+          const expectedDir = path
+            .normalize(
+              expectedDirRaw,
+            )
+            .toLowerCase();
+          const baseName = path.basename(normFile);
+          const isSpoolTrigger = /\.spool$/i.test(baseName);
+
+          if (expectedSpoolFile && normFile === expectedSpoolFile) {
+            resolvedPath = expectedSpoolFileRaw;
+          } else {
+            if (!isSpoolTrigger) return;
+            if (
+              expectedDir &&
+              normFile !== expectedSpoolFile &&
+              !normFile.startsWith(expectedDir + path.sep)
+            ) {
+              return;
+            }
+            if (
+              meta?.appid &&
+              baseName !== `${String(meta.appid).toLowerCase()}.spool`
+            ) {
+              return;
+            }
+            resolvedPath = expectedSpoolFileRaw;
+          }
         } else {
           const parts = filePath.split(path.sep).map((p) => p.toLowerCase());
           const detected = [...parts]
@@ -4348,6 +4548,20 @@ module.exports = function makeWatchedFolders({
         if (!seenCandidates.has(key)) {
           seenCandidates.add(key);
           candidates.unshift(userBin);
+        }
+      }
+    } else if (isUbisoftOfficialMeta(meta)) {
+      const resolved = resolveUbisoftOfficialSpoolFileForConfig(meta);
+      const spoolFilePath =
+        resolved?.spoolFilePath ||
+        meta?.ubisoft_spool_file ||
+        (baseDir && id ? path.join(baseDir, `${id}.spool`) : "");
+      for (const p of [spoolFilePath, baseDir]) {
+        if (!p) continue;
+        const key = path.normalize(p);
+        if (!seenCandidates.has(key)) {
+          seenCandidates.add(key);
+          candidates.unshift(p);
         }
       }
     } else if (isPs4Meta(meta)) {
@@ -4870,6 +5084,12 @@ module.exports = function makeWatchedFolders({
         if (opts.__gogGameplayDbPath) {
           genOptions.gogGameplayDbPath = opts.__gogGameplayDbPath;
         }
+        if (opts.__ubisoftUserId) {
+          genOptions.ubisoftUserId = opts.__ubisoftUserId;
+        }
+        if (opts.__ubisoftSpoolFile) {
+          genOptions.ubisoftSpoolFile = opts.__ubisoftSpoolFile;
+        }
         if (opts.__emu) {
           genOptions.emu = opts.__emu;
         }
@@ -5225,6 +5445,13 @@ module.exports = function makeWatchedFolders({
               : path.join(fp, GAMEPLAY_DB_NAME);
           if (!fs.existsSync(targetDb)) continue;
           metaPath = targetDb;
+        } else if (isUbisoftOfficialMeta(meta)) {
+          const targetSpool =
+            /\.spool$/i.test(path.basename(fp)) && !fs.statSync(fp).isDirectory()
+              ? fp
+              : path.join(fp, `${appid}.spool`);
+          if (!fs.existsSync(targetSpool)) continue;
+          metaPath = targetSpool;
         }
         if (bootLikeSeed) {
           loadCacheMetaOnce();
@@ -5323,6 +5550,15 @@ module.exports = function makeWatchedFolders({
               fullSchemaPath: resolveAchievementsSchemaPath(meta),
             },
           );
+        } else if (isUbisoftOfficialMeta(meta)) {
+          snapshot = loadAchievementsFromSaveFile(
+            path.dirname(metaPath),
+            lastSnapshot.get(snapKey) || {},
+            {
+              configMeta: meta,
+              fullSchemaPath: resolveAchievementsSchemaPath(meta),
+            },
+          );
         } else if (isPs4Meta(meta)) {
           let trophyDir = meta?.save_path || "";
           try {
@@ -5392,7 +5628,7 @@ module.exports = function makeWatchedFolders({
               watcherLogger.info("seed:cache-skip-identical", {
                 appid,
                 config: configName,
-                file: fp,
+                file: metaPath || fp,
                 bootMode,
               });
             }
@@ -5404,7 +5640,7 @@ module.exports = function makeWatchedFolders({
           watcherLogger.info("seed:pending-notify-set", {
             appid,
             config: configName,
-            file: fp,
+            file: metaPath || fp,
             bootMode,
           });
         } else if (initialFlag) {
@@ -5412,7 +5648,7 @@ module.exports = function makeWatchedFolders({
           watcherLogger.info("seed:pending-notify-skip", {
             appid,
             config: configName,
-            file: fp,
+            file: metaPath || fp,
             bootMode,
           });
         }
@@ -5817,10 +6053,84 @@ module.exports = function makeWatchedFolders({
           }
         } catch {}
 
-        const gogGalaxyApplicationRoots = resolveGogGalaxyApplicationsRoots(
-          scanBase,
-        );
-        if (gogGalaxyApplicationRoots.length) {
+        const ubisoftSpoolRoots = resolveUbisoftSpoolRoots(scanBase);
+        if (ubisoftSpoolRoots.length) {
+          let spoolEntries = [];
+          const seenSpoolFiles = new Set();
+          for (const spoolRoot of ubisoftSpoolRoots) {
+            try {
+              const entries = listUbisoftOfficialSpoolEntries(spoolRoot);
+              for (const entry of entries) {
+                const key = String(entry?.spoolFilePath || "").toLowerCase();
+                if (!key || seenSpoolFiles.has(key)) continue;
+                seenSpoolFiles.add(key);
+                spoolEntries.push(entry);
+              }
+            } catch (err) {
+              watcherLogger.warn("ubisoft-official:scan-failed", {
+                root: spoolRoot,
+                error: err?.message || String(err),
+              });
+            }
+          }
+
+          const entriesByAppId = new Map();
+          for (const entry of spoolEntries) {
+            const productId = String(entry?.appid || "").trim();
+            if (!productId || blacklist.has(productId)) continue;
+            const existingOfficial =
+              getConfigMetas(productId).find((meta) => isUbisoftOfficialMeta(meta)) ||
+              null;
+            const current =
+              existingOfficial &&
+              existingOfficial.ubisoft_user_id === entry.userId;
+            if (!entriesByAppId.has(productId) || current) {
+              entriesByAppId.set(productId, entry);
+            }
+          }
+
+          for (const entry of entriesByAppId.values()) {
+            const productId = String(entry.appid || "").trim();
+            const normalizedPath = normalizeObservedPath(
+              entry.spoolDir,
+              productId,
+            );
+            const pendingSet = pendingSavePathIndex.get(productId);
+            const knownPaths = configSavePathIndex.get(productId);
+            const alreadyTracked =
+              normalizedPath &&
+              ((knownPaths && knownPaths.has(normalizedPath)) ||
+                (pendingSet && pendingSet.has(normalizedPath)));
+            const hasOfficialVariant = hasPlatformVariant(
+              productId,
+              "ubisoft-official",
+            );
+            knownAppIds.add(productId);
+            if (alreadyTracked && hasOfficialVariant) continue;
+
+            generationTasks.push({
+              appid: productId,
+              forcePlatform: "ubisoft-official",
+              appDir: entry.spoolDir,
+              normalizedPath,
+              allowExistingVariant: hasOfficialVariant,
+              __savePathOverride: entry.spoolDir,
+              __ubisoftUserId: entry.userId || null,
+              __ubisoftSpoolFile: entry.spoolFilePath || null,
+            });
+            if (normalizedPath) markPendingSavePath(productId, normalizedPath);
+          }
+
+          if (generationTasks.length === 0) {
+            return;
+          }
+        }
+
+        if (!ubisoftSpoolRoots.length) {
+          const gogGalaxyApplicationRoots = resolveGogGalaxyApplicationsRoots(
+            scanBase,
+          );
+          if (gogGalaxyApplicationRoots.length) {
           let gameplayEntries = [];
           const seenGameplayDb = new Set();
           for (const applicationsRoot of gogGalaxyApplicationRoots) {
@@ -5890,46 +6200,47 @@ module.exports = function makeWatchedFolders({
             if (normalizedPath) markPendingSavePath(productId, normalizedPath);
           }
 
-          if (generationTasks.length === 0) {
-            return;
+            if (generationTasks.length === 0) {
+              return;
+            }
+          } else {
+          // Prefer GOG .info detection: if found, ignore other numeric folders under this root
+          gogInfoFound = await findGogInfoAppId(scanBase, 6, yieldIfNeeded).catch(
+            () => null,
+          );
+          if (gogInfoFound) {
+            const gogId = String(gogInfoFound.appid || "").trim();
+            if (gogId && !blacklist.has(gogId)) {
+              const shippingDir = await findShippingExeDir(scanBase, 6);
+              const saveRoot = shippingDir || gogInfoFound.baseDir || scanBase;
+              const normalizedPath = normalizeObservedPath(saveRoot, gogId);
+              generationTasks.push({
+                appid: gogId,
+                forcePlatform: "gog",
+                appDir: gogInfoFound.baseDir || scanBase,
+                normalizedPath,
+                __savePathOverride: saveRoot,
+                __gogName: gogInfoFound.name || null,
+              });
+              if (normalizedPath) markPendingSavePath(gogId, normalizedPath);
+            }
           }
-        } else {
-        // Prefer GOG .info detection: if found, ignore other numeric folders under this root
-        gogInfoFound = await findGogInfoAppId(scanBase, 6, yieldIfNeeded).catch(
-          () => null,
-        );
-        if (gogInfoFound) {
-          const gogId = String(gogInfoFound.appid || "").trim();
-          if (gogId && !blacklist.has(gogId)) {
-            const shippingDir = await findShippingExeDir(scanBase, 6);
-            const saveRoot = shippingDir || gogInfoFound.baseDir || scanBase;
-            const normalizedPath = normalizeObservedPath(saveRoot, gogId);
-            generationTasks.push({
-              appid: gogId,
-              forcePlatform: "gog",
-              appDir: gogInfoFound.baseDir || scanBase,
-              normalizedPath,
-              __savePathOverride: saveRoot,
-              __gogName: gogInfoFound.name || null,
-            });
-            if (normalizedPath) markPendingSavePath(gogId, normalizedPath);
+  
+          // If no GOG .info, fall back to numeric discovery (with Epic container handling)
+          const epicDiscoveredMap =
+            !gogInfoFound && (await discoverNemirtingasEpicAppIds(rootPath));
+          const shouldFallbackEpic =
+            epicDiscoveredMap instanceof Map && epicDiscoveredMap.size === 0;
+          discoveredMap =
+            epicDiscoveredMap !== null && !shouldFallbackEpic
+              ? epicDiscoveredMap
+              : !gogInfoFound
+                ? await discoverAppIdsUnder(scanBase, 6, yieldIfNeeded)
+                : null;
+          discovered = discoveredMap
+            ? Array.from(discoveredMap.keys()).map((id) => String(id))
+            : [];
           }
-        }
-
-        // If no GOG .info, fall back to numeric discovery (with Epic container handling)
-        const epicDiscoveredMap =
-          !gogInfoFound && (await discoverNemirtingasEpicAppIds(rootPath));
-        const shouldFallbackEpic =
-          epicDiscoveredMap instanceof Map && epicDiscoveredMap.size === 0;
-        discoveredMap =
-          epicDiscoveredMap !== null && !shouldFallbackEpic
-            ? epicDiscoveredMap
-            : !gogInfoFound
-              ? await discoverAppIdsUnder(scanBase, 6, yieldIfNeeded)
-              : null;
-        discovered = discoveredMap
-          ? Array.from(discoveredMap.keys()).map((id) => String(id))
-          : [];
         }
       } else {
         discoveredMap = await discoverImmediateAppIdsUnder(
@@ -6277,6 +6588,9 @@ module.exports = function makeWatchedFolders({
           markBootOnboardingDirtyRoot(root, "watch:add");
           return;
         }
+        if (await handleUbisoftOfficialRootFileEvent(root, filePath)) {
+          return;
+        }
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
@@ -6486,6 +6800,9 @@ module.exports = function makeWatchedFolders({
         if (rescanInProgress.value) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:change");
+          return;
+        }
+        if (await handleUbisoftOfficialRootFileEvent(root, filePath)) {
           return;
         }
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
@@ -6701,6 +7018,9 @@ module.exports = function makeWatchedFolders({
         if (rescanInProgress.value) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:addDir");
+          return;
+        }
+        if (handleUbisoftOfficialRootDirEvent(root, dir, schedule)) {
           return;
         }
         if (handleGogOfficialRootDirEvent(root, dir, schedule)) {

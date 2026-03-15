@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay yapılandırma tespiti platform=uplay ve emu=lumaplay gerektirir.",
   "platformGuideRescanSummary": "Yeniden Tarama ve Yeniden Oluşturma Şeması",
   "platformGuideRescanItem1": "Yeniden Oluşturma Şeması, Steam/Uplay/Epic/GOG şema yenilemesi için kullanılır.",
-  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4, Steam Resmi ve GOG Galaxy (Resmi) için şema yeniden oluşturma tasarım gereği engellenmiştir.",
+  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) ve GOG Galaxy (Official) için şema yeniden oluşturma tasarım gereği engellenmiştir.",
   "platformGuideRescanItem3": "Bu platformlar/emülatörler için, kaynak dosyalardan yeniden oluşturmak için Klasörler → Yeniden Tara'yı kullanın.",
   "platformGuideOnboardingSummary": "Önyükleme ekleme ve başlatma kapısı",
   "platformGuideOnboardingItem1": "İlk çalıştırmada (veya ilk katılım sürümü değişikliğinde), başlangıç, tam taramadan önce klasör seçimini bekler.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Başlangıç ​​akışı: boot:onboarding:*.",
   "platformGuideLogsItem3": "İlk anlık görüntü değerlendirmesi: initial-notify:*.",
   "platformGuideLogsItem4": "Otomatik seçim akışı: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Resmi işleme: steam-official:*. GOG Galaxy işleme: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Resmi işleme: steam-official:*. Ubisoft Connect işleme: ubisoft-official:*. GOG Galaxy işleme: gog-official:*.",
   "platformGuideQuickTip1": "Ayarlar → Klasörler'e kök klasörler ekleyin.",
   "platformGuideQuickTip2": "Otomatik yapılandırma yalnızca sessize alınmayan/yok sayılmayan izlenen klasörler için çalışır.",
   "platformGuideQuickTip3": "Bildirimler yalnızca yeni kilit açma/ilerleme durumu değişikliklerinde gönderilir, önceden içe aktarılmış eski kilit açma işlemleri için gönderilmez.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (Resmi)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Platform ve Emülatör Kılavuzu",
+  "platformGuideTroubleshootingItem0": "Overlay ve bildirimler en iyi Borderless Windowed modunda çalışır. DirectX 9/10/11 oyunları, bildirimlerin oyunun üzerinde görünmesi için genellikle Borderless/Borderless Windowed modunu gerektirir. Fullscreen desteği sınırlıdır, ancak DirectX 12 oyunları oyun desteklediğinde genellikle Fullscreen modunda çalışır.",
   "platformGuideTroubleshootingItem1": "Oyunun kara listede olmadığından ve ilerleme bildirimlerinin genel olarak/yapılandırma başına sessize alınmadığından emin olun.",
   "platformGuideTroubleshootingItem2": "İzlenen klasör yollarını doğrulayın ve kaydetme/kupa dosyalarının oynatma sırasında gerçekten değiştiğini doğrulayın.",
   "platformGuideTroubleshootingItem3": "Kayıtları veya emülatör dizinlerini taşıdıktan sonra Klasörlerde Yeniden Tarama'yı çalıştırın.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "İzleme klasörü: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Yerel ürün eşlemesi %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db içinden okunur ve çalışma zamanı başarı ilerlemesi Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db içinden okunur.",
   "platformGuideGogOfficialItem3": "Yapılandırma oluşturma yalnızca gameplay.db mevcut olduğunda ve içindeki başarı verileri doldurulup kararlı hale geldiğinde başlar. Önce şema, sonra yapılandırma oluşturulur.",
-  "platformGuideGogOfficialItem4": "Bir oyunda yalnızca Storage verisi varsa ve henüz Gameplay\\<userId>\\gameplay.db yoksa watcher bekler ve otomatik olarak yeniden dener."
+  "platformGuideGogOfficialItem4": "Bir oyunda yalnızca Storage verisi varsa ve henüz Gameplay\\<userId>\\gameplay.db yoksa watcher bekler ve otomatik olarak yeniden dener.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Resmi)",
+  "platformGuideUbisoftOfficialItem1": "İzlenecek klasör: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "İlerleme <userId>\\<productId>.spool dosyasından okunur; şema/görseller ise %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements konumundan oluşturulur.",
+  "platformGuideUbisoftOfficialItem3": "Yapılandırmalar ancak hem spool dosyası hem de yerel achievement arşivi hazır olduğunda oluşturulur. Önce şema, ardından yapılandırma oluşturulur.",
+  "platformGuideUbisoftOfficialItem4": "Ubisoft spool kökünü Ayarlar → Klasörler bölümüne manuel olarak ekleyin. Uygulama bu yolu otomatik olarak varsaymaz."
 }

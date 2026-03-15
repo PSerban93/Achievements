@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay 구성 감지에는 platform=uplay 및 emu=lumaplay이 필요합니다.",
   "platformGuideRescanSummary": "재검색과 스키마 재생성",
   "platformGuideRescanItem1": "스키마 재생성은 Steam/Uplay/Epic/GOG 스키마 새로 고침에 사용됩니다.",
-  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4, Steam 공식 및 GOG Galaxy (공식)의 경우 스키마 재생성은 설계상 차단됩니다.",
+  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), GOG Galaxy (Official)의 경우 스키마 재생성은 설계상 차단됩니다.",
   "platformGuideRescanItem3": "해당 플랫폼/에뮬레이터의 경우 폴더 → 다시 검색을 사용하여 소스 파일에서 다시 빌드하십시오.",
   "platformGuideOnboardingSummary": "부팅 온보딩 및 시작 게이트",
   "platformGuideOnboardingItem1": "처음 실행(또는 온보딩 버전 변경) 시 시작 시 전체 검사 전에 폴더 선택을 기다립니다.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "시작 흐름: boot:onboarding:*.",
   "platformGuideLogsItem3": "초기 스냅샷 평가: initial-notify:*.",
   "platformGuideLogsItem4": "자동 선택 흐름: auto-select:*.",
-  "platformGuideLogsItem5": "Steam 공식 처리: steam-official:*. GOG Galaxy 처리: gog-official:*.",
+  "platformGuideLogsItem5": "Steam 공식 처리: steam-official:*. Ubisoft Connect 처리: ubisoft-official:*. GOG Galaxy 처리: gog-official:*.",
   "platformGuideQuickTip1": "설정 → 폴더에서 루트 폴더를 추가하세요.",
   "platformGuideQuickTip2": "자동 구성은 음소거/무시되지 않은 감시 폴더에 대해서만 실행됩니다.",
   "platformGuideQuickTip3": "이미 가져온 이전 잠금 해제에 대한 알림이 아닌 새로운 잠금 해제/진행률 변경 시에만 알림이 전송됩니다.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (공식)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "플랫폼 및 에뮬레이터 가이드",
+  "platformGuideTroubleshootingItem0": "오버레이와 알림은 Borderless Windowed 모드에서 가장 잘 작동합니다. DirectX 9/10/11 게임은 알림이 게임 위에 표시되려면 일반적으로 Borderless/Borderless Windowed 모드가 필요합니다. Fullscreen 지원은 제한적이지만, 게임이 지원하는 경우 DirectX 12 게임은 보통 Fullscreen에서도 작동합니다.",
   "platformGuideTroubleshootingItem1": "게임이 블랙리스트에 포함되지 않았는지, 진행 알림이 전체적으로/구성별로 음소거되지 않았는지 확인하세요.",
   "platformGuideTroubleshootingItem2": "감시 폴더 경로를 확인하고, 플레이 중에 저장/트로피 파일이 실제로 변경되는지 확인하세요.",
   "platformGuideTroubleshootingItem3": "저장 또는 에뮬레이터 디렉터리를 이동한 후 폴더에서 다시 검색을 실행하세요.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "감시 폴더: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "로컬 제품 매핑은 %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db 에서 읽고, 런타임 업적 진행 상황은 Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db 에서 읽습니다.",
   "platformGuideGogOfficialItem3": "구성 생성은 gameplay.db 가 존재하고 그 안의 업적 데이터가 충분히 채워져 안정화된 후에만 시작됩니다. 먼저 스키마를 생성한 다음 구성을 만듭니다.",
-  "platformGuideGogOfficialItem4": "게임에 Storage 데이터만 있고 아직 Gameplay\\<userId>\\gameplay.db 가 없다면 watcher가 대기한 뒤 자동으로 다시 시도합니다."
+  "platformGuideGogOfficialItem4": "게임에 Storage 데이터만 있고 아직 Gameplay\\<userId>\\gameplay.db 가 없다면 watcher가 대기한 뒤 자동으로 다시 시도합니다.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (공식)",
+  "platformGuideUbisoftOfficialItem1": "감시 폴더: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "진행 상황은 <userId>\\<productId>.spool 에서 읽고, 스키마/이미지는 %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements 에서 생성합니다.",
+  "platformGuideUbisoftOfficialItem3": "구성은 spool 파일과 로컬 업적 아카이브가 모두 준비된 후에만 생성됩니다. 먼저 스키마를 만들고 그다음 config를 만듭니다.",
+  "platformGuideUbisoftOfficialItem4": "설정 → 폴더에서 Ubisoft spool 루트를 수동으로 추가하세요. 앱이 이 경로를 자동으로 가정하지 않습니다."
 }

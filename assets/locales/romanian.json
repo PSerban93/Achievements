@@ -497,7 +497,7 @@
   "platformGuideConfigRulesItem5": "Detectarea configurației LumaPlay necesită platform=uplay și emu=lumaplay.",
   "platformGuideRescanSummary": "Rescanare vs Regenerare Schema",
   "platformGuideRescanItem1": "Regenerare Schema este folosită pentru reîmprospătarea schemei Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pentru Xenia, RPCS3, shadPS4, Steam Official și GOG Galaxy (Oficial), regenerarea schemei este blocată prin proiectare.",
+  "platformGuideRescanItem2": "Pentru Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) și GOG Galaxy (Official), regenerarea schemei este blocată intenționat.",
   "platformGuideRescanItem3": "Pentru acele platforme/emulatori, utilizați Folders → Rescan pentru a reconstrui din fișierele sursă.",
   "platformGuideOnboardingSummary": "Boot onboarding și poarta de pornire",
   "platformGuideOnboardingItem1": "La prima rulare (sau schimbarea versiunii de integrare), pornirea așteaptă selectarea folderului înainte de scanarea completă.",
@@ -518,7 +518,7 @@
   "platformGuideLogsItem2": "Flux de pornire: boot:onboarding:*.",
   "platformGuideLogsItem3": "Evaluare inițială instantanee: initial-notify:*.",
   "platformGuideLogsItem4": "Flux de selecție automată: auto-select:*.",
-  "platformGuideLogsItem5": "Manipulare Steam Official: steam-official:*. Manipulare GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Manipulare Steam Official: steam-official:*. Manipulare Ubisoft Connect: ubisoft-official:*. Manipulare GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Adăugați foldere rădăcină în Setări → Foldere.",
   "platformGuideQuickTip2": "Auto-config rulează numai pentru folderele urmărite care nu sunt dezactivate/ignorate.",
   "platformGuideQuickTip3": "Notificările sunt trimise numai pentru deblocări noi/modificări de progres, nu pentru deblocări vechi deja importate.",
@@ -544,6 +544,7 @@
   "platformGuideSteamOfficialSummary": "Steam (oficial)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Ghid de platformă și emulator",
+  "platformGuideTroubleshootingItem0": "Overlay-ul și notificările funcționează cel mai bine în modul Borderless Windowed. Jocurile DirectX 9/10/11 necesită de obicei modul Borderless/Borderless Windowed pentru ca notificările să apară deasupra jocului. Suportul pentru Fullscreen este limitat, dar jocurile DirectX 12 vor funcționa de obicei în Fullscreen atunci când jocul îl suportă.",
   "platformGuideTroubleshootingItem1": "Verificați dacă jocul nu este pe lista neagră și notificările de progres nu sunt dezactivate la nivel global/per-config.",
   "platformGuideTroubleshootingItem2": "Verificați căile de foldere urmărite și confirmați că fișierele de salvare/trofeu se schimbă efectiv în timpul jocului.",
   "platformGuideTroubleshootingItem3": "După ce mutați salvările sau directoarele de emulator, rulați Rescan în foldere.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Folder monitorizat: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Maparea locală a produsului este citită din %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, iar progresul achievement-urilor în runtime este citit din Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Generarea configurației începe numai după ce gameplay.db există și datele de achievement din el sunt populate și stabile. Schema este generată mai întâi, apoi configurația.",
-  "platformGuideGogOfficialItem4": "Dacă un joc are doar date Storage și încă nu are Gameplay\\<userId>\\gameplay.db, watcher-ul așteaptă și reîncearcă automat."
+  "platformGuideGogOfficialItem4": "Dacă un joc are doar date Storage și încă nu are Gameplay\\<userId>\\gameplay.db, watcher-ul așteaptă și reîncearcă automat.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Oficial)",
+  "platformGuideUbisoftOfficialItem1": "Folder urmărit: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Progresul este citit din <userId>\\<productId>.spool, iar schema/imaginile sunt generate din %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Configurile sunt create doar după ce sunt disponibile atât fișierul spool, cât și arhiva locală de achievement-uri. Schema este generată mai întâi, apoi configul.",
+  "platformGuideUbisoftOfficialItem4": "Adaugă manual rădăcina Ubisoft spool în Setări → Foldere. Aplicația nu presupune automat această cale."
 }

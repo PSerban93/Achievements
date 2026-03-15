@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Việc phát hiện cấu hình LumaPlay yêu cầu platform=uplay và emu=lumaplay.",
   "platformGuideRescanSummary": "Quét lại và tạo lại lược đồ",
   "platformGuideRescanItem1": "Lược đồ tái tạo được sử dụng để làm mới lược đồ Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Đối với Xenia, RPCS3, shadPS4, Steam Chính thức và GOG Galaxy (Chính thức), việc tạo lại lược đồ bị chặn theo thiết kế.",
+  "platformGuideRescanItem2": "Đối với Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) và GOG Galaxy (Official), việc tạo lại schema bị chặn theo thiết kế.",
   "platformGuideRescanItem3": "Đối với những nền tảng/trình mô phỏng đó, hãy sử dụng Thư mục → Quét lại để xây dựng lại từ các tệp nguồn.",
   "platformGuideOnboardingSummary": "Khởi động và cổng khởi động",
   "platformGuideOnboardingItem1": "Trong lần chạy đầu tiên (hoặc thay đổi phiên bản cài đặt), quá trình khởi động sẽ đợi lựa chọn thư mục trước khi quét toàn bộ.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Luồng khởi động: boot:onboarding:*.",
   "platformGuideLogsItem3": "Đánh giá ảnh chụp nhanh ban đầu: initial-notify:*.",
   "platformGuideLogsItem4": "Luồng lựa chọn tự động: auto-select:*.",
-  "platformGuideLogsItem5": "Xử lý Steam Chính thức: steam-official:*. Xử lý GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Xử lý Steam Official: steam-official:*. Xử lý Ubisoft Connect: ubisoft-official:*. Xử lý GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Thêm thư mục gốc trong Cài đặt → Thư mục.",
   "platformGuideQuickTip2": "Tự động định cấu hình chỉ chạy cho các thư mục đã xem không bị tắt tiếng/bỏ qua.",
   "platformGuideQuickTip3": "Thông báo chỉ được gửi khi có thay đổi về tiến trình/mở khóa mới, không gửi cho các lần mở khóa cũ đã được nhập.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (Chính thức)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Hướng dẫn về nền tảng và trình mô phỏng",
+  "platformGuideTroubleshootingItem0": "Overlay và thông báo hoạt động tốt nhất ở chế độ Borderless Windowed. Các game DirectX 9/10/11 thường yêu cầu chế độ Borderless/Borderless Windowed để thông báo xuất hiện phía trên game. Hỗ trợ Fullscreen bị hạn chế, nhưng các game DirectX 12 thường sẽ hoạt động ở Fullscreen khi game hỗ trợ.",
   "platformGuideTroubleshootingItem1": "Kiểm tra để đảm bảo trò chơi không bị đưa vào danh sách đen và thông báo tiến trình không bị tắt tiếng trên toàn cầu/mỗi cấu hình.",
   "platformGuideTroubleshootingItem2": "Xác minh đường dẫn thư mục đã xem và xác nhận các tệp lưu/cúp thực sự thay đổi trong khi phát.",
   "platformGuideTroubleshootingItem3": "Sau khi di chuyển các thư mục lưu hoặc trình mô phỏng, hãy chạy Quét lại trong Thư mục.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Thư mục theo dõi: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Ánh xạ sản phẩm cục bộ được đọc từ %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, và tiến trình achievement trong lúc chạy được đọc từ Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Việc tạo cấu hình chỉ bắt đầu sau khi gameplay.db tồn tại và dữ liệu achievement bên trong đã được điền đầy đủ và ổn định. Schema được tạo trước, sau đó mới tạo cấu hình.",
-  "platformGuideGogOfficialItem4": "Nếu trò chơi chỉ có dữ liệu Storage và chưa có Gameplay\\<userId>\\gameplay.db, watcher sẽ chờ và tự thử lại."
+  "platformGuideGogOfficialItem4": "Nếu trò chơi chỉ có dữ liệu Storage và chưa có Gameplay\\<userId>\\gameplay.db, watcher sẽ chờ và tự thử lại.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Chính thức)",
+  "platformGuideUbisoftOfficialItem1": "Thư mục theo dõi: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Tiến trình được đọc từ <userId>\\<productId>.spool, còn schema/hình ảnh được tạo từ %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Cấu hình chỉ được tạo sau khi cả tệp spool và kho lưu trữ thành tích cục bộ đều có sẵn. Schema được tạo trước, sau đó mới đến cấu hình.",
+  "platformGuideUbisoftOfficialItem4": "Thêm thư mục gốc spool của Ubisoft theo cách thủ công trong Cài đặt → Thư mục. Ứng dụng không tự giả định đường dẫn này."
 }

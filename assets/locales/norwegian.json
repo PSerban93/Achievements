@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay konfigurasjonsdeteksjon krever platform=uplay og emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerer skjema brukes for Steam/Uplay/Epic/GOG skjemaoppdatering.",
-  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official og GOG Galaxy (Offisiell) er skjemaregenerering blokkert av design.",
+  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) og GOG Galaxy (Official) er skjemaregenerering blokkert med hensikt.",
   "platformGuideRescanItem3": "For disse plattformene/emulatorene, bruk Mapper → Skann på nytt for å gjenoppbygge fra kildefiler.",
   "platformGuideOnboardingSummary": "Boot onboarding og startup gate",
   "platformGuideOnboardingItem1": "Ved første kjøring (eller endring av onboarding-versjon), venter oppstart på mappevalg før full skanning.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Oppstartsflyt: boot:onboarding:*.",
   "platformGuideLogsItem3": "Innledende øyeblikksbildeevaluering: initial-notify:*.",
   "platformGuideLogsItem4": "Automatisk valgflyt: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official-håndtering: steam-official:*. GOG Galaxy-håndtering: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official-håndtering: steam-official:*. Ubisoft Connect-håndtering: ubisoft-official:*. GOG Galaxy-håndtering: gog-official:*.",
   "platformGuideQuickTip1": "Legg til rotmapper i Innstillinger → Mapper.",
   "platformGuideQuickTip2": "Auto-config kjører bare for overvåkede mapper som ikke er dempet/ignorert.",
   "platformGuideQuickTip3": "Varsler sendes kun ved nye opplåsings-/fremdriftsendringer, ikke for allerede importerte gamle opplåsinger.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (offisiell)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Plattform- og emulatorveiledning",
+  "platformGuideTroubleshootingItem0": "Overlayet og varslene fungerer best i Borderless Windowed-modus. DirectX 9/10/11-spill krever vanligvis Borderless/Borderless Windowed-modus for at varsler skal vises over spillet. Støtten for Fullscreen er begrenset, men DirectX 12-spill fungerer vanligvis i Fullscreen når spillet støtter det.",
   "platformGuideTroubleshootingItem1": "Sjekk at spillet ikke er svartelistet og at fremdriftsvarsler ikke er dempet globalt/per-konfigurasjon.",
   "platformGuideTroubleshootingItem2": "Bekreft overvåkede mappebaner og bekreft at lagrings-/troféfilene faktisk endres mens du spiller.",
   "platformGuideTroubleshootingItem3": "Etter å ha flyttet lagrede eller emulatorkataloger, kjør Rescan in Folders.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Overvåket mappe: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Lokal produktmapping leses fra %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, og fremdrift for achievements under kjøring leses fra Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Generering av konfigurasjon starter først når gameplay.db finnes og achievement-dataene i den er utfylt og stabile. Skjemaet genereres først, deretter konfigurasjonen.",
-  "platformGuideGogOfficialItem4": "Hvis et spill bare har Storage-data og ennå ikke har Gameplay\\<userId>\\gameplay.db, venter watcher-en og prøver automatisk igjen."
+  "platformGuideGogOfficialItem4": "Hvis et spill bare har Storage-data og ennå ikke har Gameplay\\<userId>\\gameplay.db, venter watcher-en og prøver automatisk igjen.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Offisiell)",
+  "platformGuideUbisoftOfficialItem1": "Overvåket mappe: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Fremdrift leses fra <userId>\\<productId>.spool, mens skjema/bilder genereres fra %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Konfigurasjoner opprettes først når både spool-filen og det lokale achievement-arkivet er tilgjengelige. Skjemaet genereres først, deretter konfigurasjonen.",
+  "platformGuideUbisoftOfficialItem4": "Legg til Ubisoft spool-roten manuelt i Innstillinger → Mapper. Appen antar ikke denne stien automatisk."
 }

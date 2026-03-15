@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay 構成の検出には platform=uplay と emu=lumaplay が必要です。",
   "platformGuideRescanSummary": "再スキャンとスキーマの再生成",
   "platformGuideRescanItem1": "スキーマの再生成は、Steam/Uplay/Epic/GOG スキーマの更新に使用されます。",
-  "platformGuideRescanItem2": "Xenia、RPCS3、shadPS4、Steam 公式、および GOG Galaxy（公式）では、スキーマの再生成は設計上ブロックされています。",
+  "platformGuideRescanItem2": "Xenia、RPCS3、shadPS4、Steam Official、Ubisoft Connect（Official）、GOG Galaxy（Official）では、スキーマの再生成は設計上ブロックされています。",
   "platformGuideRescanItem3": "これらのプラットフォーム/エミュレータの場合は、「フォルダ」→「再スキャン」を使用してソース ファイルから再構築します。",
   "platformGuideOnboardingSummary": "ブートオンボーディングとスタートアップゲート",
   "platformGuideOnboardingItem1": "最初の実行時 (またはオンボーディング バージョンの変更時)、起動はフル スキャンの前にフォルダーの選択を待機します。",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "起動フロー: boot:onboarding:*。",
   "platformGuideLogsItem3": "初期スナップショット評価: initial-notify:*。",
   "platformGuideLogsItem4": "自動選択フロー: auto-select:*。",
-  "platformGuideLogsItem5": "Steam 公式の処理: steam-official:*. GOG Galaxy の処理: gog-official:*.",
+  "platformGuideLogsItem5": "Steam 公式の処理: steam-official:*. Ubisoft Connect の処理: ubisoft-official:*. GOG Galaxy の処理: gog-official:*.",
   "platformGuideQuickTip1": "「設定」→「フォルダー」でルートフォルダーを追加します。",
   "platformGuideQuickTip2": "自動構成は、ミュート/無視されていない監視フォルダーに対してのみ実行されます。",
   "platformGuideQuickTip3": "通知は、新しいロック解除/進行状況の変更についてのみ送信され、すでにインポートされた古いロック解除については送信されません。",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (公式)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "プラットフォームとエミュレータのガイド",
+  "platformGuideTroubleshootingItem0": "オーバーレイと通知は Borderless Windowed モードで最も安定して動作します。DirectX 9/10/11 のゲームでは、通知をゲームの上に表示するために Borderless/Borderless Windowed モードが通常必要です。Fullscreen のサポートは限定的ですが、ゲーム側が対応していれば DirectX 12 のゲームは通常 Fullscreen でも動作します。",
   "platformGuideTroubleshootingItem1": "ゲームがブラックリストに登録されていないこと、および進行状況の通知がグローバルまたは設定ごとにミュートされていないことを確認してください。",
   "platformGuideTroubleshootingItem2": "監視フォルダーのパスを確認し、プレイ中にセーブ/トロフィー ファイルが実際に変更されることを確認します。",
   "platformGuideTroubleshootingItem3": "セーブ ディレクトリまたはエミュレータ ディレクトリを移動した後、フォルダ内の再スキャンを実行します。",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "監視フォルダー: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "ローカルの製品マッピングは %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db から読み取られ、実行中の実績進行状況は Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db から読み取られます。",
   "platformGuideGogOfficialItem3": "設定の生成は、gameplay.db が存在し、その実績データが十分に入力されて安定してから開始されます。最初にスキーマを生成し、その後で設定を作成します。",
-  "platformGuideGogOfficialItem4": "ゲームに Storage データしかなく、まだ Gameplay\\<userId>\\gameplay.db がない場合、watcher は待機して自動的に再試行します。"
+  "platformGuideGogOfficialItem4": "ゲームに Storage データしかなく、まだ Gameplay\\<userId>\\gameplay.db がない場合、watcher は待機して自動的に再試行します。",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect（公式）",
+  "platformGuideUbisoftOfficialItem1": "監視フォルダー: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "進行状況は <userId>\\<productId>.spool から読み取られ、スキーマ/画像は %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements から生成されます。",
+  "platformGuideUbisoftOfficialItem3": "設定は、spool ファイルとローカルの実績アーカイブの両方が利用可能になってから作成されます。最初にスキーマ、次に設定が生成されます。",
+  "platformGuideUbisoftOfficialItem4": "Ubisoft の spool ルートは [設定] → [フォルダー] で手動追加してください。アプリがこのパスを自動前提にすることはありません。"
 }

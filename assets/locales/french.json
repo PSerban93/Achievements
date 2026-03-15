@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "La détection de configuration LumaPlay nécessite platform=uplay et emu=lumaplay.",
   "platformGuideRescanSummary": "Réanalyser ou régénérer le schéma",
   "platformGuideRescanItem1": "Regenerate Schema est utilisé pour l’actualisation du schéma Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pour Xenia, RPCS3, shadPS4, Steam Official et GOG Galaxy (Officiel), la régénération du schéma est bloquée par conception.",
+  "platformGuideRescanItem2": "Pour Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) et GOG Galaxy (Official), la régénération du schéma est bloquée par conception.",
   "platformGuideRescanItem3": "Pour ces plates-formes/émulateurs, utilisez Dossiers → Réanalyser pour reconstruire à partir des fichiers sources.",
   "platformGuideOnboardingSummary": "Intégration au démarrage et porte de démarrage",
   "platformGuideOnboardingItem1": "Lors de la première exécution (ou du changement de version d'intégration), le démarrage attend la sélection du dossier avant l'analyse complète.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Flux de démarrage : boot:onboarding:*.",
   "platformGuideLogsItem3": "Évaluation initiale de l'instantané : initial-notify:*.",
   "platformGuideLogsItem4": "Flux de sélection automatique : auto-select:*.",
-  "platformGuideLogsItem5": "Traitement Steam Official : steam-official:*. Traitement GOG Galaxy : gog-official:*.",
+  "platformGuideLogsItem5": "Traitement Steam Official : steam-official:*. Traitement Ubisoft Connect : ubisoft-official:*. Traitement GOG Galaxy : gog-official:*.",
   "platformGuideQuickTip1": "Ajoutez des dossiers racine dans Paramètres → Dossiers.",
   "platformGuideQuickTip2": "La configuration automatique s'exécute uniquement pour les dossiers surveillés qui ne sont pas mis en sourdine/ignorés.",
   "platformGuideQuickTip3": "Les notifications sont envoyées uniquement pour les nouvelles modifications de déverrouillage/progression, pas pour les anciens déverrouillages déjà importés.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (Officiel)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Guide de la plateforme et de l'émulateur",
+  "platformGuideTroubleshootingItem0": "L'overlay et les notifications fonctionnent mieux en mode Borderless Windowed. Les jeux DirectX 9/10/11 nécessitent généralement le mode Borderless/Borderless Windowed pour que les notifications apparaissent au-dessus du jeu. La prise en charge du Fullscreen est limitée, mais les jeux DirectX 12 fonctionnent généralement en Fullscreen lorsque le jeu le prend en charge.",
   "platformGuideTroubleshootingItem1": "Vérifiez que le jeu n'est pas sur la liste noire et que les notifications de progression ne sont pas désactivées globalement/par configuration.",
   "platformGuideTroubleshootingItem2": "Vérifiez les chemins des dossiers surveillés et confirmez que les fichiers de sauvegarde/trophée changent réellement pendant la lecture.",
   "platformGuideTroubleshootingItem3": "Après avoir déplacé les répertoires de sauvegarde ou d'émulateur, exécutez une nouvelle analyse dans les dossiers.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Dossier surveillé : %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Le mappage local du produit est lu depuis %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, et la progression des succès en cours d'exécution est lue depuis Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "La génération de la configuration commence seulement lorsque gameplay.db existe et que ses données de succès sont remplies et stables. Le schéma est généré d'abord, puis la configuration.",
-  "platformGuideGogOfficialItem4": "Si un jeu ne possède que des données Storage et pas encore de Gameplay\\<userId>\\gameplay.db, le watcher attend et réessaie automatiquement."
+  "platformGuideGogOfficialItem4": "Si un jeu ne possède que des données Storage et pas encore de Gameplay\\<userId>\\gameplay.db, le watcher attend et réessaie automatiquement.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Officiel)",
+  "platformGuideUbisoftOfficialItem1": "Dossier surveillé : %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "La progression est lue depuis <userId>\\<productId>.spool, tandis que le schéma/les images sont générés depuis %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Les configurations sont créées uniquement lorsque le fichier spool et l’archive locale des succès sont disponibles. Le schéma est généré d’abord, puis la configuration.",
+  "platformGuideUbisoftOfficialItem4": "Ajoutez manuellement la racine spool d’Ubisoft dans Paramètres → Dossiers. L’application ne suppose pas ce chemin automatiquement."
 }

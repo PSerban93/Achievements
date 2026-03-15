@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Откриването на конфигурацията на LumaPlay изисква platform=uplay и emu=lumaplay.",
   "platformGuideRescanSummary": "Повторно сканиране срещу регенериране на схема",
   "platformGuideRescanItem1": "Повторното генериране на схема се използва за опресняване на схемата Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "За Xenia, RPCS3, shadPS4, Steam Official и GOG Galaxy (Официален), повторното генериране на схема е блокирано по проект.",
+  "platformGuideRescanItem2": "За Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) и GOG Galaxy (Official) повторното генериране на схема е умишлено блокирано.",
   "platformGuideRescanItem3": "За тези платформи/емулатори използвайте Папки → Повторно сканиране, за да възстановите от изходните файлове.",
   "platformGuideOnboardingSummary": "Стартиране на борда и стартова врата",
   "platformGuideOnboardingItem1": "При първо стартиране (или промяна на версията за включване) стартирането изчаква избор на папка преди пълно сканиране.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Стартов поток: boot:onboarding:*.",
   "platformGuideLogsItem3": "Първоначална оценка на моментна снимка: initial-notify:*.",
   "platformGuideLogsItem4": "Поток за автоматичен избор: auto-select:*.",
-  "platformGuideLogsItem5": "Обработка за Steam Official: steam-official:*. Обработка за GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Обработка за Steam Official: steam-official:*. Обработка за Ubisoft Connect: ubisoft-official:*. Обработка за GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Добавете основни папки в Настройки → Папки.",
   "platformGuideQuickTip2": "Автоматичното конфигуриране работи само за наблюдавани папки, които не са заглушени/игнорирани.",
   "platformGuideQuickTip3": "Известията се изпращат само при нови промени в отключването/напредъка, а не за вече импортирани стари отключвания.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (официален)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Ръководство за платформа и емулатор",
+  "platformGuideTroubleshootingItem0": "Overlay-ът и известията работят най-добре в режим Borderless Windowed. Игрите с DirectX 9/10/11 обикновено изискват режим Borderless/Borderless Windowed, за да се показват известията над играта. Поддръжката на Fullscreen е ограничена, но игрите с DirectX 12 обикновено работят в Fullscreen, когато играта го поддържа.",
   "platformGuideTroubleshootingItem1": "Проверете дали играта не е в черния списък и известията за напредък не са заглушени глобално/на конфигурация.",
   "platformGuideTroubleshootingItem2": "Проверете пътищата на наблюдаваните папки и потвърдете, че файловете за запазване/трофей действително се променят по време на игра.",
   "platformGuideTroubleshootingItem3": "След като преместите директории за запазване или емулатор, стартирайте повторно сканиране в папки.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Наблюдавана папка: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Локалното съпоставяне на продукта се чете от %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, а напредъкът на постиженията по време на работа се чете от Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Създаването на конфигурацията започва едва след като gameplay.db съществува и данните за постиженията в него са попълнени и стабилни. Първо се генерира схемата, после конфигурацията.",
-  "platformGuideGogOfficialItem4": "Ако играта има само данни в Storage и все още няма Gameplay\\<userId>\\gameplay.db, watcher-ът изчаква и опитва отново автоматично."
+  "platformGuideGogOfficialItem4": "Ако играта има само данни в Storage и все още няма Gameplay\\<userId>\\gameplay.db, watcher-ът изчаква и опитва отново автоматично.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Официален)",
+  "platformGuideUbisoftOfficialItem1": "Наблюдавана папка: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Прогресът се чете от <userId>\\<productId>.spool, а схемата/изображенията се генерират от %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Конфигурациите се създават едва след като са налични както spool файлът, така и локалният архив с постижения. Първо се генерира схемата, след това конфигът.",
+  "platformGuideUbisoftOfficialItem4": "Добавете ръчно основната spool папка на Ubisoft в Настройки → Папки. Приложението не приема този път автоматично."
 }

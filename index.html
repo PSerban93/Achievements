@@ -1758,6 +1758,36 @@
 
               <div class="settings-section">
                 <details class="platform-guide-item">
+                  <summary id="platformGuideUbisoftOfficialSummary">
+                    Ubisoft Connect (Official)
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideUbisoftOfficialItem1">
+                      Watch folder:
+                      <code>%LOCALAPPDATA%\Ubisoft Game Launcher\spool</code>.
+                    </li>
+                    <li id="platformGuideUbisoftOfficialItem2">
+                      Runtime progress is read from
+                      <code>&lt;userId&gt;\&lt;productId&gt;.spool</code>,
+                      while schema/images are generated from
+                      <code>%ProgramData%\Ubisoft\Ubisoft Game Launcher\cache\achievements</code>.
+                    </li>
+                    <li id="platformGuideUbisoftOfficialItem3">
+                      Config generation starts only after both the local spool
+                      file and achievements archive are available. The schema is
+                      generated first, then the config.
+                    </li>
+                    <li id="platformGuideUbisoftOfficialItem4">
+                      Add the Ubisoft spool root manually in
+                      <strong>Settings → Folders</strong>. The app does not
+                      assume this path automatically.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
                   <summary id="platformGuideGogOfficialSummary">
                     GOG Galaxy (Official)
                   </summary>
@@ -1903,8 +1933,9 @@
                       refresh.
                     </li>
                     <li id="platformGuideRescanItem2">
-                      For Xenia, RPCS3, shadPS4, Steam Official and GOG Galaxy
-                      (Official), schema regenerate is blocked by design.
+                      For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft
+                      Connect (Official) and GOG Galaxy (Official), schema
+                      regenerate is blocked by design.
                     </li>
                     <li id="platformGuideRescanItem3">
                       For those platforms/emulators, use Folders → Rescan to
@@ -2008,7 +2039,8 @@
                       Auto selection flow: auto-select:*.
                     </li>
                     <li id="platformGuideLogsItem5">
-                      Steam Official handling: steam-official:*. GOG Galaxy
+                      Steam Official handling: steam-official:*. Ubisoft
+                      Connect handling: ubisoft-official:*. GOG Galaxy
                       handling: gog-official:*.
                     </li>
                   </ul>
@@ -2021,6 +2053,14 @@
                     Quick troubleshooting
                   </summary>
                   <ul class="platform-guide-list">
+                    <li id="platformGuideTroubleshootingItem0">
+                      Overlay and notifications work best in Borderless Windowed
+                      mode. DirectX 9/10/11 games usually require
+                      Borderless/Borderless Windowed mode for notifications to
+                      appear above the game. Fullscreen support is limited, but
+                      DirectX 12 games will usually work in Fullscreen when the
+                      game supports it.
+                    </li>
                     <li id="platformGuideTroubleshootingItem1">
                       Check that the game is not blacklisted and progress
                       notifications are not muted globally/per-config.
@@ -2321,6 +2361,9 @@
                             Steam (Official)
                           </option>
                           <option value="uplay">Uplay</option>
+                          <option value="ubisoft-official" disabled>
+                            Ubisoft (Official)
+                          </option>
                           <option value="epic">Epic</option>
                           <option value="gog">GOG</option>
                           <option value="gog-official" disabled>
@@ -5044,6 +5087,7 @@
               "steam",
               "steam-official",
               "uplay",
+              "ubisoft-official",
               "epic",
               "gog",
               "gog-official",
@@ -10326,7 +10370,11 @@
             } catch {}
             if (dashboardBody) dashboardBody.scrollTop = dashboardScrollTop;
           });
-          startDashboardPoll();
+          if (window.__dashboardReady === true) {
+            startDashboardPoll();
+          } else {
+            dashboardPollDeferredUntilReady = true;
+          }
           installBgScrollBlockers();
         }
         function closeDashboard() {
@@ -10337,6 +10385,7 @@
           dashboard.classList.remove("open");
           document.body.style.overflow = "";
           window.__dashboardOpen = false;
+          dashboardPollDeferredUntilReady = false;
           try {
             window.api?.setDashboardOpen?.(false);
           } catch {}
@@ -10855,6 +10904,7 @@
         window.applyDashboardSortAndFilter = applyDashboardSortAndFilter;
 
         let __dashboardReadySent = false;
+        let dashboardPollDeferredUntilReady = false;
         function signalDashboardReady() {
           if (__dashboardReadySent) return;
           __dashboardReadySent = true;
@@ -10869,6 +10919,12 @@
           } catch {}
           try {
             window.__maybeOpenStartupDashboard?.();
+          } catch {}
+          try {
+            if (window.__dashboardOpen && dashboardPollDeferredUntilReady) {
+              dashboardPollDeferredUntilReady = false;
+              startDashboardPoll?.();
+            }
           } catch {}
         }
 
@@ -11565,9 +11621,12 @@
           }
         }
 
-        async function updateCardProgressUI(cardEl, cfgName) {
-          const { pct, unlocked, total, updated } =
-            await computeCardProgress(cfgName);
+        async function updateCardProgressUI(cardEl, cfgName, options = {}) {
+          const progress =
+            options?.progress && typeof options.progress === "object"
+              ? options.progress
+              : await computeCardProgress(cfgName);
+          const { pct, unlocked, total, updated } = progress;
           const bar = cardEl.querySelector(".dash-progressbar > span");
           const pill = cardEl.querySelector(".dash-progresspill");
           if (bar) bar.style.width = pct + "%";
@@ -11586,6 +11645,12 @@
           cardEl.dataset.unlocked = String(unlocked);
           cardEl.dataset.total = String(total);
           cardEl.dataset.updated = String(updated || 0);
+          try {
+            localStorage.setItem(
+              DASH_PROGRESS_PREFIX + cfgName,
+              JSON.stringify({ pct, unlocked, total, updated }),
+            );
+          } catch {}
 
           const st =
             typeof getMultiSortState === "function"
@@ -11613,10 +11678,63 @@
           clearDashboardSavedCache(cfgName);
           clearDashboardSchemaCache(cfgName);
         }
+
+        let dashboardProgressRefreshPromise = null;
+        let dashboardProgressRefreshRequested = false;
+        async function refreshDashboardProgress(options = {}) {
+          const clearSchema = options?.clearSchema === true;
+          const forceRebuild = options?.forceRebuild === true;
+          dashboardProgressRefreshRequested = true;
+          if (dashboardProgressRefreshPromise) {
+            return dashboardProgressRefreshPromise;
+          }
+          dashboardProgressRefreshPromise = (async () => {
+            while (dashboardProgressRefreshRequested) {
+              dashboardProgressRefreshRequested = false;
+              if (clearSchema) {
+                dashboardSchemaCache.clear();
+              }
+              dashboardSavedCache.clear();
+              if (!window.__dashboardOpen) {
+                window.__dashboardNeedsRebuild = true;
+                continue;
+              }
+              const cards = Array.from(gridEl?.querySelectorAll(".dash-card") || []);
+              if (forceRebuild || !cards.length) {
+                await buildDashboard();
+                continue;
+              }
+              let anyChange = false;
+              let processed = 0;
+              for (const card of cards) {
+                const cfgName = card.getAttribute("data-name");
+                if (!cfgName) continue;
+                try {
+                  const progress = await computeCardProgress(cfgName);
+                  await updateCardProgressUI(card, cfgName, { progress });
+                  anyChange = true;
+                } catch {}
+                processed += 1;
+                if (processed % DASH_POLL_BATCH_SIZE === 0) {
+                  await yieldDashboardPoll();
+                }
+              }
+              if (anyChange) {
+                try {
+                  applyDashboardSortAndFilter();
+                } catch {}
+              }
+            }
+          })().finally(() => {
+            dashboardProgressRefreshPromise = null;
+          });
+          return dashboardProgressRefreshPromise;
+        }
         try {
           window.__clearDashboardSavedCache = clearDashboardSavedCache;
           window.__clearDashboardSchemaCache = clearDashboardSchemaCache;
           window.__clearDashboardCachesFor = clearDashboardCachesFor;
+          window.refreshDashboardProgress = refreshDashboardProgress;
         } catch {}
 
         setupDashboardSearch(gridEl);
@@ -12658,6 +12776,19 @@
         window.api?.on?.("boot:manual-seed-complete", () => {
           window.__bootManualSeedComplete = true;
           window.__onBootManualSeedComplete?.();
+          dashboardSavedCache.clear();
+          if (!window.__dashboardOpen) {
+            window.__dashboardNeedsRebuild = true;
+          } else if (
+            window.__dashboardReady === true &&
+            typeof refreshDashboardProgress === "function"
+          ) {
+            scheduleIdle(() => {
+              refreshDashboardProgress({
+                reason: "boot-manual-seed-complete",
+              }).catch(() => {});
+            });
+          }
         });
         window.api?.on?.("dashboard:poll-pause", (state) => {
           if (state) {
@@ -12687,6 +12818,18 @@
         window.api?.on?.("configs:changed", () => {
           dashboardSchemaCache.clear();
           dashboardSavedCache.clear();
+        });
+        window.api?.on?.("dashboard:refresh", () => {
+          if (typeof refreshDashboardProgress === "function") {
+            scheduleIdle(() => {
+              refreshDashboardProgress({ reason: "dashboard-refresh" }).catch(
+                () => {},
+              );
+            });
+          } else {
+            dashboardSavedCache.clear();
+            window.__dashboardNeedsRebuild = true;
+          }
         });
       })();
 

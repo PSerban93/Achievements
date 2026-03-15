@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay 配置检测需要 platform=uplay 和 emu=lumaplay。",
   "platformGuideRescanSummary": "重新扫描与重新生成架构",
   "platformGuideRescanItem1": "重新生成架构用于 Steam/Uplay/Epic/GOG 架构刷新。",
-  "platformGuideRescanItem2": "对于 Xenia、RPCS3、shadPS4、Steam 官方和 GOG Galaxy（官方），架构重新生成被设计阻止。",
+  "platformGuideRescanItem2": "对于 Xenia、RPCS3、shadPS4、Steam Official、Ubisoft Connect（Official）和 GOG Galaxy（Official），重新生成 schema 在设计上被阻止。",
   "platformGuideRescanItem3": "对于这些平台/模拟器，请使用文件夹 → 重新扫描从源文件重建。",
   "platformGuideOnboardingSummary": "引导载入和启动门",
   "platformGuideOnboardingItem1": "首次运行（或载入版本更改）时，启动会在完全扫描之前等待文件夹选择。",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "启动流程：boot:onboarding:*。",
   "platformGuideLogsItem3": "初始快照评估：initial-notify:*。",
   "platformGuideLogsItem4": "自动选择流程：auto-select:*。",
-  "platformGuideLogsItem5": "Steam 官方处理：steam-official:*. GOG Galaxy 处理：gog-official:*。",
+  "platformGuideLogsItem5": "Steam 官方处理：steam-official:*. Ubisoft Connect 处理：ubisoft-official:*. GOG Galaxy 处理：gog-official:*。",
   "platformGuideQuickTip1": "在“设置”→“文件夹”中添加根文件夹。",
   "platformGuideQuickTip2": "自动配置仅针对未静音/忽略的监视文件夹运行。",
   "platformGuideQuickTip3": "仅在新解锁/进度更改时发送通知，而不会针对已导入的旧解锁发送通知。",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam（官方）",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "平台和模拟器指南",
+  "platformGuideTroubleshootingItem0": "覆盖层和通知在 Borderless Windowed 模式下效果最佳。DirectX 9/10/11 游戏通常需要 Borderless/Borderless Windowed 模式，通知才能显示在游戏上方。Fullscreen 支持有限，但如果游戏支持，DirectX 12 游戏通常可以在 Fullscreen 下正常工作。",
   "platformGuideTroubleshootingItem1": "检查游戏是否未列入黑名单，并且进度通知未全局/按配置静音。",
   "platformGuideTroubleshootingItem2": "验证观看的文件夹路径并确认保存/奖杯文件在播放时实际更改。",
   "platformGuideTroubleshootingItem3": "移动保存或模拟器目录后，在文件夹中运行重新扫描。",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "监视文件夹：%LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications。",
   "platformGuideGogOfficialItem2": "本地产品映射从 %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db 读取，运行时成就进度从 Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db 读取。",
   "platformGuideGogOfficialItem3": "只有在 gameplay.db 已存在且其中的成就数据已经填充并稳定后，才会开始生成配置。先生成 schema，然后再生成配置。",
-  "platformGuideGogOfficialItem4": "如果游戏只有 Storage 数据而还没有 Gameplay\\<userId>\\gameplay.db，watcher 会等待并自动重试。"
+  "platformGuideGogOfficialItem4": "如果游戏只有 Storage 数据而还没有 Gameplay\\<userId>\\gameplay.db，watcher 会等待并自动重试。",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect（官方）",
+  "platformGuideUbisoftOfficialItem1": "监视文件夹：%LOCALAPPDATA%\\Ubisoft Game Launcher\\spool。",
+  "platformGuideUbisoftOfficialItem2": "进度从 <userId>\\<productId>.spool 读取，而 schema/图片从 %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements 生成。",
+  "platformGuideUbisoftOfficialItem3": "只有当 spool 文件和本地成就归档都可用时才会创建配置。先生成 schema，再创建配置。",
+  "platformGuideUbisoftOfficialItem4": "请在 设置 → 文件夹 中手动添加 Ubisoft spool 根目录。应用不会自动假定此路径。"
 }

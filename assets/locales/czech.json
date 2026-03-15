@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Detekce konfigurace LumaPlay vyžaduje platform=uplay a emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema se používá pro obnovení schématu Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pro Xenia, RPCS3, shadPS4, Steam Official a GOG Galaxy (Oficiální) je regenerace schématu blokována záměrně.",
+  "platformGuideRescanItem2": "Pro Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) a GOG Galaxy (Official) je ruční regenerace schématu záměrně blokována.",
   "platformGuideRescanItem3": "Pro tyto platformy/emulátory použijte Folders → Rescan k opětovnému sestavení ze zdrojových souborů.",
   "platformGuideOnboardingSummary": "Boot onboarding a startovací brána",
   "platformGuideOnboardingItem1": "Při prvním spuštění (nebo při změně verze) čeká spuštění před úplným skenováním na výběr složky.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Průběh spouštění: boot:onboarding:*.",
   "platformGuideLogsItem3": "Počáteční vyhodnocení snímku: initial-notify:*.",
   "platformGuideLogsItem4": "Tok automatického výběru: auto-select:*.",
-  "platformGuideLogsItem5": "Zpracování Steam Official: steam-official:*. Zpracování GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Zpracování Steam Official: steam-official:*. Zpracování Ubisoft Connect: ubisoft-official:*. Zpracování GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Přidejte kořenové složky v Nastavení → Složky.",
   "platformGuideQuickTip2": "Automatická konfigurace se spustí pouze pro sledované složky, které nejsou ztlumené/ignorované.",
   "platformGuideQuickTip3": "Oznámení se zasílají pouze na nové odemknutí/změny průběhu, nikoli na již importovaná stará odemknutí.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (oficiální)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Průvodce platformou a emulátorem",
+  "platformGuideTroubleshootingItem0": "Overlay a oznámení fungují nejlépe v režimu Borderless Windowed. Hry DirectX 9/10/11 obvykle vyžadují režim Borderless/Borderless Windowed, aby se oznámení zobrazovala nad hrou. Podpora Fullscreen je omezená, ale hry DirectX 12 obvykle fungují ve Fullscreen, pokud to hra podporuje.",
   "platformGuideTroubleshootingItem1": "Zkontrolujte, zda hra není na černé listině a zda nejsou globálně / podle konfigurace ztlumena oznámení o postupu.",
   "platformGuideTroubleshootingItem2": "Ověřte cesty ke sledovaným složkám a potvrďte, že se soubory uložení/trofeje během přehrávání skutečně mění.",
   "platformGuideTroubleshootingItem3": "Po přesunutí adresářů uložení nebo emulátoru spusťte znovu prohledat složky.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Sledovaná složka: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Místní mapování produktu se čte z %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db a průběh achievementů za běhu se čte z Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Generování konfigurace začne až poté, co gameplay.db existuje a data achievementů jsou naplněná a stabilní. Nejprve se vygeneruje schema, potom konfigurace.",
-  "platformGuideGogOfficialItem4": "Pokud má hra jen data Storage a zatím nemá Gameplay\\<userId>\\gameplay.db, watcher počká a automaticky to zkusí znovu."
+  "platformGuideGogOfficialItem4": "Pokud má hra jen data Storage a zatím nemá Gameplay\\<userId>\\gameplay.db, watcher počká a automaticky to zkusí znovu.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Oficiální)",
+  "platformGuideUbisoftOfficialItem1": "Sledovaná složka: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Průběh se čte z <userId>\\<productId>.spool, zatímco schéma/obrázky se generují z %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Konfigy se vytvářejí až poté, co jsou k dispozici soubor spool i místní archiv achievementů. Nejprve se vygeneruje schéma, potom config.",
+  "platformGuideUbisoftOfficialItem4": "Kořen složky Ubisoft spool přidejte ručně v Nastavení → Složky. Aplikace tuto cestu nepředpokládá automaticky."
 }

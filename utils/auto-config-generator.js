@@ -17,6 +17,14 @@ const {
   resolveGogOfficialGameplayEntryForProduct,
   waitForStableGogGameplayDb,
 } = require("./gog-galaxy-local");
+const {
+  buildUbisoftOfficialSnapshot,
+  ensureUbisoftOfficialSchema,
+  readUbisoftSpoolFile,
+  resolveUbisoftAchievementsArchiveForAppId,
+  resolveUbisoftOfficialSpoolEntryForAppId,
+  resolveUbisoftSteamAppId,
+} = require("./ubisoft-connect-local");
 const autoConfigLogger = createLogger("autoconfig");
 const {
   normalizePlatform,
@@ -221,6 +229,8 @@ function resolveConfigTarget({ outputDir, baseName, appid, platform, index }) {
   const platformLabel =
     platform === "uplay"
       ? "Uplay"
+      : platform === "ubisoft-official"
+      ? "Ubisoft Official"
       : platform === "gog"
       ? "GOG"
       : platform === "gog-official"
@@ -668,6 +678,253 @@ async function generateGogOfficialConfigForProduct(appid, outputDir, opts = {}) 
     updated,
     snapshot: schemaResult?.snapshot || {},
   };
+}
+
+async function generateUbisoftOfficialConfigForProduct(appid, outputDir, opts = {}) {
+  const productId = String(appid || "").trim();
+  if (!/^\d+$/.test(productId)) {
+    autoConfigLogger.error("ubisoft-official:invalid-product-id", {
+      appid: productId,
+    });
+    throw new Error(`Invalid Ubisoft Product ID: ${productId}`);
+  }
+
+  const configVariantIndex = loadConfigVariantIndex(outputDir);
+  let spoolDir =
+    typeof opts.savePathOverride === "string" ? opts.savePathOverride.trim() : "";
+  let spoolFilePath =
+    typeof opts.ubisoftSpoolFile === "string"
+      ? opts.ubisoftSpoolFile.trim()
+      : typeof opts.ubisoft_spool_file === "string"
+        ? opts.ubisoft_spool_file.trim()
+        : "";
+  let userId =
+    typeof opts.ubisoftUserId === "string"
+      ? opts.ubisoftUserId.trim()
+      : typeof opts.ubisoft_user_id === "string"
+        ? opts.ubisoft_user_id.trim()
+        : "";
+
+  if (spoolFilePath && !spoolDir) {
+    spoolDir = path.dirname(spoolFilePath);
+  }
+  if (spoolDir && !userId) {
+    userId = path.basename(spoolDir);
+  }
+
+  const resolvedSpool =
+    resolveUbisoftOfficialSpoolEntryForAppId(productId, {
+      userId,
+      spoolFilePath,
+      spoolRoot: spoolDir || opts.spoolRoot,
+    }) || null;
+  if (resolvedSpool) {
+    spoolDir = resolvedSpool.spoolDir || spoolDir;
+    spoolFilePath = resolvedSpool.spoolFilePath || spoolFilePath;
+    userId = resolvedSpool.userId || userId;
+  }
+
+  if (!spoolFilePath || !fs.existsSync(spoolFilePath)) {
+    autoConfigLogger.warn("ubisoft-official:spool-missing", {
+      appid: productId,
+      userId: userId || null,
+    });
+    throw new Error("Ubisoft Connect spool file was not found for this product.");
+  }
+  spoolDir = spoolDir || path.dirname(spoolFilePath);
+  userId = userId || path.basename(spoolDir);
+
+  let archiveInfo = null;
+  try {
+    archiveInfo = resolveUbisoftAchievementsArchiveForAppId(productId, {
+      achievementsRoot: opts.achievementsRoot,
+      configurationsPath: opts.configurationsPath,
+    });
+  } catch (err) {
+    autoConfigLogger.info("ubisoft-official:schema-pending", {
+      appid: productId,
+      userId: userId || null,
+      spoolFilePath,
+      error: err?.message || String(err),
+    });
+    return {
+      appid: productId,
+      platform: "ubisoft-official",
+      skipped: true,
+      pendingSchema: true,
+      save_path: spoolDir,
+      ubisoft_user_id: userId || "",
+      ubisoft_spool_file: spoolFilePath,
+      snapshot:
+        buildUbisoftOfficialSnapshot(
+          readUbisoftSpoolFileSafe(spoolFilePath)?.records || [],
+        ) || {},
+    };
+  }
+
+  const schemaBase = path.join(outputDir, "schema");
+  const destSchemaDir = path.join(schemaBase, "ubisoft-official", productId);
+  fs.mkdirSync(destSchemaDir, { recursive: true });
+
+  const steamAppId =
+    String(opts.steamAppId || resolveUbisoftSteamAppId(productId) || "").trim();
+  const schemaResult = await ensureUbisoftOfficialSchema(productId, destSchemaDir, {
+    archivePath: archiveInfo.archivePath,
+    achievementsSpec: archiveInfo.achievementsSpec,
+    title: archiveInfo.title,
+    gameIdentifier: archiveInfo.gameIdentifier,
+    displayName: archiveInfo.displayName,
+    rootName: archiveInfo.rootName,
+    gameCode: archiveInfo.gameCode,
+    achievementsSyncId: archiveInfo.achievementsSyncId,
+    spaceId: archiveInfo.spaceId,
+    configurationsPath: opts.configurationsPath,
+    achievementsRoot: opts.achievementsRoot,
+    steamAppId,
+  });
+  const schemaCount = Number(schemaResult?.count || 0);
+  if (!Number.isFinite(schemaCount) || schemaCount <= 0) {
+    autoConfigLogger.info("ubisoft-official:schema-pending", {
+      appid: productId,
+      userId: userId || null,
+      spoolFilePath,
+      archivePath: archiveInfo.archivePath,
+      schemaCount,
+    });
+    return {
+      appid: productId,
+      platform: "ubisoft-official",
+      skipped: true,
+      pendingSchema: true,
+      save_path: spoolDir,
+      config_path: destSchemaDir,
+      ubisoft_user_id: userId || "",
+      ubisoft_spool_file: spoolFilePath,
+      snapshot:
+        buildUbisoftOfficialSnapshot(
+          readUbisoftSpoolFileSafe(spoolFilePath)?.records || [],
+        ) || {},
+    };
+  }
+
+  const existingVariant =
+    resolveExistingVariant(configVariantIndex, productId, "ubisoft-official") ||
+    null;
+  const resolvedBase =
+    String(opts.preferredName || "").trim() ||
+    String(archiveInfo?.title || "").trim() ||
+    `Ubisoft ${productId}`;
+  const defaultCfgName = `${resolvedBase} (Ubisoft Official)`;
+  const desiredFileBase = sanitizeFilename(defaultCfgName);
+  const targetInfo = existingVariant
+    ? {
+        filePath: existingVariant.filePath,
+        name: existingVariant.name || defaultCfgName,
+        reused: true,
+      }
+    : {
+        filePath: path.join(outputDir, `${desiredFileBase}.json`),
+        name: defaultCfgName,
+        reused: false,
+      };
+
+  const existingConfig = readJsonSafe(targetInfo.filePath) || {};
+  const nextConfig = {
+    ...existingConfig,
+    name: path.basename(targetInfo.filePath, ".json"),
+    displayName: defaultCfgName,
+    appid: productId,
+    platform: "ubisoft-official",
+    config_path: destSchemaDir,
+    save_path: spoolDir,
+    ubisoft_user_id: userId || existingConfig.ubisoft_user_id || undefined,
+    ubisoft_spool_file: spoolFilePath,
+    ubisoft_achievements_archive:
+      archiveInfo.archivePath || existingConfig.ubisoft_achievements_archive || undefined,
+    steamAppId: steamAppId || existingConfig.steamAppId || undefined,
+    executable:
+      typeof existingConfig.executable === "string" ? existingConfig.executable : "",
+    arguments:
+      typeof existingConfig.arguments === "string" ? existingConfig.arguments : "",
+    process_name:
+      typeof existingConfig.process_name === "string"
+        ? existingConfig.process_name
+        : "",
+  };
+
+  const previousSerialized = fs.existsSync(targetInfo.filePath)
+    ? fs.readFileSync(targetInfo.filePath, "utf8")
+    : null;
+  const nextSerialized = JSON.stringify(nextConfig, null, 2);
+  const created = !fs.existsSync(targetInfo.filePath);
+  const updated = created || previousSerialized !== nextSerialized;
+  if (updated) {
+    fs.writeFileSync(targetInfo.filePath, nextSerialized);
+  }
+
+  registerConfigVariant(configVariantIndex, productId, "ubisoft-official", {
+    filePath: targetInfo.filePath,
+    name: path.basename(targetInfo.filePath, ".json"),
+  });
+
+  const spoolSnapshot = buildUbisoftOfficialSnapshot(
+    readUbisoftSpoolFileSafe(spoolFilePath)?.records || [],
+  );
+  if (
+    typeof opts.onSeedCache === "function" &&
+    spoolSnapshot &&
+    Object.keys(spoolSnapshot).length
+  ) {
+    try {
+      opts.onSeedCache({
+        appid: productId,
+        configName: path.basename(targetInfo.filePath, ".json"),
+        platform: "ubisoft-official",
+        savePath: spoolDir,
+        snapshot: spoolSnapshot,
+      });
+    } catch (err) {
+      autoConfigLogger.warn("ubisoft-official:seed-cache-failed", {
+        appid: productId,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  autoConfigLogger.info("ubisoft-official:config-ready", {
+    appid: productId,
+    filePath: targetInfo.filePath,
+    created,
+    updated,
+    userId: userId || null,
+    spoolFilePath,
+    archivePath: archiveInfo.archivePath,
+  });
+
+  return {
+    appid: productId,
+    name: path.basename(targetInfo.filePath, ".json"),
+    filePath: targetInfo.filePath,
+    platform: "ubisoft-official",
+    save_path: spoolDir,
+    config_path: destSchemaDir,
+    ubisoft_user_id: userId || "",
+    ubisoft_spool_file: spoolFilePath,
+    ubisoft_achievements_archive: archiveInfo.archivePath || "",
+    steamAppId,
+    created,
+    updated,
+    snapshot: spoolSnapshot,
+  };
+}
+
+function readUbisoftSpoolFileSafe(filePath) {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    return readUbisoftSpoolFile(filePath);
+  } catch {
+    return null;
+  }
 }
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
@@ -1592,6 +1849,12 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
   const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
   if (desiredPlatform === "gog-official") {
     return generateGogOfficialConfigForProduct(appid, outputDir, {
+      ...opts,
+      onSeedCache,
+    });
+  }
+  if (desiredPlatform === "ubisoft-official") {
+    return generateUbisoftOfficialConfigForProduct(appid, outputDir, {
       ...opts,
       onSeedCache,
     });

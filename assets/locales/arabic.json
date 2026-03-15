@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "يتطلب اكتشاف تكوين LumaPlay platform=uplay وemu=lumaplay.",
   "platformGuideRescanSummary": "إعادة المسح مقابل إعادة إنشاء المخطط",
   "platformGuideRescanItem1": "يتم استخدام إعادة إنشاء المخطط لتحديث المخطط Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "بالنسبة إلى Xenia وRPCS3 وshadPS4 وSteam الرسمية وGOG Galaxy (رسمي)، يتم حظر إعادة إنشاء المخطط حسب التصميم.",
+  "platformGuideRescanItem2": "بالنسبة إلى Xenia وRPCS3 وshadPS4 وSteam Official وUbisoft Connect (Official) وGOG Galaxy (Official)، يتم حظر إعادة توليد المخطط عمدًا.",
   "platformGuideRescanItem3": "بالنسبة لتلك الأنظمة الأساسية/المحاكيات، استخدم Folders → Rescan لإعادة البناء من الملفات المصدر.",
   "platformGuideOnboardingSummary": "تمهيد التمهيد وبوابة بدء التشغيل",
   "platformGuideOnboardingItem1": "عند التشغيل لأول مرة (أو تغيير إصدار الإعداد)، ينتظر بدء التشغيل تحديد المجلد قبل إجراء المسح الكامل.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "تدفق بدء التشغيل: boot:onboarding:*.",
   "platformGuideLogsItem3": "تقييم اللقطة الأولي: initial-notify:*.",
   "platformGuideLogsItem4": "تدفق الاختيار التلقائي: auto-select:*.",
-  "platformGuideLogsItem5": "معالجة Steam الرسمية: steam-official:*. معالجة GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "معالجة Steam الرسمية: steam-official:*. معالجة Ubisoft Connect: ubisoft-official:*. معالجة GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "أضف المجلدات الجذرية في الإعدادات → المجلدات.",
   "platformGuideQuickTip2": "يتم تشغيل التكوين التلقائي فقط للمجلدات المراقبة التي لم يتم كتم صوتها/تجاهلها.",
   "platformGuideQuickTip3": "يتم إرسال الإشعارات فقط بشأن تغييرات إلغاء القفل/التقدم الجديدة، وليس لعمليات إلغاء القفل القديمة التي تم استيرادها بالفعل.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (رسمي)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "دليل النظام الأساسي والمحاكي",
+  "platformGuideTroubleshootingItem0": "يعمل الـ overlay والإشعارات بأفضل شكل في وضع Borderless Windowed. تتطلب ألعاب DirectX 9/10/11 عادةً وضع Borderless/Borderless Windowed لكي تظهر الإشعارات فوق اللعبة. دعم Fullscreen محدود، لكن ألعاب DirectX 12 تعمل عادةً في وضع Fullscreen عندما تدعمه اللعبة.",
   "platformGuideTroubleshootingItem1": "تأكد من عدم إدراج اللعبة في القائمة السوداء وعدم كتم صوت إشعارات التقدم عالميًا/لكل تهيئة.",
   "platformGuideTroubleshootingItem2": "تحقق من مسارات المجلدات المراقبة وتأكد من أن ملفات الحفظ/الكأس تتغير فعليًا أثناء اللعب.",
   "platformGuideTroubleshootingItem3": "بعد نقل عمليات الحفظ أو أدلة المحاكي، قم بتشغيل Rescan in Folders.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "مجلد المراقبة: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "تتم قراءة ربط المنتج المحلي من %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db، ويتم قراءة تقدم الإنجازات أثناء التشغيل من Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "يبدأ إنشاء الإعداد فقط بعد وجود gameplay.db وأن تكون بيانات الإنجازات فيه مكتملة ومستقرة. يتم إنشاء المخطط أولاً ثم الإعداد.",
-  "platformGuideGogOfficialItem4": "إذا كانت اللعبة تحتوي فقط على بيانات Storage ولا يوجد Gameplay\\<userId>\\gameplay.db بعد، فإن المراقب ينتظر ويعيد المحاولة تلقائياً."
+  "platformGuideGogOfficialItem4": "إذا كانت اللعبة تحتوي فقط على بيانات Storage ولا يوجد Gameplay\\<userId>\\gameplay.db بعد، فإن المراقب ينتظر ويعيد المحاولة تلقائياً.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (رسمي)",
+  "platformGuideUbisoftOfficialItem1": "مجلد المراقبة: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "يُقرأ التقدم من <userId>\\<productId>.spool، بينما تُولَّد المخططات/الصور من %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "لا تُنشأ الإعدادات إلا بعد توفر ملف spool وأرشيف الإنجازات المحلي معًا. يُنشأ المخطط أولًا، ثم ملف الإعداد.",
+  "platformGuideUbisoftOfficialItem4": "أضف جذر Ubisoft spool يدويًا من الإعدادات → المجلدات. التطبيق لا يفترض هذا المسار تلقائيًا."
 }

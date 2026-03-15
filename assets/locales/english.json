@@ -390,7 +390,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay config detection requires platform=uplay and emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema is used for Steam/Uplay/Epic/GOG schema refresh.",
-  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official and GOG Galaxy (Official), schema regenerate is blocked by design.",
+  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) and GOG Galaxy (Official), schema regenerate is blocked by design.",
   "platformGuideRescanItem3": "For those platforms/emulators, use Folders → Rescan to rebuild from source files.",
   "platformGuideOnboardingSummary": "Boot onboarding and startup gate",
   "platformGuideOnboardingItem1": "On first run (or onboarding version change), startup waits for folder selection before full scanning.",
@@ -411,7 +411,7 @@
   "platformGuideLogsItem2": "Startup flow: boot:onboarding:*.",
   "platformGuideLogsItem3": "Initial snapshot evaluation: initial-notify:*.",
   "platformGuideLogsItem4": "Auto selection flow: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official handling: steam-official:*. GOG Galaxy handling: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official handling: steam-official:*. Ubisoft Connect handling: ubisoft-official:*. GOG Galaxy handling: gog-official:*.",
   "platformGuideQuickTip1": "Add root folders in Settings → Folders.",
   "platformGuideQuickTip2": "Auto-config runs only for watched folders that are not muted/ignored.",
   "platformGuideQuickTip3": "Notifications are sent only on new unlock/progress changes, not for already imported old unlocks.",
@@ -437,6 +437,7 @@
   "platformGuideSteamOfficialSummary": "Steam (Official)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Platform & Emulator Guide",
+  "platformGuideTroubleshootingItem0": "Overlay and notifications work best in Borderless Windowed mode. DirectX 9/10/11 games usually require Borderless/Borderless Windowed mode for notifications to appear above the game. Fullscreen support is limited, but DirectX 12 games will usually work in Fullscreen when the game supports it.",
   "platformGuideTroubleshootingItem1": "Check that the game is not blacklisted and progress notifications are not muted globally/per-config.",
   "platformGuideTroubleshootingItem2": "Verify watched folder paths and confirm the save/trophy files actually change while playing.",
   "platformGuideTroubleshootingItem3": "After moving saves or emulator directories, run Rescan in Folders.",
@@ -567,5 +568,10 @@
   "platformGuideGogOfficialItem1": "Watch folder: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Local product mapping is read from %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, and runtime progress is read from Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Config generation starts only after gameplay.db exists and its achievement data is populated and stable. The schema is generated first, then the config.",
-  "platformGuideGogOfficialItem4": "If a game only has Storage data and no Gameplay\\<userId>\\gameplay.db yet, the watcher waits and retries automatically."
+  "platformGuideGogOfficialItem4": "If a game only has Storage data and no Gameplay\\<userId>\\gameplay.db yet, the watcher waits and retries automatically.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Official)",
+  "platformGuideUbisoftOfficialItem1": "Watch folder: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Progress is read from <userId>\\<productId>.spool, while schema/images are generated from %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Configs are created only after both the spool file and the local achievements archive are available. The schema is generated first, then the config.",
+  "platformGuideUbisoftOfficialItem4": "Add the Ubisoft spool root manually in Settings → Folders. The app does not assume this path automatically."
 }

@@ -355,7 +355,14 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
             path.join(base, normalizedPlatform, appid, "achievements.json")
           );
         }
-      ["uplay", "steam", "epic", "gog", "gog-official"].forEach((plat) =>
+      [
+        "uplay",
+        "ubisoft-official",
+        "steam",
+        "epic",
+        "gog",
+        "gog-official",
+      ].forEach((plat) =>
         candidates.add(path.join(base, plat, appid, "achievements.json"))
       );
     }
@@ -563,6 +570,26 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
         } = require("./gog-galaxy-local");
         const parsed = readGogGameplayDb(gameplayDbPath);
         const snapshot = buildGogOfficialSnapshot(parsed?.achievements || []);
+        return snapshot && Object.keys(snapshot).length ? snapshot : fallback || {};
+      } catch {
+        return fallback || {};
+      }
+    }
+  }
+  if (normalizedPlatform === "ubisoft-official") {
+    const spoolFilePath =
+      (appid &&
+        (findCaseInsensitive(saveDir, `${appid}.spool`) ||
+          path.join(saveDir, `${appid}.spool`))) ||
+      "";
+    if (spoolFilePath && fs.existsSync(spoolFilePath)) {
+      try {
+        const {
+          buildUbisoftOfficialSnapshot,
+          readUbisoftSpoolFile,
+        } = require("./ubisoft-connect-local");
+        const parsed = readUbisoftSpoolFile(spoolFilePath);
+        const snapshot = buildUbisoftOfficialSnapshot(parsed?.records || []);
         return snapshot && Object.keys(snapshot).length ? snapshot : fallback || {};
       } catch {
         return fallback || {};

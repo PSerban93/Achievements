@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "การตรวจหาการกำหนดค่า LumaPlay ต้องใช้ platform=uplay และ emu=lumaplay",
   "platformGuideRescanSummary": "สแกนซ้ำเทียบกับสร้างสคีมาใหม่",
   "platformGuideRescanItem1": "สร้าง Schema ใหม่สำหรับการรีเฟรชสคีมา Steam/Uplay/Epic/GOG",
-  "platformGuideRescanItem2": "สำหรับ Xenia, RPCS3, shadPS4, Steam ทางการ และ GOG Galaxy (ทางการ) การสร้างสคีมาใหม่จะถูกบล็อกโดยการออกแบบ",
+  "platformGuideRescanItem2": "สำหรับ Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) และ GOG Galaxy (Official) การสร้าง schema ใหม่ถูกบล็อกไว้ตามการออกแบบ",
   "platformGuideRescanItem3": "สำหรับแพลตฟอร์ม/อีมูเลเตอร์เหล่านั้น ให้ใช้ Folders → Rescan เพื่อสร้างใหม่จากไฟล์ต้นฉบับ",
   "platformGuideOnboardingSummary": "บูตออนบอร์ดและประตูเริ่มต้น",
   "platformGuideOnboardingItem1": "ในการเรียกใช้ครั้งแรก (หรือการเปลี่ยนเวอร์ชันการเริ่มต้นใช้งาน) การเริ่มต้นระบบจะรอการเลือกโฟลเดอร์ก่อนที่จะสแกนแบบเต็ม",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "ขั้นตอนการเริ่มต้น: boot:onboarding:*",
   "platformGuideLogsItem3": "การประเมินสแนปชอตเริ่มต้น: initial-notify:*",
   "platformGuideLogsItem4": "ขั้นตอนการเลือกอัตโนมัติ: auto-select:*",
-  "platformGuideLogsItem5": "การจัดการ Steam ทางการ: steam-official:*. การจัดการ GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "การจัดการ Steam ทางการ: steam-official:*. การจัดการ Ubisoft Connect: ubisoft-official:*. การจัดการ GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "เพิ่มโฟลเดอร์รูทในการตั้งค่า → โฟลเดอร์",
   "platformGuideQuickTip2": "การกำหนดค่าอัตโนมัติจะทำงานเฉพาะกับโฟลเดอร์ที่รับชมซึ่งไม่ได้ปิดเสียง/ละเว้น",
   "platformGuideQuickTip3": "การแจ้งเตือนจะถูกส่งเฉพาะเมื่อมีการปลดล็อค/การเปลี่ยนแปลงความคืบหน้าใหม่เท่านั้น ไม่ใช่สำหรับการปลดล็อคเก่าที่นำเข้าแล้ว",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (เป็นทางการ)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "คู่มือแพลตฟอร์มและโปรแกรมจำลอง",
+  "platformGuideTroubleshootingItem0": "โอเวอร์เลย์และการแจ้งเตือนทำงานได้ดีที่สุดในโหมด Borderless Windowed เกม DirectX 9/10/11 มักต้องใช้โหมด Borderless/Borderless Windowed เพื่อให้การแจ้งเตือนแสดงอยู่เหนือเกม การรองรับ Fullscreen มีจำกัด แต่เกม DirectX 12 มักจะทำงานในโหมด Fullscreen ได้เมื่อเกมรองรับ",
   "platformGuideTroubleshootingItem1": "ตรวจสอบว่าเกมไม่ได้อยู่ในบัญชีดำและไม่ได้ปิดเสียงการแจ้งเตือนความคืบหน้าทั่วโลก/ต่อการกำหนดค่า",
   "platformGuideTroubleshootingItem2": "ตรวจสอบเส้นทางของโฟลเดอร์ที่รับชมและยืนยันว่าไฟล์บันทึก/ถ้วยรางวัลเปลี่ยนแปลงจริงขณะเล่น",
   "platformGuideTroubleshootingItem3": "หลังจากย้ายไดเร็กทอรีบันทึกหรืออีมูเลเตอร์แล้ว ให้รัน Rescan ในโฟลเดอร์",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "โฟลเดอร์ที่เฝ้าดู: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "การแมปผลิตภัณฑ์ในเครื่องจะถูกอ่านจาก %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db และความคืบหน้าความสำเร็จขณะรันจะถูกอ่านจาก Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "การสร้างคอนฟิกจะเริ่มก็ต่อเมื่อมี gameplay.db แล้ว และข้อมูล achievement ภายในถูกเติมครบและนิ่งแล้วเท่านั้น โดยจะสร้าง schema ก่อน แล้วค่อยสร้างคอนฟิก",
-  "platformGuideGogOfficialItem4": "หากเกมมีเพียงข้อมูล Storage และยังไม่มี Gameplay\\<userId>\\gameplay.db ตัว watcher จะรอและลองใหม่อัตโนมัติ"
+  "platformGuideGogOfficialItem4": "หากเกมมีเพียงข้อมูล Storage และยังไม่มี Gameplay\\<userId>\\gameplay.db ตัว watcher จะรอและลองใหม่อัตโนมัติ",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (ทางการ)",
+  "platformGuideUbisoftOfficialItem1": "โฟลเดอร์ที่เฝ้าดู: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "ความคืบหน้าถูกอ่านจาก <userId>\\<productId>.spool ส่วน schema/รูปภาพจะถูกสร้างจาก %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "จะสร้างคอนฟิกก็ต่อเมื่อมีทั้งไฟล์ spool และ archive achievements ภายในเครื่องพร้อมแล้ว โดยจะสร้าง schema ก่อน แล้วค่อยสร้างคอนฟิก",
+  "platformGuideUbisoftOfficialItem4": "เพิ่ม root ของ Ubisoft spool ด้วยตนเองใน การตั้งค่า → โฟลเดอร์ แอปจะไม่สมมติเส้นทางนี้ให้อัตโนมัติ"
 }

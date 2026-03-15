@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Voor LumaPlay-configuratiedetectie zijn platform=uplay en emu=lumaplay vereist.",
   "platformGuideRescanSummary": "Opnieuw scannen versus schema opnieuw genereren",
   "platformGuideRescanItem1": "Schema opnieuw genereren wordt gebruikt voor het vernieuwen van het schema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Voor Xenia, RPCS3, shadPS4, Steam Official en GOG Galaxy (Officieel) wordt het opnieuw genereren van schema's door het ontwerp geblokkeerd.",
+  "platformGuideRescanItem2": "Voor Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) en GOG Galaxy (Official) is schema-hergeneratie bewust geblokkeerd.",
   "platformGuideRescanItem3": "Voor deze platforms/emulators gebruikt u Mappen → Opnieuw scannen om opnieuw op te bouwen vanaf bronbestanden.",
   "platformGuideOnboardingSummary": "Boot-onboarding en opstartpoort",
   "platformGuideOnboardingItem1": "Bij de eerste keer opstarten (of bij wijziging van de onboard-versie) wacht het opstarten op mapselectie voordat het volledig wordt gescand.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Opstartstroom: boot:onboarding:*.",
   "platformGuideLogsItem3": "Initiële momentopname-evaluatie: initial-notify:*.",
   "platformGuideLogsItem4": "Automatische selectiestroom: auto-select:*.",
-  "platformGuideLogsItem5": "Afhandeling van Steam Official: steam-official:*. Afhandeling van GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Afhandeling van Steam Official: steam-official:*. Afhandeling van Ubisoft Connect: ubisoft-official:*. Afhandeling van GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Voeg hoofdmappen toe via Instellingen → Mappen.",
   "platformGuideQuickTip2": "Automatische configuratie wordt alleen uitgevoerd voor bewaakte mappen die niet zijn gedempt/genegeerd.",
   "platformGuideQuickTip3": "Er worden alleen meldingen verzonden over nieuwe ontgrendelingen/voortgangswijzigingen, niet voor reeds geïmporteerde oude ontgrendelingen.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (officieel)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Platform- en emulatorgids",
+  "platformGuideTroubleshootingItem0": "De overlay en meldingen werken het best in de Borderless Windowed-modus. DirectX 9/10/11-games vereisen meestal de Borderless/Borderless Windowed-modus zodat meldingen boven de game verschijnen. Ondersteuning voor Fullscreen is beperkt, maar DirectX 12-games werken meestal in Fullscreen wanneer de game dit ondersteunt.",
   "platformGuideTroubleshootingItem1": "Controleer of de game niet op de zwarte lijst staat en of voortgangsmeldingen niet globaal/per configuratie zijn gedempt.",
   "platformGuideTroubleshootingItem2": "Controleer de bewaakte mappaden en bevestig dat de opslag-/trofeebestanden daadwerkelijk veranderen tijdens het spelen.",
   "platformGuideTroubleshootingItem3": "Nadat u opslag- of emulatormappen hebt verplaatst, voert u Opnieuw scannen in mappen uit.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Bewaakte map: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Lokale productkoppeling wordt gelezen uit %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, en achievement-voortgang tijdens runtime wordt gelezen uit Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Het genereren van de configuratie start pas nadat gameplay.db bestaat en de achievementgegevens gevuld en stabiel zijn. Eerst wordt het schema gegenereerd, daarna de configuratie.",
-  "platformGuideGogOfficialItem4": "Als een spel alleen Storage-gegevens heeft en nog geen Gameplay\\<userId>\\gameplay.db, wacht de watcher en probeert hij automatisch opnieuw."
+  "platformGuideGogOfficialItem4": "Als een spel alleen Storage-gegevens heeft en nog geen Gameplay\\<userId>\\gameplay.db, wacht de watcher en probeert hij automatisch opnieuw.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Officieel)",
+  "platformGuideUbisoftOfficialItem1": "Te volgen map: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Voortgang wordt gelezen uit <userId>\\<productId>.spool, terwijl schema/afbeeldingen worden gegenereerd vanuit %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Configuraties worden pas aangemaakt nadat zowel het spool-bestand als het lokale achievements-archief beschikbaar zijn. Eerst wordt het schema gegenereerd, daarna het configuratiebestand.",
+  "platformGuideUbisoftOfficialItem4": "Voeg de Ubisoft-spoolhoofdmap handmatig toe via Instellingen → Mappen. De app neemt dit pad niet automatisch aan."
 }

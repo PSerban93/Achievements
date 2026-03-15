@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay asetusten tunnistus vaatii platform=uplay ja emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema -mallia käytetään Steam/Uplay/Epic/GOG-skeeman päivitykseen.",
-  "platformGuideRescanItem2": "Xenia-, RPCS3-, shadPS4-, Steam Official- ja GOG Galaxy (Virallinen) -alustoilla skeeman uudelleenmuodostaminen on estetty suunnittelun vuoksi.",
+  "platformGuideRescanItem2": "Xenian, RPCS3:n, shadPS4:n, Steam Officialin, Ubisoft Connectin (Official) ja GOG Galaxyn (Official) kohdalla skeeman uudelleenluonti on estetty tarkoituksella.",
   "platformGuideRescanItem3": "Käytä kyseisissä alustoissa/emulaattoreissa Kansiot → Hae uudelleen rakentaaksesi uudelleen lähdetiedostoista.",
   "platformGuideOnboardingSummary": "Käynnistys ja käynnistysportti",
   "platformGuideOnboardingItem1": "Ensimmäisellä käyttökerralla (tai aloitusversion muutoksella) käynnistys odottaa kansion valintaa ennen täydellistä tarkistusta.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Käynnistyskulku: boot:onboarding:*.",
   "platformGuideLogsItem3": "Ensimmäinen tilannekuvan arviointi: initial-notify:*.",
   "platformGuideLogsItem4": "Automaattinen valintaprosessi: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official -käsittely: steam-official:*. GOG Galaxy -käsittely: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official -käsittely: steam-official:*. Ubisoft Connect -käsittely: ubisoft-official:*. GOG Galaxy -käsittely: gog-official:*.",
   "platformGuideQuickTip1": "Lisää juurikansioita kohdassa Asetukset → Kansiot.",
   "platformGuideQuickTip2": "Automaattinen määritys toimii vain valvotuissa kansioissa, joita ei ole mykistetty/ohitettu.",
   "platformGuideQuickTip3": "Ilmoitukset lähetetään vain uusista lukituksen avaus-/ edistymismuutoksista, ei jo tuoduista vanhoista avauksista.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (virallinen)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Alustan ja emulaattorin opas",
+  "platformGuideTroubleshootingItem0": "Overlay ja ilmoitukset toimivat parhaiten Borderless Windowed -tilassa. DirectX 9/10/11 -pelit vaativat yleensä Borderless/Borderless Windowed -tilan, jotta ilmoitukset näkyvät pelin yläpuolella. Fullscreen-tuki on rajallinen, mutta DirectX 12 -pelit toimivat yleensä Fullscreen-tilassa, kun peli tukee sitä.",
   "platformGuideTroubleshootingItem1": "Tarkista, että peli ei ole mustalla listalla ja että edistymisilmoituksia ei ole mykistetty maailmanlaajuisesti/konfiguraatiokohtaisesti.",
   "platformGuideTroubleshootingItem2": "Tarkista tarkkailtujen kansioiden polut ja varmista, että tallennus-/pokaalitiedostot todella muuttuvat toiston aikana.",
   "platformGuideTroubleshootingItem3": "Kun olet siirtänyt tallennus- tai emulaattorihakemistoja, suorita Rescan in Folders.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Valvottava kansio: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Paikallinen tuotemäppäys luetaan tiedostosta %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, ja saavutusten edistyminen ajon aikana luetaan tiedostosta Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Konfiguraation luonti alkaa vasta, kun gameplay.db on olemassa ja sen saavutustiedot on täytetty ja vakautuneet. Skeema luodaan ensin, sitten konfiguraatio.",
-  "platformGuideGogOfficialItem4": "Jos pelissä on vain Storage-tiedot eikä vielä Gameplay\\<userId>\\gameplay.db-tiedostoa, watcher odottaa ja yrittää uudelleen automaattisesti."
+  "platformGuideGogOfficialItem4": "Jos pelissä on vain Storage-tiedot eikä vielä Gameplay\\<userId>\\gameplay.db-tiedostoa, watcher odottaa ja yrittää uudelleen automaattisesti.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Virallinen)",
+  "platformGuideUbisoftOfficialItem1": "Seurattava kansio: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Edistyminen luetaan tiedostosta <userId>\\<productId>.spool, kun taas skeema/kuvat luodaan sijainnista %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Konfiguraatiot luodaan vasta, kun sekä spool-tiedosto että paikallinen saavutearkisto ovat saatavilla. Skeema luodaan ensin, sitten konfiguraatio.",
+  "platformGuideUbisoftOfficialItem4": "Lisää Ubisoftin spool-juurihakemisto manuaalisesti kohdassa Asetukset → Kansiot. Sovellus ei oleta tätä polkua automaattisesti."
 }

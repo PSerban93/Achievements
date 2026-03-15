@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Il rilevamento della configurazione LumaPlay richiede platform=uplay e emu=lumaplay.",
   "platformGuideRescanSummary": "Nuova scansione o rigenerazione dello schema",
   "platformGuideRescanItem1": "Rigenera schema viene utilizzato per l'aggiornamento dello schema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Per Xenia, RPCS3, shadPS4, Steam Official e GOG Galaxy (Ufficiale), la rigenerazione dello schema è bloccata in base alla progettazione.",
+  "platformGuideRescanItem2": "Per Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) e GOG Galaxy (Official), la rigenerazione dello schema è bloccata intenzionalmente.",
   "platformGuideRescanItem3": "Per tali piattaforme/emulatori, utilizzare Cartelle → Nuova scansione per ricostruire dai file di origine.",
   "platformGuideOnboardingSummary": "Onboarding di avvio e gate di avvio",
   "platformGuideOnboardingItem1": "Alla prima esecuzione (o alla modifica della versione di onboarding), l'avvio attende la selezione della cartella prima della scansione completa.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Flusso di avvio: boot:onboarding:*.",
   "platformGuideLogsItem3": "Valutazione iniziale dello snapshot: initial-notify:*.",
   "platformGuideLogsItem4": "Flusso di selezione automatica: auto-select:*.",
-  "platformGuideLogsItem5": "Gestione Steam Official: steam-official:*. Gestione GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Gestione Steam Official: steam-official:*. Gestione Ubisoft Connect: ubisoft-official:*. Gestione GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Aggiungi le cartelle principali in Impostazioni → Cartelle.",
   "platformGuideQuickTip2": "La configurazione automatica viene eseguita solo per le cartelle controllate che non sono disattivate/ignorate.",
   "platformGuideQuickTip3": "Le notifiche vengono inviate solo in caso di nuove modifiche di sblocco/avanzamento, non per vecchi sblocchi già importati.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (Ufficiale)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Guida alla piattaforma e all'emulatore",
+  "platformGuideTroubleshootingItem0": "L'overlay e le notifiche funzionano meglio in modalità Borderless Windowed. I giochi DirectX 9/10/11 richiedono solitamente la modalità Borderless/Borderless Windowed affinché le notifiche appaiano sopra il gioco. Il supporto al Fullscreen è limitato, ma i giochi DirectX 12 di solito funzionano in Fullscreen quando il gioco lo supporta.",
   "platformGuideTroubleshootingItem1": "Controlla che il gioco non sia nella lista nera e che le notifiche di avanzamento non siano disattivate a livello globale/per configurazione.",
   "platformGuideTroubleshootingItem2": "Verifica i percorsi delle cartelle esaminate e conferma che i file di salvataggio/trofeo cambiano effettivamente durante il gioco.",
   "platformGuideTroubleshootingItem3": "Dopo aver spostato le directory di salvataggio o di emulazione, eseguire Nuova scansione in cartelle.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Cartella monitorata: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "La mappatura locale del prodotto viene letta da %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, e il progresso degli achievement in runtime viene letto da Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "La generazione della configurazione inizia solo dopo che gameplay.db esiste e i dati degli achievement al suo interno sono popolati e stabili. Prima viene generato lo schema, poi la configurazione.",
-  "platformGuideGogOfficialItem4": "Se un gioco ha solo dati Storage e non ha ancora Gameplay\\<userId>\\gameplay.db, il watcher attende e riprova automaticamente."
+  "platformGuideGogOfficialItem4": "Se un gioco ha solo dati Storage e non ha ancora Gameplay\\<userId>\\gameplay.db, il watcher attende e riprova automaticamente.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Ufficiale)",
+  "platformGuideUbisoftOfficialItem1": "Cartella monitorata: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "I progressi vengono letti da <userId>\\<productId>.spool, mentre schema/immagini vengono generati da %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Le configurazioni vengono create solo dopo che sia il file spool sia l’archivio locale degli achievement sono disponibili. Prima viene generato lo schema, poi la configurazione.",
+  "platformGuideUbisoftOfficialItem4": "Aggiungi manualmente la radice spool di Ubisoft in Impostazioni → Cartelle. L’app non presume automaticamente questo percorso."
 }

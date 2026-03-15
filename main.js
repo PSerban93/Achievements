@@ -985,7 +985,14 @@ function findConfigDirFromSelection(selDir, appid = "", platform = "") {
     if (normalizedPlatform) {
       pushCandidate(path.join(selDir, normalizedPlatform, normalizedAppId));
     }
-    ["uplay", "steam", "epic", "gog", "gog-official"].forEach((plat) =>
+    [
+      "uplay",
+      "ubisoft-official",
+      "steam",
+      "epic",
+      "gog",
+      "gog-official",
+    ].forEach((plat) =>
       pushCandidate(path.join(selDir, plat, normalizedAppId)),
     );
   }
@@ -3367,6 +3374,35 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
     return null;
   }
 
+  if (normalizedPlatform === "ubisoft-official") {
+    try {
+      const result = await ensureUbisoftOfficialSchema(appid, destDir, {
+        archivePath:
+          options?.ubisoft_achievements_archive ||
+          options?.ubisoftAchievementsArchive ||
+          options?.archivePath,
+        steamAppId:
+          options?.steamAppId || resolveUbisoftSteamAppId(appid) || "",
+      });
+      if (result?.dir && fs.existsSync(achJson)) {
+        ipcLogger.info("schema:ensure-generated-local", {
+          appid,
+          platform: normalizedPlatform,
+          dir: result.dir,
+          archivePath: result.archivePath || null,
+        });
+        return { dir: result.dir, existed: false };
+      }
+    } catch (err) {
+      ipcLogger.warn("schema:ubisoft-official-failed", {
+        appid,
+        error: err?.message || String(err),
+      });
+      throw err;
+    }
+    return null;
+  }
+
   for (const altPlatform of SCHEMA_PLATFORM_DIRS) {
     if (altPlatform === normalizedPlatform) continue;
     const altDir = resolveSchemaDirForPlatform(appid, altPlatform);
@@ -4103,6 +4139,14 @@ ipcMain.handle("loadConfigs", () => {
             .includes(
               `${path.sep}schema${path.sep}gog-official${path.sep}`.toLowerCase(),
             ));
+      const looksUbisoftOfficial =
+        platformNorm === "ubisoft-official" ||
+        (typeof raw?.config_path === "string" &&
+          raw.config_path
+            .toLowerCase()
+            .includes(
+              `${path.sep}schema${path.sep}ubisoft-official${path.sep}`.toLowerCase(),
+            ));
       meta.platform = platformNorm || null;
       if (raw?.displayName) {
         meta.displayName =
@@ -4115,6 +4159,9 @@ ipcMain.handle("loadConfigs", () => {
       }
       if (looksGogOfficial) {
         meta.platform = "gog-official";
+      }
+      if (looksUbisoftOfficial) {
+        meta.platform = "ubisoft-official";
       }
       if (isXenia) {
         const desiredDisplay = ensureXeniaDisplayName(
@@ -4225,7 +4272,7 @@ function normalizeAchievementNameForRarity(name, shouldStrip = false) {
 function resolveSteamAppIdForRarity(config = {}) {
   const platform = normalizePlatform(config?.platform) || "steam";
   const localAppId = config?.appid != null ? String(config.appid).trim() : "";
-  if (platform === "uplay") {
+  if (platform === "uplay" || platform === "ubisoft-official") {
     let mapping = uplayToSteam.get(localAppId);
     if (!mapping) {
       try {
@@ -4234,7 +4281,8 @@ function resolveSteamAppIdForRarity(config = {}) {
       } catch {}
     }
     const steamAppId =
-      mapping?.steam_appid != null ? String(mapping.steam_appid).trim() : "";
+      sanitizeAppId(config?.steamAppId) ||
+      (mapping?.steam_appid != null ? String(mapping.steam_appid).trim() : "");
     return {
       platform,
       steamAppId,
@@ -4427,6 +4475,7 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
       "xenia",
       "steam",
       "uplay",
+      "ubisoft-official",
       "gog",
       "gog-official",
       "epic",
@@ -4620,6 +4669,50 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
           achievements: cached || {},
           save_path: gameplayDir,
           error: error?.message || "gameplay db read failed",
+        };
+      }
+    }
+
+    if (normalizedPlatform === "ubisoft-official") {
+      const cached =
+        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
+      const resolved = resolveUbisoftOfficialSpoolFileForConfig(config);
+      const spoolFilePath = resolved?.spoolFilePath || "";
+      const spoolDir = resolved?.spoolDir || config.save_path || "";
+      if (!spoolFilePath || !fs.existsSync(spoolFilePath)) {
+        return {
+          achievements: cached || {},
+          save_path: spoolDir,
+          error: "spool file not found",
+        };
+      }
+      try {
+        const parsed = readUbisoftSpoolFile(spoolFilePath);
+        const snapshot = buildUbisoftOfficialSnapshot(parsed?.records || []);
+        const merged = mergeEarnedTimeFromCached(snapshot, cached);
+        const nextUserId = resolved?.userId || config?.ubisoft_user_id || "";
+        const nextSavePath = spoolDir || config.save_path || "";
+        if (
+          nextSavePath !== config.save_path ||
+          nextUserId !== (config?.ubisoft_user_id || "") ||
+          spoolFilePath !== (config?.ubisoft_spool_file || "")
+        ) {
+          config.save_path = nextSavePath;
+          config.ubisoft_user_id = nextUserId;
+          config.ubisoft_spool_file = spoolFilePath;
+          try {
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          } catch {}
+        }
+        return {
+          achievements: merged || snapshot || {},
+          save_path: nextSavePath,
+        };
+      } catch (error) {
+        return {
+          achievements: cached || {},
+          save_path: spoolDir,
+          error: error?.message || "spool read failed",
         };
       }
     }
@@ -4863,7 +4956,11 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         }
       }
       if (deleteSaveFiles) {
-        if (platform === "steam-official" || platform === "gog-official") {
+        if (
+          platform === "steam-official" ||
+          platform === "gog-official" ||
+          platform === "ubisoft-official"
+        ) {
           ipcLogger.info("delete-config:save-delete-skip", {
             configName,
             platform,
@@ -5189,6 +5286,16 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
           "main.message.schemaGogOfficialRescan",
           {},
           "GOG (Official) schemas are generated from GOG Galaxy gameplay.db. Rescan the GOG Galaxy Applications root instead.",
+        ),
+      };
+    }
+    if (platform === "ubisoft-official") {
+      return {
+        success: false,
+        message: tUi(
+          "main.message.schemaUbisoftOfficialRescan",
+          {},
+          "Ubisoft (Official) schemas are generated from Ubisoft Connect cache archives. Rescan the Ubisoft Connect spool root instead.",
         ),
       };
     }
@@ -6774,6 +6881,18 @@ function resolveBootSeedCandidatePath(config) {
         return directGameplayDb;
       }
     }
+    if (normalizedPlatform === "ubisoft-official") {
+      const resolved = resolveUbisoftOfficialSpoolFileForConfig(config);
+      if (resolved?.spoolFilePath && fs.existsSync(resolved.spoolFilePath)) {
+        return resolved.spoolFilePath;
+      }
+      const directSpoolFile = appid
+        ? path.join(saveRoot, `${appid}.spool`)
+        : "";
+      if (directSpoolFile && fs.existsSync(directSpoolFile)) {
+        return directSpoolFile;
+      }
+    }
     const saveJsonPath = resolveSaveFilePath(saveRoot, appid);
     const {
       tenokeIni: tenokeIniPath,
@@ -7357,6 +7476,9 @@ async function monitorAchievementsFile(filePath) {
     String(filePath || "")
       .toLowerCase()
       .startsWith("usergamestats_");
+  const isUbisoftOfficial =
+    normalizePlatform(configMeta?.platform) === "ubisoft-official" ||
+    /\.spool$/i.test(String(filePath || ""));
   const isLumaPlay = isLumaPlayConfig(configMeta) && isLumaPlayWatcherEnabled();
   try {
     if (
@@ -7439,6 +7561,9 @@ async function monitorAchievementsFile(filePath) {
             parsed,
             previousAchievements,
           );
+      } else if (isUbisoftOfficial) {
+        const parsed = readUbisoftSpoolFile(filePath);
+        currentAchievements = buildUbisoftOfficialSnapshot(parsed?.records || []);
       } else if (isLumaPlay) {
         const parsed = readLumaPlayAchievementsSnapshot({
           appid: String(configMeta?.appid || ""),
@@ -7857,6 +7982,23 @@ async function monitorAchievementsFile(filePath) {
           return;
         }
       }
+      if (normalizePlatform(configMeta?.platform) === "ubisoft-official") {
+        const resolved = resolveUbisoftOfficialSpoolFileForConfig(
+          configMeta || {},
+        );
+        const nextSpoolFile = resolved?.spoolFilePath || "";
+        if (
+          nextSpoolFile &&
+          nextSpoolFile !== filePath &&
+          fs.existsSync(nextSpoolFile)
+        ) {
+          if (isNonEmptyString(configName)) {
+            pendingMissingAchievementFiles.set(configName, nextSpoolFile);
+          }
+          monitorAchievementsFile(nextSpoolFile);
+          return;
+        }
+      }
       const tenokePath = path.join(baseDir, "SteamData", "user_stats.ini");
       const iniPath = path.join(baseDir, "achievements.ini");
       const universeIniPath = path.join(
@@ -8180,6 +8322,56 @@ ipcMain.on(
         event.sender.send("achievements-missing", {
           configName,
           reason: "no-gameplay-db",
+        });
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+          overlayWindow.webContents.send("set-language", {
+            language: selectedLanguage,
+            uiLanguage: selectedUiLanguage,
+          });
+        }
+        return;
+      }
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      monitorAchievementsFile(achievementsFilePath);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      return;
+    }
+
+    if (normalizedPlatform === "ubisoft-official") {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      const resolved = resolveUbisoftOfficialSpoolFileForConfig(config);
+      achievementsFilePath = resolved?.spoolFilePath || null;
+      if (
+        resolved &&
+        (config.save_path !== resolved.spoolDir ||
+          (config.ubisoft_user_id || "") !== (resolved.userId || "") ||
+          (config.ubisoft_spool_file || "") !== (resolved.spoolFilePath || ""))
+      ) {
+        config.save_path = resolved.spoolDir || config.save_path || "";
+        config.ubisoft_user_id =
+          resolved.userId || config.ubisoft_user_id || "";
+        config.ubisoft_spool_file =
+          resolved.spoolFilePath || config.ubisoft_spool_file || "";
+        try {
+          fs.writeFileSync(cfgFile, JSON.stringify(config, null, 2));
+        } catch {}
+      }
+      if (!achievementsFilePath || !fs.existsSync(achievementsFilePath)) {
+        monitorAchievementsFile(null);
+        achievementsFilePath = null;
+        event.sender.send("achievements-missing", {
+          configName,
+          reason: "no-spool-file",
         });
         if (overlayWindow && !overlayWindow.isDestroyed()) {
           overlayWindow.webContents.send("load-overlay-data", selectedConfig);
@@ -11569,6 +11761,13 @@ const {
   readGogGameplayDb,
   resolveGogOfficialGameplayDbForConfig,
 } = require("./utils/gog-galaxy-local");
+const {
+  buildUbisoftOfficialSnapshot,
+  ensureUbisoftOfficialSchema,
+  readUbisoftSpoolFile,
+  resolveUbisoftOfficialSpoolFileForConfig,
+  resolveUbisoftSteamAppId,
+} = require("./utils/ubisoft-connect-local");
 
 async function seedManualConfigsAtBoot() {
   if (bootManualSeedRunning) return;
@@ -11933,7 +12132,8 @@ function applyConfigPlatformDefaults(payload = {}) {
     normalizedPlatform === "rpcs3" ||
     normalizedPlatform === "shadps4" ||
     normalizedPlatform === "steam-official" ||
-    normalizedPlatform === "gog-official"
+    normalizedPlatform === "gog-official" ||
+    normalizedPlatform === "ubisoft-official"
   ) {
     const sanitizedSpecial = sanitizeAppIdForPlatform(
       payload.appid || payload.appId || payload.steamAppId,
@@ -11943,7 +12143,15 @@ function applyConfigPlatformDefaults(payload = {}) {
       payload.appid = sanitizedSpecial;
     }
     payload.platform = normalizedPlatform;
-    if (payload.steamAppId) delete payload.steamAppId;
+    if (normalizedPlatform === "ubisoft-official") {
+      const mappedSteamAppId =
+        sanitizeAppId(payload.steamAppId) ||
+        resolveUbisoftSteamAppId(payload.appid || sanitizedSpecial || "");
+      if (mappedSteamAppId) payload.steamAppId = mappedSteamAppId;
+      else delete payload.steamAppId;
+    } else if (payload.steamAppId) {
+      delete payload.steamAppId;
+    }
     return payload;
   }
   const sanitizedAppId =
@@ -11970,6 +12178,7 @@ const SCHEMA_PLATFORM_DIRS = [
   "steam",
   "steam-official",
   "uplay",
+  "ubisoft-official",
   "gog",
   "gog-official",
   "epic",
@@ -11982,6 +12191,7 @@ function normalizeStoragePlatform(platform) {
   const normalized = normalizePlatform(platform);
   if (normalized === "steam-official") return "steam-official";
   if (normalized === "uplay") return "uplay";
+  if (normalized === "ubisoft-official") return "ubisoft-official";
   if (normalized === "gog") return "gog";
   if (normalized === "gog-official") return "gog-official";
   if (normalized === "epic") return "epic";
@@ -12045,6 +12255,7 @@ function getPlatformForAppId(appid) {
     const order = [
       "steam",
       "steam-official",
+      "ubisoft-official",
       "uplay",
       "gog",
       "epic",
@@ -12312,6 +12523,7 @@ ipcMain.handle(
       platform === "steam" ||
       platform === "steam-official" ||
       platform === "uplay" ||
+      platform === "ubisoft-official" ||
       platform === "epic" ||
       platform === "gog" ||
       platform === "gog-official";
@@ -12320,7 +12532,7 @@ ipcMain.handle(
       return {
         success: false,
         code: "unsupported-platform",
-        message: `Rarity refresh is supported only for Steam/Uplay/Epic/GOG configs (current: ${platform}).`,
+        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/GOG configs (current: ${platform}).`,
       };
     }
 

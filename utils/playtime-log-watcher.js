@@ -215,7 +215,8 @@ async function cacheHeaderImage(
   const stripCoverSuffix = (name) => {
     let out = String(name || "").trim();
     if (!out) return "";
-    const rx = /\s*\((?:steam|steam[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
+    const rx =
+      /\s*\((?:steam|steam[-\s]?official|ubisoft|ubisoft[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
     while (rx.test(out)) out = out.replace(rx, "").trim();
     return out;
   };
@@ -486,7 +487,9 @@ function startPlaytimeLogWatcher(configData) {
   const immediateLocal = localHeaderIfExists();
   const initialHeader =
     immediateLocal ||
-    (platform === "steam" || platform === "uplay"
+    (platform === "steam" ||
+    platform === "uplay" ||
+    platform === "ubisoft-official"
       ? remoteHeaderUrl
       : fallbackHeaderUrl);
 

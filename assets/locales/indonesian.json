@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Deteksi konfigurasi LumaPlay memerlukan platform=uplay dan emu=lumaplay.",
   "platformGuideRescanSummary": "Pindai Ulang vs Regenerasi Skema",
   "platformGuideRescanItem1": "Skema Regenerasi digunakan untuk penyegaran skema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Untuk Xenia, RPCS3, shadPS4, Steam Resmi, dan GOG Galaxy (Resmi), pembuatan ulang skema diblokir oleh desain.",
+  "platformGuideRescanItem2": "Untuk Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), dan GOG Galaxy (Official), regenerasi skema diblokir secara desain.",
   "platformGuideRescanItem3": "Untuk platform/emulator tersebut, gunakan Folder → Pindai ulang untuk membangun kembali dari file sumber.",
   "platformGuideOnboardingSummary": "Orientasi boot dan gerbang permulaan",
   "platformGuideOnboardingItem1": "Saat pertama kali dijalankan (atau perubahan versi orientasi), startup menunggu pemilihan folder sebelum pemindaian penuh.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Alur permulaan: boot:onboarding:*.",
   "platformGuideLogsItem3": "Evaluasi cuplikan awal: initial-notify:*.",
   "platformGuideLogsItem4": "Alur pemilihan otomatis: auto-select:*.",
-  "platformGuideLogsItem5": "Penanganan Steam Resmi: steam-official:*. Penanganan GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Penanganan Steam Resmi: steam-official:*. Penanganan Ubisoft Connect: ubisoft-official:*. Penanganan GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Tambahkan folder root di Pengaturan → Folder.",
   "platformGuideQuickTip2": "Konfigurasi otomatis hanya berjalan untuk folder yang diawasi yang tidak dibisukan/diabaikan.",
   "platformGuideQuickTip3": "Pemberitahuan dikirim hanya pada pembukaan kunci baru/perubahan kemajuan, bukan pada pembukaan kunci lama yang sudah diimpor.",
@@ -537,6 +537,7 @@
   "platformGuideSteamOfficialSummary": "Steam (Resmi)",
   "platformGuideSteamSummary": "Steam / Epic / GOG / Uplay",
   "platformGuideTitle": "Panduan Platform & Emulator",
+  "platformGuideTroubleshootingItem0": "Overlay dan notifikasi bekerja paling baik dalam mode Borderless Windowed. Game DirectX 9/10/11 biasanya memerlukan mode Borderless/Borderless Windowed agar notifikasi muncul di atas game. Dukungan Fullscreen terbatas, tetapi game DirectX 12 biasanya akan berfungsi dalam Fullscreen saat game mendukungnya.",
   "platformGuideTroubleshootingItem1": "Periksa apakah game tidak masuk daftar hitam dan notifikasi kemajuan tidak dibisukan secara global/per konfigurasi.",
   "platformGuideTroubleshootingItem2": "Verifikasi jalur folder yang ditonton dan konfirmasikan file penyimpanan/piala benar-benar berubah saat diputar.",
   "platformGuideTroubleshootingItem3": "Setelah memindahkan direktori penyimpanan atau emulator, jalankan Pindai Ulang di Folder.",
@@ -566,5 +567,10 @@
   "platformGuideGogOfficialItem1": "Folder yang dipantau: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
   "platformGuideGogOfficialItem2": "Pemetaan produk lokal dibaca dari %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, dan progres achievement saat runtime dibaca dari Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
   "platformGuideGogOfficialItem3": "Pembuatan konfigurasi dimulai hanya setelah gameplay.db ada dan data achievement di dalamnya sudah terisi dan stabil. Schema dibuat terlebih dahulu, lalu konfigurasi.",
-  "platformGuideGogOfficialItem4": "Jika game hanya memiliki data Storage dan belum ada Gameplay\\<userId>\\gameplay.db, watcher akan menunggu dan mencoba lagi secara otomatis."
+  "platformGuideGogOfficialItem4": "Jika game hanya memiliki data Storage dan belum ada Gameplay\\<userId>\\gameplay.db, watcher akan menunggu dan mencoba lagi secara otomatis.",
+  "platformGuideUbisoftOfficialSummary": "Ubisoft Connect (Resmi)",
+  "platformGuideUbisoftOfficialItem1": "Folder yang dipantau: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
+  "platformGuideUbisoftOfficialItem2": "Progres dibaca dari <userId>\\<productId>.spool, sedangkan skema/gambar dibuat dari %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
+  "platformGuideUbisoftOfficialItem3": "Konfigurasi dibuat hanya setelah file spool dan arsip achievement lokal sama-sama tersedia. Skema dibuat terlebih dahulu, lalu konfigurasinya.",
+  "platformGuideUbisoftOfficialItem4": "Tambahkan root spool Ubisoft secara manual di Pengaturan → Folder. Aplikasi tidak mengasumsikan path ini secara otomatis."
 }
