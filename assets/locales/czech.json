@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Detekce konfigurace LumaPlay vyžaduje platform=uplay a emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema se používá pro obnovení schématu Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pro Xenia, RPCS3, shadPS4 a Steam Official je regenerace schématu blokována záměrně.",
+  "platformGuideRescanItem2": "Pro Xenia, RPCS3, shadPS4, Steam Official a GOG Galaxy (Oficiální) je regenerace schématu blokována záměrně.",
   "platformGuideRescanItem3": "Pro tyto platformy/emulátory použijte Folders → Rescan k opětovnému sestavení ze zdrojových souborů.",
   "platformGuideOnboardingSummary": "Boot onboarding a startovací brána",
   "platformGuideOnboardingItem1": "Při prvním spuštění (nebo při změně verze) čeká spuštění před úplným skenováním na výběr složky.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Průběh spouštění: boot:onboarding:*.",
   "platformGuideLogsItem3": "Počáteční vyhodnocení snímku: initial-notify:*.",
   "platformGuideLogsItem4": "Tok automatického výběru: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Oficiální zpracování: steam-official:*.",
+  "platformGuideLogsItem5": "Zpracování Steam Official: steam-official:*. Zpracování GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Přidejte kořenové složky v Nastavení → Složky.",
   "platformGuideQuickTip2": "Automatická konfigurace se spustí pouze pro sledované složky, které nejsou ztlumené/ignorované.",
   "platformGuideQuickTip3": "Oznámení se zasílají pouze na nové odemknutí/změny průběhu, nikoli na již importovaná stará odemknutí.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Aktualizace vzácnosti selhala:",
   "settings-schemaLanguagesTitle": "Jazyky schématu achievementů",
   "settings-schemaLanguagesSelectAllBtn": "Vybrat vše",
-  "settings-schemaLanguagesDeselectAllBtn": "Zrušit výběr všeho"
+  "settings-schemaLanguagesDeselectAllBtn": "Zrušit výběr všeho",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Oficiální)",
+  "platformGuideGogOfficialItem1": "Sledovaná složka: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Místní mapování produktu se čte z %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db a průběh achievementů za běhu se čte z Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Generování konfigurace začne až poté, co gameplay.db existuje a data achievementů jsou naplněná a stabilní. Nejprve se vygeneruje schema, potom konfigurace.",
+  "platformGuideGogOfficialItem4": "Pokud má hra jen data Storage a zatím nemá Gameplay\\<userId>\\gameplay.db, watcher počká a automaticky to zkusí znovu."
 }

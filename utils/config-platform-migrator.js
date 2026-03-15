@@ -7,6 +7,7 @@ const VALID_PLATFORMS = new Set([
   "uplay",
   "epic",
   "gog",
+  "gog-official",
   "xenia",
   "rpcs3",
   "shadps4",
@@ -73,7 +74,11 @@ function inferPlatformAndSteamId({ config, mapping }) {
     if (steamAppId && (!appid || steamAppId === appid)) {
       steamAppId = "";
     }
-  } else if (platform === "epic" || platform === "gog") {
+  } else if (
+    platform === "epic" ||
+    platform === "gog" ||
+    platform === "gog-official"
+  ) {
     steamAppId = "";
   } else if (platform === "xenia" || platform === "rpcs3") {
     steamAppId = "";
@@ -208,12 +213,19 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
     const currentDir = path.join(schemaRoot, dir);
     const platforms = platformIndex?.get(appid);
     const prefersUplay = platforms?.has("uplay") && !platforms?.has("steam");
+    const prefersGogOfficial =
+      platforms?.has("gog-official") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog");
     const prefersGog =
       platforms?.has("gog") &&
       !platforms?.has("steam") &&
       !platforms?.has("uplay");
     const targetPlatform = prefersUplay
       ? "uplay"
+      : prefersGogOfficial
+        ? "gog-official"
       : prefersGog
         ? "gog"
         : "steam";
@@ -262,6 +274,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
             ? "gog"
             : platform === "epic"
               ? "epic"
+              : platform === "gog-official"
+                ? "gog-official"
               : platform === "xenia"
                 ? "xenia"
                 : platform === "rpcs3"

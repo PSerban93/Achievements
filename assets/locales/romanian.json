@@ -497,7 +497,7 @@
   "platformGuideConfigRulesItem5": "Detectarea configurației LumaPlay necesită platform=uplay și emu=lumaplay.",
   "platformGuideRescanSummary": "Rescanare vs Regenerare Schema",
   "platformGuideRescanItem1": "Regenerare Schema este folosită pentru reîmprospătarea schemei Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pentru Xenia, RPCS3, shadPS4 și Steam Official, regenerarea schemei este blocată prin proiectare.",
+  "platformGuideRescanItem2": "Pentru Xenia, RPCS3, shadPS4, Steam Official și GOG Galaxy (Oficial), regenerarea schemei este blocată prin proiectare.",
   "platformGuideRescanItem3": "Pentru acele platforme/emulatori, utilizați Folders → Rescan pentru a reconstrui din fișierele sursă.",
   "platformGuideOnboardingSummary": "Boot onboarding și poarta de pornire",
   "platformGuideOnboardingItem1": "La prima rulare (sau schimbarea versiunii de integrare), pornirea așteaptă selectarea folderului înainte de scanarea completă.",
@@ -518,7 +518,7 @@
   "platformGuideLogsItem2": "Flux de pornire: boot:onboarding:*.",
   "platformGuideLogsItem3": "Evaluare inițială instantanee: initial-notify:*.",
   "platformGuideLogsItem4": "Flux de selecție automată: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Manipulare oficială: steam-official:*.",
+  "platformGuideLogsItem5": "Manipulare Steam Official: steam-official:*. Manipulare GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Adăugați foldere rădăcină în Setări → Foldere.",
   "platformGuideQuickTip2": "Auto-config rulează numai pentru folderele urmărite care nu sunt dezactivate/ignorate.",
   "platformGuideQuickTip3": "Notificările sunt trimise numai pentru deblocări noi/modificări de progres, nu pentru deblocări vechi deja importate.",
@@ -561,5 +561,10 @@
   "title.tab-platformGuide": "Ghid de platformă și emulator",
   "settings-schemaLanguagesTitle": "Limbi pentru schema realizărilor",
   "settings-schemaLanguagesSelectAllBtn": "Selectează tot",
-  "settings-schemaLanguagesDeselectAllBtn": "Deselectează tot"
+  "settings-schemaLanguagesDeselectAllBtn": "Deselectează tot",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Oficial)",
+  "platformGuideGogOfficialItem1": "Folder monitorizat: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Maparea locală a produsului este citită din %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, iar progresul achievement-urilor în runtime este citit din Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Generarea configurației începe numai după ce gameplay.db există și datele de achievement din el sunt populate și stabile. Schema este generată mai întâi, apoi configurația.",
+  "platformGuideGogOfficialItem4": "Dacă un joc are doar date Storage și încă nu are Gameplay\\<userId>\\gameplay.db, watcher-ul așteaptă și reîncearcă automat."
 }

@@ -191,7 +191,10 @@ async function cacheHeaderImage(
   options = {}
 ) {
   const platform = normalizePlatform(options?.platform) || "steam";
-  const preferLocalOnly = platform === "gog" || platform === "epic";
+  const preferLocalOnly =
+    platform === "gog" ||
+    platform === "gog-official" ||
+    platform === "epic";
   const imageDir = path.join(userDataDir, "images", platform, String(appid));
   try {
     if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
@@ -405,7 +408,10 @@ function startPlaytimeLogWatcher(configData) {
     return null;
   };
   const fallbackHeaderUrl =
-    platform === "gog" || platform === "epic" || isSteamGridOnly
+    platform === "gog" ||
+    platform === "gog-official" ||
+    platform === "epic" ||
+    isSteamGridOnly
       ? pathToFileURL(logoFallbackPath).toString()
       : remoteHeaderUrl;
 

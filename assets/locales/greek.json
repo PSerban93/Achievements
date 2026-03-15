@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Ο εντοπισμός παραμέτρων LumaPlay απαιτεί platform=uplay και emu=lumaplay.",
   "platformGuideRescanSummary": "Εκ νέου σάρωση έναντι αναγέννησης σχήματος",
   "platformGuideRescanItem1": "Το Regenerate Schema χρησιμοποιείται για την ανανέωση σχήματος Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Για Xenia, RPCS3, shadPS4 και Steam Official, η αναγέννηση σχήματος αποκλείεται από τη σχεδίαση.",
+  "platformGuideRescanItem2": "Για Xenia, RPCS3, shadPS4, Steam Official και GOG Galaxy (Επίσημο), η αναγέννηση σχήματος αποκλείεται από τη σχεδίαση.",
   "platformGuideRescanItem3": "Για αυτές τις πλατφόρμες/εξομοιωτές, χρησιμοποιήστε το Folders → Rescan για να δημιουργήσετε ξανά από αρχεία προέλευσης.",
   "platformGuideOnboardingSummary": "Ενσωμάτωση εκκίνησης και πύλη εκκίνησης",
   "platformGuideOnboardingItem1": "Κατά την πρώτη εκτέλεση (ή την αλλαγή έκδοσης ενσωμάτωσης), η εκκίνηση περιμένει για την επιλογή φακέλου πριν από την πλήρη σάρωση.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Ροή εκκίνησης: boot:onboarding:*.",
   "platformGuideLogsItem3": "Αρχική αξιολόγηση στιγμιότυπου: initial-notify:*.",
   "platformGuideLogsItem4": "Ροή αυτόματης επιλογής: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Επίσημος χειρισμός: steam-official:*.",
+  "platformGuideLogsItem5": "Χειρισμός Steam Official: steam-official:*. Χειρισμός GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Προσθήκη ριζικών φακέλων στις Ρυθμίσεις → Φάκελοι.",
   "platformGuideQuickTip2": "Η αυτόματη ρύθμιση παραμέτρων εκτελείται μόνο για φακέλους παρακολούθησης που δεν έχουν απενεργοποιηθεί/αγνοηθεί.",
   "platformGuideQuickTip3": "Οι ειδοποιήσεις αποστέλλονται μόνο για νέες αλλαγές ξεκλειδώματος/προόδου, όχι για παλιά ξεκλειδώματα που έχουν ήδη εισαχθεί.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Αποτυχία ανανέωσης σπανιότητας:",
   "settings-schemaLanguagesTitle": "Γλώσσες σχήματος επιτευγμάτων",
   "settings-schemaLanguagesSelectAllBtn": "Επιλογή όλων",
-  "settings-schemaLanguagesDeselectAllBtn": "Αποεπιλογή όλων"
+  "settings-schemaLanguagesDeselectAllBtn": "Αποεπιλογή όλων",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Επίσημο)",
+  "platformGuideGogOfficialItem1": "Φάκελος παρακολούθησης: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Η τοπική αντιστοίχιση προϊόντος διαβάζεται από το %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db και η πρόοδος επιτευγμάτων κατά τον χρόνο εκτέλεσης διαβάζεται από το Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Η δημιουργία της ρύθμισης ξεκινά μόνο αφού υπάρξει το gameplay.db και τα δεδομένα επιτευγμάτων σε αυτό είναι πλήρη και σταθερά. Πρώτα δημιουργείται το schema και μετά η ρύθμιση.",
+  "platformGuideGogOfficialItem4": "Αν ένα παιχνίδι έχει μόνο δεδομένα Storage και δεν υπάρχει ακόμα Gameplay\\<userId>\\gameplay.db, ο watcher περιμένει και δοκιμάζει ξανά αυτόματα."
 }

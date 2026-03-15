@@ -390,7 +390,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay config detection requires platform=uplay and emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema is used for Steam/Uplay/Epic/GOG schema refresh.",
-  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4 and Steam Official, schema regenerate is blocked by design.",
+  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official and GOG Galaxy (Official), schema regenerate is blocked by design.",
   "platformGuideRescanItem3": "For those platforms/emulators, use Folders → Rescan to rebuild from source files.",
   "platformGuideOnboardingSummary": "Boot onboarding and startup gate",
   "platformGuideOnboardingItem1": "On first run (or onboarding version change), startup waits for folder selection before full scanning.",
@@ -411,7 +411,7 @@
   "platformGuideLogsItem2": "Startup flow: boot:onboarding:*.",
   "platformGuideLogsItem3": "Initial snapshot evaluation: initial-notify:*.",
   "platformGuideLogsItem4": "Auto selection flow: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official handling: steam-official:*.",
+  "platformGuideLogsItem5": "Steam Official handling: steam-official:*. GOG Galaxy handling: gog-official:*.",
   "platformGuideQuickTip1": "Add root folders in Settings → Folders.",
   "platformGuideQuickTip2": "Auto-config runs only for watched folders that are not muted/ignored.",
   "platformGuideQuickTip3": "Notifications are sent only on new unlock/progress changes, not for already imported old unlocks.",
@@ -562,5 +562,10 @@
   "boot.onboarding.listAriaLabel": "Auto-config folder selection",
   "settings-schemaLanguagesTitle": "Achievements Schema Languages",
   "settings-schemaLanguagesSelectAllBtn": "Select All",
-  "settings-schemaLanguagesDeselectAllBtn": "Deselect All"
+  "settings-schemaLanguagesDeselectAllBtn": "Deselect All",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Official)",
+  "platformGuideGogOfficialItem1": "Watch folder: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Local product mapping is read from %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, and runtime progress is read from Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Config generation starts only after gameplay.db exists and its achievement data is populated and stable. The schema is generated first, then the config.",
+  "platformGuideGogOfficialItem4": "If a game only has Storage data and no Gameplay\\<userId>\\gameplay.db yet, the watcher waits and retries automatically."
 }

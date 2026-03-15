@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Для виявлення конфігурації LumaPlay потрібні platform=uplay і emu=lumaplay.",
   "platformGuideRescanSummary": "Повторне сканування та регенерація схеми",
   "platformGuideRescanItem1": "Regenerate Schema використовується для оновлення схеми Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Для Xenia, RPCS3, shadPS4 та Steam Official, перегенерація схеми заблокована дизайном.",
+  "platformGuideRescanItem2": "Для Xenia, RPCS3, shadPS4, Steam Official і GOG Galaxy (Офіційний) перегенерація схеми заблокована задумом.",
   "platformGuideRescanItem3": "Для цих платформ/емуляторів скористайтеся папками → Пересканувати, щоб відновити вихідні файли.",
   "platformGuideOnboardingSummary": "Шлюз реєстрації завантаження та запуску",
   "platformGuideOnboardingItem1": "Під час першого запуску (або під час зміни версії) запуск очікує вибору папки перед повним скануванням.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Потік запуску: boot:onboarding:*.",
   "platformGuideLogsItem3": "Початкова оцінка знімка: initial-notify:*.",
   "platformGuideLogsItem4": "Потік автоматичного вибору: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Офіційна обробка: steam-official:*.",
+  "platformGuideLogsItem5": "Обробка Steam Official: steam-official:*. Обробка GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Додайте кореневі папки в Параметри → Папки.",
   "platformGuideQuickTip2": "Автоматична конфігурація запускається лише для папок, які відстежуються, і які не ігноруються.",
   "platformGuideQuickTip3": "Сповіщення надсилаються лише про нове розблокування/зміни прогресу, а не про вже імпортовані старі розблокування.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Не вдалося оновити рідкість:",
   "settings-schemaLanguagesTitle": "Мови схеми досягнень",
   "settings-schemaLanguagesSelectAllBtn": "Вибрати все",
-  "settings-schemaLanguagesDeselectAllBtn": "Зняти вибір з усього"
+  "settings-schemaLanguagesDeselectAllBtn": "Зняти вибір з усього",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Офіційний)",
+  "platformGuideGogOfficialItem1": "Відстежувана папка: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Локальне зіставлення продукту зчитується з %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, а прогрес досягнень під час роботи зчитується з Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Створення конфігурації починається лише після того, як gameplay.db існує, а дані досягнень у ньому заповнені й стабільні. Спочатку генерується схема, потім конфігурація.",
+  "platformGuideGogOfficialItem4": "Якщо гра має лише дані Storage і ще не має Gameplay\\<userId>\\gameplay.db, watcher чекає та автоматично повторює спробу."
 }

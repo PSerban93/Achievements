@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Die LumaPlay-Konfigurationserkennung erfordert platform=uplay und emu=lumaplay.",
   "platformGuideRescanSummary": "Schema erneut scannen vs. neu generieren",
   "platformGuideRescanItem1": "Das Schema neu generieren wird für die Schemaaktualisierung Steam/Uplay/Epic/GOG verwendet.",
-  "platformGuideRescanItem2": "Für Xenia, RPCS3, shadPS4 und Steam Official ist die Schema-Neugenerierung konstruktionsbedingt blockiert.",
+  "platformGuideRescanItem2": "Für Xenia, RPCS3, shadPS4, Steam Official und GOG Galaxy (Offiziell) ist die Schema-Neugenerierung konstruktionsbedingt blockiert.",
   "platformGuideRescanItem3": "Verwenden Sie für diese Plattformen/Emulatoren Ordner → Erneut scannen, um aus Quelldateien neu zu erstellen.",
   "platformGuideOnboardingSummary": "Boot-Onboarding und Startup-Gate",
   "platformGuideOnboardingItem1": "Beim ersten Start (oder beim Onboarding-Versionswechsel) wartet der Start auf die Ordnerauswahl, bevor der vollständige Scan durchgeführt wird.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Startablauf: boot:onboarding:*.",
   "platformGuideLogsItem3": "Erste Snapshot-Auswertung: initial-notify:*.",
   "platformGuideLogsItem4": "Automatischer Auswahlablauf: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Offizielle Abwicklung: steam-official:*.",
+  "platformGuideLogsItem5": "Steam-Official-Verarbeitung: steam-official:*. GOG-Galaxy-Verarbeitung: gog-official:*.",
   "platformGuideQuickTip1": "Fügen Sie Stammordner unter Einstellungen → Ordner hinzu.",
   "platformGuideQuickTip2": "Die automatische Konfiguration wird nur für überwachte Ordner ausgeführt, die nicht stummgeschaltet/ignoriert sind.",
   "platformGuideQuickTip3": "Benachrichtigungen werden nur bei neuen Freischaltungen/Fortschrittsänderungen gesendet, nicht bei bereits importierten alten Freischaltungen.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Seltenheit konnte nicht aktualisiert werden:",
   "settings-schemaLanguagesTitle": "Sprachen des Erfolgsschemas",
   "settings-schemaLanguagesSelectAllBtn": "Alle auswählen",
-  "settings-schemaLanguagesDeselectAllBtn": "Auswahl aufheben"
+  "settings-schemaLanguagesDeselectAllBtn": "Auswahl aufheben",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Offiziell)",
+  "platformGuideGogOfficialItem1": "Überwachter Ordner: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Die lokale Produktzuordnung wird aus %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db gelesen, und der Erfolgsfortschritt zur Laufzeit wird aus Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db gelesen.",
+  "platformGuideGogOfficialItem3": "Die Konfigurationsgenerierung beginnt erst, wenn gameplay.db existiert und die Erfolgsdaten darin vollständig und stabil sind. Zuerst wird das Schema erzeugt, danach die Konfiguration.",
+  "platformGuideGogOfficialItem4": "Wenn ein Spiel nur Storage-Daten hat und noch kein Gameplay\\<userId>\\gameplay.db vorhanden ist, wartet der Watcher und versucht es automatisch erneut."
 }

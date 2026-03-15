@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay yapılandırma tespiti platform=uplay ve emu=lumaplay gerektirir.",
   "platformGuideRescanSummary": "Yeniden Tarama ve Yeniden Oluşturma Şeması",
   "platformGuideRescanItem1": "Yeniden Oluşturma Şeması, Steam/Uplay/Epic/GOG şema yenilemesi için kullanılır.",
-  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4 ve Steam Resmi için şema yeniden oluşturma tasarım nedeniyle engellenmiştir.",
+  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4, Steam Resmi ve GOG Galaxy (Resmi) için şema yeniden oluşturma tasarım gereği engellenmiştir.",
   "platformGuideRescanItem3": "Bu platformlar/emülatörler için, kaynak dosyalardan yeniden oluşturmak için Klasörler → Yeniden Tara'yı kullanın.",
   "platformGuideOnboardingSummary": "Önyükleme ekleme ve başlatma kapısı",
   "platformGuideOnboardingItem1": "İlk çalıştırmada (veya ilk katılım sürümü değişikliğinde), başlangıç, tam taramadan önce klasör seçimini bekler.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Başlangıç ​​akışı: boot:onboarding:*.",
   "platformGuideLogsItem3": "İlk anlık görüntü değerlendirmesi: initial-notify:*.",
   "platformGuideLogsItem4": "Otomatik seçim akışı: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Resmi işlem: steam-official:*.",
+  "platformGuideLogsItem5": "Steam Resmi işleme: steam-official:*. GOG Galaxy işleme: gog-official:*.",
   "platformGuideQuickTip1": "Ayarlar → Klasörler'e kök klasörler ekleyin.",
   "platformGuideQuickTip2": "Otomatik yapılandırma yalnızca sessize alınmayan/yok sayılmayan izlenen klasörler için çalışır.",
   "platformGuideQuickTip3": "Bildirimler yalnızca yeni kilit açma/ilerleme durumu değişikliklerinde gönderilir, önceden içe aktarılmış eski kilit açma işlemleri için gönderilmez.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Nadirlik yenilenemedi:",
   "settings-schemaLanguagesTitle": "Başarım şeması dilleri",
   "settings-schemaLanguagesSelectAllBtn": "Tümünü seç",
-  "settings-schemaLanguagesDeselectAllBtn": "Tüm seçimleri kaldır"
+  "settings-schemaLanguagesDeselectAllBtn": "Tüm seçimleri kaldır",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Resmi)",
+  "platformGuideGogOfficialItem1": "İzleme klasörü: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Yerel ürün eşlemesi %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db içinden okunur ve çalışma zamanı başarı ilerlemesi Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db içinden okunur.",
+  "platformGuideGogOfficialItem3": "Yapılandırma oluşturma yalnızca gameplay.db mevcut olduğunda ve içindeki başarı verileri doldurulup kararlı hale geldiğinde başlar. Önce şema, sonra yapılandırma oluşturulur.",
+  "platformGuideGogOfficialItem4": "Bir oyunda yalnızca Storage verisi varsa ve henüz Gameplay\\<userId>\\gameplay.db yoksa watcher bekler ve otomatik olarak yeniden dener."
 }

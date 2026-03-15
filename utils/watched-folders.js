@@ -38,6 +38,14 @@ const {
   scanLumaPlayRegistryEntries,
   startLumaPlayRegistryEventWatcher,
 } = require("./lumaplay-registry");
+const {
+  GAMEPLAY_DB_NAME,
+  listGogOfficialGameplayEntries,
+  resolveGogGalaxyProductByClientId,
+  resolveGogOfficialGameplayDbForConfig,
+} = require("./gog-galaxy-local");
+const GAMEPLAY_DB_WAL_NAME = `${GAMEPLAY_DB_NAME}-wal`;
+const GAMEPLAY_DB_SHM_NAME = `${GAMEPLAY_DB_NAME}-shm`;
 
 const watcherLogger = createLogger("watcher");
 function isAppIdName(name) {
@@ -960,7 +968,11 @@ module.exports = function makeWatchedFolders({
                   forcePlatform: task.forcePlatform,
                   normalizedSavePath: task.normalizedPath || "",
                   skipPostIndex: true,
+                  allowExistingVariant: task.allowExistingVariant === true,
                   __savePathOverride: task.__savePathOverride || null,
+                  __gogClientId: task.__gogClientId || null,
+                  __gogUserId: task.__gogUserId || null,
+                  __gogGameplayDbPath: task.__gogGameplayDbPath || null,
                   __emu: task.__emu || null,
                 },
               );
@@ -1838,6 +1850,10 @@ module.exports = function makeWatchedFolders({
     return normalizePlatform(meta?.platform) === "steam-official";
   }
 
+  function isGogOfficialMeta(meta) {
+    return normalizePlatform(meta?.platform) === "gog-official";
+  }
+
   function isPs4Meta(meta) {
     return normalizePlatform(meta?.platform) === "shadps4";
   }
@@ -1847,6 +1863,215 @@ module.exports = function makeWatchedFolders({
       normalizePlatform(meta?.platform) === "uplay" &&
       normalizeEmuValue(meta?.emu) === "lumaplay"
     );
+  }
+
+  function resolveGogGalaxyApplicationsRoots(rootPath) {
+    const out = [];
+    const seen = new Set();
+    const push = (candidate) => {
+      if (!candidate) return;
+      let resolved = "";
+      try {
+        resolved = fs.realpathSync(candidate);
+      } catch {
+        try {
+          resolved = path.resolve(candidate);
+        } catch {
+          resolved = "";
+        }
+      }
+      if (!resolved) return;
+      const key = resolved.toLowerCase();
+      if (seen.has(key)) return;
+      try {
+        if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+          return;
+        }
+      } catch {
+        return;
+      }
+      seen.add(key);
+      out.push(resolved);
+    };
+
+    let cursor = "";
+    try {
+      cursor = fs.realpathSync(rootPath);
+    } catch {
+      try {
+        cursor = path.resolve(String(rootPath || ""));
+      } catch {
+        cursor = "";
+      }
+    }
+    while (cursor) {
+      const base = path.basename(cursor).toLowerCase();
+      const parent = path.dirname(cursor);
+      const parentBase = path.basename(parent).toLowerCase();
+      const grandParent = path.dirname(parent);
+      const grandParentBase = path.basename(grandParent).toLowerCase();
+
+      if (base === "applications" && parentBase === "galaxy" && grandParentBase === "gog.com") {
+        push(cursor);
+      }
+      if (base === "galaxy" && parentBase === "gog.com") {
+        push(path.join(cursor, "Applications"));
+      }
+
+      if (!parent || parent === cursor) break;
+      cursor = parent;
+    }
+
+    return out;
+  }
+
+  function resolveGogOfficialApplicationsEvent(rootPath, targetPath) {
+    if (!targetPath) return null;
+    const applicationsRoots = resolveGogGalaxyApplicationsRoots(rootPath);
+    if (!applicationsRoots.length) return null;
+
+    let resolvedTarget = "";
+    try {
+      resolvedTarget = fs.realpathSync(targetPath);
+    } catch {
+      try {
+        resolvedTarget = path.resolve(String(targetPath || ""));
+      } catch {
+        resolvedTarget = "";
+      }
+    }
+    if (!resolvedTarget) return null;
+
+    for (const applicationsRoot of applicationsRoots) {
+      let relative = "";
+      try {
+        relative = path.relative(applicationsRoot, resolvedTarget);
+      } catch {
+        relative = "";
+      }
+      if (
+        !relative ||
+        relative.startsWith("..") ||
+        path.isAbsolute(relative)
+      ) {
+        continue;
+      }
+      return {
+        applicationsRoot,
+        targetPath: resolvedTarget,
+        relativeSegments: relative.split(/[\\/]+/).filter(Boolean),
+      };
+    }
+
+    return null;
+  }
+
+  async function handleGogOfficialRootFileEvent(rootPath, filePath) {
+    const event = resolveGogOfficialApplicationsEvent(rootPath, filePath);
+    if (!event) return false;
+
+    const baseName = path.basename(event.targetPath).toLowerCase();
+    if (baseName !== GAMEPLAY_DB_NAME) {
+      return true;
+    }
+
+    const rel = event.relativeSegments;
+    if (
+      rel.length !== 4 ||
+      String(rel[1] || "").toLowerCase() !== "gameplay" ||
+      String(rel[3] || "").toLowerCase() !== GAMEPLAY_DB_NAME
+    ) {
+      return true;
+    }
+
+    let gameplayEntries = [];
+    try {
+      gameplayEntries = listGogOfficialGameplayEntries(event.applicationsRoot);
+    } catch (err) {
+      watcherLogger.warn("gog-official:live-scan-failed", {
+        root: event.applicationsRoot,
+        file: event.targetPath,
+        error: err?.message || String(err),
+      });
+      return true;
+    }
+
+    const normalizedTarget = path.normalize(event.targetPath).toLowerCase();
+    const matchedEntry = gameplayEntries.find((entry) => {
+      const candidate = String(entry?.gameplayDbPath || "").trim();
+      return (
+        candidate &&
+        path.normalize(candidate).toLowerCase() === normalizedTarget
+      );
+    });
+    if (!matchedEntry) {
+      return true;
+    }
+
+    const productId = String(matchedEntry.productId || "").trim();
+    if (!productId || hasPlatformVariant(productId, "gog-official")) {
+      return true;
+    }
+
+    watcherLogger.info("gog-official:live-discovery", {
+      root: event.applicationsRoot,
+      productId,
+      clientId: matchedEntry.clientId || null,
+      userId: matchedEntry.userId || null,
+      gameplayDbPath: matchedEntry.gameplayDbPath || event.targetPath,
+    });
+
+    try {
+      await scanRootOnce(event.applicationsRoot, {
+        suppressInitialNotify: true,
+      });
+    } catch (err) {
+      watcherLogger.warn("gog-official:live-discovery-failed", {
+        root: event.applicationsRoot,
+        productId,
+        error: err?.message || String(err),
+      });
+    }
+
+    return true;
+  }
+
+  function handleGogOfficialRootDirEvent(rootPath, dirPath, scheduleScan) {
+    const event = resolveGogOfficialApplicationsEvent(rootPath, dirPath);
+    if (!event) return false;
+
+    const rel = event.relativeSegments;
+    const clientId =
+      rel.length && /^[0-9]+$/.test(String(rel[0] || "")) ? String(rel[0]) : "";
+    if (!clientId) {
+      return true;
+    }
+
+    const product = resolveGogGalaxyProductByClientId(clientId);
+    const productId = String(product?.productId || "").trim();
+    const hasOfficialVariant =
+      productId && hasPlatformVariant(productId, "gog-official");
+    const secondSegment = String(rel[1] || "").toLowerCase();
+    const shouldSchedule =
+      !hasOfficialVariant &&
+      (rel.length === 1 ||
+        secondSegment === "gameplay" ||
+        secondSegment === "storage");
+
+    watcherLogger.info("gog-official:root-dir-discovered", {
+      root: event.applicationsRoot,
+      clientId,
+      productId: productId || null,
+      title: product?.title || null,
+      relativePath: rel.join(path.sep),
+      hasOfficialVariant,
+      scheduled: shouldSchedule,
+    });
+
+    if (shouldSchedule && typeof scheduleScan === "function") {
+      scheduleScan();
+    }
+    return true;
   }
 
   function parseSteamOfficialBinInfo(filePath) {
@@ -2352,6 +2577,24 @@ module.exports = function makeWatchedFolders({
             : typeof data?.lumaplayUser === "string"
               ? data.lumaplayUser
               : "",
+        gog_client_id:
+          typeof data?.gog_client_id === "string"
+            ? data.gog_client_id
+            : typeof data?.gogClientId === "string"
+              ? data.gogClientId
+              : "",
+        gog_user_id:
+          typeof data?.gog_user_id === "string"
+            ? data.gog_user_id
+            : typeof data?.gogUserId === "string"
+              ? data.gogUserId
+              : "",
+        gog_gameplay_db:
+          typeof data?.gog_gameplay_db === "string"
+            ? data.gog_gameplay_db
+            : typeof data?.gogGameplayDb === "string"
+              ? data.gogGameplayDb
+              : "",
         normalizedSavePath,
         platinum: data?.platinum === true,
         __tenoke: data?.emu === "tenoke" || false,
@@ -2570,6 +2813,18 @@ module.exports = function makeWatchedFolders({
       return Array.from(out);
     }
 
+    if (isGogOfficialMeta(meta)) {
+      const resolved = resolveGogOfficialGameplayDbForConfig(meta);
+      const gameplayDir = resolved?.gameplayDir || meta.save_path || "";
+      const gameplayDbPath =
+        resolved?.gameplayDbPath ||
+        meta.gog_gameplay_db ||
+        (gameplayDir ? path.join(gameplayDir, GAMEPLAY_DB_NAME) : "");
+      if (gameplayDir) out.add(gameplayDir);
+      if (gameplayDbPath) out.add(gameplayDbPath);
+      return Array.from(out);
+    }
+
     if (isPs4Meta(meta)) {
       const trophyDir = resolvePs4TrophyDirForMeta(meta);
       if (trophyDir) {
@@ -2647,6 +2902,7 @@ module.exports = function makeWatchedFolders({
     const isRpcs3 = isRpcs3Meta(meta);
     const isPs4 = isPs4Meta(meta);
     const isSteamOfficial = isSteamOfficialMeta(meta);
+    const isGogOfficial = isGogOfficialMeta(meta);
     if (isLumaPlay) {
       // Registry-backed source; no file suffix checks.
     } else if (isXenia) {
@@ -2655,6 +2911,8 @@ module.exports = function makeWatchedFolders({
       if (base !== "tropusr.dat") return;
     } else if (isPs4) {
       if (base !== "trop.xml") return;
+    } else if (isGogOfficial) {
+      if (base !== GAMEPLAY_DB_NAME) return;
     } else if (isSteamOfficial) {
       if (!base.endsWith(".bin") || !base.startsWith("usergamestats_")) return;
       const appidStr = String(meta?.appid || appid || "").toLowerCase();
@@ -3866,6 +4124,46 @@ module.exports = function makeWatchedFolders({
               return;
             }
           }
+        } else if (isGogOfficialMeta(meta)) {
+          const normFile = path.normalize(filePath).toLowerCase();
+          const resolved = resolveGogOfficialGameplayDbForConfig(meta);
+          const expectedDbPathRaw =
+            resolved?.gameplayDbPath ||
+            meta?.gog_gameplay_db ||
+            path.join(meta?.save_path || "", GAMEPLAY_DB_NAME);
+          const expectedDbPath = path
+            .normalize(
+              expectedDbPathRaw,
+            )
+            .toLowerCase();
+          const expectedDirRaw =
+            resolved?.gameplayDir ||
+            meta?.save_path ||
+            path.dirname(expectedDbPathRaw);
+          const expectedDir = path
+            .normalize(
+              expectedDirRaw,
+            )
+            .toLowerCase();
+          const baseName = path.basename(normFile);
+          const isGameplayTrigger =
+            baseName === GAMEPLAY_DB_NAME ||
+            baseName === GAMEPLAY_DB_WAL_NAME ||
+            baseName === GAMEPLAY_DB_SHM_NAME;
+
+          if (expectedDbPath && normFile === expectedDbPath) {
+            resolvedPath = expectedDbPathRaw;
+          } else {
+            if (!isGameplayTrigger) return;
+            if (
+              expectedDir &&
+              normFile !== expectedDbPath &&
+              !normFile.startsWith(expectedDir + path.sep)
+            ) {
+              return;
+            }
+            resolvedPath = expectedDbPathRaw;
+          }
         } else {
           const parts = filePath.split(path.sep).map((p) => p.toLowerCase());
           const detected = [...parts]
@@ -4528,10 +4826,13 @@ module.exports = function makeWatchedFolders({
     if (isAppIdBlacklisted(appid)) return false;
     const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
     const skipPostIndex = opts.skipPostIndex === true;
+    const allowExistingVariant = opts.allowExistingVariant === true;
     const inflightKey = `${appid}:${desiredPlatform || "auto"}`;
     if (
       (!desiredPlatform && existingConfigIds.has(appid)) ||
-      (desiredPlatform && hasPlatformVariant(appid, desiredPlatform)) ||
+      (desiredPlatform &&
+        hasPlatformVariant(appid, desiredPlatform) &&
+        !allowExistingVariant) ||
       inflightAppIds.has(inflightKey)
     ) {
       return false;
@@ -4560,6 +4861,15 @@ module.exports = function makeWatchedFolders({
         if (opts.__savePathOverride) {
           genOptions.savePathOverride = opts.__savePathOverride;
         }
+        if (opts.__gogClientId) {
+          genOptions.gogClientId = opts.__gogClientId;
+        }
+        if (opts.__gogUserId) {
+          genOptions.gogUserId = opts.__gogUserId;
+        }
+        if (opts.__gogGameplayDbPath) {
+          genOptions.gogGameplayDbPath = opts.__gogGameplayDbPath;
+        }
         if (opts.__emu) {
           genOptions.emu = opts.__emu;
         }
@@ -4571,6 +4881,14 @@ module.exports = function makeWatchedFolders({
           configsDir,
           genOptions,
         );
+        if (!result || result.skipped) {
+          watcherLogger.info("watcher:generate-skipped", {
+            appid,
+            platform: desiredPlatform || null,
+            pendingSchema: result?.pendingSchema === true,
+          });
+          return false;
+        }
         existingConfigIds.add(appid);
         knownAppIds.add(appid);
         if (normalizedSavePath) {
@@ -4900,6 +5218,13 @@ module.exports = function makeWatchedFolders({
               metaPath = resolveTropusrPathForMeta(meta) || fp;
             }
           } catch {}
+        } else if (isGogOfficialMeta(meta)) {
+          const targetDb =
+            path.basename(fp).toLowerCase() === GAMEPLAY_DB_NAME
+              ? fp
+              : path.join(fp, GAMEPLAY_DB_NAME);
+          if (!fs.existsSync(targetDb)) continue;
+          metaPath = targetDb;
         }
         if (bootLikeSeed) {
           loadCacheMetaOnce();
@@ -4989,6 +5314,15 @@ module.exports = function makeWatchedFolders({
               snapshot = buildSnapshotFromAppcache(entries, userStats);
             }
           } catch {}
+        } else if (isGogOfficialMeta(meta)) {
+          snapshot = loadAchievementsFromSaveFile(
+            path.dirname(metaPath),
+            lastSnapshot.get(snapKey) || {},
+            {
+              configMeta: meta,
+              fullSchemaPath: resolveAchievementsSchemaPath(meta),
+            },
+          );
         } else if (isPs4Meta(meta)) {
           let trophyDir = meta?.save_path || "";
           try {
@@ -5483,6 +5817,83 @@ module.exports = function makeWatchedFolders({
           }
         } catch {}
 
+        const gogGalaxyApplicationRoots = resolveGogGalaxyApplicationsRoots(
+          scanBase,
+        );
+        if (gogGalaxyApplicationRoots.length) {
+          let gameplayEntries = [];
+          const seenGameplayDb = new Set();
+          for (const applicationsRoot of gogGalaxyApplicationRoots) {
+            try {
+              const entries = listGogOfficialGameplayEntries(applicationsRoot);
+              for (const entry of entries) {
+                const key = String(entry?.gameplayDbPath || "").toLowerCase();
+                if (!key || seenGameplayDb.has(key)) continue;
+                seenGameplayDb.add(key);
+                gameplayEntries.push(entry);
+              }
+            } catch (err) {
+              watcherLogger.warn("gog-official:scan-failed", {
+                root: applicationsRoot,
+                error: err?.message || String(err),
+              });
+            }
+          }
+
+          const entriesByProduct = new Map();
+          for (const entry of gameplayEntries) {
+            const productId = String(entry?.productId || "").trim();
+            if (!productId || blacklist.has(productId)) continue;
+            const existingOfficial =
+              getConfigMetas(productId).find((meta) => isGogOfficialMeta(meta)) ||
+              null;
+            const current =
+              existingOfficial &&
+              existingOfficial.gog_client_id === entry.clientId &&
+              existingOfficial.gog_user_id === entry.userId;
+            if (!entriesByProduct.has(productId) || current) {
+              entriesByProduct.set(productId, entry);
+            }
+          }
+
+          for (const entry of entriesByProduct.values()) {
+            const productId = String(entry.productId || "").trim();
+            const normalizedPath = normalizeObservedPath(
+              entry.gameplayDir,
+              productId,
+            );
+            const pendingSet = pendingSavePathIndex.get(productId);
+            const knownPaths = configSavePathIndex.get(productId);
+            const alreadyTracked =
+              normalizedPath &&
+              ((knownPaths && knownPaths.has(normalizedPath)) ||
+                (pendingSet && pendingSet.has(normalizedPath)));
+            const hasOfficialVariant = hasPlatformVariant(
+              productId,
+              "gog-official",
+            );
+            knownAppIds.add(productId);
+            if (alreadyTracked && hasOfficialVariant) continue;
+
+            generationTasks.push({
+              appid: productId,
+              forcePlatform: "gog-official",
+              appDir: path.dirname(entry.gameplayDir),
+              normalizedPath,
+              allowExistingVariant: hasOfficialVariant,
+              __savePathOverride: entry.gameplayDir,
+              __gogName: entry.title || null,
+              __gogClientId: entry.clientId || null,
+              __gogUserId: entry.userId || null,
+              __gogGameplayDbPath: entry.gameplayDbPath || null,
+            });
+            if (normalizedPath) markPendingSavePath(productId, normalizedPath);
+          }
+
+          if (generationTasks.length === 0) {
+            return;
+          }
+        } else {
         // Prefer GOG .info detection: if found, ignore other numeric folders under this root
         gogInfoFound = await findGogInfoAppId(scanBase, 6, yieldIfNeeded).catch(
           () => null,
@@ -5519,6 +5930,7 @@ module.exports = function makeWatchedFolders({
         discovered = discoveredMap
           ? Array.from(discoveredMap.keys()).map((id) => String(id))
           : [];
+        }
       } else {
         discoveredMap = await discoverImmediateAppIdsUnder(
           scanBase,
@@ -5673,13 +6085,17 @@ module.exports = function makeWatchedFolders({
               task.appid,
               task.appDir || null,
               {
-                forcePlatform: task.forcePlatform,
-                normalizedSavePath: task.normalizedPath || "",
-                skipPostIndex: true,
-                __savePathOverride: task.__savePathOverride || null,
-                __emu: task.__emu || null,
-              },
-            );
+                  forcePlatform: task.forcePlatform,
+                  normalizedSavePath: task.normalizedPath || "",
+                  skipPostIndex: true,
+                  allowExistingVariant: task.allowExistingVariant === true,
+                  __savePathOverride: task.__savePathOverride || null,
+                  __gogClientId: task.__gogClientId || null,
+                  __gogUserId: task.__gogUserId || null,
+                  __gogGameplayDbPath: task.__gogGameplayDbPath || null,
+                  __emu: task.__emu || null,
+                },
+              );
             if (created) generatedIds.add(String(task.appid));
           }
         }
@@ -5729,6 +6145,7 @@ module.exports = function makeWatchedFolders({
               const rootDir =
                 discoveredMap?.get(id) || tenokeFound?.baseDir || rootPath;
               const maybe = [
+                m.gog_gameplay_db || path.join(m.save_path || "", GAMEPLAY_DB_NAME),
                 path.join(rootDir || "", "achievements.json"),
                 path.join(m.save_path || "", "achievements.json"),
                 path.join(m.save_path || "", String(id), "achievements.json"),
@@ -5858,6 +6275,9 @@ module.exports = function makeWatchedFolders({
         if (rescanInProgress.value) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:add");
+          return;
+        }
+        if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
         const steamInfo = parseSteamOfficialBinInfo(filePath);
@@ -6066,6 +6486,9 @@ module.exports = function makeWatchedFolders({
         if (rescanInProgress.value) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:change");
+          return;
+        }
+        if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
         const steamInfo = parseSteamOfficialBinInfo(filePath);
@@ -6278,6 +6701,9 @@ module.exports = function makeWatchedFolders({
         if (rescanInProgress.value) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:addDir");
+          return;
+        }
+        if (handleGogOfficialRootDirEvent(root, dir, schedule)) {
           return;
         }
 

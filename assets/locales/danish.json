@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay konfigurationsdetektion kræver platform=uplay og emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerer skema bruges til Steam/Uplay/Epic/GOG skemaopdatering.",
-  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4 og Steam Official er skemagendannelse blokeret af design.",
+  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official og GOG Galaxy (Officiel) er skemagendannelse blokeret af design.",
   "platformGuideRescanItem3": "For disse platforme/emulatorer, brug mapper → Genscan for at genopbygge fra kildefiler.",
   "platformGuideOnboardingSummary": "Boot onboarding og startup gate",
   "platformGuideOnboardingItem1": "Ved første kørsel (eller ændring af onboardingversion) venter opstart på mappevalg før fuld scanning.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Opstartsflow: boot:onboarding:*.",
   "platformGuideLogsItem3": "Indledende snapshot-evaluering: initial-notify:*.",
   "platformGuideLogsItem4": "Automatisk valg flow: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Officiel håndtering: steam-official:*.",
+  "platformGuideLogsItem5": "Steam Official-håndtering: steam-official:*. GOG Galaxy-håndtering: gog-official:*.",
   "platformGuideQuickTip1": "Tilføj rodmapper i Indstillinger → Mapper.",
   "platformGuideQuickTip2": "Auto-config kører kun for overvågede mapper, der ikke er slået fra/ignoreret.",
   "platformGuideQuickTip3": "Meddelelser sendes kun ved nye oplåsnings-/fremskridtsændringer, ikke for allerede importerede gamle oplåsninger.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Kunne ikke opdatere sjældenhed:",
   "settings-schemaLanguagesTitle": "Sprog for achievements-skema",
   "settings-schemaLanguagesSelectAllBtn": "Vælg alle",
-  "settings-schemaLanguagesDeselectAllBtn": "Fravælg alle"
+  "settings-schemaLanguagesDeselectAllBtn": "Fravælg alle",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Officiel)",
+  "platformGuideGogOfficialItem1": "Overvåget mappe: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Lokal produktmapping læses fra %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, og achievement-fremskridt ved kørsel læses fra Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Konfigurationsgenerering starter først, når gameplay.db findes, og achievement-dataene er udfyldt og stabile. Skemaet genereres først, derefter konfigurationen.",
+  "platformGuideGogOfficialItem4": "Hvis et spil kun har Storage-data og endnu ikke har Gameplay\\<userId>\\gameplay.db, venter watcher'en og prøver automatisk igen."
 }

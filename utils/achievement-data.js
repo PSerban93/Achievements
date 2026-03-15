@@ -348,14 +348,14 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
     if (!base) continue;
     const candidates = new Set();
     candidates.add(path.join(base, "achievements.json"));
-    if (appid) {
-      candidates.add(path.join(base, appid, "achievements.json"));
-      if (normalizedPlatform) {
-        candidates.add(
-          path.join(base, normalizedPlatform, appid, "achievements.json")
-        );
-      }
-      ["uplay", "steam", "epic", "gog"].forEach((plat) =>
+      if (appid) {
+        candidates.add(path.join(base, appid, "achievements.json"));
+        if (normalizedPlatform) {
+          candidates.add(
+            path.join(base, normalizedPlatform, appid, "achievements.json")
+          );
+        }
+      ["uplay", "steam", "epic", "gog", "gog-official"].forEach((plat) =>
         candidates.add(path.join(base, plat, appid, "achievements.json"))
       );
     }
@@ -504,6 +504,9 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
   const appid = configMeta?.appid != null ? String(configMeta.appid) : null;
   const configPathOverride =
     (configMeta && configMeta.config_path) || selectedConfigPath || null;
+  const normalizedPlatform = String(configMeta?.platform || "")
+    .trim()
+    .toLowerCase();
 
   const nameIndex = getNameIndexFromConfigPath(
     configPathOverride,
@@ -548,6 +551,24 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
   const saveJsonPath =
     findCaseInsensitive(saveDir, "achievements.json") ||
     path.join(saveDir, "achievements.json");
+  if (normalizedPlatform === "gog-official") {
+    const gameplayDbPath =
+      findCaseInsensitive(saveDir, "gameplay.db") ||
+      path.join(saveDir, "gameplay.db");
+    if (fs.existsSync(gameplayDbPath)) {
+      try {
+        const {
+          readGogGameplayDb,
+          buildGogOfficialSnapshot,
+        } = require("./gog-galaxy-local");
+        const parsed = readGogGameplayDb(gameplayDbPath);
+        const snapshot = buildGogOfficialSnapshot(parsed?.achievements || []);
+        return snapshot && Object.keys(snapshot).length ? snapshot : fallback || {};
+      } catch {
+        return fallback || {};
+      }
+    }
+  }
   // UniverseLAN sometimes nests the ini; allow a shallow search (depth 2)
   const iniPath =
     findCaseInsensitive(saveDir, "achievements.ini", { maxDepth: 2 }) ||

@@ -985,7 +985,7 @@ function findConfigDirFromSelection(selDir, appid = "", platform = "") {
     if (normalizedPlatform) {
       pushCandidate(path.join(selDir, normalizedPlatform, normalizedAppId));
     }
-    ["uplay", "steam", "epic", "gog"].forEach((plat) =>
+    ["uplay", "steam", "epic", "gog", "gog-official"].forEach((plat) =>
       pushCandidate(path.join(selDir, plat, normalizedAppId)),
     );
   }
@@ -3284,7 +3284,7 @@ async function runAchievementsGenerator(
   });
 }
 
-async function ensureSchemaForApp(appid, platform = "steam") {
+async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   const appidStr = String(appid || "");
   if (!platform && /[a-f]/i.test(appidStr)) {
     platform = "epic";
@@ -3336,6 +3336,35 @@ async function ensureSchemaForApp(appid, platform = "steam") {
       });
       return { dir: legacyDir, existed: true };
     }
+  }
+
+  if (normalizedPlatform === "gog-official") {
+    try {
+      const result = await ensureGogOfficialSchema(appid, destDir, {
+        gameplayDbPath:
+          options?.gog_gameplay_db ||
+          options?.gogGameplayDb ||
+          options?.gameplayDbPath,
+        clientId: options?.gog_client_id || options?.gogClientId,
+        userId: options?.gog_user_id || options?.gogUserId,
+      });
+      if (result?.dir && fs.existsSync(achJson)) {
+        ipcLogger.info("schema:ensure-generated-local", {
+          appid,
+          platform: normalizedPlatform,
+          dir: result.dir,
+          gameplayDbPath: result.gameplayDbPath || null,
+        });
+        return { dir: result.dir, existed: false };
+      }
+    } catch (err) {
+      ipcLogger.warn("schema:gog-official-failed", {
+        appid,
+        error: err?.message || String(err),
+      });
+      throw err;
+    }
+    return null;
   }
 
   for (const altPlatform of SCHEMA_PLATFORM_DIRS) {
@@ -3969,7 +3998,11 @@ ipcMain.handle("saveConfig", async (event, config) => {
 
       (async () => {
         try {
-          const res = await ensureSchemaForApp(payload.appid, payload.platform);
+          const res = await ensureSchemaForApp(
+            payload.appid,
+            payload.platform,
+            payload,
+          );
           if (res?.dir) {
             try {
               const curr = JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -4062,6 +4095,14 @@ ipcMain.handle("loadConfigs", () => {
             .includes(
               `${path.sep}schema${path.sep}steam-official${path.sep}`.toLowerCase(),
             ));
+      const looksGogOfficial =
+        platformNorm === "gog-official" ||
+        (typeof raw?.config_path === "string" &&
+          raw.config_path
+            .toLowerCase()
+            .includes(
+              `${path.sep}schema${path.sep}gog-official${path.sep}`.toLowerCase(),
+            ));
       meta.platform = platformNorm || null;
       if (raw?.displayName) {
         meta.displayName =
@@ -4071,6 +4112,9 @@ ipcMain.handle("loadConfigs", () => {
       }
       if (looksSteamOfficial) {
         meta.platform = "steam-official";
+      }
+      if (looksGogOfficial) {
+        meta.platform = "gog-official";
       }
       if (isXenia) {
         const desiredDisplay = ensureXeniaDisplayName(
@@ -4384,6 +4428,7 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
       "steam",
       "uplay",
       "gog",
+      "gog-official",
       "epic",
     ]);
     const getCacheFallback = async () =>
@@ -4526,6 +4571,55 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
           achievements: cached || {},
           save_path: config.save_path || "",
           error: error?.message || "lumaplay read failed",
+        };
+      }
+    }
+
+    if (normalizedPlatform === "gog-official") {
+      const cached =
+        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
+      const resolved = resolveGogOfficialGameplayDbForConfig(config);
+      const gameplayDbPath = resolved?.gameplayDbPath || "";
+      const gameplayDir = resolved?.gameplayDir || config.save_path || "";
+      if (!gameplayDbPath || !fs.existsSync(gameplayDbPath)) {
+        return {
+          achievements: cached || {},
+          save_path: gameplayDir,
+          error: "gameplay.db not found",
+        };
+      }
+      try {
+        const parsed = readGogGameplayDb(gameplayDbPath);
+        const snapshot = buildGogOfficialSnapshot(parsed?.achievements || []);
+        const merged = mergeEarnedTimeFromCached(snapshot, cached);
+
+        const nextClientId = resolved?.clientId || config?.gog_client_id || "";
+        const nextUserId = resolved?.userId || config?.gog_user_id || "";
+        const nextSavePath = gameplayDir || config.save_path || "";
+        if (
+          nextSavePath !== config.save_path ||
+          nextClientId !== (config?.gog_client_id || "") ||
+          nextUserId !== (config?.gog_user_id || "") ||
+          gameplayDbPath !== (config?.gog_gameplay_db || "")
+        ) {
+          config.save_path = nextSavePath;
+          config.gog_client_id = nextClientId;
+          config.gog_user_id = nextUserId;
+          config.gog_gameplay_db = gameplayDbPath;
+          try {
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          } catch {}
+        }
+
+        return {
+          achievements: merged || snapshot || {},
+          save_path: nextSavePath,
+        };
+      } catch (error) {
+        return {
+          achievements: cached || {},
+          save_path: gameplayDir,
+          error: error?.message || "gameplay db read failed",
         };
       }
     }
@@ -4769,7 +4863,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         }
       }
       if (deleteSaveFiles) {
-        if (platform === "steam-official") {
+        if (platform === "steam-official" || platform === "gog-official") {
           ipcLogger.info("delete-config:save-delete-skip", {
             configName,
             platform,
@@ -5085,6 +5179,16 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
           "main.message.schemaSteamOfficialRescan",
           {},
           "Steam (Official) schemas are generated from appcache stats. Rescan the stats folder instead.",
+        ),
+      };
+    }
+    if (platform === "gog-official") {
+      return {
+        success: false,
+        message: tUi(
+          "main.message.schemaGogOfficialRescan",
+          {},
+          "GOG (Official) schemas are generated from GOG Galaxy gameplay.db. Rescan the GOG Galaxy Applications root instead.",
         ),
       };
     }
@@ -6647,6 +6751,7 @@ function isAchCacheMetaMatch(configName, platform, filePath, appid = "") {
 function resolveBootSeedCandidatePath(config) {
   const savePathRaw = config?.save_path;
   if (!savePathRaw) return null;
+  const normalizedPlatform = normalizePlatform(config?.platform) || "steam";
   let saveRoot = savePathRaw;
   let candidatePath = null;
   try {
@@ -6659,6 +6764,16 @@ function resolveBootSeedCandidatePath(config) {
   if (!candidatePath) {
     if (!fs.existsSync(saveRoot)) return null;
     const appid = String(config?.appid || "").trim();
+    if (normalizedPlatform === "gog-official") {
+      const resolved = resolveGogOfficialGameplayDbForConfig(config);
+      if (resolved?.gameplayDbPath && fs.existsSync(resolved.gameplayDbPath)) {
+        return resolved.gameplayDbPath;
+      }
+      const directGameplayDb = path.join(saveRoot, "gameplay.db");
+      if (fs.existsSync(directGameplayDb)) {
+        return directGameplayDb;
+      }
+    }
     const saveJsonPath = resolveSaveFilePath(saveRoot, appid);
     const {
       tenokeIni: tenokeIniPath,
@@ -7727,6 +7842,21 @@ async function monitorAchievementsFile(filePath) {
       achievementMonitorTimer = null;
     } else {
       const baseDir = path.dirname(filePath);
+      if (normalizePlatform(configMeta?.platform) === "gog-official") {
+        const resolved = resolveGogOfficialGameplayDbForConfig(configMeta || {});
+        const nextGameplayDb = resolved?.gameplayDbPath || "";
+        if (
+          nextGameplayDb &&
+          nextGameplayDb !== filePath &&
+          fs.existsSync(nextGameplayDb)
+        ) {
+          if (isNonEmptyString(configName)) {
+            pendingMissingAchievementFiles.set(configName, nextGameplayDb);
+          }
+          monitorAchievementsFile(nextGameplayDb);
+          return;
+        }
+      }
       const tenokePath = path.join(baseDir, "SteamData", "user_stats.ini");
       const iniPath = path.join(baseDir, "achievements.ini");
       const universeIniPath = path.join(
@@ -7999,6 +8129,57 @@ ipcMain.on(
         event.sender.send("achievements-missing", {
           configName,
           reason: "no-usergamestats",
+        });
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+          overlayWindow.webContents.send("set-language", {
+            language: selectedLanguage,
+            uiLanguage: selectedUiLanguage,
+          });
+        }
+        return;
+      }
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      monitorAchievementsFile(achievementsFilePath);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      return;
+    }
+
+    if (normalizedPlatform === "gog-official") {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      const resolved = resolveGogOfficialGameplayDbForConfig(config);
+      achievementsFilePath = resolved?.gameplayDbPath || null;
+      if (
+        resolved &&
+        (config.save_path !== resolved.gameplayDir ||
+          (config.gog_client_id || "") !== (resolved.clientId || "") ||
+          (config.gog_user_id || "") !== (resolved.userId || "") ||
+          (config.gog_gameplay_db || "") !== (resolved.gameplayDbPath || ""))
+      ) {
+        config.save_path = resolved.gameplayDir || config.save_path || "";
+        config.gog_client_id = resolved.clientId || config.gog_client_id || "";
+        config.gog_user_id = resolved.userId || config.gog_user_id || "";
+        config.gog_gameplay_db =
+          resolved.gameplayDbPath || config.gog_gameplay_db || "";
+        try {
+          fs.writeFileSync(cfgFile, JSON.stringify(config, null, 2));
+        } catch {}
+      }
+      if (!achievementsFilePath || !fs.existsSync(achievementsFilePath)) {
+        monitorAchievementsFile(null);
+        achievementsFilePath = null;
+        event.sender.send("achievements-missing", {
+          configName,
+          reason: "no-gameplay-db",
         });
         if (overlayWindow && !overlayWindow.isDestroyed()) {
           overlayWindow.webContents.send("load-overlay-data", selectedConfig);
@@ -8412,7 +8593,11 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
       try {
         global.mainWindow = BrowserWindow.fromWebContents(event.sender);
       } catch {}
-      const res = await ensureSchemaForApp(payload.appid, payload.platform);
+      const res = await ensureSchemaForApp(
+        payload.appid,
+        payload.platform,
+        payload,
+      );
       if (res && res.dir) payload.config_path = res.dir;
     }
     try {
@@ -8454,7 +8639,11 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
         to: nextPlatform,
       });
       try {
-        const res = await ensureSchemaForApp(payload.appid, nextPlatform);
+        const res = await ensureSchemaForApp(
+          payload.appid,
+          nextPlatform,
+          payload,
+        );
         if (res?.dir) {
           const current = JSON.parse(fs.readFileSync(newConfigPath, "utf8"));
           if (current.config_path !== res.dir) {
@@ -11373,6 +11562,13 @@ const {
   buildCrcNameMap,
   resolveConfigSchemaPath,
 } = require("./utils/achievement-data");
+const {
+  buildGogOfficialRarityEntries,
+  buildGogOfficialSnapshot,
+  ensureGogOfficialSchema,
+  readGogGameplayDb,
+  resolveGogOfficialGameplayDbForConfig,
+} = require("./utils/gog-galaxy-local");
 
 async function seedManualConfigsAtBoot() {
   if (bootManualSeedRunning) return;
@@ -11736,7 +11932,8 @@ function applyConfigPlatformDefaults(payload = {}) {
     normalizedPlatform === "xenia" ||
     normalizedPlatform === "rpcs3" ||
     normalizedPlatform === "shadps4" ||
-    normalizedPlatform === "steam-official"
+    normalizedPlatform === "steam-official" ||
+    normalizedPlatform === "gog-official"
   ) {
     const sanitizedSpecial = sanitizeAppIdForPlatform(
       payload.appid || payload.appId || payload.steamAppId,
@@ -11774,6 +11971,7 @@ const SCHEMA_PLATFORM_DIRS = [
   "steam-official",
   "uplay",
   "gog",
+  "gog-official",
   "epic",
   "xenia",
   "rpcs3",
@@ -11785,6 +11983,7 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "steam-official") return "steam-official";
   if (normalized === "uplay") return "uplay";
   if (normalized === "gog") return "gog";
+  if (normalized === "gog-official") return "gog-official";
   if (normalized === "epic") return "epic";
   if (normalized === "xenia") return "xenia";
   if (normalized === "rpcs3") return "rpcs3";
@@ -12114,7 +12313,8 @@ ipcMain.handle(
       platform === "steam-official" ||
       platform === "uplay" ||
       platform === "epic" ||
-      platform === "gog";
+      platform === "gog" ||
+      platform === "gog-official";
 
     if (!supportedPlatform) {
       return {
@@ -12122,6 +12322,68 @@ ipcMain.handle(
         code: "unsupported-platform",
         message: `Rarity refresh is supported only for Steam/Uplay/Epic/GOG configs (current: ${platform}).`,
       };
+    }
+
+    if (platform === "gog-official") {
+      const productId =
+        config?.appid != null ? String(config.appid).trim() : "";
+      if (!productId) {
+        return {
+          success: false,
+          code: "invalid-gog-product-id",
+          message: "GOG Product ID for rarity refresh is invalid.",
+        };
+      }
+      const resolved = resolveGogOfficialGameplayDbForConfig(config);
+      const gameplayDbPath = resolved?.gameplayDbPath || "";
+      if (!gameplayDbPath || !fs.existsSync(gameplayDbPath)) {
+        return {
+          success: false,
+          code: "gameplay-db-missing",
+          message: "GOG Galaxy gameplay.db was not found for this config.",
+        };
+      }
+      try {
+        const parsed = readGogGameplayDb(gameplayDbPath);
+        const entries = buildGogOfficialRarityEntries(parsed?.achievements || []);
+        const sidecarPath = writeAchievementPercentagesSidecar(
+          path.dirname(schemaPath),
+          productId,
+          entries,
+          { source: RARITY_SOURCES.gogGameplay },
+        );
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          source: RARITY_SOURCES.gogGameplay,
+          sidecarPath,
+          matchedCount: entries.length,
+        });
+        broadcastToAll("refresh-achievements-table", config?.name || safeName);
+        return {
+          success: true,
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          sidecarPath,
+          fetchedCount: entries.length,
+          matchedCount: entries.length,
+        };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config?.name || safeName,
+          platform,
+          appid: productId,
+          source: RARITY_SOURCES.gogGameplay,
+          error: err?.message || String(err),
+        });
+        return {
+          success: false,
+          code: "fetch-failed",
+          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+        };
+      }
     }
 
     if (platform === "gog") {

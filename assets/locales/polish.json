@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Wykrywanie konfiguracji LumaPlay wymaga platform=uplay i emu=lumaplay.",
   "platformGuideRescanSummary": "Ponowne skanowanie lub regeneracja schematu",
   "platformGuideRescanItem1": "Opcja Regeneruj schemat jest używana do odświeżania schematu Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "W przypadku Xenia, RPCS3, shadPS4 i Steam oficjalny ponowne generowanie schematu jest blokowane przez projekt.",
+  "platformGuideRescanItem2": "W przypadku Xenia, RPCS3, shadPS4, Steam Official i GOG Galaxy (Oficjalne) ponowne generowanie schematu jest blokowane przez projekt.",
   "platformGuideRescanItem3": "W przypadku tych platform/emulatorów użyj opcji Foldery → Skanuj ponownie, aby odbudować pliki źródłowe.",
   "platformGuideOnboardingSummary": "Boot onboarding i bramka startowa",
   "platformGuideOnboardingItem1": "Przy pierwszym uruchomieniu (lub zmianie wersji dołączającej) uruchamianie czeka na wybór folderu przed pełnym skanowaniem.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Przebieg uruchamiania: boot:onboarding:*.",
   "platformGuideLogsItem3": "Wstępna ocena migawki: initial-notify:*.",
   "platformGuideLogsItem4": "Przebieg automatycznego wyboru: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Oficjalna obsługa: steam-official:*.",
+  "platformGuideLogsItem5": "Obsługa Steam Official: steam-official:*. Obsługa GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Dodaj foldery główne w Ustawieniach → Foldery.",
   "platformGuideQuickTip2": "Automatyczna konfiguracja działa tylko dla obserwowanych folderów, które nie są wyciszone/ignorowane.",
   "platformGuideQuickTip3": "Powiadomienia są wysyłane tylko w przypadku nowych zmian odblokowania/postępu, a nie w przypadku już zaimportowanych starych odblokowań.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Nie udało się odświeżyć rzadkości:",
   "settings-schemaLanguagesTitle": "Języki schematu osiągnięć",
   "settings-schemaLanguagesSelectAllBtn": "Zaznacz wszystko",
-  "settings-schemaLanguagesDeselectAllBtn": "Odznacz wszystko"
+  "settings-schemaLanguagesDeselectAllBtn": "Odznacz wszystko",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Oficjalne)",
+  "platformGuideGogOfficialItem1": "Obserwowany folder: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Lokalne mapowanie produktu jest odczytywane z %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, a postęp osiągnięć w czasie działania jest odczytywany z Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Generowanie konfiguracji rozpoczyna się dopiero wtedy, gdy gameplay.db istnieje, a dane osiągnięć w nim są uzupełnione i stabilne. Najpierw generowany jest schemat, potem konfiguracja.",
+  "platformGuideGogOfficialItem4": "Jeśli gra ma tylko dane Storage i nie ma jeszcze Gameplay\\<userId>\\gameplay.db, watcher czeka i próbuje ponownie automatycznie."
 }

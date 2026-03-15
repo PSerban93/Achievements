@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "La détection de configuration LumaPlay nécessite platform=uplay et emu=lumaplay.",
   "platformGuideRescanSummary": "Réanalyser ou régénérer le schéma",
   "platformGuideRescanItem1": "Regenerate Schema est utilisé pour l’actualisation du schéma Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pour Xenia, RPCS3, shadPS4 et Steam Official, la régénération du schéma est bloquée par conception.",
+  "platformGuideRescanItem2": "Pour Xenia, RPCS3, shadPS4, Steam Official et GOG Galaxy (Officiel), la régénération du schéma est bloquée par conception.",
   "platformGuideRescanItem3": "Pour ces plates-formes/émulateurs, utilisez Dossiers → Réanalyser pour reconstruire à partir des fichiers sources.",
   "platformGuideOnboardingSummary": "Intégration au démarrage et porte de démarrage",
   "platformGuideOnboardingItem1": "Lors de la première exécution (ou du changement de version d'intégration), le démarrage attend la sélection du dossier avant l'analyse complète.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Flux de démarrage : boot:onboarding:*.",
   "platformGuideLogsItem3": "Évaluation initiale de l'instantané : initial-notify:*.",
   "platformGuideLogsItem4": "Flux de sélection automatique : auto-select:*.",
-  "platformGuideLogsItem5": "Steam Traitement officiel : steam-official:*.",
+  "platformGuideLogsItem5": "Traitement Steam Official : steam-official:*. Traitement GOG Galaxy : gog-official:*.",
   "platformGuideQuickTip1": "Ajoutez des dossiers racine dans Paramètres → Dossiers.",
   "platformGuideQuickTip2": "La configuration automatique s'exécute uniquement pour les dossiers surveillés qui ne sont pas mis en sourdine/ignorés.",
   "platformGuideQuickTip3": "Les notifications sont envoyées uniquement pour les nouvelles modifications de déverrouillage/progression, pas pour les anciens déverrouillages déjà importés.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Échec de l’actualisation de la rareté :",
   "settings-schemaLanguagesTitle": "Langues du schéma des succès",
   "settings-schemaLanguagesSelectAllBtn": "Tout sélectionner",
-  "settings-schemaLanguagesDeselectAllBtn": "Tout désélectionner"
+  "settings-schemaLanguagesDeselectAllBtn": "Tout désélectionner",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Officiel)",
+  "platformGuideGogOfficialItem1": "Dossier surveillé : %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Le mappage local du produit est lu depuis %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, et la progression des succès en cours d'exécution est lue depuis Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "La génération de la configuration commence seulement lorsque gameplay.db existe et que ses données de succès sont remplies et stables. Le schéma est généré d'abord, puis la configuration.",
+  "platformGuideGogOfficialItem4": "Si un jeu ne possède que des données Storage et pas encore de Gameplay\\<userId>\\gameplay.db, le watcher attend et réessaie automatiquement."
 }

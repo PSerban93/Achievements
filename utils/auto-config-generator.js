@@ -9,6 +9,14 @@ const ini = require("ini");
 const CRC32 = require("crc-32");
 const { loadAchievementsFromSaveFile } = require("./achievement-data");
 const { createLogger } = require("./logger");
+const {
+  buildGogOfficialSnapshot,
+  ensureGogOfficialSchema,
+  parseGameplayDirIdentity,
+  resolveGogGalaxyProductByProductId,
+  resolveGogOfficialGameplayEntryForProduct,
+  waitForStableGogGameplayDb,
+} = require("./gog-galaxy-local");
 const autoConfigLogger = createLogger("autoconfig");
 const {
   normalizePlatform,
@@ -215,6 +223,8 @@ function resolveConfigTarget({ outputDir, baseName, appid, platform, index }) {
       ? "Uplay"
       : platform === "gog"
       ? "GOG"
+      : platform === "gog-official"
+      ? "GOG Official"
       : platform === "epic"
       ? "Epic"
       : "Steam";
@@ -358,12 +368,14 @@ async function maybeSeedAchCache({
   configName,
   save_path,
   config_path,
+  platform = "steam",
   onSeedCache,
 }) {
   if (typeof onSeedCache !== "function" || !save_path) return;
   const id = String(appid);
-  const meta = { appid: id, config_path };
+  const meta = { appid: id, config_path, platform };
   const candidates = [
+    path.join(save_path, "gameplay.db"),
     path.join(save_path, "achievements.json"),
     path.join(save_path, id, "achievements.json"),
     path.join(save_path, "steam_settings", id, "achievements.json"),
@@ -415,6 +427,247 @@ async function maybeSeedAchCache({
 }
 function sanitizeFilename(name) {
   return name.replace(/[\/\\:*?"<>|]/g, "");
+}
+
+async function generateGogOfficialConfigForProduct(appid, outputDir, opts = {}) {
+  const productId = String(appid || "").trim();
+  if (!/^\d+$/.test(productId)) {
+    autoConfigLogger.error("gog-official:invalid-product-id", { appid: productId });
+    throw new Error(`Invalid GOG Product ID: ${productId}`);
+  }
+
+  const configVariantIndex = loadConfigVariantIndex(outputDir);
+  const product = resolveGogGalaxyProductByProductId(productId, {
+    storageDbPath: opts.storageDbPath,
+  });
+
+  let gameplayDir = typeof opts.savePathOverride === "string" ? opts.savePathOverride.trim() : "";
+  let gameplayDbPath =
+    typeof opts.gogGameplayDbPath === "string" ? opts.gogGameplayDbPath.trim() : "";
+  let clientId =
+    typeof opts.gogClientId === "string" ? opts.gogClientId.trim() : "";
+  let userId = typeof opts.gogUserId === "string" ? opts.gogUserId.trim() : "";
+
+  if (gameplayDbPath && !gameplayDir) {
+    gameplayDir = path.dirname(gameplayDbPath);
+  }
+  if (gameplayDir && (!clientId || !userId)) {
+    const parsedIdentity = parseGameplayDirIdentity(gameplayDir);
+    clientId = clientId || parsedIdentity.clientId || "";
+    userId = userId || parsedIdentity.userId || "";
+  }
+  if (gameplayDir && (!gameplayDbPath || !fs.existsSync(gameplayDbPath))) {
+    const candidateGameplayDb = path.join(gameplayDir, "gameplay.db");
+    if (fs.existsSync(candidateGameplayDb)) {
+      gameplayDbPath = candidateGameplayDb;
+    }
+  }
+
+  let resolvedEntry = null;
+  if (!gameplayDbPath || !fs.existsSync(gameplayDbPath)) {
+    resolvedEntry = resolveGogOfficialGameplayEntryForProduct(productId, {
+      applicationsRoot: opts.applicationsRoot,
+      storageDbPath: opts.storageDbPath,
+      clientId,
+      userId,
+    });
+  }
+  if (resolvedEntry) {
+    gameplayDir = resolvedEntry.gameplayDir || gameplayDir;
+    gameplayDbPath = resolvedEntry.gameplayDbPath || gameplayDbPath;
+    clientId = resolvedEntry.clientId || clientId;
+    userId = resolvedEntry.userId || userId;
+  }
+
+  if (!gameplayDbPath || !fs.existsSync(gameplayDbPath)) {
+    autoConfigLogger.warn("gog-official:gameplay-db-missing", {
+      appid: productId,
+      clientId: clientId || null,
+      userId: userId || null,
+    });
+    throw new Error("GOG Galaxy gameplay.db was not found for this product.");
+  }
+  gameplayDir = gameplayDir || path.dirname(gameplayDbPath);
+
+  const existingVariant =
+    resolveExistingVariant(configVariantIndex, productId, "gog-official") ||
+    null;
+  const resolvedBase =
+    String(opts.preferredName || "").trim() ||
+    String(product?.title || "").trim() ||
+    `GOG ${productId}`;
+  const defaultCfgName = `${resolvedBase} (GOG Official)`;
+  const desiredFileBase = sanitizeFilename(defaultCfgName);
+  const targetInfo = existingVariant
+    ? {
+        filePath: existingVariant.filePath,
+        name: existingVariant.name || defaultCfgName,
+        reused: true,
+      }
+    : {
+        filePath: path.join(outputDir, `${desiredFileBase}.json`),
+        name: defaultCfgName,
+        reused: false,
+      };
+
+  const schemaBase = path.join(outputDir, "schema");
+  const destSchemaDir = path.join(schemaBase, "gog-official", productId);
+  fs.mkdirSync(destSchemaDir, { recursive: true });
+
+  const stability = await waitForStableGogGameplayDb(gameplayDbPath, {
+    maxWaitMs: 20000,
+    pollMs: 1000,
+    stableReadsRequired: 2,
+  });
+  if (!stability?.stable || !stability?.ready) {
+    autoConfigLogger.info("gog-official:schema-pending", {
+      appid: productId,
+      clientId: clientId || null,
+      userId: userId || null,
+      gameplayDbPath,
+      schemaDir: destSchemaDir,
+      schemaCount: Number(stability?.count || 0),
+      stable: stability?.stable === true,
+      attempts: Number(stability?.attempts || 0),
+      elapsedMs: Number(stability?.elapsedMs || 0),
+    });
+    return {
+      appid: productId,
+      platform: "gog-official",
+      skipped: true,
+      pendingSchema: true,
+      save_path: gameplayDir,
+      config_path: destSchemaDir,
+      gog_client_id: clientId || "",
+      gog_user_id: userId || "",
+      gog_gameplay_db: gameplayDbPath,
+      snapshot:
+        stability?.gameplay &&
+        Array.isArray(stability.gameplay.achievements)
+          ? buildGogOfficialSnapshot(stability.gameplay.achievements)
+          : {},
+    };
+  }
+
+  const schemaResult = await ensureGogOfficialSchema(productId, destSchemaDir, {
+    preloadedGameplay: stability.gameplay,
+    gameplayDbPath,
+    applicationsRoot: opts.applicationsRoot,
+    storageDbPath: opts.storageDbPath,
+    clientId,
+    userId,
+  });
+  const schemaCount = Number(schemaResult?.count || 0);
+  if (!Number.isFinite(schemaCount) || schemaCount <= 0) {
+    autoConfigLogger.info("gog-official:schema-pending", {
+      appid: productId,
+      clientId: clientId || null,
+      userId: userId || null,
+      gameplayDbPath,
+      schemaDir: destSchemaDir,
+      schemaCount,
+      stable: true,
+      attempts: Number(stability?.attempts || 0),
+      elapsedMs: Number(stability?.elapsedMs || 0),
+    });
+    return {
+      appid: productId,
+      platform: "gog-official",
+      skipped: true,
+      pendingSchema: true,
+      save_path: gameplayDir,
+      config_path: destSchemaDir,
+      gog_client_id: clientId || "",
+      gog_user_id: userId || "",
+      gog_gameplay_db: gameplayDbPath,
+      snapshot: schemaResult?.snapshot || {},
+    };
+  }
+
+  const existingConfig = readJsonSafe(targetInfo.filePath) || {};
+  const nextConfig = {
+    ...existingConfig,
+    name: targetInfo.name,
+    displayName: defaultCfgName,
+    appid: productId,
+    platform: "gog-official",
+    config_path: destSchemaDir,
+    save_path: gameplayDir,
+    gog_client_id: clientId || existingConfig.gog_client_id || undefined,
+    gog_user_id: userId || existingConfig.gog_user_id || undefined,
+    gog_gameplay_db: gameplayDbPath,
+    executable:
+      typeof existingConfig.executable === "string" ? existingConfig.executable : "",
+    arguments:
+      typeof existingConfig.arguments === "string" ? existingConfig.arguments : "",
+    process_name:
+      typeof existingConfig.process_name === "string"
+        ? existingConfig.process_name
+        : "",
+  };
+  if (nextConfig.steamAppId) delete nextConfig.steamAppId;
+
+  const previousSerialized = fs.existsSync(targetInfo.filePath)
+    ? fs.readFileSync(targetInfo.filePath, "utf8")
+    : null;
+  const nextSerialized = JSON.stringify(nextConfig, null, 2);
+  const created = !fs.existsSync(targetInfo.filePath);
+  const updated = created || previousSerialized !== nextSerialized;
+  if (updated) {
+    fs.writeFileSync(targetInfo.filePath, nextSerialized);
+  }
+
+  registerConfigVariant(configVariantIndex, productId, "gog-official", {
+    filePath: targetInfo.filePath,
+    name: targetInfo.name,
+  });
+
+  if (
+    typeof opts.onSeedCache === "function" &&
+    schemaResult?.snapshot &&
+    Object.keys(schemaResult.snapshot).length
+  ) {
+    try {
+      opts.onSeedCache({
+        appid: productId,
+        configName: targetInfo.name,
+        platform: "gog-official",
+        savePath: gameplayDir,
+        snapshot: schemaResult.snapshot,
+      });
+    } catch (err) {
+      autoConfigLogger.warn("gog-official:seed-cache-failed", {
+        appid: productId,
+        configName: targetInfo.name,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  autoConfigLogger.info("gog-official:config-ready", {
+    appid: productId,
+    filePath: targetInfo.filePath,
+    created,
+    updated,
+    clientId: clientId || null,
+    userId: userId || null,
+    gameplayDbPath,
+  });
+
+  return {
+    appid: productId,
+    name: targetInfo.name,
+    filePath: targetInfo.filePath,
+    platform: "gog-official",
+    save_path: gameplayDir,
+    config_path: destSchemaDir,
+    gog_client_id: clientId || "",
+    gog_user_id: userId || "",
+    gog_gameplay_db: gameplayDbPath,
+    created,
+    updated,
+    snapshot: schemaResult?.snapshot || {},
+  };
 }
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
@@ -779,7 +1032,10 @@ async function getEpicTitleFromEgdata(appid) {
 async function getGameName(appid, opts = {}, retries = 2) {
   const platformHint = normalizePlatform(opts?.platform);
   const preferredName = (opts?.preferredName || "").trim();
-  if (preferredName && platformHint === "gog") {
+  if (
+    preferredName &&
+    (platformHint === "gog" || platformHint === "gog-official")
+  ) {
     return preferredName;
   }
   const hasHex = /[a-f]/i.test(String(appid || ""));
@@ -791,7 +1047,7 @@ async function getGameName(appid, opts = {}, retries = 2) {
     // For Epic IDs, do not fall back to Steam/GOG
     return null;
   }
-  if (platformHint === "gog") {
+  if (platformHint === "gog" || platformHint === "gog-official") {
     const gogName = await getGameNameFromGogDb(appid);
     if (gogName) return gogName;
     return preferredName || null;
@@ -1258,6 +1514,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
           configName: safeName,
           save_path: curr.save_path || gameSaveDir,
           config_path: curr.config_path || destSchemaDir,
+          platform: curr.platform || platformMeta.platform,
           onSeedCache,
         });
       } catch (e) {
@@ -1306,6 +1563,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       configName: safeName,
       save_path: gameSaveDir,
       config_path: destSchemaDir,
+      platform: platformMeta.platform,
       onSeedCache,
     });
   }
@@ -1331,6 +1589,13 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
     throw new Error(`Invalid appid: ${appid}`);
   }
   autoConfigLogger.info("generate-single:start", { appid, outputDir });
+  const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
+  if (desiredPlatform === "gog-official") {
+    return generateGogOfficialConfigForProduct(appid, outputDir, {
+      ...opts,
+      onSeedCache,
+    });
+  }
   const appDir = opts?.appDir || null;
   const tmpRoot = path.join(
     os.tmpdir(),
@@ -1355,7 +1620,6 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
     tmpRoot,
     outputDir,
   });
-  const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
   const files = fs
     .readdirSync(outputDir)
     .filter((f) => f.toLowerCase().endsWith(".json"));
@@ -1452,6 +1716,7 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
         configName: cfg.name || path.basename(targetFile, ".json"),
         save_path: cfg.save_path,
         config_path: cfg.config_path,
+        platform: cfg.platform,
         onSeedCache,
       });
       autoConfigLogger.info("generate-single:completed", {
@@ -1474,6 +1739,7 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
         configName: cfg.name || path.basename(targetFile, ".json"),
         save_path: cfg.save_path,
         config_path: cfg.config_path,
+        platform: cfg.platform,
         onSeedCache,
       });
       autoConfigLogger.info("generate-single:seeded", {

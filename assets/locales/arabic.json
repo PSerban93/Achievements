@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "يتطلب اكتشاف تكوين LumaPlay platform=uplay وemu=lumaplay.",
   "platformGuideRescanSummary": "إعادة المسح مقابل إعادة إنشاء المخطط",
   "platformGuideRescanItem1": "يتم استخدام إعادة إنشاء المخطط لتحديث المخطط Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "بالنسبة إلى Xenia وRPCS3 وshadPS4 وSteam الرسمية، يتم حظر إعادة إنشاء المخطط حسب التصميم.",
+  "platformGuideRescanItem2": "بالنسبة إلى Xenia وRPCS3 وshadPS4 وSteam الرسمية وGOG Galaxy (رسمي)، يتم حظر إعادة إنشاء المخطط حسب التصميم.",
   "platformGuideRescanItem3": "بالنسبة لتلك الأنظمة الأساسية/المحاكيات، استخدم Folders → Rescan لإعادة البناء من الملفات المصدر.",
   "platformGuideOnboardingSummary": "تمهيد التمهيد وبوابة بدء التشغيل",
   "platformGuideOnboardingItem1": "عند التشغيل لأول مرة (أو تغيير إصدار الإعداد)، ينتظر بدء التشغيل تحديد المجلد قبل إجراء المسح الكامل.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "تدفق بدء التشغيل: boot:onboarding:*.",
   "platformGuideLogsItem3": "تقييم اللقطة الأولي: initial-notify:*.",
   "platformGuideLogsItem4": "تدفق الاختيار التلقائي: auto-select:*.",
-  "platformGuideLogsItem5": "Steam التعامل الرسمي: steam-official:*.",
+  "platformGuideLogsItem5": "معالجة Steam الرسمية: steam-official:*. معالجة GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "أضف المجلدات الجذرية في الإعدادات → المجلدات.",
   "platformGuideQuickTip2": "يتم تشغيل التكوين التلقائي فقط للمجلدات المراقبة التي لم يتم كتم صوتها/تجاهلها.",
   "platformGuideQuickTip3": "يتم إرسال الإشعارات فقط بشأن تغييرات إلغاء القفل/التقدم الجديدة، وليس لعمليات إلغاء القفل القديمة التي تم استيرادها بالفعل.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "فشل تحديث الندرة:",
   "settings-schemaLanguagesTitle": "لغات مخطط الإنجازات",
   "settings-schemaLanguagesSelectAllBtn": "تحديد الكل",
-  "settings-schemaLanguagesDeselectAllBtn": "إلغاء تحديد الكل"
+  "settings-schemaLanguagesDeselectAllBtn": "إلغاء تحديد الكل",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (رسمي)",
+  "platformGuideGogOfficialItem1": "مجلد المراقبة: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "تتم قراءة ربط المنتج المحلي من %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db، ويتم قراءة تقدم الإنجازات أثناء التشغيل من Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "يبدأ إنشاء الإعداد فقط بعد وجود gameplay.db وأن تكون بيانات الإنجازات فيه مكتملة ومستقرة. يتم إنشاء المخطط أولاً ثم الإعداد.",
+  "platformGuideGogOfficialItem4": "إذا كانت اللعبة تحتوي فقط على بيانات Storage ولا يوجد Gameplay\\<userId>\\gameplay.db بعد، فإن المراقب ينتظر ويعيد المحاولة تلقائياً."
 }

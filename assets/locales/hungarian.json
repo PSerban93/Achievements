@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "A LumaPlay konfiguráció észleléséhez platform=uplay és emu=lumaplay szükséges.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "A Séma újragenerálása a Steam/Uplay/Epic/GOG séma frissítéséhez használatos.",
-  "platformGuideRescanItem2": "A Xenia, RPCS3, shadPS4 és Steam Official esetében a séma újragenerálása a tervezés miatt le van tiltva.",
+  "platformGuideRescanItem2": "A Xenia, RPCS3, shadPS4, Steam Official és GOG Galaxy (Hivatalos) esetében a séma újragenerálása tervezés szerint le van tiltva.",
   "platformGuideRescanItem3": "Ezeknél a platformoknál/emulátoroknál használja a Mappák → Újrakeresés menüpontot a forrásfájlokból való újraépítéshez.",
   "platformGuideOnboardingSummary": "Boot onboarding és startup gate",
   "platformGuideOnboardingItem1": "Az első futtatáskor (vagy a verzióváltáskor) az indítás megvárja a mappa kiválasztását a teljes vizsgálat előtt.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Indítási folyamat: boot:onboarding:*.",
   "platformGuideLogsItem3": "A pillanatkép kezdeti kiértékelése: initial-notify:*.",
   "platformGuideLogsItem4": "Automatikus kiválasztási folyamat: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Hivatalos kezelés: steam-official:*.",
+  "platformGuideLogsItem5": "Steam Official kezelés: steam-official:*. GOG Galaxy kezelés: gog-official:*.",
   "platformGuideQuickTip1": "Adja hozzá a gyökérmappákat a Beállítások → Mappák menüpontban.",
   "platformGuideQuickTip2": "Az automatikus konfiguráció csak azokon a figyelt mappákon fut, amelyek nincsenek elnémítva/figyelmen kívül hagyva.",
   "platformGuideQuickTip3": "A rendszer csak az új feloldási/haladásmódosításokról küld értesítést, a már importált régi feloldásokról nem.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "A ritkaság frissítése sikertelen:",
   "settings-schemaLanguagesTitle": "Achievement-séma nyelvei",
   "settings-schemaLanguagesSelectAllBtn": "Összes kijelölése",
-  "settings-schemaLanguagesDeselectAllBtn": "Összes kijelölésének megszüntetése"
+  "settings-schemaLanguagesDeselectAllBtn": "Összes kijelölésének megszüntetése",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Hivatalos)",
+  "platformGuideGogOfficialItem1": "Figyelt mappa: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "A helyi termék-hozzárendelés innen olvasható: %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, a futás közbeni achievement-haladás pedig innen: Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "A konfiguráció létrehozása csak akkor indul el, ha a gameplay.db már létezik, és az achievement-adatok feltöltöttek és stabilak. Először a séma készül el, utána a konfiguráció.",
+  "platformGuideGogOfficialItem4": "Ha egy játékhoz csak Storage-adatok vannak, és még nincs Gameplay\\<userId>\\gameplay.db, a watcher vár, majd automatikusan újrapróbálja."
 }

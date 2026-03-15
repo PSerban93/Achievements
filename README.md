@@ -187,7 +187,7 @@ Creates a standalone `.exe` installer in the `dist/` folder.
 **Config JSON fields (reference):**
 
 - `appid` (string) – game id
-- `platform` (string) – steam/uplay/gog/epic/xenia/rpcs3/shadps4/steam-official
+- `platform` (string) – steam/uplay/gog/gog-official/epic/xenia/rpcs3/shadps4/steam-official
 - `config_path` (string) – folder containing `achievements.json` and `img/`
 - `save_path` (string) – location of save/achievement progress
 - `process_name` (string) – executable name for process tracking
@@ -259,6 +259,25 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
    - fetch game name, schema and images.
    - generate configs automatically.
    - when new achievement is unlocked display the notifications.
+
+#### GOG Galaxy Support
+
+1. Install and sign in to **GOG Galaxy**.
+2. Use **Watched Folders** add the `%LOCALAPPDATA%\GOG.com\Galaxy\Applications` folder.
+3. Start and play the game via GOG Galaxy at least once.
+4. The app will:
+   - resolve the local `clientId -> productId -> game title` mapping from `%ProgramData%\GOG.com\Galaxy\storage\galaxy-2.0.db`,
+   - watch `%LOCALAPPDATA%\GOG.com\Galaxy\Applications\<clientId>\Gameplay\<userId>\gameplay.db`,
+   - generate a `gog-official` config automatically,
+   - build `achievements.json` and `achievementpercentages.json` locally from `gameplay.db`,
+   - monitor later changes in `gameplay.db` and display notifications when new achievements are unlocked.
+
+**Important notes:**
+
+- `gog-official` is auto-generated from local GOG Galaxy data. It is not meant to be created manually from the platform dropdown.
+- The config is created only after `gameplay.db` exists and the achievement table is populated and stable, to avoid generating an empty schema.
+- If a game only has `Storage\...` data and no `Gameplay\<userId>\gameplay.db` yet, the app will detect the install path but will wait before creating the config.
+- After creation, the config `save_path` points to the concrete `Gameplay\<userId>` folder, while runtime progress is read from `gameplay.db`.
 
 ### Dashboard
 

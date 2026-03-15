@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Voor LumaPlay-configuratiedetectie zijn platform=uplay en emu=lumaplay vereist.",
   "platformGuideRescanSummary": "Opnieuw scannen versus schema opnieuw genereren",
   "platformGuideRescanItem1": "Schema opnieuw genereren wordt gebruikt voor het vernieuwen van het schema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Voor Xenia, RPCS3, shadPS4 en Steam Official wordt het opnieuw genereren van schema's door het ontwerp geblokkeerd.",
+  "platformGuideRescanItem2": "Voor Xenia, RPCS3, shadPS4, Steam Official en GOG Galaxy (Officieel) wordt het opnieuw genereren van schema's door het ontwerp geblokkeerd.",
   "platformGuideRescanItem3": "Voor deze platforms/emulators gebruikt u Mappen → Opnieuw scannen om opnieuw op te bouwen vanaf bronbestanden.",
   "platformGuideOnboardingSummary": "Boot-onboarding en opstartpoort",
   "platformGuideOnboardingItem1": "Bij de eerste keer opstarten (of bij wijziging van de onboard-versie) wacht het opstarten op mapselectie voordat het volledig wordt gescand.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Opstartstroom: boot:onboarding:*.",
   "platformGuideLogsItem3": "Initiële momentopname-evaluatie: initial-notify:*.",
   "platformGuideLogsItem4": "Automatische selectiestroom: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Officiële afhandeling: steam-official:*.",
+  "platformGuideLogsItem5": "Afhandeling van Steam Official: steam-official:*. Afhandeling van GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Voeg hoofdmappen toe via Instellingen → Mappen.",
   "platformGuideQuickTip2": "Automatische configuratie wordt alleen uitgevoerd voor bewaakte mappen die niet zijn gedempt/genegeerd.",
   "platformGuideQuickTip3": "Er worden alleen meldingen verzonden over nieuwe ontgrendelingen/voortgangswijzigingen, niet voor reeds geïmporteerde oude ontgrendelingen.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Vernieuwen van zeldzaamheid mislukt:",
   "settings-schemaLanguagesTitle": "Talen voor achievements-schema",
   "settings-schemaLanguagesSelectAllBtn": "Alles selecteren",
-  "settings-schemaLanguagesDeselectAllBtn": "Alles deselecteren"
+  "settings-schemaLanguagesDeselectAllBtn": "Alles deselecteren",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Officieel)",
+  "platformGuideGogOfficialItem1": "Bewaakte map: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Lokale productkoppeling wordt gelezen uit %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, en achievement-voortgang tijdens runtime wordt gelezen uit Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Het genereren van de configuratie start pas nadat gameplay.db bestaat en de achievementgegevens gevuld en stabiel zijn. Eerst wordt het schema gegenereerd, daarna de configuratie.",
+  "platformGuideGogOfficialItem4": "Als een spel alleen Storage-gegevens heeft en nog geen Gameplay\\<userId>\\gameplay.db, wacht de watcher en probeert hij automatisch opnieuw."
 }

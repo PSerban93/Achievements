@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Deteksi konfigurasi LumaPlay memerlukan platform=uplay dan emu=lumaplay.",
   "platformGuideRescanSummary": "Pindai Ulang vs Regenerasi Skema",
   "platformGuideRescanItem1": "Skema Regenerasi digunakan untuk penyegaran skema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Untuk Xenia, RPCS3, shadPS4 dan Steam Resmi, pembuatan ulang skema diblokir oleh desain.",
+  "platformGuideRescanItem2": "Untuk Xenia, RPCS3, shadPS4, Steam Resmi, dan GOG Galaxy (Resmi), pembuatan ulang skema diblokir oleh desain.",
   "platformGuideRescanItem3": "Untuk platform/emulator tersebut, gunakan Folder → Pindai ulang untuk membangun kembali dari file sumber.",
   "platformGuideOnboardingSummary": "Orientasi boot dan gerbang permulaan",
   "platformGuideOnboardingItem1": "Saat pertama kali dijalankan (atau perubahan versi orientasi), startup menunggu pemilihan folder sebelum pemindaian penuh.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Alur permulaan: boot:onboarding:*.",
   "platformGuideLogsItem3": "Evaluasi cuplikan awal: initial-notify:*.",
   "platformGuideLogsItem4": "Alur pemilihan otomatis: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Penanganan resmi: steam-official:*.",
+  "platformGuideLogsItem5": "Penanganan Steam Resmi: steam-official:*. Penanganan GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Tambahkan folder root di Pengaturan → Folder.",
   "platformGuideQuickTip2": "Konfigurasi otomatis hanya berjalan untuk folder yang diawasi yang tidak dibisukan/diabaikan.",
   "platformGuideQuickTip3": "Pemberitahuan dikirim hanya pada pembukaan kunci baru/perubahan kemajuan, bukan pada pembukaan kunci lama yang sudah diimpor.",
@@ -561,5 +561,10 @@
   "log.rarityRefreshFailed": "Gagal memperbarui kelangkaan:",
   "settings-schemaLanguagesTitle": "Bahasa skema achievement",
   "settings-schemaLanguagesSelectAllBtn": "Pilih semua",
-  "settings-schemaLanguagesDeselectAllBtn": "Batalkan semua"
+  "settings-schemaLanguagesDeselectAllBtn": "Batalkan semua",
+  "platformGuideGogOfficialSummary": "GOG Galaxy (Resmi)",
+  "platformGuideGogOfficialItem1": "Folder yang dipantau: %LOCALAPPDATA%\\GOG.com\\Galaxy\\Applications.",
+  "platformGuideGogOfficialItem2": "Pemetaan produk lokal dibaca dari %ProgramData%\\GOG.com\\Galaxy\\storage\\galaxy-2.0.db, dan progres achievement saat runtime dibaca dari Applications\\<clientId>\\Gameplay\\<userId>\\gameplay.db.",
+  "platformGuideGogOfficialItem3": "Pembuatan konfigurasi dimulai hanya setelah gameplay.db ada dan data achievement di dalamnya sudah terisi dan stabil. Schema dibuat terlebih dahulu, lalu konfigurasi.",
+  "platformGuideGogOfficialItem4": "Jika game hanya memiliki data Storage dan belum ada Gameplay\\<userId>\\gameplay.db, watcher akan menunggu dan mencoba lagi secara otomatis."
 }

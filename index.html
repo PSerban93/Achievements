@@ -1758,6 +1758,37 @@
 
               <div class="settings-section">
                 <details class="platform-guide-item">
+                  <summary id="platformGuideGogOfficialSummary">
+                    GOG Galaxy (Official)
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideGogOfficialItem1">
+                      Watch folder:
+                      <code>%LOCALAPPDATA%\GOG.com\Galaxy\Applications</code>.
+                    </li>
+                    <li id="platformGuideGogOfficialItem2">
+                      Local product mapping is read from
+                      <code>%ProgramData%\GOG.com\Galaxy\storage\galaxy-2.0.db</code>,
+                      and runtime progress is read from
+                      <code>Applications\&lt;clientId&gt;\Gameplay\&lt;userId&gt;\gameplay.db</code>.
+                    </li>
+                    <li id="platformGuideGogOfficialItem3">
+                      Config generation starts only after
+                      <code>gameplay.db</code> exists and its achievement data
+                      is populated and stable. The schema is generated first,
+                      then the config.
+                    </li>
+                    <li id="platformGuideGogOfficialItem4">
+                      If a game only has <code>Storage</code> data and no
+                      <code>Gameplay\&lt;userId&gt;\gameplay.db</code> yet, the
+                      watcher waits and retries automatically.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
                   <summary id="platformGuideXeniaSummary">Xenia</summary>
                   <ul class="platform-guide-list">
                     <li id="platformGuideXeniaItem1">
@@ -1872,8 +1903,8 @@
                       refresh.
                     </li>
                     <li id="platformGuideRescanItem2">
-                      For Xenia, RPCS3, shadPS4 and Steam Official, schema
-                      regenerate is blocked by design.
+                      For Xenia, RPCS3, shadPS4, Steam Official and GOG Galaxy
+                      (Official), schema regenerate is blocked by design.
                     </li>
                     <li id="platformGuideRescanItem3">
                       For those platforms/emulators, use Folders → Rescan to
@@ -1977,7 +2008,8 @@
                       Auto selection flow: auto-select:*.
                     </li>
                     <li id="platformGuideLogsItem5">
-                      Steam Official handling: steam-official:*.
+                      Steam Official handling: steam-official:*. GOG Galaxy
+                      handling: gog-official:*.
                     </li>
                   </ul>
                 </details>
@@ -2291,6 +2323,9 @@
                           <option value="uplay">Uplay</option>
                           <option value="epic">Epic</option>
                           <option value="gog">GOG</option>
+                          <option value="gog-official" disabled>
+                            GOG (Official)
+                          </option>
                           <option value="xenia" disabled>Xenia</option>
                           <option value="rpcs3" disabled>RPCS3</option>
                           <option value="shadps4" disabled>
@@ -5011,6 +5046,7 @@
               "uplay",
               "epic",
               "gog",
+              "gog-official",
               "xenia",
               "rpcs3",
               "shadps4",
