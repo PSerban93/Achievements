@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "Yükseltilmiş/korumalı oyun bağlamlarında sürükleme başarısız olabilir; snap konumlarını (Ctrl+Alt+Shift+1..5) veya ince ayar modunu (Ctrl+Alt+Shift+Arrow Keys) kullanın.",
   "platformGuideTroubleshootingItem7": "Overlay içinde PageUp/PageDown çalışmıyorsa yedek olarak Ctrl+PageUp / Ctrl+PageDown kullanın.",
   "platformGuideTroubleshootingItem8": "Ses çalıyor ancak bildirimler geç görünüyorsa preset maliyetini (bulanıklık/gölgeler/büyük dönüşümler) düşürün ve bildirim süresini azaltın.",
-  "platformGuideTroubleshootingItem9": "Overlay görüntüleme/sunum sorunları ortaya çıkarsa, özellikle Special K etkinken, Advanced > Rendering bölümünden overlay için globalShortcut uyumluluk seçeneğini etkinleştirin. Bu, hook tabanlı sürüklemeyi devre dışı bırakır ve bazı sistemlerde uyumluluğu artırabilir.",
+  "platformGuideTroubleshootingItem9": "Overlay görüntüleme/sunum sorunları ortaya çıkarsa ya da kısayol çalışmasına rağmen hiçbir şey görünmüyorsa Advanced > Rendering bölümündeki Disable Hardware Acceleration seçeneğini değiştirin ve uygulamayı yeniden başlatın. Sorunlar devam ederse, özellikle Special K etkinken, overlay için globalShortcut uyumluluk seçeneğini etkinleştirin. Bu, hook tabanlı sürüklemeyi devre dışı bırakır ve bazı sistemlerde uyumluluğu artırabilir.",
   "platformGuideTroubleshootingSummary": "Hızlı sorun giderme",
   "platformGuideXeniaItem1": ".gpd dosyalarının güncellendiği Xenia içerik/profil yolunu izleyin.",
   "platformGuideXeniaItem2": "Otomatik yapılandırma, başlık verilerini okur, şema/görüntüler oluşturur ve bu dosyalardan bildirim akışını başlatır.",

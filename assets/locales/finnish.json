@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "Korotetuissa/suojatuissa pelitilanteissa raahaus voi epäonnistua; käytä snap-sijainteja (Ctrl+Alt+Shift+1..5) tai hienosäätötilaa (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Jos PageUp/PageDown ei toimi overlayssa, käytä varavaihtoehtoa Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Jos ääni kuuluu mutta ilmoitukset näkyvät viiveellä, kevennä presetin kuormaa (sumennus/varjot/suuret muunnokset) ja lyhennä ilmoituksen kestoa.",
-  "platformGuideTroubleshootingItem9": "Jos overlayn näyttö-/esitystilassa ilmenee ongelmia, etenkin kun Special K on aktiivinen, ota käyttöön overlayn globalShortcut-yhteensopivuusasetus kohdassa Advanced > Rendering. Tämä poistaa hook-pohjaisen vedon käytöstä ja voi parantaa yhteensopivuutta joissakin järjestelmissä.",
+  "platformGuideTroubleshootingItem9": "Jos overlayn näyttö-/esitystilassa ilmenee ongelmia tai pikanäppäin toimii mutta mitään ei näy, vaihda Disable Hardware Acceleration -asetusta kohdassa Advanced > Rendering ja käynnistä sovellus uudelleen. Jos ongelmat jatkuvat, erityisesti kun Special K on aktiivinen, ota käyttöön overlayn globalShortcut-yhteensopivuusasetus. Tämä poistaa hook-pohjaisen vedon käytöstä ja voi parantaa yhteensopivuutta joissakin järjestelmissä.",
   "platformGuideTroubleshootingSummary": "Nopea vianetsintä",
   "platformGuideXeniaItem1": "Katso Xenia-sisältö-/profiilipolku, jossa .gpd-tiedostot päivitetään.",
   "platformGuideXeniaItem2": "Automaattinen määritys lukee otsikkotiedot, luo skeeman/kuvat ja käynnistää ilmoitusvirran näistä tiedostoista.",

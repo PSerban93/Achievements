@@ -398,7 +398,7 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - Overlay drag may fail in elevated/protected game contexts; use snap positions (`Ctrl+Alt+Shift+1..5`) or nudge (`Ctrl+Alt+Shift+Arrow Keys`) instead.
 - In some engine/driver combinations, overlay z-order can vary (may appear behind windows); retoggle overlay and prefer Borderless Windowed mode.
 - Flip/compositor behavior is controlled by Windows + GPU driver; app cannot force a single flip mode across all systems.
-- Toggle **Disable Hardware Acceleration** (restart required) and keep the mode that is most stable for your setup.
+- Toggle **Disable Hardware Acceleration** (restart required) and keep the mode that is most stable for your setup. If the overlay hotkey works but nothing is visible, turn **Disable Hardware Acceleration** off (enable hardware acceleration) and restart the app.
 - If overlay display/presentation issues appear, especially when **Special K** is also active, enable **Force globalShortcut for overlay**. This switches overlay shortcuts to Electron `globalShortcut`, disables hook-based drag, and can resolve compatibility/composition issues on affected systems.
 - Notifications are queue-based; long preset durations can cause perceived delay. Reduce **Notification Duration** if needed.
 - Presets with expensive effects (blur/backdrop + layered animation) can micro-stutter on some GPUs; use lighter presets if needed.

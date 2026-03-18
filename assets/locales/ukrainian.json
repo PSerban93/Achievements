@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "У підвищених/захищених ігрових контекстах перетягування може не працювати; використовуйте snap-позиції (Ctrl+Alt+Shift+1..5) або режим точного зміщення (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Якщо PageUp/PageDown не працює в оверлеї, використовуйте запасний варіант Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Якщо звук є, але сповіщення з'являються із затримкою, зменште навантаження пресету (розмиття/тіні/великі трансформації) і тривалість сповіщення.",
-  "platformGuideTroubleshootingItem9": "Якщо виникають проблеми з відображенням/показом оверлею, особливо коли активний Special K, увімкніть параметр сумісності globalShortcut для оверлею в Advanced > Rendering. Це вимикає перетягування на основі hook і може покращити сумісність на деяких системах.",
+  "platformGuideTroubleshootingItem9": "Якщо виникають проблеми з відображенням/показом overlay або гаряча клавіша спрацьовує, але нічого не видно, перемкніть параметр Disable Hardware Acceleration у Advanced > Rendering і перезапустіть застосунок. Якщо проблеми залишаються, особливо коли активний Special K, увімкніть для overlay параметр сумісності globalShortcut. Це вимикає перетягування на основі hook і може покращити сумісність на деяких системах.",
   "platformGuideTroubleshootingSummary": "Швидке усунення несправностей",
   "platformGuideXeniaItem1": "Перегляньте шлях вмісту/профілю Xenia, де оновлюються файли .gpd.",
   "platformGuideXeniaItem2": "Автоматична конфігурація зчитує дані заголовка, генерує схеми/зображення та запускає потік сповіщень із цих файлів.",

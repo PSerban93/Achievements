@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "昇格/保護されたゲーム環境ではドラッグが失敗することがあります。スナップ位置（Ctrl+Alt+Shift+1..5）または微調整モード（Ctrl+Alt+Shift+Arrow Keys）を使用してください。",
   "platformGuideTroubleshootingItem7": "オーバーレイで PageUp/PageDown が効かない場合は、代替の Ctrl+PageUp / Ctrl+PageDown を使用してください。",
   "platformGuideTroubleshootingItem8": "音は鳴るのに通知表示が遅れる場合は、プリセットの負荷（ぼかし/影/大きな変形）を下げ、通知時間を短くしてください。",
-  "platformGuideTroubleshootingItem9": "オーバーレイの表示/プレゼンテーションに問題が出る場合、特に Special K を有効にしているときは、Advanced > Rendering にあるオーバーレイ用 globalShortcut 互換オプションを有効にしてください。これにより hook ベースのドラッグが無効になり、一部の環境で互換性が改善することがあります。",
+  "platformGuideTroubleshootingItem9": "オーバーレイの表示/描画に問題がある場合、またはホットキーは反応するのに何も表示されない場合は、Advanced > Rendering の Disable Hardware Acceleration を切り替えてアプリを再起動してください。問題が続く場合、特に Special K が有効なときは、オーバーレイの globalShortcut 互換オプションを有効にしてください。これにより hook ベースのドラッグが無効になり、一部の環境で互換性が向上する場合があります。",
   "platformGuideTroubleshootingSummary": "素早いトラブルシューティング",
   "platformGuideXeniaItem1": ".gpd ファイルが更新される Xenia コンテンツ/プロファイル パスを監視します。",
   "platformGuideXeniaItem2": "自動構成は、タイトル データを読み取り、スキーマ/イメージを生成し、それらのファイルから通知フローを開始します。",

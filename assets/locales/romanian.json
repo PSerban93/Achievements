@@ -553,7 +553,7 @@
   "platformGuideTroubleshootingItem6": "În contexte de joc elevated/protected, drag-ul poate eșua; folosește pozițiile snap (Ctrl+Alt+Shift+1..5) sau modul nudge (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Dacă PageUp/PageDown nu funcționează în overlay, folosește fallback-ul Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Dacă sunetul se aude dar notificările apar cu întârziere, redu costul presetului (blur/umbre/transformări mari) și durata notificării.",
-  "platformGuideTroubleshootingItem9": "Dacă apar probleme de afișare/prezentare ale overlay-ului, în special când Special K este activ, activați opțiunea de compatibilitate globalShortcut pentru overlay din Advanced > Rendering. Aceasta dezactivează tragerea bazată pe hook și poate îmbunătăți compatibilitatea pe unele sisteme.",
+  "platformGuideTroubleshootingItem9": "Dacă apar probleme de afișare/prezentare ale overlay-ului sau dacă scurtătura funcționează dar nu se vede nimic, comută opțiunea Disable Hardware Acceleration din Advanced > Rendering și repornește aplicația. Dacă problemele continuă, mai ales când Special K este activ, activează opțiunea de compatibilitate globalShortcut pentru overlay. Aceasta dezactivează tragerea bazată pe hook și poate îmbunătăți compatibilitatea pe unele sisteme.",
   "platformGuideTroubleshootingSummary": "Depanare rapidă",
   "platformGuideXeniaItem1": "Urmăriți calea conținutului/profilului Xenia unde sunt actualizate fișierele .gpd.",
   "platformGuideXeniaItem2": "Auto-config citește datele de titlu, generează schema/imagini și pornește fluxul de notificări din acele fișiere.",

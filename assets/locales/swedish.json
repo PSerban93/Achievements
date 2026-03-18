@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "I förhöjda/skyddade spelkontexter kan drag misslyckas; använd snap-positioner (Ctrl+Alt+Shift+1..5) eller finjusteringsläge (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Om PageUp/PageDown inte fungerar i overlayen, använd fallback Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Om ljud spelas men notiser visas sent, sänk preset-kostnaden (blur/skuggor/stora transformeringar) och minska notisens varaktighet.",
-  "platformGuideTroubleshootingItem9": "Om problem med overlayens visning/presentation uppstår, särskilt när Special K är aktivt, aktivera globalShortcut-kompatibilitetsalternativet för overlayen i Advanced > Rendering. Detta inaktiverar hook-baserad dragning och kan förbättra kompatibiliteten på vissa system.",
+  "platformGuideTroubleshootingItem9": "Om problem med overlayens visning/presentation uppstår, eller om snabbtangenten fungerar men inget syns, växla Disable Hardware Acceleration i Advanced > Rendering och starta om appen. Om problemen kvarstår, särskilt när Special K är aktivt, aktivera globalShortcut-kompatibilitetsalternativet för overlayen. Detta inaktiverar hook-baserad dragning och kan förbättra kompatibiliteten på vissa system.",
   "platformGuideTroubleshootingSummary": "Snabb felsökning",
   "platformGuideXeniaItem1": "Titta på Xenia innehålls-/profilsökvägen där .gpd-filer uppdateras.",
   "platformGuideXeniaItem2": "Auto-config läser titeldata, genererar schema/bilder och startar meddelandeflöde från dessa filer.",

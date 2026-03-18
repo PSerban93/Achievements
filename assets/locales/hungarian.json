@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "Emelt/védett játékkörnyezetben a húzás nem mindig működik; használd a snap pozíciókat (Ctrl+Alt+Shift+1..5) vagy a finom mozgatás módot (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Ha a PageUp/PageDown nem működik az overlayben, használd a tartalék Ctrl+PageUp / Ctrl+PageDown kombinációt.",
   "platformGuideTroubleshootingItem8": "Ha a hang lejátszódik, de az értesítések késve jelennek meg, csökkentsd a preset terhelését (elmosás/árnyékok/nagy transzformációk) és az értesítés időtartamát.",
-  "platformGuideTroubleshootingItem9": "Ha az overlay megjelenítésével/prezentációjával kapcsolatos problémák jelentkeznek, különösen aktív Special K mellett, kapcsold be az overlay globalShortcut kompatibilitási beállítását az Advanced > Rendering részben. Ez letiltja a hook-alapú húzást, és egyes rendszereken javíthatja a kompatibilitást.",
+  "platformGuideTroubleshootingItem9": "Ha megjelenítési/prezentációs problémák jelentkeznek az overlaynél, vagy a gyorsbillentyű működik, de semmi sem látható, kapcsold át a Disable Hardware Acceleration beállítást az Advanced > Rendering részen, majd indítsd újra az alkalmazást. Ha a problémák továbbra is fennállnak, különösen ha a Special K aktív, engedélyezd az overlay globalShortcut kompatibilitási opcióját. Ez letiltja a hook-alapú húzást, és egyes rendszereken javíthatja a kompatibilitást.",
   "platformGuideTroubleshootingSummary": "Gyors hibaelhárítás",
   "platformGuideXeniaItem1": "Tekintse meg a Xenia tartalom/profil elérési útját, ahol a .gpd fájlok frissülnek.",
   "platformGuideXeniaItem2": "Az automatikus konfiguráció beolvassa a címadatokat, sémát/képeket generál, és elindítja az értesítések áramlását ezekből a fájlokból.",

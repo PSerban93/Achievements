@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "ในบริบทเกมที่ยกระดับสิทธิ์/มีการป้องกัน การลากอาจล้มเหลว; ให้ใช้ตำแหน่งสแนป (Ctrl+Alt+Shift+1..5) หรือโหมดขยับละเอียด (Ctrl+Alt+Shift+Arrow Keys)",
   "platformGuideTroubleshootingItem7": "หาก PageUp/PageDown ใช้ไม่ได้ในโอเวอร์เลย์ ให้ใช้คีย์สำรอง Ctrl+PageUp / Ctrl+PageDown",
   "platformGuideTroubleshootingItem8": "หากมีเสียงแต่การแจ้งเตือนขึ้นช้า ให้ลดภาระของพรีเซ็ต (เบลอ/เงา/ทรานส์ฟอร์มขนาดใหญ่) และลดระยะเวลาการแจ้งเตือน",
-  "platformGuideTroubleshootingItem9": "หากมีปัญหาในการแสดงผล/การนำเสนอของโอเวอร์เลย์ โดยเฉพาะเมื่อเปิดใช้ Special K ให้เปิดตัวเลือกความเข้ากันได้ globalShortcut สำหรับโอเวอร์เลย์ใน Advanced > Rendering การทำเช่นนี้จะปิดการลากแบบอาศัย hook และอาจช่วยให้เข้ากันได้ดีขึ้นในบางระบบ",
+  "platformGuideTroubleshootingItem9": "หากมีปัญหาเกี่ยวกับการแสดงผล/การนำเสนอของ overlay หรือปุ่มลัดทำงานแต่ไม่เห็นอะไรเลย ให้สลับตัวเลือก Disable Hardware Acceleration ใน Advanced > Rendering แล้วรีสตาร์ทแอป หากปัญหายังคงอยู่ โดยเฉพาะเมื่อ Special K ทำงานอยู่ ให้เปิดตัวเลือกความเข้ากันได้ globalShortcut สำหรับ overlay การทำเช่นนี้จะปิดการลากแบบอาศัย hook และอาจช่วยเพิ่มความเข้ากันได้บนบางระบบ",
   "platformGuideTroubleshootingSummary": "การแก้ไขปัญหาอย่างรวดเร็ว",
   "platformGuideXeniaItem1": "ดูเส้นทางเนื้อหา/โปรไฟล์ Xenia ที่มีการอัพเดตไฟล์ .gpd",
   "platformGuideXeniaItem2": "การกำหนดค่าอัตโนมัติจะอ่านข้อมูลชื่อ สร้างสคีมา/รูปภาพ และเริ่มโฟลว์การแจ้งเตือนจากไฟล์เหล่านั้น",

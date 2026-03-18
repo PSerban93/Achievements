@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "Em contextos de jogo elevados/protegidos, o arrastar pode falhar; use posições snap (Ctrl+Alt+Shift+1..5) ou modo de ajuste fino (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Se PageUp/PageDown não funcionar no overlay, use o fallback Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Se o som tocar mas as notificações surgirem com atraso, reduza o custo do preset (desfoque/sombras/transformações grandes) e diminua a duração da notificação.",
-  "platformGuideTroubleshootingItem9": "Se surgirem problemas de visualização/apresentação do overlay, especialmente com o Special K ativo, ative a opção de compatibilidade globalShortcut para o overlay em Advanced > Rendering. Isto desativa o arrasto baseado em hook e pode melhorar a compatibilidade em alguns sistemas.",
+  "platformGuideTroubleshootingItem9": "Se surgirem problemas de apresentação/visualização do overlay, ou se o atalho funcionar mas nada ficar visível, altere a opção Disable Hardware Acceleration em Advanced > Rendering e reinicie a aplicação. Se os problemas persistirem, especialmente com o Special K ativo, ative a opção de compatibilidade globalShortcut para o overlay. Isto desativa o arrasto baseado em hooks e pode melhorar a compatibilidade em alguns sistemas.",
   "platformGuideTroubleshootingSummary": "Solução rápida de problemas",
   "platformGuideXeniaItem1": "Observe o caminho do conteúdo/perfil Xenia onde os arquivos .gpd são atualizados.",
   "platformGuideXeniaItem2": "A configuração automática lê os dados do título, gera esquemas/imagens e inicia o fluxo de notificação desses arquivos.",

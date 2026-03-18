@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "在提权/受保护的游戏环境中，拖拽可能失败；请使用吸附位置（Ctrl+Alt+Shift+1..5）或微调模式（Ctrl+Alt+Shift+方向键）。",
   "platformGuideTroubleshootingItem7": "如果覆盖层中的 PageUp/PageDown 不生效，请使用备用组合 Ctrl+PageUp / Ctrl+PageDown。",
   "platformGuideTroubleshootingItem8": "如果声音先播放但通知显示延迟，请降低预设开销（模糊/阴影/大幅变换）并缩短通知时长。",
-  "platformGuideTroubleshootingItem9": "如果出现覆盖层显示/呈现问题，尤其是在启用 Special K 时，请在 Advanced > Rendering 中启用覆盖层的 globalShortcut 兼容选项。这会禁用基于 hook 的拖拽，并可能改善某些系统上的兼容性。",
+  "platformGuideTroubleshootingItem9": "如果出现 overlay 显示/呈现问题，或者热键有效但什么都看不到，请在 Advanced > Rendering 中切换 Disable Hardware Acceleration，并重启应用。如果问题仍然存在，尤其是在启用了 Special K 的情况下，请为 overlay 启用 globalShortcut 兼容选项。这样会禁用基于 hook 的拖动，并可能提升某些系统上的兼容性。",
   "platformGuideTroubleshootingSummary": "快速排除故障",
   "platformGuideXeniaItem1": "观看更新 .gpd 文件的 Xenia 内容/配置文件路径。",
   "platformGuideXeniaItem2": "自动配置读取标题数据，生成架构/图像，并从这些文件启动通知流。",

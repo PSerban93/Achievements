@@ -1969,7 +1969,8 @@ function armOverlayVisibilityAckTimeout(visible, source) {
     ) {
       overlayVisibleAckSatisfied = true;
       overlayLogger.warn("overlay:renderer-ack-timeout:fallback-show", {
-        source: overlayVisibilityAckState?.source || String(source || "unknown"),
+        source:
+          overlayVisibilityAckState?.source || String(source || "unknown"),
         elapsedMs,
         state: getOverlayWindowLogState(),
       });
@@ -2093,46 +2094,6 @@ function reassertOverlayAlwaysOnTop(reason) {
     });
   }, 50);
 }
-
-/*
-function boostOverlayTopmost(reason) {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return;
-  const resolvedReason = String(reason || "unknown");
-  let before = null;
-  try {
-    if (typeof overlayWindow.isAlwaysOnTop === "function") {
-      before = overlayWindow.isAlwaysOnTop();
-    }
-  } catch {}
-  try {
-    overlayWindow.setAlwaysOnTop(true, "screen-saver");
-  } catch {}
-  try {
-    overlayWindow.setVisibleOnAllWorkspaces(true, {
-      visibleOnFullScreen: true,
-    });
-  } catch {}
-  let after = null;
-  try {
-    if (typeof overlayWindow.isAlwaysOnTop === "function") {
-      after = overlayWindow.isAlwaysOnTop();
-    }
-  } catch {}
-  overlayLogger.debug("overlay:always-on-top:boost", {
-    level: "screen-saver",
-    reason: resolvedReason,
-    before,
-    after,
-  });
-  clearOverlayTopmostBoostTimer();
-  overlayTopmostBoostTimer = setTimeout(() => {
-    overlayTopmostBoostTimer = null;
-    if (!overlayWindow || overlayWindow.isDestroyed()) return;
-    if (!overlayPresented) return;
-    reassertOverlayAlwaysOnTop(`${resolvedReason}:settle`);
-  }, 150);
-}
-*/
 
 // Overlay focus safety contract (keep this for drag/snap/reposition fallback logic):
 // 1) Do not call `overlayWindow.show()` or `overlayWindow.focus()` from move/snap paths.
@@ -7563,7 +7524,9 @@ async function monitorAchievementsFile(filePath) {
           );
       } else if (isUbisoftOfficial) {
         const parsed = readUbisoftSpoolFile(filePath);
-        currentAchievements = buildUbisoftOfficialSnapshot(parsed?.records || []);
+        currentAchievements = buildUbisoftOfficialSnapshot(
+          parsed?.records || [],
+        );
       } else if (isLumaPlay) {
         const parsed = readLumaPlayAchievementsSnapshot({
           appid: String(configMeta?.appid || ""),
@@ -7968,7 +7931,9 @@ async function monitorAchievementsFile(filePath) {
     } else {
       const baseDir = path.dirname(filePath);
       if (normalizePlatform(configMeta?.platform) === "gog-official") {
-        const resolved = resolveGogOfficialGameplayDbForConfig(configMeta || {});
+        const resolved = resolveGogOfficialGameplayDbForConfig(
+          configMeta || {},
+        );
         const nextGameplayDb = resolved?.gameplayDbPath || "";
         if (
           nextGameplayDb &&
@@ -12557,7 +12522,9 @@ ipcMain.handle(
       }
       try {
         const parsed = readGogGameplayDb(gameplayDbPath);
-        const entries = buildGogOfficialRarityEntries(parsed?.achievements || []);
+        const entries = buildGogOfficialRarityEntries(
+          parsed?.achievements || [],
+        );
         const sidecarPath = writeAchievementPercentagesSidecar(
           path.dirname(schemaPath),
           productId,

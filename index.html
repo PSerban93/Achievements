@@ -1768,9 +1768,12 @@
                     </li>
                     <li id="platformGuideUbisoftOfficialItem2">
                       Runtime progress is read from
-                      <code>&lt;userId&gt;\&lt;productId&gt;.spool</code>,
-                      while schema/images are generated from
-                      <code>%ProgramData%\Ubisoft\Ubisoft Game Launcher\cache\achievements</code>.
+                      <code>&lt;userId&gt;\&lt;productId&gt;.spool</code>, while
+                      schema/images are generated from
+                      <code
+                        >%ProgramData%\Ubisoft\Ubisoft Game
+                        Launcher\cache\achievements</code
+                      >.
                     </li>
                     <li id="platformGuideUbisoftOfficialItem3">
                       Config generation starts only after both the local spool
@@ -1798,9 +1801,12 @@
                     </li>
                     <li id="platformGuideGogOfficialItem2">
                       Local product mapping is read from
-                      <code>%ProgramData%\GOG.com\Galaxy\storage\galaxy-2.0.db</code>,
-                      and runtime progress is read from
-                      <code>Applications\&lt;clientId&gt;\Gameplay\&lt;userId&gt;\gameplay.db</code>.
+                      <code
+                        >%ProgramData%\GOG.com\Galaxy\storage\galaxy-2.0.db</code
+                      >, and runtime progress is read from
+                      <code
+                        >Applications\&lt;clientId&gt;\Gameplay\&lt;userId&gt;\gameplay.db</code
+                      >.
                     </li>
                     <li id="platformGuideGogOfficialItem3">
                       Config generation starts only after
@@ -1933,9 +1939,9 @@
                       refresh.
                     </li>
                     <li id="platformGuideRescanItem2">
-                      For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft
-                      Connect (Official) and GOG Galaxy (Official), schema
-                      regenerate is blocked by design.
+                      For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect
+                      (Official) and GOG Galaxy (Official), schema regenerate is
+                      blocked by design.
                     </li>
                     <li id="platformGuideRescanItem3">
                       For those platforms/emulators, use Folders → Rescan to
@@ -2039,9 +2045,9 @@
                       Auto selection flow: auto-select:*.
                     </li>
                     <li id="platformGuideLogsItem5">
-                      Steam Official handling: steam-official:*. Ubisoft
-                      Connect handling: ubisoft-official:*. GOG Galaxy
-                      handling: gog-official:*.
+                      Steam Official handling: steam-official:*. Ubisoft Connect
+                      handling: ubisoft-official:*. GOG Galaxy handling:
+                      gog-official:*.
                     </li>
                   </ul>
                 </details>
@@ -2097,11 +2103,13 @@
                       notification duration.
                     </li>
                     <li id="platformGuideTroubleshootingItem9">
-                      If overlay display/presentation issues appear, especially
-                      with Special K active, enable Force globalShortcut for
-                      overlay in Advanced &gt; Rendering. This disables
-                      hook-based drag and can improve compatibility on some
-                      systems.
+                      If overlay display/presentation issues appear, or the
+                      hotkey works but nothing is visible, toggle Disable
+                      Hardware Acceleration in Advanced &gt; Rendering and
+                      restart the app. If issues remain, especially with
+                      Special K active, enable the globalShortcut compatibility
+                      option for overlay. This disables hook-based drag and can
+                      improve compatibility on some systems.
                     </li>
                   </ul>
                 </details>
@@ -6821,6 +6829,7 @@
             document.getElementById("scaleSlider").value,
           );
 
+          stopUiAudioPlayback();
           window.api.showTestNotification({
             preset,
             position,
@@ -7322,6 +7331,7 @@
 
       window.api.onPlaySound(async (soundName) => {
         if (soundName && soundName !== "mute") {
+          stopPreviewSound();
           await playCustomSound(soundName);
         }
       });
@@ -7401,14 +7411,25 @@
           const gainNode = soundAudioContext.createGain();
           gainNode.gain.value = vol;
           source.connect(gainNode).connect(soundAudioContext.destination);
+          let cleanedUp = false;
           const cleanup = () => {
+            if (cleanedUp) return;
+            cleanedUp = true;
             try {
               source.disconnect();
             } catch {}
             try {
               gainNode.disconnect();
             } catch {}
+            if (audio.__volumeGraphCleanup === cleanup) {
+              try {
+                delete audio.__volumeGraphCleanup;
+              } catch {
+                audio.__volumeGraphCleanup = null;
+              }
+            }
           };
+          audio.__volumeGraphCleanup = cleanup;
           audio.addEventListener("ended", cleanup, { once: true });
           audio.addEventListener("error", cleanup, { once: true });
         } catch (err) {
@@ -7430,12 +7451,75 @@
         playAudioWithVolume(audio, volume, "?? Sound play error:");
       }
 
-      async function playCustomSound(fileName) {
+      let activePreviewAudio = null;
+      let activePlaybackAudio = null;
+      let activePreviewSelectId = "settings-soundSelect";
+
+      function stopManagedAudio(audio) {
+        if (!audio) return;
+        audio.pause();
+        audio.currentTime = 0;
+        try {
+          audio.__volumeGraphCleanup?.();
+        } catch {}
+      }
+
+      function stopPreviewSound() {
+        if (!activePreviewAudio) return;
+        stopManagedAudio(activePreviewAudio);
+        activePreviewAudio = null;
+      }
+
+      function stopPlaybackSound() {
+        if (!activePlaybackAudio) return;
+        stopManagedAudio(activePlaybackAudio);
+        activePlaybackAudio = null;
+      }
+
+      function stopUiAudioPlayback() {
+        stopPreviewSound();
+        stopPlaybackSound();
+      }
+
+      async function playPreviewSound(fileName, sourceSelectId) {
+        if (sourceSelectId) {
+          activePreviewSelectId = sourceSelectId;
+        }
+        stopUiAudioPlayback();
         if (!fileName || fileName === "mute") return;
 
         try {
           const fullPath = await window.api.getSoundFullPath(fileName);
+          activePreviewAudio = new Audio(fullPath);
+          const volume = getSoundVolumeValue();
+          playAudioWithVolume(
+            activePreviewAudio,
+            volume,
+            "Preview sound play error:",
+          );
+        } catch (err) {
+          console.error(
+            tUi("log.soundPathLoadFailed", "Failed to load sound path:"),
+            err,
+          );
+        }
+      }
+
+      async function playCustomSound(fileName) {
+        if (!fileName || fileName === "mute") return;
+
+        try {
+          stopPlaybackSound();
+          const fullPath = await window.api.getSoundFullPath(fileName);
           const audio = new Audio(fullPath);
+          activePlaybackAudio = audio;
+          const clearPlaybackRef = () => {
+            if (activePlaybackAudio === audio) {
+              activePlaybackAudio = null;
+            }
+          };
+          audio.addEventListener("ended", clearPlaybackRef, { once: true });
+          audio.addEventListener("error", clearPlaybackRef, { once: true });
           const volume = getSoundVolumeValue();
           playAudioWithVolume(audio, volume, "?? Custom sound play error:");
         } catch (err) {
@@ -8771,6 +8855,7 @@
             document.getElementById("settings-scaleSlider").value,
           );
 
+          stopUiAudioPlayback();
           window.api.showTestNotification({
             preset,
             position,
@@ -8895,6 +8980,15 @@
         window.api.savePreferences({
           soundVolume: settingsSoundVolumeSlider.value,
         });
+        stopUiAudioPlayback();
+      });
+
+      settingsSoundVolumeSlider.addEventListener("change", () => {
+        const sourceSelectId = activePreviewSelectId || "settings-soundSelect";
+        const selectedSound =
+          document.getElementById(sourceSelectId)?.value ||
+          document.getElementById("settings-soundSelect")?.value;
+        playPreviewSound(selectedSound, sourceSelectId);
       });
 
       // Save Settings without config
@@ -8954,6 +9048,7 @@
         .getElementById("settings-soundSelect")
         .addEventListener("change", (e) => {
           window.api.savePreferences({ sound: e.target.value });
+          playPreviewSound(e.target.value, "settings-soundSelect");
         });
 
       document
@@ -8962,6 +9057,7 @@
           const hidden = document.getElementById("platinumSoundValue");
           if (hidden) hidden.value = e.target.value;
           window.api.savePreferences({ platinumSound: e.target.value });
+          playPreviewSound(e.target.value, "settings-platinumSoundSelect");
         });
 
       // Function to sync values between main UI and settings menu
@@ -11699,7 +11795,9 @@
                 window.__dashboardNeedsRebuild = true;
                 continue;
               }
-              const cards = Array.from(gridEl?.querySelectorAll(".dash-card") || []);
+              const cards = Array.from(
+                gridEl?.querySelectorAll(".dash-card") || [],
+              );
               if (forceRebuild || !cards.length) {
                 await buildDashboard();
                 continue;

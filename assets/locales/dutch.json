@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "In verhoogde/beschermde game-contexten kan slepen mislukken; gebruik snap-posities (Ctrl+Alt+Shift+1..5) of nudge-modus (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Als PageUp/PageDown niet werkt in de overlay, gebruik dan de fallback Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Als geluid afspeelt maar meldingen laat verschijnen, verlaag de preset-kosten (blur/schaduwen/grote transformaties) en verkort de meldingsduur.",
-  "platformGuideTroubleshootingItem9": "Als er problemen optreden met de weergave/presentatie van de overlay, vooral wanneer Special K actief is, schakel dan in Advanced > Rendering de globalShortcut-compatibiliteitsoptie voor de overlay in. Dit schakelt hook-gebaseerd slepen uit en kan de compatibiliteit op sommige systemen verbeteren.",
+  "platformGuideTroubleshootingItem9": "Als er problemen optreden met de weergave/presentatie van de overlay, of als de sneltoets werkt maar er niets zichtbaar is, schakel dan Disable Hardware Acceleration in Advanced > Rendering om en start de app opnieuw. Als de problemen blijven bestaan, vooral wanneer Special K actief is, schakel dan de globalShortcut-compatibiliteitsoptie voor de overlay in. Dit schakelt hook-gebaseerd slepen uit en kan de compatibiliteit op sommige systemen verbeteren.",
   "platformGuideTroubleshootingSummary": "Snelle probleemoplossing",
   "platformGuideXeniaItem1": "Bekijk het inhouds-/profielpad Xenia waar .gpd-bestanden worden bijgewerkt.",
   "platformGuideXeniaItem2": "Auto-config leest titelgegevens, genereert schema's/afbeeldingen en start de meldingsstroom vanuit die bestanden.",

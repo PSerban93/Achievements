@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "V elevovaných/chráněných herních kontextech nemusí fungovat tažení; použijte snap pozice (Ctrl+Alt+Shift+1..5) nebo jemné posouvání (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Pokud v overlayi nefunguje PageUp/PageDown, použijte náhradní Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Pokud se přehraje zvuk, ale notifikace se zobrazují se zpožděním, snižte náročnost presetu (rozostření/stíny/velké transformace) a zkraťte dobu zobrazení notifikace.",
-  "platformGuideTroubleshootingItem9": "Pokud se objeví problémy se zobrazením/prezentací overlaye, zejména když je aktivní Special K, zapněte v Advanced > Rendering možnost kompatibility globalShortcut pro overlay. Tím se vypne přetahování založené na hooku a na některých systémech se může zlepšit kompatibilita.",
+  "platformGuideTroubleshootingItem9": "Pokud se objeví problémy se zobrazením/prezentací overlaye nebo zkratka funguje, ale nic není vidět, přepněte možnost Disable Hardware Acceleration v Advanced > Rendering a restartujte aplikaci. Pokud potíže přetrvávají, zejména když je aktivní Special K, povolte pro overlay možnost kompatibility globalShortcut. Tím se vypne drag založený na hooku a na některých systémech to může zlepšit kompatibilitu.",
   "platformGuideTroubleshootingSummary": "Rychlé řešení problémů",
   "platformGuideXeniaItem1": "Sledujte cestu k obsahu/profilu Xenia, kde se aktualizují soubory .gpd.",
   "platformGuideXeniaItem2": "Automatická konfigurace čte data názvu, generuje schéma/obrazy a zahajuje tok upozornění z těchto souborů.",

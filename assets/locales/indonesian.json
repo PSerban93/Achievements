@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "Pada konteks game elevated/protected, drag bisa gagal; gunakan posisi snap (Ctrl+Alt+Shift+1..5) atau mode geser halus (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Jika PageUp/PageDown tidak berfungsi di overlay, gunakan fallback Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Jika suara berbunyi tetapi notifikasi muncul terlambat, turunkan beban preset (blur/bayangan/transformasi besar) dan kurangi durasi notifikasi.",
-  "platformGuideTroubleshootingItem9": "Jika muncul masalah tampilan/presentasi overlay, terutama saat Special K aktif, aktifkan opsi kompatibilitas globalShortcut untuk overlay di Advanced > Rendering. Ini menonaktifkan drag berbasis hook dan dapat meningkatkan kompatibilitas pada beberapa sistem.",
+  "platformGuideTroubleshootingItem9": "Jika muncul masalah tampilan/presentasi overlay, atau hotkey berfungsi tetapi tidak ada yang terlihat, ubah opsi Disable Hardware Acceleration di Advanced > Rendering lalu mulai ulang aplikasi. Jika masalah tetap ada, terutama saat Special K aktif, aktifkan opsi kompatibilitas globalShortcut untuk overlay. Ini menonaktifkan drag berbasis hook dan dapat meningkatkan kompatibilitas pada beberapa sistem.",
   "platformGuideTroubleshootingSummary": "Pemecahan masalah cepat",
   "platformGuideXeniaItem1": "Tonton jalur konten/profil Xenia tempat file .gpd diperbarui.",
   "platformGuideXeniaItem2": "Konfigurasi otomatis membaca data judul, menghasilkan skema/gambar, dan memulai aliran notifikasi dari file tersebut.",

@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "Nei contesti di gioco elevati/protetti, il trascinamento può fallire; usa le posizioni snap (Ctrl+Alt+Shift+1..5) o la modalità nudge (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Se PageUp/PageDown non funziona nell'overlay, usa il fallback Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Se il suono viene riprodotto ma le notifiche compaiono in ritardo, riduci il costo del preset (blur/ombre/trasformazioni grandi) e la durata della notifica.",
-  "platformGuideTroubleshootingItem9": "Se compaiono problemi di visualizzazione/presentazione dell'overlay, soprattutto con Special K attivo, attiva l'opzione di compatibilità globalShortcut per l'overlay in Advanced > Rendering. Questo disattiva il trascinamento basato su hook e può migliorare la compatibilità su alcuni sistemi.",
+  "platformGuideTroubleshootingItem9": "Se compaiono problemi di visualizzazione/presentazione dell'overlay, oppure il tasto rapido funziona ma non si vede nulla, cambia l'opzione Disable Hardware Acceleration in Advanced > Rendering e riavvia l'app. Se i problemi persistono, soprattutto con Special K attivo, abilita l'opzione di compatibilità globalShortcut per l'overlay. Questo disattiva il trascinamento basato su hook e può migliorare la compatibilità su alcuni sistemi.",
   "platformGuideTroubleshootingSummary": "Risoluzione rapida dei problemi",
   "platformGuideXeniaItem1": "Guarda il percorso del contenuto/profilo Xenia in cui vengono aggiornati i file .gpd.",
   "platformGuideXeniaItem2": "La configurazione automatica legge i dati del titolo, genera schemi/immagini e avvia il flusso di notifiche da tali file.",

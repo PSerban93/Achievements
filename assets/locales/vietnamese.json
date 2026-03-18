@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "Trong ngữ cảnh game elevated/protected, kéo thả có thể thất bại; hãy dùng vị trí snap (Ctrl+Alt+Shift+1..5) hoặc chế độ tinh chỉnh (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Nếu PageUp/PageDown không hoạt động trong overlay, hãy dùng tổ hợp dự phòng Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Nếu có âm thanh nhưng thông báo xuất hiện chậm, hãy giảm độ nặng của preset (blur/bóng đổ/biến đổi lớn) và giảm thời lượng thông báo.",
-  "platformGuideTroubleshootingItem9": "Nếu xuất hiện sự cố hiển thị/trình bày overlay, đặc biệt khi Special K đang hoạt động, hãy bật tùy chọn tương thích globalShortcut cho overlay trong Advanced > Rendering. Tùy chọn này sẽ tắt kéo thả dựa trên hook và có thể cải thiện khả năng tương thích trên một số hệ thống.",
+  "platformGuideTroubleshootingItem9": "Nếu xuất hiện sự cố hiển thị/trình bày overlay hoặc phím tắt hoạt động nhưng không thấy gì, hãy chuyển đổi Disable Hardware Acceleration trong Advanced > Rendering rồi khởi động lại ứng dụng. Nếu sự cố vẫn còn, đặc biệt khi Special K đang hoạt động, hãy bật tùy chọn tương thích globalShortcut cho overlay. Tùy chọn này sẽ tắt kéo thả dựa trên hook và có thể cải thiện khả năng tương thích trên một số hệ thống.",
   "platformGuideTroubleshootingSummary": "Khắc phục sự cố nhanh",
   "platformGuideXeniaItem1": "Xem đường dẫn nội dung/hồ sơ Xenia nơi các tệp .gpd được cập nhật.",
   "platformGuideXeniaItem2": "Tự động định cấu hình đọc dữ liệu tiêu đề, tạo lược đồ/hình ảnh và bắt đầu luồng thông báo từ các tệp đó.",

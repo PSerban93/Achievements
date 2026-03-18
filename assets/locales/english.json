@@ -446,7 +446,7 @@
   "platformGuideTroubleshootingItem6": "In elevated/protected game contexts, drag may fail; use snap positions (Ctrl+Alt+Shift+1..5) or nudge mode (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "If PageUp/PageDown does not work in overlay, use the fallback Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "If sound plays but notifications appear late, lower preset cost (blur/shadows/large transforms) and reduce notification duration.",
-  "platformGuideTroubleshootingItem9": "If overlay display/presentation issues appear, especially with Special K active, enable the globalShortcut compatibility option for overlay in Advanced > Rendering. This disables hook-based drag and can improve compatibility on some systems.",
+  "platformGuideTroubleshootingItem9": "If overlay display/presentation issues appear, or the hotkey works but nothing is visible, toggle Disable Hardware Acceleration in Advanced > Rendering and restart the app. If issues remain, especially with Special K active, enable the globalShortcut compatibility option for overlay. This disables hook-based drag and can improve compatibility on some systems.",
   "platformGuideTroubleshootingSummary": "Quick troubleshooting",
   "platformGuideXeniaItem1": "Watch the Xenia content/profile path where .gpd files are updated.",
   "platformGuideXeniaItem2": "Auto-config reads title data, generates schema/images, and starts notification flow from those files.",

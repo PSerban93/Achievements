@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "В повишени/защитени игрови контексти влаченето може да не работи; използвайте snap позиции (Ctrl+Alt+Shift+1..5) или режим за фино преместване (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Ако PageUp/PageDown не работи в overlay, използвайте резервния вариант Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Ако звукът се чува, но известията се появяват със закъснение, намалете тежестта на preset-а (замъгляване/сенки/големи трансформации) и съкратете продължителността на известието.",
-  "platformGuideTroubleshootingItem9": "Ако се появят проблеми с показването/презентацията на overlay-а, особено когато Special K е активен, активирайте опцията за съвместимост globalShortcut за overlay в Advanced > Rendering. Това изключва влаченето чрез hook и може да подобри съвместимостта на някои системи.",
+  "platformGuideTroubleshootingItem9": "Ако се появят проблеми с показването/презентацията на overlay-а, или ако бързият клавиш работи, но нищо не се вижда, превключете Disable Hardware Acceleration в Advanced > Rendering и рестартирайте приложението. Ако проблемите продължат, особено когато Special K е активен, активирайте опцията за съвместимост globalShortcut за overlay-а. Това изключва влаченето чрез hook и може да подобри съвместимостта на някои системи.",
   "platformGuideTroubleshootingSummary": "Бързо отстраняване на проблеми",
   "platformGuideXeniaItem1": "Гледайте пътя за съдържание/профил Xenia, където се актуализират .gpd файловете.",
   "platformGuideXeniaItem2": "Автоматичното конфигуриране чете данни за заглавие, генерира схема/изображения и стартира поток от известия от тези файлове.",

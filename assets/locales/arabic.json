@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "في سياقات الألعاب المرتفعة الصلاحيات/المحمية قد يفشل السحب؛ استخدم مواضع التثبيت (Ctrl+Alt+Shift+1..5) أو وضع التحريك الدقيق (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "إذا لم يعمل PageUp/PageDown داخل الـ Overlay، استخدم البديل Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "إذا تم تشغيل الصوت لكن الإشعارات تظهر متأخرة، خفّض كلفة القالب (الضبابية/الظلال/التحويلات الكبيرة) وقلّل مدة الإشعار.",
-  "platformGuideTroubleshootingItem9": "إذا ظهرت مشاكل في عرض/تقديم الـ Overlay، خصوصًا عند تفعيل Special K، ففعّل خيار توافق globalShortcut الخاص بالـ Overlay من Advanced > Rendering. هذا يعطّل السحب المعتمد على hook وقد يحسّن التوافق على بعض الأنظمة.",
+  "platformGuideTroubleshootingItem9": "إذا ظهرت مشاكل في عرض/إظهار الـ overlay، أو كان مفتاح الاختصار يعمل لكن لا يظهر شيء، فقم بتبديل خيار Disable Hardware Acceleration من Advanced > Rendering ثم أعد تشغيل التطبيق. إذا استمرت المشاكل، خاصة عند تفعيل Special K، فقم بتمكين خيار توافق globalShortcut للـ overlay. هذا يعطل السحب المعتمد على hook وقد يحسن التوافق على بعض الأنظمة.",
   "platformGuideTroubleshootingSummary": "استكشاف الأخطاء وإصلاحها بسرعة",
   "platformGuideXeniaItem1": "شاهد مسار المحتوى/الملف الشخصي Xenia حيث يتم تحديث ملفات .gpd.",
   "platformGuideXeniaItem2": "يقرأ التكوين التلقائي بيانات العنوان، وينشئ المخطط/الصور، ويبدأ تدفق الإشعارات من تلك الملفات.",

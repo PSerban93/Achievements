@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "I forhøjede/beskyttede spilkontekster kan træk fejle; brug snap-positioner (Ctrl+Alt+Shift+1..5) eller finjustering (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Hvis PageUp/PageDown ikke virker i overlayet, brug fallback Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Hvis lyd afspilles men notifikationer vises forsinket, sænk preset-omkostningen (blur/skygger/store transformeringer) og reducer notifikationsvarigheden.",
-  "platformGuideTroubleshootingItem9": "Hvis der opstår problemer med visning/præsentation af overlayet, især når Special K er aktivt, så aktivér globalShortcut-kompatibilitetsindstillingen for overlayet i Advanced > Rendering. Dette deaktiverer hook-baseret træk og kan forbedre kompatibiliteten på nogle systemer.",
+  "platformGuideTroubleshootingItem9": "Hvis der opstår problemer med overlayets visning/præsentation, eller hvis genvejstasten virker men intet er synligt, så skift Disable Hardware Acceleration i Advanced > Rendering og genstart appen. Hvis problemerne fortsætter, især når Special K er aktiv, så aktiver globalShortcut-kompatibilitetsindstillingen for overlayet. Dette deaktiverer hook-baseret træk og kan forbedre kompatibiliteten på nogle systemer.",
   "platformGuideTroubleshootingSummary": "Hurtig fejlfinding",
   "platformGuideXeniaItem1": "Se Xenia indhold/profilstien, hvor .gpd-filer opdateres.",
   "platformGuideXeniaItem2": "Auto-config læser titeldata, genererer skema/billeder og starter meddelelsesflow fra disse filer.",

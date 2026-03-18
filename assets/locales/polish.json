@@ -546,7 +546,7 @@
   "platformGuideTroubleshootingItem6": "W podniesionych/chronionych kontekstach gry przeciąganie może nie działać; użyj pozycji snap (Ctrl+Alt+Shift+1..5) albo trybu precyzyjnego przesuwania (Ctrl+Alt+Shift+Arrow Keys).",
   "platformGuideTroubleshootingItem7": "Jeśli PageUp/PageDown nie działa w overlay, użyj fallbacku Ctrl+PageUp / Ctrl+PageDown.",
   "platformGuideTroubleshootingItem8": "Jeśli dźwięk gra, ale powiadomienia pojawiają się z opóźnieniem, zmniejsz koszt presetu (rozmycie/cienie/duże transformacje) i skróć czas powiadomienia.",
-  "platformGuideTroubleshootingItem9": "Jeśli pojawią się problemy z wyświetlaniem/prezentacją overlayu, zwłaszcza gdy aktywny jest Special K, włącz opcję zgodności globalShortcut dla overlayu w sekcji Advanced > Rendering. Wyłącza to przeciąganie oparte na hooku i może poprawić kompatybilność na niektórych systemach.",
+  "platformGuideTroubleshootingItem9": "Jeśli pojawią się problemy z wyświetlaniem/prezentacją nakładki albo skrót działa, ale nic nie widać, przełącz opcję Disable Hardware Acceleration w Advanced > Rendering i uruchom aplikację ponownie. Jeśli problemy nadal występują, zwłaszcza gdy aktywny jest Special K, włącz opcję zgodności globalShortcut dla nakładki. Wyłącza to przeciąganie oparte na hookach i może poprawić kompatybilność na niektórych systemach.",
   "platformGuideTroubleshootingSummary": "Szybkie rozwiązywanie problemów",
   "platformGuideXeniaItem1": "Obserwuj ścieżkę zawartości/profilu Xenia, w której aktualizowane są pliki .gpd.",
   "platformGuideXeniaItem2": "Automatyczna konfiguracja odczytuje dane tytułu, generuje schemat/obrazy i rozpoczyna przepływ powiadomień z tych plików.",
