@@ -25,6 +25,12 @@ const {
   resolveUbisoftOfficialSpoolEntryForAppId,
   resolveUbisoftSteamAppId,
 } = require("./ubisoft-connect-local");
+const {
+  buildEaOfficialSnapshot,
+  ensureEaOfficialSchema,
+  resolveEaOfficialAchievementSetForAppId,
+  resolveEaOfficialVerboseLogPath,
+} = require("./ea-desktop-local");
 const autoConfigLogger = createLogger("autoconfig");
 const {
   normalizePlatform,
@@ -231,6 +237,8 @@ function resolveConfigTarget({ outputDir, baseName, appid, platform, index }) {
       ? "Uplay"
       : platform === "ubisoft-official"
       ? "Ubisoft Official"
+      : platform === "ea-official"
+      ? "EA Official"
       : platform === "gog"
       ? "GOG"
       : platform === "gog-official"
@@ -925,6 +933,208 @@ function readUbisoftSpoolFileSafe(filePath) {
   } catch {
     return null;
   }
+}
+
+async function generateEaOfficialConfigForProduct(appid, outputDir, opts = {}) {
+  const productId = String(appid || "").trim();
+  if (!/^\d+$/.test(productId)) {
+    autoConfigLogger.error("ea-official:invalid-product-id", {
+      appid: productId,
+    });
+    throw new Error(`Invalid EA Content ID: ${productId}`);
+  }
+
+  const configVariantIndex = loadConfigVariantIndex(outputDir);
+  const logsDir =
+    typeof opts.savePathOverride === "string" ? opts.savePathOverride.trim() : "";
+  const explicitLogFile = String(
+    opts.eaLogFile || opts.ea_log_file || "",
+  ).trim();
+  const achievementSet = String(
+    opts.eaAchievementSet || opts.ea_achievement_set || "",
+  ).trim();
+  const logFilePath = resolveEaOfficialVerboseLogPath(
+    {
+      save_path: logsDir,
+      ea_log_file: explicitLogFile,
+    },
+    {
+      savePath: logsDir,
+      logFilePath: explicitLogFile,
+    },
+  );
+  if (!logFilePath || !fs.existsSync(logFilePath)) {
+    autoConfigLogger.warn("ea-official:log-missing", {
+      appid: productId,
+      savePath: logsDir || null,
+      eaLogFile: explicitLogFile || null,
+    });
+    throw new Error("EA Desktop verbose log was not found for this product.");
+  }
+
+  const entry = resolveEaOfficialAchievementSetForAppId(productId, {
+    achievementSet,
+    savePath: logsDir,
+    logFilePath,
+  });
+  if (!entry || !Array.isArray(entry.achievements) || !entry.achievements.length) {
+    autoConfigLogger.info("ea-official:schema-pending", {
+      appid: productId,
+      achievementSet: achievementSet || null,
+      logFilePath,
+    });
+    return {
+      appid: productId,
+      platform: "ea-official",
+      skipped: true,
+      pendingSchema: true,
+      save_path: path.dirname(logFilePath),
+      ea_log_file: logFilePath,
+      ea_achievement_set: achievementSet || "",
+      snapshot: {},
+    };
+  }
+
+  const schemaBase = path.join(outputDir, "schema");
+  const destSchemaDir = path.join(schemaBase, "ea-official", productId);
+  fs.mkdirSync(destSchemaDir, { recursive: true });
+
+  const schemaResult = await ensureEaOfficialSchema(productId, destSchemaDir, {
+    entry,
+    logFilePath,
+    savePath: logsDir || path.dirname(logFilePath),
+  });
+  const schemaCount = Number(schemaResult?.count || 0);
+  if (!Number.isFinite(schemaCount) || schemaCount <= 0) {
+    autoConfigLogger.info("ea-official:schema-pending", {
+      appid: productId,
+      achievementSet: entry.achievementSet || null,
+      logFilePath,
+      schemaCount,
+    });
+    return {
+      appid: productId,
+      platform: "ea-official",
+      skipped: true,
+      pendingSchema: true,
+      save_path: path.dirname(logFilePath),
+      config_path: destSchemaDir,
+      ea_log_file: logFilePath,
+      ea_achievement_set: entry.achievementSet || "",
+      snapshot: buildEaOfficialSnapshot(entry, null),
+    };
+  }
+
+  const existingVariant =
+    resolveExistingVariant(configVariantIndex, productId, "ea-official") || null;
+  const resolvedBase =
+    String(opts.preferredName || "").trim() ||
+    String(entry.gameName || schemaResult?.title || "").trim() ||
+    `EA ${productId}`;
+  const defaultCfgName = `${resolvedBase} (EA Official)`;
+  const desiredFileBase = sanitizeFilename(defaultCfgName);
+  const targetInfo = existingVariant
+    ? {
+        filePath: existingVariant.filePath,
+        name: existingVariant.name || defaultCfgName,
+        reused: true,
+      }
+    : {
+        filePath: path.join(outputDir, `${desiredFileBase}.json`),
+        name: defaultCfgName,
+        reused: false,
+      };
+
+  const existingConfig = readJsonSafe(targetInfo.filePath) || {};
+  const nextConfig = {
+    ...existingConfig,
+    name: path.basename(targetInfo.filePath, ".json"),
+    displayName: defaultCfgName,
+    appid: productId,
+    platform: "ea-official",
+    config_path: destSchemaDir,
+    save_path: path.dirname(logFilePath),
+    ea_log_file: logFilePath,
+    ea_achievement_set:
+      entry.achievementSet || existingConfig.ea_achievement_set || undefined,
+    ea_offer_id: entry.offerId || existingConfig.ea_offer_id || undefined,
+    ea_install_path:
+      entry.installPath || existingConfig.ea_install_path || undefined,
+    executable:
+      entry.exePath ||
+      (typeof existingConfig.executable === "string" ? existingConfig.executable : ""),
+    arguments:
+      typeof existingConfig.arguments === "string" ? existingConfig.arguments : "",
+    process_name:
+      entry.processName ||
+      (typeof existingConfig.process_name === "string"
+        ? existingConfig.process_name
+        : entry.exePath
+          ? path.basename(entry.exePath)
+          : ""),
+  };
+  if (nextConfig.steamAppId) delete nextConfig.steamAppId;
+
+  const previousSerialized = fs.existsSync(targetInfo.filePath)
+    ? fs.readFileSync(targetInfo.filePath, "utf8")
+    : null;
+  const nextSerialized = JSON.stringify(nextConfig, null, 2);
+  const created = !fs.existsSync(targetInfo.filePath);
+  const updated = created || previousSerialized !== nextSerialized;
+  if (updated) {
+    fs.writeFileSync(targetInfo.filePath, nextSerialized);
+  }
+
+  registerConfigVariant(configVariantIndex, productId, "ea-official", {
+    filePath: targetInfo.filePath,
+    name: path.basename(targetInfo.filePath, ".json"),
+  });
+
+  if (
+    typeof opts.onSeedCache === "function" &&
+    schemaResult?.snapshot &&
+    Object.keys(schemaResult.snapshot).length
+  ) {
+    try {
+      opts.onSeedCache({
+        appid: productId,
+        configName: path.basename(targetInfo.filePath, ".json"),
+        platform: "ea-official",
+        savePath: path.dirname(logFilePath),
+        snapshot: schemaResult.snapshot,
+      });
+    } catch (err) {
+      autoConfigLogger.warn("ea-official:seed-cache-failed", {
+        appid: productId,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  autoConfigLogger.info("ea-official:config-ready", {
+    appid: productId,
+    filePath: targetInfo.filePath,
+    created,
+    updated,
+    achievementSet: entry.achievementSet || null,
+    offerId: entry.offerId || null,
+    logFilePath,
+  });
+
+  return {
+    appid: productId,
+    name: path.basename(targetInfo.filePath, ".json"),
+    filePath: targetInfo.filePath,
+    platform: "ea-official",
+    save_path: path.dirname(logFilePath),
+    config_path: destSchemaDir,
+    ea_log_file: logFilePath,
+    ea_achievement_set: entry.achievementSet || "",
+    ea_offer_id: entry.offerId || "",
+    created,
+    updated,
+    snapshot: schemaResult?.snapshot || {},
+  };
 }
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
@@ -1855,6 +2065,12 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
   }
   if (desiredPlatform === "ubisoft-official") {
     return generateUbisoftOfficialConfigForProduct(appid, outputDir, {
+      ...opts,
+      onSeedCache,
+    });
+  }
+  if (desiredPlatform === "ea-official") {
+    return generateEaOfficialConfigForProduct(appid, outputDir, {
       ...opts,
       onSeedCache,
     });

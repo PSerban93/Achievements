@@ -358,6 +358,7 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
       [
         "uplay",
         "ubisoft-official",
+        "ea-official",
         "steam",
         "epic",
         "gog",
@@ -594,6 +595,46 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
       } catch {
         return fallback || {};
       }
+    }
+  }
+  if (normalizedPlatform === "ea-official") {
+    try {
+      const {
+        buildEaOfficialSnapshot,
+        readEaDesktopVerboseLog,
+        resolveEaOfficialAchievementSetForAppId,
+        resolveEaOfficialVerboseLogPath,
+      } = require("./ea-desktop-local");
+      const logFilePath = resolveEaOfficialVerboseLogPath(
+        configMeta || {},
+        {
+          savePath: saveDir,
+        },
+      );
+      if (logFilePath && fs.existsSync(logFilePath)) {
+        const parsed = readEaDesktopVerboseLog(logFilePath);
+        const entry = resolveEaOfficialAchievementSetForAppId(appid, {
+          achievementSet:
+            configMeta?.ea_achievement_set || configMeta?.eaAchievementSet || "",
+          parsedLog: parsed,
+          logFilePath,
+        });
+        const achievementSet =
+          entry?.achievementSet ||
+          configMeta?.ea_achievement_set ||
+          configMeta?.eaAchievementSet ||
+          "";
+        const snapshot = buildEaOfficialSnapshot(
+          entry || achievementSet,
+          parsed,
+          fallback || {},
+        );
+        return snapshot && Object.keys(snapshot).length
+          ? snapshot
+          : fallback || {};
+      }
+    } catch {
+      return fallback || {};
     }
   }
   // UniverseLAN sometimes nests the ini; allow a shallow search (depth 2)

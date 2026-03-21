@@ -6,6 +6,7 @@ const VALID_PLATFORMS = new Set([
   "steam-official",
   "uplay",
   "ubisoft-official",
+  "ea-official",
   "epic",
   "gog",
   "gog-official",
@@ -75,6 +76,8 @@ function inferPlatformAndSteamId({ config, mapping }) {
     if (!steamAppId && mappedSteamId && mappedSteamId !== appid) {
       steamAppId = mappedSteamId;
     }
+  } else if (platform === "ea-official") {
+    steamAppId = "";
   } else if (platform === "steam") {
     if (steamAppId && (!appid || steamAppId === appid)) {
       steamAppId = "";
@@ -227,10 +230,18 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
       platforms?.has("gog") &&
       !platforms?.has("steam") &&
       !platforms?.has("uplay");
+    const prefersEaOfficial =
+      platforms?.has("ea-official") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog") &&
+      !platforms?.has("epic");
     const targetPlatform = prefersUplay
       ? "uplay"
       : prefersGogOfficial
         ? "gog-official"
+      : prefersEaOfficial
+        ? "ea-official"
       : prefersGog
         ? "gog"
         : "steam";
@@ -277,6 +288,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
         ? "uplay"
         : platform === "ubisoft-official"
           ? "ubisoft-official"
+        : platform === "ea-official"
+          ? "ea-official"
         : platform === "gog"
             ? "gog"
             : platform === "epic"

@@ -988,6 +988,7 @@ function findConfigDirFromSelection(selDir, appid = "", platform = "") {
     [
       "uplay",
       "ubisoft-official",
+      "ea-official",
       "steam",
       "epic",
       "gog",
@@ -3364,6 +3365,35 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
     return null;
   }
 
+  if (normalizedPlatform === "ea-official") {
+    try {
+      const result = await ensureEaOfficialSchema(appid, destDir, {
+        logFilePath:
+          options?.ea_log_file || options?.eaLogFile || options?.logFilePath,
+        achievementSet:
+          options?.ea_achievement_set || options?.eaAchievementSet,
+        savePath: options?.save_path || options?.savePath,
+      });
+      if (result?.dir && fs.existsSync(achJson)) {
+        ipcLogger.info("schema:ensure-generated-local", {
+          appid,
+          platform: normalizedPlatform,
+          dir: result.dir,
+          logFilePath: result.logFilePath || null,
+          achievementSet: result.achievementSet || null,
+        });
+        return { dir: result.dir, existed: false };
+      }
+    } catch (err) {
+      ipcLogger.warn("schema:ea-official-failed", {
+        appid,
+        error: err?.message || String(err),
+      });
+      throw err;
+    }
+    return null;
+  }
+
   for (const altPlatform of SCHEMA_PLATFORM_DIRS) {
     if (altPlatform === normalizedPlatform) continue;
     const altDir = resolveSchemaDirForPlatform(appid, altPlatform);
@@ -4108,6 +4138,14 @@ ipcMain.handle("loadConfigs", () => {
             .includes(
               `${path.sep}schema${path.sep}ubisoft-official${path.sep}`.toLowerCase(),
             ));
+      const looksEaOfficial =
+        platformNorm === "ea-official" ||
+        (typeof raw?.config_path === "string" &&
+          raw.config_path
+            .toLowerCase()
+            .includes(
+              `${path.sep}schema${path.sep}ea-official${path.sep}`.toLowerCase(),
+            ));
       meta.platform = platformNorm || null;
       if (raw?.displayName) {
         meta.displayName =
@@ -4123,6 +4161,9 @@ ipcMain.handle("loadConfigs", () => {
       }
       if (looksUbisoftOfficial) {
         meta.platform = "ubisoft-official";
+      }
+      if (looksEaOfficial) {
+        meta.platform = "ea-official";
       }
       if (isXenia) {
         const desiredDisplay = ensureXeniaDisplayName(
@@ -4437,6 +4478,7 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
       "steam",
       "uplay",
       "ubisoft-official",
+      "ea-official",
       "gog",
       "gog-official",
       "epic",
@@ -4678,6 +4720,86 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
       }
     }
 
+    if (normalizedPlatform === "ea-official") {
+      const cached =
+        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
+      const resolved = resolveEaOfficialVerboseLogForConfig(config);
+      const logFilePath = resolved?.logFilePath || "";
+      const logsRoot = resolved?.logsRoot || config.save_path || "";
+      if (!logFilePath || !fs.existsSync(logFilePath)) {
+        return {
+          achievements: cached || {},
+          save_path: logsRoot,
+          error: "ea verbose log not found",
+        };
+      }
+      try {
+        const parsed = readEaDesktopVerboseLog(logFilePath);
+        const entry = resolveEaOfficialAchievementSetForAppId(config.appid, {
+          achievementSet: config?.ea_achievement_set || "",
+          savePath: logsRoot,
+          logFilePath,
+          parsedLog: parsed,
+        });
+        const achievementSet =
+          entry?.achievementSet || config?.ea_achievement_set || "";
+        if (!entry && !achievementSet) {
+          return {
+            achievements: cached || {},
+            save_path: logsRoot,
+            error: "ea achievement set not found",
+          };
+        }
+
+        const snapshot = buildEaOfficialSnapshot(
+          entry || achievementSet,
+          parsed,
+          cached || {},
+        );
+        const nextSavePath = logsRoot || config.save_path || "";
+        const nextLogFile = logFilePath || config?.ea_log_file || "";
+        const nextAchievementSet = achievementSet;
+        const nextOfferId = entry?.offerId || config?.ea_offer_id || "";
+        const nextInstallPath = entry?.installPath || config?.ea_install_path || "";
+        const nextExecutable = entry?.exePath || config?.executable || "";
+        const nextProcessName =
+          entry?.processName ||
+          config?.process_name ||
+          (nextExecutable ? path.basename(nextExecutable) : "");
+        if (
+          nextSavePath !== config.save_path ||
+          nextLogFile !== (config?.ea_log_file || "") ||
+          nextAchievementSet !== (config?.ea_achievement_set || "") ||
+          nextOfferId !== (config?.ea_offer_id || "") ||
+          nextInstallPath !== (config?.ea_install_path || "") ||
+          nextExecutable !== (config?.executable || "") ||
+          nextProcessName !== (config?.process_name || "")
+        ) {
+          config.save_path = nextSavePath;
+          config.ea_log_file = nextLogFile;
+          config.ea_achievement_set = nextAchievementSet;
+          config.ea_offer_id = nextOfferId;
+          config.ea_install_path = nextInstallPath;
+          config.executable = nextExecutable;
+          config.process_name = nextProcessName;
+          try {
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+          } catch {}
+        }
+
+        return {
+          achievements: snapshot || cached || {},
+          save_path: nextSavePath,
+        };
+      } catch (error) {
+        return {
+          achievements: cached || {},
+          save_path: logsRoot,
+          error: error?.message || "ea verbose log read failed",
+        };
+      }
+    }
+
     if (normalizedPlatform === "steam-official") {
       const schemaPath = resolveConfigSchemaPath(config);
       const schemaArr =
@@ -4820,7 +4942,50 @@ ipcMain.handle("delete-config", async (_event, payload) => {
     typeof payload === "string" ? payload : payload?.configName;
   const deleteExtras = payload?.deleteExtras === true;
   const deleteSaveFiles = payload?.deleteSaveFiles === true;
-  ipcLogger.info("delete-config:request", {
+  const logDeleteInfo = (message, meta) => {
+    appLogger.info(message, meta);
+    ipcLogger.info(message, meta);
+  };
+  const logDeleteWarn = (message, meta) => {
+    appLogger.warn(message, meta);
+    ipcLogger.warn(message, meta);
+  };
+  const logDeleteError = (message, meta) => {
+    appLogger.error(message, meta);
+    ipcLogger.error(message, meta);
+  };
+  const deleteWarnings = [];
+  const pushDeleteWarning = (message, meta) => {
+    deleteWarnings.push({
+      message,
+      ...(meta && typeof meta === "object" ? meta : {}),
+    });
+    logDeleteWarn(message, meta);
+  };
+  const isRetryableDeleteError = (err) => {
+    const code = String(err?.code || "").toUpperCase();
+    return code === "EPERM" || code === "EBUSY" || code === "ENOTEMPTY";
+  };
+  const runDeleteWithRetries = async (stage, targetPath, fn) => {
+    const maxAttempts = 5;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return fn();
+      } catch (err) {
+        if (!isRetryableDeleteError(err) || attempt === maxAttempts) throw err;
+        logDeleteWarn("delete-config:retry", {
+          configName,
+          stage,
+          path: targetPath || null,
+          attempt,
+          error: err?.message || String(err),
+        });
+        await sleep(80);
+      }
+    }
+    return undefined;
+  };
+  logDeleteInfo("delete-config:request", {
     configName,
     deleteExtras,
     deleteSaveFiles,
@@ -4839,7 +5004,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         try {
           configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
         } catch (err) {
-          ipcLogger.warn("delete-config:parse-failed", {
+          pushDeleteWarning("delete-config:parse-failed", {
             configName,
             error: err?.message || String(err),
           });
@@ -4861,17 +5026,56 @@ ipcMain.handle("delete-config", async (_event, payload) => {
           ? configData.save_path
           : "";
 
+      const deletingActiveConfig =
+        sanitizeConfigName(selectedConfig || "") === safeName;
+      if (deletingActiveConfig) {
+        logDeleteInfo("delete-config:active-clear:start", {
+          configName,
+          activeConfig: selectedConfig || null,
+        });
+        await clearActiveConfigSelection({
+          reason: "delete-config",
+          configName,
+        });
+        logDeleteInfo("delete-config:active-clear:complete", {
+          configName,
+        });
+      }
+
+      await runDeleteWithRetries("config-file", configPath, () =>
+        fs.unlinkSync(configPath),
+      );
+      clearPendingMissingAchievementFile(configName);
+
+      if (watchedFoldersApi?.refreshConfigState) {
+        logDeleteInfo("delete-config:refresh-config-state:start", {
+          configName,
+        });
+        await watchedFoldersApi.refreshConfigState();
+        logDeleteInfo("delete-config:refresh-config-state:complete", {
+          configName,
+        });
+      }
+
       if (deleteExtras) {
         try {
           const cachePath = getCachePath(configName, platform);
-          if (fs.existsSync(cachePath)) fs.unlinkSync(cachePath);
+          if (fs.existsSync(cachePath)) {
+            await runDeleteWithRetries("cache-file", cachePath, () =>
+              fs.unlinkSync(cachePath),
+            );
+          }
           const legacyCachePath = path.join(
             cacheDir,
             `${safeName}_achievements_cache.json`,
           );
-          if (fs.existsSync(legacyCachePath)) fs.unlinkSync(legacyCachePath);
+          if (fs.existsSync(legacyCachePath)) {
+            await runDeleteWithRetries("legacy-cache-file", legacyCachePath, () =>
+              fs.unlinkSync(legacyCachePath),
+            );
+          }
         } catch (err) {
-          ipcLogger.warn("delete-config:cache-delete-failed", {
+          pushDeleteWarning("delete-config:cache-delete-failed", {
             configName,
             error: err?.message || String(err),
           });
@@ -4885,10 +5089,12 @@ ipcMain.handle("delete-config", async (_event, payload) => {
               String(appid),
             );
             if (fs.existsSync(imagesDir)) {
-              fs.rmSync(imagesDir, { recursive: true, force: true });
+              await runDeleteWithRetries("images-dir", imagesDir, () =>
+                fs.rmSync(imagesDir, { recursive: true, force: true }),
+              );
             }
           } catch (err) {
-            ipcLogger.warn("delete-config:images-delete-failed", {
+            pushDeleteWarning("delete-config:images-delete-failed", {
               configName,
               appid,
               error: err?.message || String(err),
@@ -4905,10 +5111,12 @@ ipcMain.handle("delete-config", async (_event, payload) => {
           try {
             const schemaDir = resolveSchemaDirForPlatform(appid, platform);
             if (fs.existsSync(schemaDir)) {
-              fs.rmSync(schemaDir, { recursive: true, force: true });
+              await runDeleteWithRetries("schema-dir", schemaDir, () =>
+                fs.rmSync(schemaDir, { recursive: true, force: true }),
+              );
             }
           } catch (err) {
-            ipcLogger.warn("delete-config:schema-delete-failed", {
+            pushDeleteWarning("delete-config:schema-delete-failed", {
               configName,
               appid,
               error: err?.message || String(err),
@@ -4920,44 +5128,47 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         if (
           platform === "steam-official" ||
           platform === "gog-official" ||
-          platform === "ubisoft-official"
+          platform === "ubisoft-official" ||
+          platform === "ea-official"
         ) {
-          ipcLogger.info("delete-config:save-delete-skip", {
+          logDeleteInfo("delete-config:save-delete-skip", {
             configName,
             platform,
           });
         } else {
-          const deleteFile = (p) => {
+          const deleteFile = async (p) => {
             if (!p || typeof p !== "string") return;
             try {
               if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-                fs.unlinkSync(p);
-                ipcLogger.info("delete-config:save-delete", {
+                await runDeleteWithRetries("save-file", p, () => fs.unlinkSync(p));
+                logDeleteInfo("delete-config:save-delete", {
                   configName,
                   path: p,
                 });
               }
             } catch (err) {
-              ipcLogger.warn("delete-config:save-delete-failed", {
+              pushDeleteWarning("delete-config:save-delete-failed", {
                 configName,
                 path: p,
                 error: err?.message || String(err),
               });
             }
           };
-          const deleteDir = (dir) => {
+          const deleteDir = async (dir) => {
             if (!dir || typeof dir !== "string") return false;
             try {
               if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
-                fs.rmSync(dir, { recursive: true, force: true });
-                ipcLogger.info("delete-config:save-delete-dir", {
+                await runDeleteWithRetries("save-dir", dir, () =>
+                  fs.rmSync(dir, { recursive: true, force: true }),
+                );
+                logDeleteInfo("delete-config:save-delete-dir", {
                   configName,
                   path: dir,
                 });
                 return true;
               }
             } catch (err) {
-              ipcLogger.warn("delete-config:save-delete-dir-failed", {
+              pushDeleteWarning("delete-config:save-delete-dir-failed", {
                 configName,
                 path: dir,
                 error: err?.message || String(err),
@@ -4965,17 +5176,17 @@ ipcMain.handle("delete-config", async (_event, payload) => {
             }
             return false;
           };
-          const deleteAllMatching = (dir, matcher) => {
+          const deleteAllMatching = async (dir, matcher) => {
             if (!dir || typeof dir !== "string") return;
             try {
               const entries = fs.readdirSync(dir);
               for (const name of entries) {
                 if (matcher(name)) {
-                  deleteFile(path.join(dir, name));
+                  await deleteFile(path.join(dir, name));
                 }
               }
             } catch (err) {
-              ipcLogger.warn("delete-config:save-scan-failed", {
+              pushDeleteWarning("delete-config:save-scan-failed", {
                 configName,
                 dir,
                 error: err?.message || String(err),
@@ -5027,24 +5238,24 @@ ipcMain.handle("delete-config", async (_event, payload) => {
 
           let deletedDir = false;
           for (const dir of appidDirs) {
-            if (deleteDir(dir)) deletedDir = true;
+            if (await deleteDir(dir)) deletedDir = true;
           }
 
           if (!deletedDir) {
             if (platform === "rpcs3") {
               const tropusr = resolveTropusrPathForConfig(configData || {});
-              deleteFile(tropusr);
+              await deleteFile(tropusr);
             } else if (platform === "shadps4") {
               const trophyDir = saveBase || "";
               if (trophyDir) {
                 const xmlDir = path.join(trophyDir, "Xml");
-                deleteAllMatching(xmlDir, (n) =>
+                await deleteAllMatching(xmlDir, (n) =>
                   /^trop(_\d{2})?\.xml$/i.test(n),
                 );
               }
             } else if (platform === "xenia") {
               const gpd = resolveGpdPathForConfig(configData || {});
-              deleteFile(gpd);
+              await deleteFile(gpd);
             } else if (saveBase) {
               const saveJsonPath = resolveSaveFilePath(saveBase, appid);
               const {
@@ -5053,25 +5264,29 @@ ipcMain.handle("delete-config", async (_event, payload) => {
                 ofx: achievementsIniOnlineFixPath,
                 bin: achievementsBinPath,
               } = resolveSaveSidecarPaths(saveBase, appid);
-              deleteFile(saveJsonPath);
-              deleteFile(tenokeIniPath);
-              deleteFile(achievementsIniPath);
-              deleteFile(achievementsIniOnlineFixPath);
-              deleteFile(achievementsBinPath);
+              await deleteFile(saveJsonPath);
+              await deleteFile(tenokeIniPath);
+              await deleteFile(achievementsIniPath);
+              await deleteFile(achievementsIniOnlineFixPath);
+              await deleteFile(achievementsBinPath);
             }
           }
         }
       }
-      fs.unlinkSync(configPath);
-      pendingMissingAchievementFiles.delete(safeName);
-      watchedFoldersApi?.refreshConfigState?.();
-      ipcLogger.info("delete-config:success", { configName, configPath });
-      return { success: true };
+      logDeleteInfo("delete-config:success", {
+        configName,
+        configPath,
+        warnings: deleteWarnings.length,
+      });
+      return {
+        success: true,
+        warnings: deleteWarnings,
+      };
     }
-    ipcLogger.warn("delete-config:not-found", { configName, configPath });
+    logDeleteWarn("delete-config:not-found", { configName, configPath });
     return { success: false, error: "File not found." };
   } catch (error) {
-    ipcLogger.error("delete-config:error", {
+    logDeleteError("delete-config:error", {
       configName,
       error: error.message,
     });
@@ -5257,6 +5472,16 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
           "main.message.schemaUbisoftOfficialRescan",
           {},
           "Ubisoft (Official) schemas are generated from Ubisoft Connect cache archives. Rescan the Ubisoft Connect spool root instead.",
+        ),
+      };
+    }
+    if (platform === "ea-official") {
+      return {
+        success: false,
+        message: tUi(
+          "main.message.schemaEaOfficialRescan",
+          {},
+          "EA (Official) schemas are generated from EA Desktop achievement logs. Rescan the EA Desktop Logs root instead.",
         ),
       };
     }
@@ -6854,6 +7079,16 @@ function resolveBootSeedCandidatePath(config) {
         return directSpoolFile;
       }
     }
+    if (normalizedPlatform === "ea-official") {
+      const resolved = resolveEaOfficialVerboseLogForConfig(config);
+      if (resolved?.logFilePath && fs.existsSync(resolved.logFilePath)) {
+        return resolved.logFilePath;
+      }
+      const directVerboseLog = path.join(saveRoot, EA_VERBOSE_LOG_NAME);
+      if (fs.existsSync(directVerboseLog)) {
+        return directVerboseLog;
+      }
+    }
     const saveJsonPath = resolveSaveFilePath(saveRoot, appid);
     const {
       tenokeIni: tenokeIniPath,
@@ -7437,6 +7672,10 @@ async function monitorAchievementsFile(filePath) {
     String(filePath || "")
       .toLowerCase()
       .startsWith("usergamestats_");
+  const isEaOfficial =
+    normalizePlatform(configMeta?.platform) === "ea-official" ||
+    path.basename(String(filePath || "")).toLowerCase() ===
+      EA_VERBOSE_LOG_NAME.toLowerCase();
   const isUbisoftOfficial =
     normalizePlatform(configMeta?.platform) === "ubisoft-official" ||
     /\.spool$/i.test(String(filePath || ""));
@@ -7526,6 +7765,16 @@ async function monitorAchievementsFile(filePath) {
         const parsed = readUbisoftSpoolFile(filePath);
         currentAchievements = buildUbisoftOfficialSnapshot(
           parsed?.records || [],
+        );
+      } else if (isEaOfficial) {
+        currentAchievements = loadAchievementsFromSaveFile(
+          path.dirname(filePath),
+          previousAchievements,
+          {
+            configMeta,
+            selectedConfigPath,
+            fullSchemaPath: fullAchievementsConfigPath,
+          },
         );
       } else if (isLumaPlay) {
         const parsed = readLumaPlayAchievementsSnapshot({
@@ -7814,8 +8063,11 @@ async function monitorAchievementsFile(filePath) {
     }
     const appid = String(configMeta?.appid || currentAppId || "");
     currentAppId = appid || null;
+    const shouldPersistSnapshot =
+      !isEaOfficial ||
+      !deepEqual(currentAchievements || {}, previousAchievements || {});
     previousAchievements = currentAchievements;
-    if (!(isLumaPlay && lumaPlayReadFailed)) {
+    if (shouldPersistSnapshot && !(isLumaPlay && lumaPlayReadFailed)) {
       savePreviousAchievements(
         configName,
         previousAchievements,
@@ -7964,6 +8216,17 @@ async function monitorAchievementsFile(filePath) {
           return;
         }
       }
+      if (normalizePlatform(configMeta?.platform) === "ea-official") {
+        const resolved = resolveEaOfficialVerboseLogForConfig(configMeta || {});
+        const nextEaLog = resolved?.logFilePath || "";
+        if (nextEaLog && nextEaLog !== filePath && fs.existsSync(nextEaLog)) {
+          if (isNonEmptyString(configName)) {
+            pendingMissingAchievementFiles.set(configName, nextEaLog);
+          }
+          monitorAchievementsFile(nextEaLog);
+          return;
+        }
+      }
       const tenokePath = path.join(baseDir, "SteamData", "user_stats.ini");
       const iniPath = path.join(baseDir, "achievements.ini");
       const universeIniPath = path.join(
@@ -8021,32 +8284,105 @@ async function monitorAchievementsFile(filePath) {
 }
 
 let fullAchievementsConfigPath;
+function clearPendingMissingAchievementFile(configName) {
+  if (!isNonEmptyString(configName)) return;
+  pendingMissingAchievementFiles.delete(configName);
+  const safeName = sanitizeConfigName(configName);
+  if (safeName && safeName !== configName) {
+    pendingMissingAchievementFiles.delete(safeName);
+  }
+}
+
+async function clearActiveConfigSelection(options = {}) {
+  const reason =
+    typeof options?.reason === "string" && options.reason
+      ? options.reason
+      : "unspecified";
+  const requestedConfig = isNonEmptyString(options?.configName)
+    ? options.configName
+    : "";
+  const previousConfig = isNonEmptyString(selectedConfig) ? selectedConfig : "";
+  const previousMonitorPath =
+    currentAchievementsFilePath || achievementsFilePath || null;
+  const matchedTarget =
+    !!requestedConfig &&
+    sanitizeConfigName(requestedConfig) === sanitizeConfigName(previousConfig);
+
+  appLogger.info("active-config:clear:start", {
+    reason,
+    requestedConfig: requestedConfig || null,
+    activeConfig: previousConfig || null,
+    matchedTarget,
+    monitorPath: previousMonitorPath,
+  });
+
+  try {
+    await monitorAchievementsFile(null);
+  } catch (err) {
+    appLogger.warn("active-config:clear:monitor-stop-failed", {
+      reason,
+      activeConfig: previousConfig || null,
+      error: err?.message || String(err),
+    });
+  }
+
+  achievementsFilePath = null;
+  fullAchievementsConfigPath = null;
+  selectedConfigPath = null;
+  selectedConfig = null;
+  selectedPlatform = null;
+  currentAppId = null;
+  clearPendingMissingAchievementFile(previousConfig);
+
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("load-overlay-data", null);
+    overlayWindow.webContents.send("set-language", {
+      language: selectedLanguage,
+      uiLanguage: selectedUiLanguage,
+    });
+  }
+
+  appLogger.info("active-config:clear:complete", {
+    reason,
+    previousConfig: previousConfig || null,
+    monitorPath: previousMonitorPath,
+  });
+
+  return {
+    previousConfig: previousConfig || null,
+    monitorPath: previousMonitorPath,
+  };
+}
+
+ipcMain.handle("config:clear-active", async (_event, payload = {}) => {
+  try {
+    const result = await clearActiveConfigSelection({
+      reason: payload?.reason || "renderer-invoke",
+      configName: payload?.configName || "",
+    });
+    return { success: true, ...result };
+  } catch (error) {
+    appLogger.error("active-config:clear:error", {
+      reason: payload?.reason || "renderer-invoke",
+      configName: payload?.configName || null,
+      error: error?.message || String(error),
+    });
+    return {
+      success: false,
+      error: error?.message || String(error),
+    };
+  }
+});
+
 ipcMain.on(
   "update-config",
-  (event, { configName, preset, position, platform }) => {
+  async (event, { configName, preset, position, platform }) => {
     const safeName = configName ? sanitizeConfigName(configName) : null;
 
     if (!safeName) {
-      stopActiveLumaPlayRegistryWatcher();
-      if (achievementMonitorTimer) {
-        clearTimeout(achievementMonitorTimer);
-        achievementMonitorTimer = null;
-      }
-      if (achievementsWatcher && achievementsFilePath) {
-        fs.unwatchFile(achievementsFilePath, achievementsWatcher);
-        achievementsWatcher = null;
-      }
-      achievementsFilePath = null;
-      selectedConfig = null;
-      selectedPlatform = null;
-
-      if (overlayWindow && !overlayWindow.isDestroyed()) {
-        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
-        overlayWindow.webContents.send("set-language", {
-          language: selectedLanguage,
-          uiLanguage: selectedUiLanguage,
-        });
-      }
+      await clearActiveConfigSelection({
+        reason: "update-config:null",
+      });
       return;
     }
 
@@ -8337,6 +8673,87 @@ ipcMain.on(
         event.sender.send("achievements-missing", {
           configName,
           reason: "no-spool-file",
+        });
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+          overlayWindow.webContents.send("set-language", {
+            language: selectedLanguage,
+            uiLanguage: selectedUiLanguage,
+          });
+        }
+        return;
+      }
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      monitorAchievementsFile(achievementsFilePath);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      return;
+    }
+
+    if (normalizedPlatform === "ea-official") {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      const resolved = resolveEaOfficialVerboseLogForConfig(config);
+      const parsed =
+        resolved?.logFilePath && fs.existsSync(resolved.logFilePath)
+          ? readEaDesktopVerboseLog(resolved.logFilePath)
+          : null;
+      const entry =
+        appid && resolved?.logFilePath
+          ? resolveEaOfficialAchievementSetForAppId(appid, {
+              achievementSet: config?.ea_achievement_set || "",
+              savePath: resolved.logsRoot || config.save_path || "",
+              logFilePath: resolved.logFilePath,
+              parsedLog: parsed,
+            })
+          : null;
+      achievementsFilePath = resolved?.logFilePath || null;
+      if (
+        resolved &&
+        (config.save_path !== (resolved.logsRoot || config.save_path || "") ||
+          (config.ea_log_file || "") !== (resolved.logFilePath || "") ||
+          (config.ea_achievement_set || "") !==
+            (entry?.achievementSet || config.ea_achievement_set || "") ||
+          (config.ea_offer_id || "") !==
+            (entry?.offerId || config.ea_offer_id || "") ||
+          (config.ea_install_path || "") !==
+            (entry?.installPath || config.ea_install_path || "") ||
+          (config.executable || "") !==
+            (entry?.exePath || config.executable || "") ||
+          (config.process_name || "") !==
+            (entry?.processName ||
+              config.process_name ||
+              (entry?.exePath ? path.basename(entry.exePath) : "")))
+      ) {
+        config.save_path = resolved.logsRoot || config.save_path || "";
+        config.ea_log_file = resolved.logFilePath || config.ea_log_file || "";
+        config.ea_achievement_set =
+          entry?.achievementSet || config.ea_achievement_set || "";
+        config.ea_offer_id = entry?.offerId || config.ea_offer_id || "";
+        config.ea_install_path =
+          entry?.installPath || config.ea_install_path || "";
+        config.executable = entry?.exePath || config.executable || "";
+        config.process_name =
+          entry?.processName ||
+          config.process_name ||
+          (entry?.exePath ? path.basename(entry.exePath) : "");
+        try {
+          fs.writeFileSync(cfgFile, JSON.stringify(config, null, 2));
+        } catch {}
+      }
+      if (!achievementsFilePath || !fs.existsSync(achievementsFilePath)) {
+        monitorAchievementsFile(null);
+        achievementsFilePath = null;
+        event.sender.send("achievements-missing", {
+          configName,
+          reason: "no-ea-log-file",
         });
         if (overlayWindow && !overlayWindow.isDestroyed()) {
           overlayWindow.webContents.send("load-overlay-data", selectedConfig);
@@ -11733,6 +12150,14 @@ const {
   resolveUbisoftOfficialSpoolFileForConfig,
   resolveUbisoftSteamAppId,
 } = require("./utils/ubisoft-connect-local");
+const {
+  EA_VERBOSE_LOG_NAME,
+  buildEaOfficialSnapshot,
+  ensureEaOfficialSchema,
+  readEaDesktopVerboseLog,
+  resolveEaOfficialAchievementSetForAppId,
+  resolveEaOfficialVerboseLogForConfig,
+} = require("./utils/ea-desktop-local");
 
 async function seedManualConfigsAtBoot() {
   if (bootManualSeedRunning) return;
@@ -12098,7 +12523,8 @@ function applyConfigPlatformDefaults(payload = {}) {
     normalizedPlatform === "shadps4" ||
     normalizedPlatform === "steam-official" ||
     normalizedPlatform === "gog-official" ||
-    normalizedPlatform === "ubisoft-official"
+    normalizedPlatform === "ubisoft-official" ||
+    normalizedPlatform === "ea-official"
   ) {
     const sanitizedSpecial = sanitizeAppIdForPlatform(
       payload.appid || payload.appId || payload.steamAppId,
@@ -12144,6 +12570,7 @@ const SCHEMA_PLATFORM_DIRS = [
   "steam-official",
   "uplay",
   "ubisoft-official",
+  "ea-official",
   "gog",
   "gog-official",
   "epic",
@@ -12157,6 +12584,7 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "steam-official") return "steam-official";
   if (normalized === "uplay") return "uplay";
   if (normalized === "ubisoft-official") return "ubisoft-official";
+  if (normalized === "ea-official") return "ea-official";
   if (normalized === "gog") return "gog";
   if (normalized === "gog-official") return "gog-official";
   if (normalized === "epic") return "epic";
@@ -12220,6 +12648,7 @@ function getPlatformForAppId(appid) {
     const order = [
       "steam",
       "steam-official",
+      "ea-official",
       "ubisoft-official",
       "uplay",
       "gog",

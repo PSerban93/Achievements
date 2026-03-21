@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("api", {
       ...(options || {}),
     });
   },
+  clearActiveConfig: (payload = {}) =>
+    ipcRenderer.invoke("config:clear-active", payload),
   blacklistConfig: (payload) => ipcRenderer.invoke("config:blacklist", payload),
   getBlacklist: () => ipcRenderer.invoke("blacklist:list"),
   resetBlacklist: () => ipcRenderer.invoke("blacklist:reset"),

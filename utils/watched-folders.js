@@ -51,6 +51,12 @@ const {
   resolveUbisoftOfficialSpoolFileForConfig,
   resolveUbisoftSpoolRoots,
 } = require("./ubisoft-connect-local");
+const {
+  EA_VERBOSE_LOG_NAME,
+  listEaOfficialAchievementSets,
+  resolveEaOfficialLogsRoots,
+  resolveEaOfficialVerboseLogForConfig,
+} = require("./ea-desktop-local");
 const GAMEPLAY_DB_WAL_NAME = `${GAMEPLAY_DB_NAME}-wal`;
 const GAMEPLAY_DB_SHM_NAME = `${GAMEPLAY_DB_NAME}-shm`;
 
@@ -981,6 +987,11 @@ module.exports = function makeWatchedFolders({
                   __gogClientId: task.__gogClientId || null,
                   __gogUserId: task.__gogUserId || null,
                   __gogGameplayDbPath: task.__gogGameplayDbPath || null,
+                  __ubisoftUserId: task.__ubisoftUserId || null,
+                  __ubisoftSpoolFile: task.__ubisoftSpoolFile || null,
+                  __eaAchievementSet: task.__eaAchievementSet || null,
+                  __eaLogFile: task.__eaLogFile || null,
+                  __eaGameName: task.__eaGameName || null,
                   __emu: task.__emu || null,
                 },
               );
@@ -1866,6 +1877,10 @@ module.exports = function makeWatchedFolders({
     return normalizePlatform(meta?.platform) === "ubisoft-official";
   }
 
+  function isEaOfficialMeta(meta) {
+    return normalizePlatform(meta?.platform) === "ea-official";
+  }
+
   function isPs4Meta(meta) {
     return normalizePlatform(meta?.platform) === "shadps4";
   }
@@ -2013,6 +2028,93 @@ module.exports = function makeWatchedFolders({
     }
 
     return null;
+  }
+
+  function resolveEaOfficialLogsEvent(rootPath, targetPath) {
+    if (!targetPath) return null;
+    const logsRoots = resolveEaOfficialLogsRoots(rootPath);
+    if (!logsRoots.length) return null;
+
+    let resolvedTarget = "";
+    try {
+      resolvedTarget = fs.realpathSync(targetPath);
+    } catch {
+      try {
+        resolvedTarget = path.resolve(String(targetPath || ""));
+      } catch {
+        resolvedTarget = "";
+      }
+    }
+    if (!resolvedTarget) return null;
+
+    for (const logsRoot of logsRoots) {
+      let relative = "";
+      try {
+        relative = path.relative(logsRoot, resolvedTarget);
+      } catch {
+        relative = "";
+      }
+      if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+        continue;
+      }
+      return {
+        logsRoot,
+        targetPath: resolvedTarget,
+        relativeSegments: relative.split(/[\\/]+/).filter(Boolean),
+      };
+    }
+
+    return null;
+  }
+
+  async function handleEaOfficialRootFileEvent(rootPath, filePath) {
+    const event = resolveEaOfficialLogsEvent(rootPath, filePath);
+    if (!event) return false;
+
+    const baseName = path.basename(event.targetPath).toLowerCase();
+    if (baseName !== EA_VERBOSE_LOG_NAME.toLowerCase()) {
+      return true;
+    }
+
+    let entries = [];
+    try {
+      entries = listEaOfficialAchievementSets(event.logsRoot);
+    } catch (err) {
+      watcherLogger.warn("ea-official:live-scan-failed", {
+        root: event.logsRoot,
+        file: event.targetPath,
+        error: err?.message || String(err),
+      });
+      return true;
+    }
+
+    const missingEntry = entries.find((entry) => {
+      const appid = String(entry?.appid || "").trim();
+      return appid && !hasPlatformVariant(appid, "ea-official");
+    });
+    if (!missingEntry) return true;
+
+    watcherLogger.info("ea-official:live-discovery", {
+      root: event.logsRoot,
+      appid: missingEntry.appid,
+      achievementSet: missingEntry.achievementSet || null,
+      gameName: missingEntry.gameName || null,
+      logFilePath: missingEntry.logFilePath || event.targetPath,
+    });
+
+    try {
+      await scanRootOnce(event.logsRoot, {
+        suppressInitialNotify: true,
+      });
+    } catch (err) {
+      watcherLogger.warn("ea-official:live-discovery-failed", {
+        root: event.logsRoot,
+        appid: missingEntry.appid,
+        error: err?.message || String(err),
+      });
+    }
+
+    return true;
   }
 
   async function handleUbisoftOfficialRootFileEvent(rootPath, filePath) {
@@ -2969,6 +3071,18 @@ module.exports = function makeWatchedFolders({
       return Array.from(out);
     }
 
+    if (isEaOfficialMeta(meta)) {
+      const resolved = resolveEaOfficialVerboseLogForConfig(meta);
+      const logsRoot = resolved?.logsRoot || meta.save_path || "";
+      const logFilePath =
+        resolved?.logFilePath ||
+        meta.ea_log_file ||
+        (logsRoot ? path.join(logsRoot, EA_VERBOSE_LOG_NAME) : "");
+      if (logsRoot) out.add(logsRoot);
+      if (logFilePath) out.add(logFilePath);
+      return Array.from(out);
+    }
+
     if (isPs4Meta(meta)) {
       const trophyDir = resolvePs4TrophyDirForMeta(meta);
       if (trophyDir) {
@@ -3048,6 +3162,7 @@ module.exports = function makeWatchedFolders({
     const isSteamOfficial = isSteamOfficialMeta(meta);
     const isGogOfficial = isGogOfficialMeta(meta);
     const isUbisoftOfficial = isUbisoftOfficialMeta(meta);
+    const isEaOfficial = isEaOfficialMeta(meta);
     if (isLumaPlay) {
       // Registry-backed source; no file suffix checks.
     } else if (isXenia) {
@@ -3062,6 +3177,8 @@ module.exports = function makeWatchedFolders({
       if (!base.endsWith(".spool")) return;
       const appidStr = String(meta?.appid || appid || "").toLowerCase();
       if (appidStr && base !== `${appidStr}.spool`) return;
+    } else if (isEaOfficial) {
+      if (base !== EA_VERBOSE_LOG_NAME.toLowerCase()) return;
     } else if (isSteamOfficial) {
       if (!base.endsWith(".bin") || !base.startsWith("usergamestats_")) return;
       const appidStr = String(meta?.appid || appid || "").toLowerCase();
@@ -3248,6 +3365,16 @@ module.exports = function makeWatchedFolders({
       try {
         const parsed = readUbisoftSpoolFile(filePath);
         cur = buildUbisoftOfficialSnapshot(parsed?.records || []);
+      } catch {
+        parseOk = false;
+        cur = prev;
+      }
+    } else if (isEaOfficial) {
+      try {
+        cur = loadAchievementsFromSaveFile(path.dirname(filePath), prev, {
+          configMeta: meta,
+          fullSchemaPath: resolveAchievementsSchemaPath(meta),
+        });
       } catch {
         parseOk = false;
         cur = prev;
@@ -4654,6 +4781,11 @@ module.exports = function makeWatchedFolders({
           allowed.has(appid) &&
           allowed.get(appid).has(configName);
         if (keep) continue;
+        watcherLogger.info("unwatch-save", {
+          appid,
+          config: configName,
+          reason: "rebuild-save-watchers",
+        });
         try {
           watcher.close();
         } catch {}
@@ -5090,6 +5222,15 @@ module.exports = function makeWatchedFolders({
         if (opts.__ubisoftSpoolFile) {
           genOptions.ubisoftSpoolFile = opts.__ubisoftSpoolFile;
         }
+        if (opts.__eaAchievementSet) {
+          genOptions.eaAchievementSet = opts.__eaAchievementSet;
+        }
+        if (opts.__eaLogFile) {
+          genOptions.eaLogFile = opts.__eaLogFile;
+        }
+        if (opts.__eaGameName) {
+          genOptions.preferredName = opts.__eaGameName;
+        }
         if (opts.__emu) {
           genOptions.emu = opts.__emu;
         }
@@ -5452,6 +5593,13 @@ module.exports = function makeWatchedFolders({
               : path.join(fp, `${appid}.spool`);
           if (!fs.existsSync(targetSpool)) continue;
           metaPath = targetSpool;
+        } else if (isEaOfficialMeta(meta)) {
+          const targetLog =
+            path.basename(fp).toLowerCase() === EA_VERBOSE_LOG_NAME.toLowerCase()
+              ? fp
+              : path.join(fp, EA_VERBOSE_LOG_NAME);
+          if (!fs.existsSync(targetLog)) continue;
+          metaPath = targetLog;
         }
         if (bootLikeSeed) {
           loadCacheMetaOnce();
@@ -5551,6 +5699,15 @@ module.exports = function makeWatchedFolders({
             },
           );
         } else if (isUbisoftOfficialMeta(meta)) {
+          snapshot = loadAchievementsFromSaveFile(
+            path.dirname(metaPath),
+            lastSnapshot.get(snapKey) || {},
+            {
+              configMeta: meta,
+              fullSchemaPath: resolveAchievementsSchemaPath(meta),
+            },
+          );
+        } else if (isEaOfficialMeta(meta)) {
           snapshot = loadAchievementsFromSaveFile(
             path.dirname(metaPath),
             lastSnapshot.get(snapKey) || {},
@@ -6053,8 +6210,88 @@ module.exports = function makeWatchedFolders({
           }
         } catch {}
 
+        const eaLogsRoots = resolveEaOfficialLogsRoots(scanBase);
+        if (eaLogsRoots.length) {
+          let achievementSets = [];
+          const seenAchievementSets = new Set();
+          for (const logsRoot of eaLogsRoots) {
+            try {
+              const entries = listEaOfficialAchievementSets(logsRoot);
+              for (const entry of entries) {
+                const key = `${String(entry?.appid || "")}:${String(
+                  entry?.achievementSet || "",
+                )}`.toLowerCase();
+                if (!key || seenAchievementSets.has(key)) continue;
+                seenAchievementSets.add(key);
+                achievementSets.push(entry);
+              }
+            } catch (err) {
+              watcherLogger.warn("ea-official:scan-failed", {
+                root: logsRoot,
+                error: err?.message || String(err),
+              });
+            }
+          }
+
+          const entriesByAppId = new Map();
+          for (const entry of achievementSets) {
+            const productId = String(entry?.appid || "").trim();
+            if (!productId || blacklist.has(productId)) continue;
+            const existingOfficial =
+              getConfigMetas(productId).find((meta) => isEaOfficialMeta(meta)) ||
+              null;
+            const current =
+              existingOfficial &&
+              String(existingOfficial.ea_achievement_set || "").trim() ===
+                String(entry.achievementSet || "").trim();
+            const previous = entriesByAppId.get(productId);
+            if (
+              !previous ||
+              current ||
+              Number(entry.order || 0) > Number(previous.order || 0)
+            ) {
+              entriesByAppId.set(productId, entry);
+            }
+          }
+
+          for (const entry of entriesByAppId.values()) {
+            const productId = String(entry.appid || "").trim();
+            const logsRoot = entry.logsRoot || path.dirname(entry.logFilePath || "");
+            const normalizedPath = normalizeObservedPath(logsRoot, productId);
+            const pendingSet = pendingSavePathIndex.get(productId);
+            const knownPaths = configSavePathIndex.get(productId);
+            const alreadyTracked =
+              normalizedPath &&
+              ((knownPaths && knownPaths.has(normalizedPath)) ||
+                (pendingSet && pendingSet.has(normalizedPath)));
+            const hasOfficialVariant = hasPlatformVariant(
+              productId,
+              "ea-official",
+            );
+            knownAppIds.add(productId);
+            if (alreadyTracked && hasOfficialVariant) continue;
+
+            generationTasks.push({
+              appid: productId,
+              forcePlatform: "ea-official",
+              appDir: logsRoot,
+              normalizedPath,
+              allowExistingVariant: hasOfficialVariant,
+              __savePathOverride: logsRoot,
+              __eaAchievementSet: entry.achievementSet || null,
+              __eaLogFile: entry.logFilePath || null,
+              __eaGameName: entry.gameName || null,
+            });
+            if (normalizedPath) markPendingSavePath(productId, normalizedPath);
+          }
+
+          if (generationTasks.length === 0) {
+            return;
+          }
+        }
+
         const ubisoftSpoolRoots = resolveUbisoftSpoolRoots(scanBase);
-        if (ubisoftSpoolRoots.length) {
+        if (!eaLogsRoots.length && ubisoftSpoolRoots.length) {
           let spoolEntries = [];
           const seenSpoolFiles = new Set();
           for (const spoolRoot of ubisoftSpoolRoots) {
@@ -6126,7 +6363,7 @@ module.exports = function makeWatchedFolders({
           }
         }
 
-        if (!ubisoftSpoolRoots.length) {
+        if (!eaLogsRoots.length && !ubisoftSpoolRoots.length) {
           const gogGalaxyApplicationRoots = resolveGogGalaxyApplicationsRoots(
             scanBase,
           );
@@ -6395,7 +6632,7 @@ module.exports = function makeWatchedFolders({
             const created = await generateOneAppId(
               task.appid,
               task.appDir || null,
-              {
+                {
                   forcePlatform: task.forcePlatform,
                   normalizedSavePath: task.normalizedPath || "",
                   skipPostIndex: true,
@@ -6404,6 +6641,11 @@ module.exports = function makeWatchedFolders({
                   __gogClientId: task.__gogClientId || null,
                   __gogUserId: task.__gogUserId || null,
                   __gogGameplayDbPath: task.__gogGameplayDbPath || null,
+                  __ubisoftUserId: task.__ubisoftUserId || null,
+                  __ubisoftSpoolFile: task.__ubisoftSpoolFile || null,
+                  __eaAchievementSet: task.__eaAchievementSet || null,
+                  __eaLogFile: task.__eaLogFile || null,
+                  __eaGameName: task.__eaGameName || null,
                   __emu: task.__emu || null,
                 },
               );
@@ -6589,6 +6831,9 @@ module.exports = function makeWatchedFolders({
           return;
         }
         if (await handleUbisoftOfficialRootFileEvent(root, filePath)) {
+          return;
+        }
+        if (await handleEaOfficialRootFileEvent(root, filePath)) {
           return;
         }
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
@@ -6803,6 +7048,9 @@ module.exports = function makeWatchedFolders({
           return;
         }
         if (await handleUbisoftOfficialRootFileEvent(root, filePath)) {
+          return;
+        }
+        if (await handleEaOfficialRootFileEvent(root, filePath)) {
           return;
         }
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
@@ -7714,8 +7962,16 @@ module.exports = function makeWatchedFolders({
   });
 
   async function refreshConfigState() {
+    watcherLogger.info("refresh-config-state:start", {
+      saveWatcherBuckets: appidSaveWatchers.size,
+      folderWatchers: folderWatchers.size,
+    });
     await indexExistingConfigsSync();
     await rebuildSaveWatchers();
+    watcherLogger.info("refresh-config-state:complete", {
+      saveWatcherBuckets: appidSaveWatchers.size,
+      folderWatchers: folderWatchers.size,
+    });
   }
 
   async function findShippingExeDir(root, maxDepth = 6) {

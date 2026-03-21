@@ -2372,6 +2372,9 @@
                           <option value="ubisoft-official" disabled>
                             Ubisoft (Official)
                           </option>
+                          <option value="ea-official" disabled>
+                            EA (Official)
+                          </option>
                           <option value="epic">Epic</option>
                           <option value="gog">GOG</option>
                           <option value="gog-official" disabled>
@@ -5096,6 +5099,7 @@
               "steam-official",
               "uplay",
               "ubisoft-official",
+              "ea-official",
               "epic",
               "gog",
               "gog-official",
@@ -6456,58 +6460,104 @@
 
         try {
           const wasSelected = configList?.value === configName;
+          logUiEvent("info", "ui:delete-config:request", {
+            configName,
+            label,
+            wasSelected,
+            deleteExtras: confirmDelete.checked === true,
+            deleteSaveFiles: confirmDelete.checked2 === true,
+          });
+
+          if (wasSelected && configList) {
+            logUiEvent("info", "ui:delete-config:preclear:start", {
+              configName,
+            });
+            configChangeRequestSeq += 1;
+            lastSelectedConfigMeta = null;
+            configList.value = "";
+            document.getElementById("backButton").style.display = "none";
+
+            const selectOption = configList.querySelector('option[value=""]');
+            if (selectOption) {
+              selectOption.selected = true;
+              selectOption.disabled = true;
+            }
+
+            document.getElementById("deleteConfigBtn").style.display = "none";
+            document.getElementById("blacklistConfigBtn").style.display = "none";
+            document.getElementById("editConfigBtn").style.display = "none";
+            document.getElementById("playBtn").style.display = "none";
+            document.getElementById("achStats").style.display = "none";
+            updateMainPlayButtonState(null);
+            updateBlacklistButtonState(null);
+            setAchievementsHeaderVisible(false);
+            updateMuteProgressUI().catch(() => {});
+            resetConfigForm();
+
+            const tableBody = document.getElementById("achievementsTableBody");
+            if (tableBody) tableBody.innerHTML = "";
+
+            window.__showFallbackLogo?.();
+            window.__setEmbeddedPlatinumBadgeByConfig?.(null);
+
+            try {
+              const clearResponse = await window.api.clearActiveConfig({
+                reason: "delete-config-ui",
+                configName,
+              });
+              logUiEvent("info", "ui:delete-config:preclear:result", {
+                configName,
+                success: clearResponse?.success === true,
+                error: clearResponse?.error || null,
+              });
+            } catch (clearError) {
+              logUiEvent("warn", "ui:delete-config:preclear:failed", {
+                configName,
+                error: clearError?.message || String(clearError),
+              });
+            }
+          }
+
           const response = await window.api.deleteConfig(configName, {
             deleteExtras: confirmDelete.checked === true,
             deleteSaveFiles: confirmDelete.checked2 === true,
           });
           if (response?.success) {
+            if (Array.isArray(response?.warnings) && response.warnings.length) {
+              console.warn("Delete config warnings:", response.warnings);
+              logUiEvent("warn", "ui:delete-config:warnings", {
+                configName,
+                warnings: response.warnings,
+              });
+            }
             if (typeof reloadConfigsDropdown === "function") {
               await reloadConfigsDropdown(true);
-            }
-
-            if (wasSelected && configList) {
-              configList.value = "";
-              document.getElementById("backButton").style.display = "none";
-
-              const selectOption = configList.querySelector('option[value=""]');
-              if (selectOption) {
-                selectOption.selected = true;
-                selectOption.disabled = true;
-              }
-
-              document.getElementById("deleteConfigBtn").style.display = "none";
-              document.getElementById("blacklistConfigBtn").style.display =
-                "none";
-              document.getElementById("editConfigBtn").style.display = "none";
-              document.getElementById("playBtn").style.display = "none";
-              document.getElementById("achStats").style.display = "none";
-              updateMuteProgressUI().catch(() => {});
-              resetConfigForm();
-
-              const tableBody = document.getElementById(
-                "achievementsTableBody",
-              );
-              if (tableBody) tableBody.innerHTML = "";
-
-              window.api.updateConfig({
-                configName: null,
-                preset: null,
-                position: null,
-              });
-              window.__showFallbackLogo?.();
-              window.__setEmbeddedPlatinumBadgeByConfig?.(null);
             }
 
             if (typeof buildDashboard === "function") {
               await buildDashboard();
             }
+            logUiEvent("info", "ui:delete-config:success", {
+              configName,
+              warnings: Array.isArray(response?.warnings)
+                ? response.warnings.length
+                : 0,
+            });
           } else {
+            logUiEvent("error", "ui:delete-config:error", {
+              configName,
+              error: response?.error || String(response || ""),
+            });
             console.error(
               tUi("log.deleteError", "Error on delete:"),
               response?.error || response,
             );
           }
         } catch (error) {
+          logUiEvent("error", "ui:delete-config:error", {
+            configName,
+            error: error?.message || String(error),
+          });
           console.error(tUi("log.deleteError", "Error on delete:"), error);
         }
       }
