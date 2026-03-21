@@ -59,6 +59,7 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
   - Achievement sound volume (0% to 200%)
   - Show hidden descriptions (when available)
   - Close-to-tray option
+  - Optional controller support for the overlay (`Settings -> Advanced -> Rendering`)
   - Multi-language support for achievements
 
 ## 📁 Project Structure
@@ -339,6 +340,7 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - Enable Close to Tray (X button hides to tray)
 - Configure overlay shortcut or disable the overlay entirely
 - Configure Overlay Interaction Key (toggle click-through ↔ drag/scroll)
+- Enable/disable controller support for the overlay from **Settings -> Advanced -> Rendering**
 - Enable/disable features:
   - Achievement screenshots
   - Progress Notification
@@ -376,6 +378,15 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
   - Cycle snap presets: `Ctrl+Alt+Shift+M`.
   - Fine nudge (20px): `Ctrl+Alt+Shift+Arrow Keys`.
   - Overlay-specific shortcuts above are active only while the overlay is shown.
+  - Enable controller support from **Settings -> Advanced -> Rendering** to control the overlay independently from the main window navigation.
+  - Toggle visibility: Controller: Xbox View + Menu, PlayStation Share + Options.
+  - Enter overlay control mode: Hold Xbox LB + RB, PlayStation L1 + R1.
+  - Move overlay in control mode: Controller: Left Stick (LS).
+  - Page scroll in control mode: Controller: Right Stick (RS).
+  - Fine nudge in control mode: Controller: D-pad.
+  - Cycle snap presets in control mode: Controller: Xbox Y, PlayStation △.
+  - Overlay control mode ends when the shoulder buttons are released, the controller disconnects, or the overlay is no longer available.
+  - Native PlayStation controller support uses Microsoft GameInput when available. If GameInput is missing, the app warns when the setting is enabled and falls back to XInput-compatible controllers only.
 - **Dashboard**
   - Grid navigation: Arrow keys, `Home`, `End`, `PageUp`, `PageDown`; Controller: D-pad or LS.
   - Search: `Ctrl+F`; Controller: Xbox X, PlayStation ☐.
@@ -416,6 +427,7 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - Match privilege level between app and game (`non-admin/non-admin` or `admin/admin`) for more reliable overlay and shortcut behavior.
 - If overlay shortcut does not trigger in a specific game, switch to a 3-key combo and test `Ctrl+PageUp` / `Ctrl+PageDown` fallback.
 - Overlay drag may fail in elevated/protected game contexts; use snap positions (`Ctrl+Alt+Shift+1..5`) or nudge (`Ctrl+Alt+Shift+Arrow Keys`) instead.
+- Native PlayStation controller support for the overlay depends on Microsoft GameInput. Without it, only Xbox/XInput-compatible controllers are available for the overlay controller feature.
 - In some engine/driver combinations, overlay z-order can vary (may appear behind windows); retoggle overlay and prefer Borderless Windowed mode.
 - Flip/compositor behavior is controlled by Windows + GPU driver; app cannot force a single flip mode across all systems.
 - Toggle **Disable Hardware Acceleration** (restart required) and keep the mode that is most stable for your setup. If the overlay hotkey works but nothing is visible, turn **Disable Hardware Acceleration** off (enable hardware acceleration) and restart the app.

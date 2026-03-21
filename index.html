@@ -810,6 +810,15 @@
                   <div class="checkbox-control">
                     <input
                       type="checkbox"
+                      id="settings-overlayControllerSupportCheckbox"
+                    />
+                    <label for="settings-overlayControllerSupportCheckbox">
+                      Enable controller support for overlay
+                    </label>
+                  </div>
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
                       id="settings-ignoreLeadingArticlesSortCheckbox"
                     />
                     <label for="settings-ignoreLeadingArticlesSortCheckbox">
@@ -865,53 +874,83 @@
                   <h4 id="settings-globalTitle">Global</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Settings</div>
+                      <div class="ctl-label" data-i18n="shortcutsGlobalSettings">
+                        Settings
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>F1</kbd></div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>O</kbd>
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-view">View</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-view" data-i18n="shortcutsButtonView"
+                              >View</span
+                            >
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-share">Share</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span
+                              class="btn ps-share"
+                              data-i18n="shortcutsButtonShare"
+                              >Share</span
+                            >
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Dashboard</div>
+                      <div class="ctl-label" data-i18n="settings-dashboardTitle">
+                        Dashboard
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>F2</kbd></div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>D</kbd>
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox:
-                            <span class="btn xb-Xboxbtn"
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span
+                              class="btn xb-Xboxbtn"
+                              data-i18n="shortcutsButtonXboxButton"
                               >Xbox Button</span
-                            ></span
-                          >
+                            >
+                          </span>
                         </div>
                         <div class="ctl-line sub">
                           <span class="ctl ctl-ps">
-                            PlayStation:
-                            <span class="btn ps-touchpad">Touchpad</span> |
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span
+                              class="btn ps-touchpad"
+                              data-i18n="shortcutsButtonTouchpad"
+                              >Touchpad</span
+                            >
+                            |
                             <span class="btn ps-ps">PS</span></span
                           >
                         </div>
@@ -919,11 +958,16 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsGlobalOptionsDashboard"
+                      >
                         Show/Hide Options panel (on Dashboard)
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub">
                           <kbd>≣ (Context Menu)</kbd>
                         </div>
@@ -932,72 +976,97 @@
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-y">Y</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-y">Y</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-triangle">⃤⃤</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-triangle">⃤⃤</span>
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">
+                      <div class="ctl-label" data-i18n="shortcutsGlobalOptionsMain">
                         Show/Hide Options panel (on Main)
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>F3</kbd></div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-x">X</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-x">X</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-square">☐</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-square">☐</span>
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Back / Close</div>
+                      <div class="ctl-label" data-i18n="shortcutsGlobalBackClose">
+                        Back / Close
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>Esc</kbd></div>
                         <div class="ctl-line sub"><kbd>Backspace</kbd></div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-b">B</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-b">B</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-circle">◯</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-circle">◯</span>
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Play (launch)</div>
+                      <div class="ctl-label" data-i18n="shortcutsGlobalPlayLaunch">
+                        Play (launch)
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>P</kbd></div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Enter</kbd>
@@ -1007,53 +1076,82 @@
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-menu">Menu</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
+                              >Menu</span
+                            >
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-options">Options</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span
+                              class="btn ps-options"
+                              data-i18n="shortcutsButtonOptions"
+                              >Options</span
+                            >
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Confirm / Activate</div>
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsGlobalConfirmActivate"
+                      >
+                        Confirm / Activate
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>Enter</kbd></div>
                         <div class="ctl-line sub"><kbd>Space</kbd></div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-a">A</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-a">A</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-cross">✕</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-cross">✕</span>
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Page scroll</div>
+                      <div class="ctl-label" data-i18n="shortcutsGlobalPageScroll">
+                        Page scroll
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>PageUp</kbd></div>
                         <div class="ctl-line sub"><kbd>PageDown</kbd></div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
                           <span class="ctl ctl-xb"
                             ><span class="btn stick">RS</span></span
@@ -1063,14 +1161,24 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Move</div>
-                      <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">Arrow Keys</div>
+                      <div class="ctl-label" data-i18n="shortcutsCommonMove">
+                        Move
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
-                        <div class="ctl-line sub">D-pad</div>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div class="ctl-line sub" data-i18n="shortcutsCommonArrowKeys">
+                          Arrow Keys
+                        </div>
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub" data-i18n="shortcutsCommonDpad">
+                          D-pad
+                        </div>
                         <div class="ctl-line sub">
                           <span class="btn stick">LS</span>
                         </div>
@@ -1084,32 +1192,132 @@
                   <h4 id="settings-overlayControlsTitle">Overlay</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Show / Hide Overlay</div>
+                      <div class="ctl-label" id="shortcutsOverlayShowHideTitle">
+                        Show / Hide Overlay
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsOverlayShortcutConfigurable"
+                        >
                           Configurable in Settings: Overlay Shortcut
                         </div>
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub">
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-view" data-i18n="shortcutsButtonView"
+                              >View</span
+                            >
+                            +
+                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
+                              >Menu</span
+                            >
+                          </span>
+                        </div>
+                        <div class="ctl-line sub">
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span
+                              class="btn ps-share"
+                              data-i18n="shortcutsButtonShare"
+                              >Share</span
+                            >
+                            +
+                            <span
+                              class="btn ps-options"
+                              data-i18n="shortcutsButtonOptions"
+                              >Options</span
+                            >
+                          </span>
+                        </div>
+                      </div>
+                      <div class="ctl-line sub" id="shortcutsOverlayEnableInSettings">
+                        Enable controller support in Settings: Advanced →
+                        Rendering
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Toggle Interaction Mode</div>
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsOverlayToggleInteractionTitle"
+                      >
+                        Toggle Interaction Mode
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub">
-                          Interact Key from Settings (default <kbd>\</kbd>)
+                          <span
+                            data-i18n="shortcutsOverlayToggleInteractionConfig"
+                            >Interact Key from Settings (default</span
+                          >
+                          <kbd>\</kbd>
+                          <span data-i18n="shortcutsOverlayToggleInteractionConfigEnd"
+                            >)</span
+                          >
                         </div>
                       </div>
-                      <div class="ctl-line sub">
+                      <div
+                        class="ctl-line sub"
+                        data-i18n="shortcutsOverlayToggleInteractionDesc"
+                      >
                         Switches click-through ↔ interactive (drag/scroll)
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Overlay Page Scroll</div>
+                      <div class="ctl-label" id="shortcutsOverlayControlModeTitle">
+                        Overlay Control Mode
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub">
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span id="shortcutsOverlayControlModeXboxHold">Hold</span>
+                            <span class="btn shoulder">LB</span> +
+                            <span class="btn shoulder">RB</span>
+                          </span>
+                        </div>
+                        <div class="ctl-line sub">
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span id="shortcutsOverlayControlModePsHold">Hold</span>
+                            <span class="btn shoulder">L1</span> +
+                            <span class="btn shoulder">R1</span>
+                          </span>
+                        </div>
+                      </div>
+                      <div class="ctl-line sub" id="shortcutsOverlayControlModeEnd">
+                        Ends when the shoulder buttons are released, the
+                        controller disconnects, or the overlay is unavailable
+                      </div>
+                    </li>
+
+                    <li class="shortcut-item" tabindex="0">
+                      <div class="ctl-label" id="shortcutsOverlayPageScrollTitle">
+                        Overlay Page Scroll
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>PageUp</kbd></div>
                         <div class="ctl-line sub"><kbd>PageDown</kbd></div>
                         <div class="ctl-line sub">
@@ -1119,62 +1327,175 @@
                           <kbd>Ctrl</kbd>+<kbd>PageDown</kbd>
                         </div>
                       </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub">
+                          <span class="btn stick">RS</span>
+                          <span id="shortcutsOverlayPageScrollControllerMode"
+                            >(overlay control mode)</span
+                          >
+                        </div>
+                      </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Snap 5 Positions</div>
+                      <div class="ctl-label" id="shortcutsOverlayMoveOverlayTitle">
+                        Move Overlay
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub">
+                          <span class="btn stick">LS</span>
+                          <span id="shortcutsOverlayMoveControllerMode"
+                            >(overlay control mode)</span
+                          >
+                        </div>
+                      </div>
+                    </li>
+
+                    <li class="shortcut-item" tabindex="0">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsOverlaySnap5PositionsTitle"
+                      >
+                        Snap 5 Positions
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd
                             >1</kbd
                           >
-                          (Top-Left)
+                          <span data-i18n="shortcutsOverlaySnapTopLeft"
+                            >(Top-Left)</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd
                             >2</kbd
                           >
-                          (Top-Right)
+                          <span data-i18n="shortcutsOverlaySnapTopRight"
+                            >(Top-Right)</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd
                             >3</kbd
                           >
-                          (Center)
+                          <span data-i18n="shortcutsOverlaySnapCenter"
+                            >(Center)</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd
                             >4</kbd
                           >
-                          (Bottom-Left)
+                          <span data-i18n="shortcutsOverlaySnapBottomLeft"
+                            >(Bottom-Left)</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd
                             >5</kbd
                           >
-                          (Bottom-Right)
+                          <span data-i18n="shortcutsOverlaySnapBottomRight"
+                            >(Bottom-Right)</span
+                          >
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Snap Grid / Cycle / Nudge</div>
+                      <div
+                        class="ctl-label"
+                        id="shortcutsOverlaySnapGridCycleNudgeTitle"
+                      >
+                        Snap Grid / Cycle / Nudge
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd
                             >M</kbd
                           >
-                          (cycle presets)
+                          <span data-i18n="shortcutsCommonCyclePresets"
+                            >(cycle presets)</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Shift</kbd>+Arrow
-                          (nudge 20px)
+                          <span data-i18n="shortcutsCommonNudge20px"
+                            >(nudge 20px)</span
+                          >
                         </div>
                       </div>
-                      <div class="ctl-line sub">
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          id="shortcutsOverlaySnapGridControllerNudge"
+                        >
+                          D-pad (nudge 20px, overlay control mode)
+                        </div>
+                        <div class="ctl-line sub">
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-y">Y</span>
+                            <span id="shortcutsOverlaySnapGridControllerCycleXbox"
+                              >(cycle presets)</span
+                            >
+                          </span>
+                        </div>
+                        <div class="ctl-line sub">
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-triangle">⃤⃤</span>
+                            <span id="shortcutsOverlaySnapGridControllerCyclePs"
+                              >(cycle presets)</span
+                            >
+                          </span>
+                        </div>
+                      </div>
+                      <div
+                        class="ctl-line sub"
+                        data-i18n="shortcutsOverlayActiveOnlyShown"
+                      >
                         Active only while the overlay is shown
+                      </div>
+                    </li>
+
+                    <li class="shortcut-item" tabindex="0">
+                      <div
+                        class="ctl-label"
+                        id="shortcutsOverlayControllerSupportNotesTitle"
+                      >
+                        Controller Support Notes
+                      </div>
+                      <div
+                        class="ctl-line sub"
+                        id="shortcutsOverlayControllerSupportNotesGameInput"
+                      >
+                        Native PlayStation support uses Microsoft GameInput when
+                        available
+                      </div>
+                      <div
+                        class="ctl-line sub"
+                        id="shortcutsOverlayControllerSupportNotesFallback"
+                      >
+                        If GameInput is missing, only XInput-compatible
+                        controllers can use overlay controller support
                       </div>
                     </li>
                   </ul>
@@ -1185,18 +1506,31 @@
                   <h4 id="settings-dashboardTitle">Dashboard</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Grid navigation</div>
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsDashboardGridNavigation"
+                      >
+                        Grid navigation
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">Arrows</div>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div class="ctl-line sub" data-i18n="shortcutsCommonArrows">
+                          Arrows
+                        </div>
                         <div class="ctl-line sub"><kbd>Home</kbd></div>
                         <div class="ctl-line sub"><kbd>End</kbd></div>
                         <div class="ctl-line sub"><kbd>PageUp</kbd></div>
                         <div class="ctl-line sub"><kbd>PageDown</kbd></div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
-                        <div class="ctl-line sub">D-pad</div>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub" data-i18n="shortcutsCommonDpad">
+                          D-pad
+                        </div>
                         <div class="ctl-line sub">
                           <span class="btn stick">LS</span>
                         </div>
@@ -1204,76 +1538,107 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Search</div>
+                      <div class="ctl-label" data-i18n="shortcutsDashboardSearch">
+                        Search
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>F</kbd>
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-x">X</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-x">X</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-square">☐</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-square">☐</span>
+                          </span>
                         </div>
                       </div>
                       <div class="ctl-line sub">
-                        In search:
+                        <span data-i18n="shortcutsDashboardSearchIn">In search:</span>
                         <div class="ctl-line sub">
                           <kbd>Enter</kbd> |
                           <span class="btn ps-cross">✕</span> |
-                          <span class="btn xb-a">A</span> opens first visible
-                          card
+                          <span class="btn xb-a">A</span>
+                          <span data-i18n="shortcutsDashboardSearchOpenFirst"
+                            >opens first visible card</span
+                          >
                         </div>
                         <div class="ctl-line sub">
-                          <kbd>↓</kbd> moves focus to first card
+                          <kbd>↓</kbd>
+                          <span data-i18n="shortcutsDashboardSearchFocusFirst"
+                            >moves focus to first card</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Esc</kbd> | <span class="btn xb-b">B</span> |
                           <span class="btn ps-circle">◯</span>
-                          close Dashboard
+                          <span data-i18n="shortcutsDashboardSearchClose"
+                            >close Dashboard</span
+                          >
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Open game (select card)</div>
+                      <div class="ctl-label" data-i18n="shortcutsDashboardOpenGame">
+                        Open game (select card)
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>Enter</kbd></div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-a">A</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-a">A</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-cross">✕</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-cross">✕</span>
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Play from card</div>
-                      <div class="ctl-line">
-                        <span class="hint">Mouse:</span>
-                        <div class="ctl-line sub">Click Play</div>
+                      <div class="ctl-label" data-i18n="shortcutsDashboardPlayFromCard">
+                        Play from card
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintMouse">Mouse:</span>
+                        <div class="ctl-line sub" data-i18n="shortcutsCommonClickPlay">
+                          Click Play
+                        </div>
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>P</kbd></div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Enter</kbd>
@@ -1283,53 +1648,87 @@
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-menu">Menu</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
+                              >Menu</span
+                            >
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-options">Options</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span
+                              class="btn ps-options"
+                              data-i18n="shortcutsButtonOptions"
+                              >Options</span
+                            >
+                          </span>
                         </div>
                       </div>
                       <div class="ctl-line sub">
-                        <span class="hint">(if executable)</span>
+                        <span
+                          class="hint"
+                          data-i18n="shortcutsCommonIfExecutable"
+                          >(if executable)</span
+                        >
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Sort cycles</div>
+                      <div class="ctl-label" data-i18n="shortcutsDashboardSortCycles">
+                        Sort cycles
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub">
-                          By Name — <kbd>Alt</kbd>+<kbd>1</kbd>
+                          <span data-i18n="shortcutsDashboardSortByName"
+                            >By Name —</span
+                          >
+                          <kbd>Alt</kbd>+<kbd>1</kbd>
                         </div>
                         <div class="ctl-line sub">
-                          By Progress — <kbd>Alt</kbd>+<kbd>2</kbd>
+                          <span data-i18n="shortcutsDashboardSortByProgress"
+                            >By Progress —</span
+                          >
+                          <kbd>Alt</kbd>+<kbd>2</kbd>
                         </div>
                         <div class="ctl-line sub">
-                          By Last Updated — <kbd>Alt</kbd>+<kbd>3</kbd>
+                          <span data-i18n="shortcutsDashboardSortByLastUpdated"
+                            >By Last Updated —</span
+                          >
+                          <kbd>Alt</kbd>+<kbd>3</kbd>
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn stick">L3</span>,
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn stick">L3</span>,
                             <span class="btn shoulder">RB</span>,
-                            <span class="btn shoulder">LB</span></span
-                          >
+                            <span class="btn shoulder">LB</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation: <span class="btn stick">L3</span>,
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn stick">L3</span>,
                             <span class="btn shoulder">R1</span>,
-                            <span class="btn shoulder">L1</span></span
-                          >
+                            <span class="btn shoulder">L1</span>
+                          </span>
                         </div>
                       </div>
                     </li>
@@ -1341,99 +1740,156 @@
                   <h4 id="settings-panelTitle">Settings panel</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Open/Close</div>
+                      <div class="ctl-label" data-i18n="shortcutsSettingsOpenClose">
+                        Open/Close
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>F1</kbd></div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>O</kbd>
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-view">View</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-view" data-i18n="shortcutsButtonView"
+                              >View</span
+                            >
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-share">Share</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span
+                              class="btn ps-share"
+                              data-i18n="shortcutsButtonShare"
+                              >Share</span
+                            >
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Tabs mode</div>
-                      <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">↑/↓ move</div>
-                        <div class="ctl-line sub"><kbd>Enter</kbd> select</div>
-                        <div class="ctl-line sub"><kbd>Esc</kbd> close</div>
+                      <div class="ctl-label" data-i18n="shortcutsSettingsTabsMode">
+                        Tabs mode
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div class="ctl-line sub" data-i18n="shortcutsSettingsTabsMove">
+                          ↑/↓ move
+                        </div>
                         <div class="ctl-line sub">
-                          D-pad / <span class="btn stick">RS</span> move
+                          <kbd>Enter</kbd>
+                          <span data-i18n="shortcutsCommonSelect">select</span>
+                        </div>
+                        <div class="ctl-line sub">
+                          <kbd>Esc</kbd>
+                          <span data-i18n="shortcutsCommonClose">close</span>
+                        </div>
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub">
+                          <span data-i18n="shortcutsCommonDpad">D-pad</span> /
+                          <span class="btn stick">RS</span>
+                          <span data-i18n="shortcutsCommonMove">move</span>
                         </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-a">A</span>/<span
                             class="btn ps-cross"
                             >✕</span
                           >
-                          select
+                          <span data-i18n="shortcutsCommonSelect">select</span>
                         </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-b">B</span>/<span
                             class="btn ps-circle"
                             >◯</span
                           >
-                          close
+                          <span data-i18n="shortcutsCommonClose">close</span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Section mode</div>
+                      <div class="ctl-label" data-i18n="shortcutsSettingsSectionMode">
+                        Section mode
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">↑/↓ focus</div>
-                        <div class="ctl-line sub">←/→ adjust</div>
-                        <div class="ctl-line sub">
-                          <kbd>Enter</kbd> activate
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsSettingsSectionFocusLine"
+                        >
+                          ↑/↓ focus
+                        </div>
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsSettingsSectionAdjustLine"
+                        >
+                          ←/→ adjust
                         </div>
                         <div class="ctl-line sub">
-                          <kbd>Esc</kbd> back to Tabs
+                          <kbd>Enter</kbd>
+                          <span data-i18n="shortcutsCommonActivate">activate</span>
+                        </div>
+                        <div class="ctl-line sub">
+                          <kbd>Esc</kbd>
+                          <span data-i18n="shortcutsSettingsSectionBackToTabs"
+                            >back to Tabs</span
+                          >
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          D-pad / <span class="btn stick">LS</span> focus
+                          <span data-i18n="shortcutsCommonDpad">D-pad</span> /
+                          <span class="btn stick">LS</span>
+                          <span data-i18n="shortcutsCommonFocus">focus</span>
                         </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-a">A</span>/<span
                             class="btn ps-cross"
                             >✕</span
                           >
-                          activate
+                          <span data-i18n="shortcutsCommonActivate">activate</span>
                         </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-b">B</span>/<span
                             class="btn ps-circle"
                             >◯</span
                           >
-                          back
+                          <span data-i18n="shortcutsCommonBack">back</span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Cycle tabs</div>
+                      <div class="ctl-label" data-i18n="shortcutsSettingsCycleTabs">
+                        Cycle tabs
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
                           <span class="ctl ctl-xb"
                             ><span class="btn shoulder">LB</span>/<span
@@ -1460,31 +1916,44 @@
                   <h4 id="settings-mainScreenTitle">Main screen</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Toggle Options</div>
+                      <div class="ctl-label" data-i18n="shortcutsMainToggleOptions">
+                        Toggle Options
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>F3</kbd></div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-x">X</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-x">X</span>
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-square">☐</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span class="btn ps-square">☐</span>
+                          </span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Create New Config</div>
+                      <div class="ctl-label" data-i18n="createNewConfigBtn">
+                        Create New Config
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>N</kbd>
                         </div>
@@ -1492,14 +1961,24 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Move</div>
-                      <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">↑/↓</div>
+                      <div class="ctl-label" data-i18n="shortcutsCommonMove">
+                        Move
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
-                        <div class="ctl-line sub">D-pad</div>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div class="ctl-line sub" data-i18n="shortcutsMainMoveKeyboard">
+                          ↑/↓
+                        </div>
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div class="ctl-line sub" data-i18n="shortcutsCommonDpad">
+                          D-pad
+                        </div>
                         <div class="ctl-line sub">
                           <span class="btn stick">LS</span>
                         </div>
@@ -1507,9 +1986,11 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Play</div>
+                      <div class="ctl-label" data-i18n="dashboard.play">Play</div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>P</kbd></div>
                         <div class="ctl-line sub">
                           <kbd>Ctrl</kbd>+<kbd>Enter</kbd>
@@ -1519,17 +2000,28 @@
                         </div>
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-xb"
-                            >Xbox: <span class="btn xb-menu">Menu</span></span
-                          >
+                          <span class="ctl ctl-xb">
+                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
+                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
+                              >Menu</span
+                            >
+                          </span>
                         </div>
                         <div class="ctl-line sub">
-                          <span class="ctl ctl-ps"
-                            >PlayStation:
-                            <span class="btn ps-options">Options</span></span
-                          >
+                          <span class="ctl ctl-ps">
+                            <span data-i18n="shortcutsBrandPlayStation"
+                              >PlayStation:</span
+                            >
+                            <span
+                              class="btn ps-options"
+                              data-i18n="shortcutsButtonOptions"
+                              >Options</span
+                            >
+                          </span>
                         </div>
                       </div>
                     </li>
@@ -1541,54 +2033,97 @@
                   <h4 id="settings-dropdownsTitle">Drop-downs</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">Open</div>
+                      <div class="ctl-label" data-i18n="shortcutsDropdownsOpen">
+                        Open
+                      </div>
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
                         <div class="ctl-line sub"><kbd>Enter</kbd></div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">While open</div>
+                      <div class="ctl-label" data-i18n="shortcutsDropdownsWhileOpen">
+                        While open
+                      </div>
 
                       <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">↑/↓/←/→ navigate</div>
-                        <div class="ctl-line sub"><kbd>Enter</kbd> confirm</div>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsDropdownsKeyboardNavigate"
+                        >
+                          ↑/↓/←/→ navigate
+                        </div>
                         <div class="ctl-line sub">
-                          <kbd>Esc</kbd>/<kbd>Backspace</kbd> cancel
+                          <kbd>Enter</kbd>
+                          <span data-i18n="shortcutsCommonConfirm">confirm</span>
+                        </div>
+                        <div class="ctl-line sub">
+                          <kbd>Esc</kbd>/<kbd>Backspace</kbd>
+                          <span data-i18n="shortcutsCommonCancel">cancel</span>
                         </div>
                       </div>
 
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
-                        <div class="ctl-line sub">D-pad navigate</div>
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsDropdownsControllerNavigate"
+                        >
+                          D-pad navigate
+                        </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-a">A</span>/<span
                             class="btn ps-cross"
                             >✕</span
                           >
-                          confirm
+                          <span data-i18n="shortcutsCommonConfirm">confirm</span>
                         </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-b">B</span>/<span
                             class="btn ps-circle"
                             >◯</span
                           >
-                          cancel
+                          <span data-i18n="shortcutsCommonCancel">cancel</span>
                         </div>
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label">While closed</div>
-                      <div class="ctl-line">
-                        <span class="hint">Keyboard:</span>
-                        <div class="ctl-line sub">←/→ cycles options</div>
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsDropdownsWhileClosed"
+                      >
+                        While closed
                       </div>
                       <div class="ctl-line">
-                        <span class="hint">Controller:</span>
-                        <div class="ctl-line sub">D-pad Left/Right</div>
+                        <span class="hint" data-i18n="shortcutsHintKeyboard"
+                          >Keyboard:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsDropdownsKeyboardCyclesOptions"
+                        >
+                          ←/→ cycles options
+                        </div>
+                      </div>
+                      <div class="ctl-line">
+                        <span class="hint" data-i18n="shortcutsHintController"
+                          >Controller:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsDropdownsControllerCycles"
+                        >
+                          D-pad Left/Right
+                        </div>
                       </div>
                     </li>
                   </ul>
@@ -7746,6 +8281,12 @@
           if (cb) cb.checked = prefs?.ignoreLeadingArticlesSort !== false;
         }
         {
+          const cb = document.getElementById(
+            "settings-overlayControllerSupportCheckbox",
+          );
+          if (cb) cb.checked = prefs?.overlayControllerSupportEnabled === true;
+        }
+        {
           const hwCb = document.getElementById(
             "settings-disableHardwareAccelerationCheckbox",
           );
@@ -8224,6 +8765,20 @@
               await loadPreferencesCached().catch(() => {});
             },
           );
+        }
+
+        const overlayControllerSupportEl = document.getElementById(
+          "settings-overlayControllerSupportCheckbox",
+        );
+        if (overlayControllerSupportEl) {
+          overlayControllerSupportEl.checked =
+            prefs?.overlayControllerSupportEnabled === true;
+          overlayControllerSupportEl.addEventListener("change", async (e) => {
+            await window.api.savePreferences({
+              overlayControllerSupportEnabled: e.target.checked,
+            });
+            await loadPreferencesCached().catch(() => {});
+          });
         }
 
         const showDashEl = document.getElementById(
@@ -9407,6 +9962,9 @@
           ),
           ignoreLeadingArticlesSort: checkbox(
             "settings-ignoreLeadingArticlesSortCheckbox",
+          ),
+          overlayControllerSupportEnabled: checkbox(
+            "settings-overlayControllerSupportCheckbox",
           ),
           schemaLanguages: getSchemaLanguageSelectionFromUi(),
           startMaximized: checkbox("settings-startMaximizedCheckbox"),
@@ -14201,6 +14759,13 @@
           if (!tpl) return;
           tab.appendChild(tpl.content.cloneNode(true));
           tab.dataset.ready = "1";
+          const strings =
+            typeof window.i18nUi?.getStrings === "function"
+              ? window.i18nUi.getStrings()
+              : null;
+          if (strings && typeof window.i18nUi?.applyLocaleStrings === "function") {
+            window.i18nUi.applyLocaleStrings(strings);
+          }
         }
         window.ensureShortcutsTabContent = ensureShortcutsTabContent;
         function focusFirstInActiveSection() {

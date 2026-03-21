@@ -83,6 +83,10 @@ const {
   normalizeShortcutAccelerator: normalizeOverlayShortcutAccelerator,
   parseShortcutAccelerator: parseOverlayShortcutAccelerator,
 } = require("./utils/overlay-shortcut-manager");
+const {
+  createControllerInputManager,
+  inspectControllerBackendAvailability,
+} = require("./utils/controller-input-manager");
 const getConfigInflight = new Map();
 const { createLogger } = require("./utils/logger");
 
@@ -100,6 +104,9 @@ const persistenceLogger = createLogger("persistence");
 const execLogger = createLogger("execution");
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
+const controllerLogger = createLogger("controller", {
+  level: process.env.CONTROLLER_LOG_LEVEL || "info",
+});
 const overlayShortcutManager = createOverlayShortcutManager({
   loadHook: () => {
     const { uIOhook, UiohookKey } = require("uiohook-napi");
@@ -578,6 +585,7 @@ const DEFAULT_PREFERENCES = {
   lumaPlayWatcherEnabled: false,
   disableProcessNameWatcher: false,
   forceGlobalOverlayShortcuts: false,
+  overlayControllerSupportEnabled: false,
   ignoreLeadingArticlesSort: true,
   schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
@@ -604,20 +612,24 @@ function getUiLanguage() {
 function loadUiLocale(lang) {
   const normalized = normalizeUiLanguage(lang);
   if (uiLocaleCache.has(normalized)) return uiLocaleCache.get(normalized);
-  let data = {};
+  let englishData = {};
+  let localizedData = {};
+  const englishPath = path.join(UI_LOCALE_DIR, "english.json");
   const filePath = path.join(UI_LOCALE_DIR, `${normalized}.json`);
   try {
-    data = JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch {
-    if (normalized !== "english") {
-      try {
-        const fallbackPath = path.join(UI_LOCALE_DIR, "english.json");
-        data = JSON.parse(fs.readFileSync(fallbackPath, "utf8"));
-      } catch {
-        data = {};
-      }
-    }
+    englishData = JSON.parse(fs.readFileSync(englishPath, "utf8"));
+  } catch {}
+  if (normalized === "english") {
+    localizedData = englishData;
+  } else {
+    try {
+      localizedData = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } catch {}
   }
+  const data =
+    normalized === "english"
+      ? englishData
+      : { ...(englishData || {}), ...(localizedData || {}) };
   uiLocaleCache.set(normalized, data);
   return data;
 }
@@ -678,6 +690,7 @@ let mainWindow;
 let selectedConfigPath = null;
 let selectedConfig = null;
 let selectedPlatform = null;
+let overlayControllerManager = null;
 let mainWindowUserZoom = 1;
 let mainWindowZoomTimer = null;
 let displayMetricsListenerAdded = false;
@@ -1484,6 +1497,16 @@ function isProcessNameWatcherEnabled(prefs = null) {
   return source?.disableProcessNameWatcher !== true;
 }
 
+function isOverlayControllerSupportEnabled(prefs = null) {
+  const source =
+    prefs && typeof prefs === "object"
+      ? prefs
+      : cachedPreferences && typeof cachedPreferences === "object"
+        ? cachedPreferences
+        : readPrefsSafe?.() || {};
+  return source?.overlayControllerSupportEnabled === true;
+}
+
 //Achievements Image
 function resolveIconAbsolutePath(configPath, rel) {
   try {
@@ -1789,6 +1812,16 @@ function applyOverlayFocusMode() {
 
 function isOverlayEffectivelyPresented() {
   if (!overlayWindow || overlayWindow.isDestroyed()) return false;
+  try {
+    return overlayWindow.isVisible();
+  } catch {
+    return false;
+  }
+}
+
+function isOverlayControllable() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return false;
+  if (!overlayPresented) return false;
   try {
     return overlayWindow.isVisible();
   } catch {
@@ -2282,6 +2315,47 @@ function setOverlayPositionClamped(nextX, nextY) {
   }
 }
 
+function moveOverlayRelative(deltaX, deltaY) {
+  const ctx = getOverlayPositionContext();
+  if (!ctx) return false;
+  return setOverlayPositionClamped(
+    ctx.bounds.x + (Number(deltaX) || 0),
+    ctx.bounds.y + (Number(deltaY) || 0),
+  );
+}
+
+function nudgeOverlayPosition(direction, step = OVERLAY_NUDGE_STEP_PX) {
+  const ctx = getOverlayPositionContext();
+  if (!ctx) return false;
+  const resolvedStep = Math.max(1, Number(step) || OVERLAY_NUDGE_STEP_PX);
+  const dir = String(direction || "").toLowerCase();
+  if (dir === "left") {
+    return setOverlayPositionClamped(
+      ctx.bounds.x - resolvedStep,
+      ctx.bounds.y,
+    );
+  }
+  if (dir === "right") {
+    return setOverlayPositionClamped(
+      ctx.bounds.x + resolvedStep,
+      ctx.bounds.y,
+    );
+  }
+  if (dir === "up") {
+    return setOverlayPositionClamped(
+      ctx.bounds.x,
+      ctx.bounds.y - resolvedStep,
+    );
+  }
+  if (dir === "down") {
+    return setOverlayPositionClamped(
+      ctx.bounds.x,
+      ctx.bounds.y + resolvedStep,
+    );
+  }
+  return false;
+}
+
 function snapOverlayByFactors(xFactor, yFactor) {
   const ctx = getOverlayPositionContext();
   if (!ctx) return false;
@@ -2308,6 +2382,37 @@ function cycleOverlaySnapPreset() {
   const preset = OVERLAY_SNAP5_PRESETS[overlaySnapCycleIndex];
   if (!preset) return false;
   return snapOverlayByFactors(preset.x, preset.y);
+}
+
+function sendOverlayScrollPage(direction, source = "unknown") {
+  if (
+    !overlayWindow ||
+    overlayWindow.isDestroyed() ||
+    !overlayPresented ||
+    !overlayWindow.isVisible()
+  ) {
+    return false;
+  }
+  const resolvedDirection =
+    String(direction || "").toLowerCase() === "up" ? "up" : "down";
+  try {
+    overlayWindow.webContents.send("overlay:scroll-page", {
+      direction: resolvedDirection,
+      source: String(source || "unknown"),
+    });
+    overlayLogger.debug("overlay:scroll-page:sent", {
+      direction: resolvedDirection,
+      source: String(source || "unknown"),
+    });
+    return true;
+  } catch (err) {
+    overlayLogger.warn("overlay:scroll-page:send-failed", {
+      direction: resolvedDirection,
+      source: String(source || "unknown"),
+      error: err?.message || String(err),
+    });
+    return false;
+  }
 }
 
 function applyOverlayPositionShortcutRegistration() {
@@ -2363,43 +2468,23 @@ function applyOverlayPositionShortcutRegistration() {
   });
 
   registerAll("overlay-position:nudge-left", ["Control+Alt+Shift+Left"], () => {
-    const ctx = getOverlayPositionContext();
-    if (!ctx) return;
-    setOverlayPositionClamped(
-      ctx.bounds.x - OVERLAY_NUDGE_STEP_PX,
-      ctx.bounds.y,
-    );
+    nudgeOverlayPosition("left");
   });
 
   registerAll(
     "overlay-position:nudge-right",
     ["Control+Alt+Shift+Right"],
     () => {
-      const ctx = getOverlayPositionContext();
-      if (!ctx) return;
-      setOverlayPositionClamped(
-        ctx.bounds.x + OVERLAY_NUDGE_STEP_PX,
-        ctx.bounds.y,
-      );
+      nudgeOverlayPosition("right");
     },
   );
 
   registerAll("overlay-position:nudge-up", ["Control+Alt+Shift+Up"], () => {
-    const ctx = getOverlayPositionContext();
-    if (!ctx) return;
-    setOverlayPositionClamped(
-      ctx.bounds.x,
-      ctx.bounds.y - OVERLAY_NUDGE_STEP_PX,
-    );
+    nudgeOverlayPosition("up");
   });
 
   registerAll("overlay-position:nudge-down", ["Control+Alt+Shift+Down"], () => {
-    const ctx = getOverlayPositionContext();
-    if (!ctx) return;
-    setOverlayPositionClamped(
-      ctx.bounds.x,
-      ctx.bounds.y + OVERLAY_NUDGE_STEP_PX,
-    );
+    nudgeOverlayPosition("down");
   });
 }
 
@@ -2450,16 +2535,7 @@ function applyOverlayKeyboardScrollShortcutRegistration() {
     "overlay-scroll-up",
     ["PageUp", "Control+PageUp"],
     () => {
-      if (
-        !overlayWindow ||
-        overlayWindow.isDestroyed() ||
-        !overlayPresented ||
-        !overlayWindow.isVisible()
-      )
-        return;
-      overlayWindow.webContents.send("overlay:scroll-page", {
-        direction: "up",
-      });
+      sendOverlayScrollPage("up", "keyboard-shortcut");
     },
   );
 
@@ -2467,16 +2543,7 @@ function applyOverlayKeyboardScrollShortcutRegistration() {
     "overlay-scroll-down",
     ["PageDown", "Control+PageDown"],
     () => {
-      if (
-        !overlayWindow ||
-        overlayWindow.isDestroyed() ||
-        !overlayPresented ||
-        !overlayWindow.isVisible()
-      )
-        return;
-      overlayWindow.webContents.send("overlay:scroll-page", {
-        direction: "down",
-      });
+      sendOverlayScrollPage("down", "keyboard-shortcut");
     },
   );
 }
@@ -2501,6 +2568,175 @@ function toggleOverlayInteractive() {
   if (!overlayWindow || overlayWindow.isDestroyed()) return;
   if (!overlayPresented || !overlayWindow.isVisible()) return;
   setOverlayInteractive(!overlayInteractive);
+}
+
+function toggleOverlayFromController(payload = {}) {
+  const onboardingBlocked =
+    isBootOnboardingGatePending() || global.bootOnboardingRequired;
+  const userIndex = Number(payload?.userIndex);
+  if (onboardingBlocked) {
+    controllerLogger.info("controller:overlay-toggle:blocked", {
+      reason: "boot-onboarding",
+      userIndex: Number.isFinite(userIndex) ? userIndex : null,
+    });
+    return false;
+  }
+
+  const currentlyPresented = isOverlayEffectivelyPresented();
+  try {
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      setOverlayPresented(!currentlyPresented);
+      return true;
+    }
+    createOverlayWindow(selectedConfig);
+    return true;
+  } catch (err) {
+    controllerLogger.error("controller:overlay-toggle:failed", {
+      userIndex: Number.isFinite(userIndex) ? userIndex : null,
+      error: err?.message || String(err),
+    });
+    return false;
+  }
+}
+
+function handleOverlayControllerAction(type, payload = {}) {
+  const action = String(type || "");
+  if (!action) return;
+
+  if (action === "overlay.control-mode") {
+    controllerLogger.info("controller:overlay-control-mode", {
+      active: payload?.active === true,
+      reason: payload?.reason || null,
+      userIndex:
+        Number.isFinite(Number(payload?.userIndex)) &&
+        Number(payload?.userIndex) >= 0
+          ? Number(payload?.userIndex)
+          : null,
+    });
+    return;
+  }
+
+  if (action === "overlay.toggle") {
+    toggleOverlayFromController(payload);
+    return;
+  }
+
+  if (!isOverlayControllable()) {
+    controllerLogger.debug("controller:overlay-action:skipped", {
+      action,
+      reason: "overlay-not-controllable",
+    });
+    return;
+  }
+
+  if (action === "overlay.move-relative") {
+    moveOverlayRelative(payload?.dx, payload?.dy);
+    return;
+  }
+  if (action === "overlay.scroll-page") {
+    sendOverlayScrollPage(payload?.direction, "controller-input");
+    return;
+  }
+  if (action === "overlay.nudge") {
+    nudgeOverlayPosition(payload?.direction);
+    return;
+  }
+  if (action === "overlay.snap-cycle") {
+    cycleOverlaySnapPreset();
+    return;
+  }
+
+  controllerLogger.debug("controller:overlay-action:unknown", {
+    action,
+    payload,
+  });
+}
+
+function ensureOverlayControllerManager() {
+  if (overlayControllerManager) return overlayControllerManager;
+  overlayControllerManager = createControllerInputManager({
+    logger: controllerLogger,
+    canEnterOverlayControlMode: () => isOverlayControllable(),
+    onAction: handleOverlayControllerAction,
+  });
+  return overlayControllerManager;
+}
+
+function syncOverlayControllerSupportState(reason, prefs = null) {
+  const enabled = isOverlayControllerSupportEnabled(prefs);
+  if (!enabled && !overlayControllerManager) {
+    return {
+      enabled: false,
+      running: false,
+      available: false,
+      dllName: null,
+      backendError: null,
+      controlModeActive: false,
+      controlModeUserIndex: null,
+    };
+  }
+  const manager = ensureOverlayControllerManager();
+  const status = manager.setEnabled(enabled, reason || "preferences");
+  if (enabled && !status.available) {
+    controllerLogger.warn("controller:preference-sync:unavailable", {
+      reason: String(reason || "preferences"),
+      backendError: status.backendError || null,
+    });
+  }
+  return status;
+}
+
+function validateOverlayControllerSupportPreference(
+  currentPrefs,
+  mergedPrefs,
+  incomingPatch,
+) {
+  const enablingNow =
+    currentPrefs?.overlayControllerSupportEnabled !== true &&
+    mergedPrefs?.overlayControllerSupportEnabled === true;
+  if (!enablingNow) return mergedPrefs;
+
+  const availability = inspectControllerBackendAvailability();
+  if (!availability.anyAvailable) {
+    controllerLogger.warn("controller:preference-enable:rejected", {
+      reason: "no-backend-available",
+      gameInputError: availability.gameInput.error,
+      xInputError: availability.xInput.error,
+    });
+    notifyError(
+      tUi(
+        "main.notify.overlayControllerSupportUnavailable",
+        {},
+        "No supported controller runtime was found. Install Microsoft GameInput or use an XInput-compatible controller.",
+      ),
+    );
+    mergedPrefs.overlayControllerSupportEnabled = false;
+    if (
+      Object.prototype.hasOwnProperty.call(
+        incomingPatch || {},
+        "overlayControllerSupportEnabled",
+      )
+    ) {
+      incomingPatch.overlayControllerSupportEnabled = false;
+    }
+    return mergedPrefs;
+  }
+
+  if (!availability.gameInput.available) {
+    controllerLogger.warn("controller:preference-enable:gameinput-missing", {
+      xInputDllName: availability.xInput.dllName,
+      gameInputError: availability.gameInput.error,
+    });
+    notifyWarn(
+      tUi(
+        "main.notify.overlayControllerSupportGameInputMissing",
+        {},
+        "Microsoft GameInput was not found on this PC. Native PlayStation controller support is unavailable; XInput-compatible controllers can still use the overlay.",
+      ),
+    );
+  }
+
+  return mergedPrefs;
 }
 
 function clearOverlayInteractShortcut() {
@@ -2956,6 +3192,14 @@ function applyPreferenceSideEffects(
   ) {
     refreshOverlayInputBackend("preferences:force-global-overlay-shortcuts");
   }
+  if (
+    Object.prototype.hasOwnProperty.call(patch, "overlayControllerSupportEnabled")
+  ) {
+    syncOverlayControllerSupportState(
+      "preferences:overlay-controller-support",
+      prefsSnapshot,
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "showHiddenDescription")) {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.send("overlay-preferences-updated", {
@@ -3049,6 +3293,7 @@ function updatePreferences(patch = {}) {
       ...current,
       ...incoming,
     });
+    validateOverlayControllerSupportPreference(current, merged, incoming);
     if (removeSteamKey) delete merged.steamApiKey;
 
     const overlayShortcutValidation =
@@ -11122,6 +11367,7 @@ app.whenReady().then(async () => {
   copyProgressTemplateToUserPresetsOnce();
 
   createMainWindow();
+  syncOverlayControllerSupportState("app-ready", cachedPreferences);
   scheduleAutoSelectProcessPollerAfterBoot();
   mainWindow.hide();
   schedulePostBootUiInitialization();
@@ -11133,6 +11379,9 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
+  if (overlayControllerManager) {
+    overlayControllerManager.shutdown("app:will-quit");
+  }
   clearOverlayShortcutRegistration();
   clearOverlayInteractShortcut();
   clearOverlayGlobalDragHookRegistration();

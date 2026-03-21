@@ -92,6 +92,7 @@
     "crc-32": "^1.2.2",
     "ini": "^4.1.1",
     "jsdom": "^26.1.0",
+    "koffi": "^2.15.2",
     "playwright": "^1.55.0",
     "ps-list": "^8.1.1",
     "screenshot-desktop": "^1.15.3",

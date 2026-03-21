@@ -17,22 +17,29 @@
     return raw === "latam" || raw === "es-419" ? "latam" : raw;
   };
 
-  async function fetchLocale(lang) {
+  async function fetchLocaleFile(lang) {
     const normalized = normalizeLang(lang);
     const url = `${LOCALE_BASE}/${encodeURIComponent(normalized)}.json`;
     try {
       const res = await fetch(url, { cache: "no-store" });
       if (res.ok) return await res.json();
     } catch {}
-    if (normalized !== DEFAULT_LANG) {
-      try {
-        const res = await fetch(`${LOCALE_BASE}/${DEFAULT_LANG}.json`, {
-          cache: "no-store",
-        });
-        if (res.ok) return await res.json();
-      } catch {}
-    }
     return {};
+  }
+
+  async function fetchLocale(lang) {
+    const normalized = normalizeLang(lang);
+    const englishStrings = await fetchLocaleFile(DEFAULT_LANG);
+    if (normalized === DEFAULT_LANG) return englishStrings;
+    const localizedStrings = await fetchLocaleFile(normalized);
+    return {
+      ...(englishStrings && typeof englishStrings === "object"
+        ? englishStrings
+        : {}),
+      ...(localizedStrings && typeof localizedStrings === "object"
+        ? localizedStrings
+        : {}),
+    };
   }
 
   function applyLocaleStrings(strings) {
@@ -95,6 +102,15 @@
       const el = document.getElementById(key);
       if (el) el.textContent = value;
     }
+
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      const key = el.getAttribute("data-i18n");
+      if (!key) return;
+      const value = strings[key];
+      if (typeof value === "string") {
+        el.textContent = value;
+      }
+    });
   }
 
   async function setUiLanguage(lang) {
@@ -131,6 +147,7 @@
     setUiLanguage,
     applyLocaleStrings,
     getString,
+    getStrings: () => cachedStrings,
   };
 
   if (document.readyState === "loading") {
