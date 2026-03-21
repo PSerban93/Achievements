@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Việc phát hiện cấu hình LumaPlay yêu cầu platform=uplay và emu=lumaplay.",
   "platformGuideRescanSummary": "Quét lại và tạo lại lược đồ",
   "platformGuideRescanItem1": "Lược đồ tái tạo được sử dụng để làm mới lược đồ Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Đối với Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) và GOG Galaxy (Official), việc tạo lại schema bị chặn theo thiết kế.",
+  "platformGuideRescanItem2": "Đối với Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) và GOG Galaxy (Official), việc tạo lại schema bị chặn theo thiết kế.",
   "platformGuideRescanItem3": "Đối với những nền tảng/trình mô phỏng đó, hãy sử dụng Thư mục → Quét lại để xây dựng lại từ các tệp nguồn.",
   "platformGuideOnboardingSummary": "Khởi động và cổng khởi động",
   "platformGuideOnboardingItem1": "Trong lần chạy đầu tiên (hoặc thay đổi phiên bản cài đặt), quá trình khởi động sẽ đợi lựa chọn thư mục trước khi quét toàn bộ.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Luồng khởi động: boot:onboarding:*.",
   "platformGuideLogsItem3": "Đánh giá ảnh chụp nhanh ban đầu: initial-notify:*.",
   "platformGuideLogsItem4": "Luồng lựa chọn tự động: auto-select:*.",
-  "platformGuideLogsItem5": "Xử lý Steam Official: steam-official:*. Xử lý Ubisoft Connect: ubisoft-official:*. Xử lý GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Xử lý Steam Official: steam-official:*. Xử lý Ubisoft Connect: ubisoft-official:*. Xử lý EA Desktop: ea-official:*. Xử lý GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Thêm thư mục gốc trong Cài đặt → Thư mục.",
   "platformGuideQuickTip2": "Tự động định cấu hình chỉ chạy cho các thư mục đã xem không bị tắt tiếng/bỏ qua.",
   "platformGuideQuickTip3": "Thông báo chỉ được gửi khi có thay đổi về tiến trình/mở khóa mới, không gửi cho các lần mở khóa cũ đã được nhập.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Thư mục theo dõi: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Tiến trình được đọc từ <userId>\\<productId>.spool, còn schema/hình ảnh được tạo từ %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Cấu hình chỉ được tạo sau khi cả tệp spool và kho lưu trữ thành tích cục bộ đều có sẵn. Schema được tạo trước, sau đó mới đến cấu hình.",
-  "platformGuideUbisoftOfficialItem4": "Thêm thư mục gốc spool của Ubisoft theo cách thủ công trong Cài đặt → Thư mục. Ứng dụng không tự giả định đường dẫn này."
+  "platformGuideUbisoftOfficialItem4": "Thêm thư mục gốc spool của Ubisoft theo cách thủ công trong Cài đặt → Thư mục. Ứng dụng không tự giả định đường dẫn này.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Chính thức)",
+  "platformGuideEaOfficialItem1": "Thư mục theo dõi: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Schema được tạo từ các bộ achievement mà EA Desktop ghi vào log, còn tiến độ runtime được đọc từ EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Config chỉ được tạo sau khi EA Desktop đã ghi một bộ achievement đầy đủ cho trò chơi đó. Schema được tạo trước, sau đó mới đến config.",
+  "platformGuideEaOfficialItem4": "Thêm thủ công thư mục gốc EA Desktop Logs trong Cài đặt → Thư mục. Ứng dụng không tự giả định đường dẫn này.",
+  "platformGuideEaOfficialItem5": "EA Desktop có thể xoay EADesktopVerbose.log thành EADesktopVerbose.bak; ứng dụng đọc cả hai để sự kiện achievement không bị mất khi log xoay vòng."
 }

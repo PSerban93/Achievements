@@ -390,7 +390,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay config detection requires platform=uplay and emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema is used for Steam/Uplay/Epic/GOG schema refresh.",
-  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) and GOG Galaxy (Official), schema regenerate is blocked by design.",
+  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) and GOG Galaxy (Official), schema regenerate is blocked by design.",
   "platformGuideRescanItem3": "For those platforms/emulators, use Folders → Rescan to rebuild from source files.",
   "platformGuideOnboardingSummary": "Boot onboarding and startup gate",
   "platformGuideOnboardingItem1": "On first run (or onboarding version change), startup waits for folder selection before full scanning.",
@@ -411,7 +411,7 @@
   "platformGuideLogsItem2": "Startup flow: boot:onboarding:*.",
   "platformGuideLogsItem3": "Initial snapshot evaluation: initial-notify:*.",
   "platformGuideLogsItem4": "Auto selection flow: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official handling: steam-official:*. Ubisoft Connect handling: ubisoft-official:*. GOG Galaxy handling: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official handling: steam-official:*. Ubisoft Connect handling: ubisoft-official:*. EA Desktop handling: ea-official:*. GOG Galaxy handling: gog-official:*.",
   "platformGuideQuickTip1": "Add root folders in Settings → Folders.",
   "platformGuideQuickTip2": "Auto-config runs only for watched folders that are not muted/ignored.",
   "platformGuideQuickTip3": "Notifications are sent only on new unlock/progress changes, not for already imported old unlocks.",
@@ -573,5 +573,11 @@
   "platformGuideUbisoftOfficialItem1": "Watch folder: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Progress is read from <userId>\\<productId>.spool, while schema/images are generated from %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Configs are created only after both the spool file and the local achievements archive are available. The schema is generated first, then the config.",
-  "platformGuideUbisoftOfficialItem4": "Add the Ubisoft spool root manually in Settings → Folders. The app does not assume this path automatically."
+  "platformGuideUbisoftOfficialItem4": "Add the Ubisoft spool root manually in Settings → Folders. The app does not assume this path automatically.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Official)",
+  "platformGuideEaOfficialItem1": "Watch folder: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Schema is generated from achievement sets logged by EA Desktop, while runtime progress is read from EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Configs are created only after EA Desktop has logged a full achievement set for that game. The schema is generated first, then the config.",
+  "platformGuideEaOfficialItem4": "Add the EA Desktop Logs root manually in Settings → Folders. The app does not assume this path automatically.",
+  "platformGuideEaOfficialItem5": "EA Desktop can rotate EADesktopVerbose.log into EADesktopVerbose.bak; the app reads both so achievement events are not lost across log rotation."
 }

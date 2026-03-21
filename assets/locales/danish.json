@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay konfigurationsdetektion kræver platform=uplay og emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerer skema bruges til Steam/Uplay/Epic/GOG skemaopdatering.",
-  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) og GOG Galaxy (Official) er skemaregenerering blokeret med vilje.",
+  "platformGuideRescanItem2": "For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) og GOG Galaxy (Official) er skemaregenerering blokeret med vilje.",
   "platformGuideRescanItem3": "For disse platforme/emulatorer, brug mapper → Genscan for at genopbygge fra kildefiler.",
   "platformGuideOnboardingSummary": "Boot onboarding og startup gate",
   "platformGuideOnboardingItem1": "Ved første kørsel (eller ændring af onboardingversion) venter opstart på mappevalg før fuld scanning.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Opstartsflow: boot:onboarding:*.",
   "platformGuideLogsItem3": "Indledende snapshot-evaluering: initial-notify:*.",
   "platformGuideLogsItem4": "Automatisk valg flow: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official-håndtering: steam-official:*. Ubisoft Connect-håndtering: ubisoft-official:*. GOG Galaxy-håndtering: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official-håndtering: steam-official:*. Ubisoft Connect-håndtering: ubisoft-official:*. EA Desktop-håndtering: ea-official:*. GOG Galaxy-håndtering: gog-official:*.",
   "platformGuideQuickTip1": "Tilføj rodmapper i Indstillinger → Mapper.",
   "platformGuideQuickTip2": "Auto-config kører kun for overvågede mapper, der ikke er slået fra/ignoreret.",
   "platformGuideQuickTip3": "Meddelelser sendes kun ved nye oplåsnings-/fremskridtsændringer, ikke for allerede importerede gamle oplåsninger.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Overvåget mappe: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Fremdrift læses fra <userId>\\<productId>.spool, mens skema/billeder genereres fra %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Konfigurationer oprettes først, når både spool-filen og det lokale achievements-arkiv er tilgængelige. Skemaet genereres først, derefter konfigurationen.",
-  "platformGuideUbisoftOfficialItem4": "Tilføj Ubisoft spool-roden manuelt i Indstillinger → Mapper. Appen antager ikke automatisk denne sti."
+  "platformGuideUbisoftOfficialItem4": "Tilføj Ubisoft spool-roden manuelt i Indstillinger → Mapper. Appen antager ikke automatisk denne sti.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Officiel)",
+  "platformGuideEaOfficialItem1": "Overvåget mappe: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Skemaet genereres ud fra achievementsæt, som logges af EA Desktop, mens runtime-fremskridt læses fra EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Konfigurationer oprettes først, når EA Desktop har logget et komplet achievementsæt for det spil. Skemaet genereres først, derefter konfigurationen.",
+  "platformGuideEaOfficialItem4": "Tilføj manuelt roden til EA Desktop Logs under Indstillinger → Mapper. Appen antager ikke denne sti automatisk.",
+  "platformGuideEaOfficialItem5": "EA Desktop kan rotere EADesktopVerbose.log til EADesktopVerbose.bak; appen læser begge, så achievement-hændelser ikke går tabt under logrotation."
 }

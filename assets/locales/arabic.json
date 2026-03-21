@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "يتطلب اكتشاف تكوين LumaPlay platform=uplay وemu=lumaplay.",
   "platformGuideRescanSummary": "إعادة المسح مقابل إعادة إنشاء المخطط",
   "platformGuideRescanItem1": "يتم استخدام إعادة إنشاء المخطط لتحديث المخطط Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "بالنسبة إلى Xenia وRPCS3 وshadPS4 وSteam Official وUbisoft Connect (Official) وGOG Galaxy (Official)، يتم حظر إعادة توليد المخطط عمدًا.",
+  "platformGuideRescanItem2": "بالنسبة إلى Xenia وRPCS3 وshadPS4 وSteam Official وUbisoft Connect (Official) وEA Desktop (Official) وGOG Galaxy (Official)، يتم حظر إعادة توليد المخطط عمدًا.",
   "platformGuideRescanItem3": "بالنسبة لتلك الأنظمة الأساسية/المحاكيات، استخدم Folders → Rescan لإعادة البناء من الملفات المصدر.",
   "platformGuideOnboardingSummary": "تمهيد التمهيد وبوابة بدء التشغيل",
   "platformGuideOnboardingItem1": "عند التشغيل لأول مرة (أو تغيير إصدار الإعداد)، ينتظر بدء التشغيل تحديد المجلد قبل إجراء المسح الكامل.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "تدفق بدء التشغيل: boot:onboarding:*.",
   "platformGuideLogsItem3": "تقييم اللقطة الأولي: initial-notify:*.",
   "platformGuideLogsItem4": "تدفق الاختيار التلقائي: auto-select:*.",
-  "platformGuideLogsItem5": "معالجة Steam الرسمية: steam-official:*. معالجة Ubisoft Connect: ubisoft-official:*. معالجة GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "معالجة Steam الرسمية: steam-official:*. معالجة Ubisoft Connect: ubisoft-official:*. معالجة EA Desktop: ea-official:*. معالجة GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "أضف المجلدات الجذرية في الإعدادات → المجلدات.",
   "platformGuideQuickTip2": "يتم تشغيل التكوين التلقائي فقط للمجلدات المراقبة التي لم يتم كتم صوتها/تجاهلها.",
   "platformGuideQuickTip3": "يتم إرسال الإشعارات فقط بشأن تغييرات إلغاء القفل/التقدم الجديدة، وليس لعمليات إلغاء القفل القديمة التي تم استيرادها بالفعل.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "مجلد المراقبة: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "يُقرأ التقدم من <userId>\\<productId>.spool، بينما تُولَّد المخططات/الصور من %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "لا تُنشأ الإعدادات إلا بعد توفر ملف spool وأرشيف الإنجازات المحلي معًا. يُنشأ المخطط أولًا، ثم ملف الإعداد.",
-  "platformGuideUbisoftOfficialItem4": "أضف جذر Ubisoft spool يدويًا من الإعدادات → المجلدات. التطبيق لا يفترض هذا المسار تلقائيًا."
+  "platformGuideUbisoftOfficialItem4": "أضف جذر Ubisoft spool يدويًا من الإعدادات → المجلدات. التطبيق لا يفترض هذا المسار تلقائيًا.",
+  "platformGuideEaOfficialSummary": "EA Desktop (رسمي)",
+  "platformGuideEaOfficialItem1": "مجلد المراقبة: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "يتم إنشاء المخطط من مجموعات الإنجازات التي يسجلها EA Desktop، بينما تتم قراءة التقدم أثناء التشغيل من EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "لا يتم إنشاء ملفات الإعداد إلا بعد أن يسجل EA Desktop مجموعة إنجازات كاملة لتلك اللعبة. يتم إنشاء المخطط أولاً، ثم ملف الإعداد.",
+  "platformGuideEaOfficialItem4": "أضف جذر EA Desktop Logs يدويًا في الإعدادات → المجلدات. لا يفترض التطبيق هذا المسار تلقائيًا.",
+  "platformGuideEaOfficialItem5": "قد يقوم EA Desktop بتدوير EADesktopVerbose.log إلى EADesktopVerbose.bak؛ يقرأ التطبيق كلا الملفين حتى لا تضيع أحداث الإنجازات أثناء تدوير السجل."
 }

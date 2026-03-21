@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Deteksi konfigurasi LumaPlay memerlukan platform=uplay dan emu=lumaplay.",
   "platformGuideRescanSummary": "Pindai Ulang vs Regenerasi Skema",
   "platformGuideRescanItem1": "Skema Regenerasi digunakan untuk penyegaran skema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Untuk Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), dan GOG Galaxy (Official), regenerasi skema diblokir secara desain.",
+  "platformGuideRescanItem2": "Untuk Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official), dan GOG Galaxy (Official), regenerasi skema diblokir secara desain.",
   "platformGuideRescanItem3": "Untuk platform/emulator tersebut, gunakan Folder → Pindai ulang untuk membangun kembali dari file sumber.",
   "platformGuideOnboardingSummary": "Orientasi boot dan gerbang permulaan",
   "platformGuideOnboardingItem1": "Saat pertama kali dijalankan (atau perubahan versi orientasi), startup menunggu pemilihan folder sebelum pemindaian penuh.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Alur permulaan: boot:onboarding:*.",
   "platformGuideLogsItem3": "Evaluasi cuplikan awal: initial-notify:*.",
   "platformGuideLogsItem4": "Alur pemilihan otomatis: auto-select:*.",
-  "platformGuideLogsItem5": "Penanganan Steam Resmi: steam-official:*. Penanganan Ubisoft Connect: ubisoft-official:*. Penanganan GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Penanganan Steam Resmi: steam-official:*. Penanganan Ubisoft Connect: ubisoft-official:*. Penanganan EA Desktop: ea-official:*. Penanganan GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Tambahkan folder root di Pengaturan → Folder.",
   "platformGuideQuickTip2": "Konfigurasi otomatis hanya berjalan untuk folder yang diawasi yang tidak dibisukan/diabaikan.",
   "platformGuideQuickTip3": "Pemberitahuan dikirim hanya pada pembukaan kunci baru/perubahan kemajuan, bukan pada pembukaan kunci lama yang sudah diimpor.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Folder yang dipantau: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Progres dibaca dari <userId>\\<productId>.spool, sedangkan skema/gambar dibuat dari %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Konfigurasi dibuat hanya setelah file spool dan arsip achievement lokal sama-sama tersedia. Skema dibuat terlebih dahulu, lalu konfigurasinya.",
-  "platformGuideUbisoftOfficialItem4": "Tambahkan root spool Ubisoft secara manual di Pengaturan → Folder. Aplikasi tidak mengasumsikan path ini secara otomatis."
+  "platformGuideUbisoftOfficialItem4": "Tambahkan root spool Ubisoft secara manual di Pengaturan → Folder. Aplikasi tidak mengasumsikan path ini secara otomatis.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Resmi)",
+  "platformGuideEaOfficialItem1": "Folder yang dipantau: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Skema dibuat dari kumpulan achievement yang dicatat oleh EA Desktop, sementara progres runtime dibaca dari EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Konfig hanya dibuat setelah EA Desktop mencatat satu kumpulan achievement lengkap untuk game tersebut. Skema dibuat terlebih dahulu, lalu konfig.",
+  "platformGuideEaOfficialItem4": "Tambahkan root EA Desktop Logs secara manual di Pengaturan → Folder. Aplikasi tidak mengasumsikan path ini secara otomatis.",
+  "platformGuideEaOfficialItem5": "EA Desktop dapat merotasi EADesktopVerbose.log menjadi EADesktopVerbose.bak; aplikasi membaca keduanya agar event achievement tidak hilang saat rotasi log."
 }

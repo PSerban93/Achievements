@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay konfigurationsdetektering kräver platform=uplay och emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema används för Steam/Uplay/Epic/GOG schemauppdatering.",
-  "platformGuideRescanItem2": "För Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) och GOG Galaxy (Official) är schemaregenerering avsiktligt blockerad.",
+  "platformGuideRescanItem2": "För Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) och GOG Galaxy (Official) är schemaregenerering avsiktligt blockerad.",
   "platformGuideRescanItem3": "För dessa plattformar/emulatorer, använd Mappar → Skanna om för att bygga om från källfiler.",
   "platformGuideOnboardingSummary": "Boot onboarding och startup gate",
   "platformGuideOnboardingItem1": "Vid första körningen (eller byte av versionsändring), väntar start på mappval innan full skanning.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Startflöde: boot:onboarding:*.",
   "platformGuideLogsItem3": "Inledande ögonblicksbildsutvärdering: initial-notify:*.",
   "platformGuideLogsItem4": "Autovalsflöde: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official-hantering: steam-official:*. Ubisoft Connect-hantering: ubisoft-official:*. GOG Galaxy-hantering: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official-hantering: steam-official:*. Ubisoft Connect-hantering: ubisoft-official:*. EA Desktop-hantering: ea-official:*. GOG Galaxy-hantering: gog-official:*.",
   "platformGuideQuickTip1": "Lägg till rotmappar i Inställningar → Mappar.",
   "platformGuideQuickTip2": "Auto-config körs endast för bevakade mappar som inte är tystade/ignorerade.",
   "platformGuideQuickTip3": "Aviseringar skickas endast vid nya upplåsnings-/förloppsändringar, inte för redan importerade gamla upplåsningar.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Bevakad mapp: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Förlopp läses från <userId>\\<productId>.spool, medan schema/bilder genereras från %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Konfigurationer skapas först när både spool-filen och det lokala achievements-arkivet är tillgängliga. Schemat genereras först och därefter konfigurationen.",
-  "platformGuideUbisoftOfficialItem4": "Lägg till Ubisofts spool-rot manuellt i Inställningar → Mappar. Appen antar inte den här sökvägen automatiskt."
+  "platformGuideUbisoftOfficialItem4": "Lägg till Ubisofts spool-rot manuellt i Inställningar → Mappar. Appen antar inte den här sökvägen automatiskt.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Officiell)",
+  "platformGuideEaOfficialItem1": "Övervakad mapp: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Schemat genereras från achievement-set som loggas av EA Desktop, medan runtime-framsteg läses från EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Konfigurationer skapas först efter att EA Desktop har loggat ett komplett achievement-set för det spelet. Först genereras schemat, sedan konfigurationen.",
+  "platformGuideEaOfficialItem4": "Lägg till roten för EA Desktop Logs manuellt i Inställningar → Mappar. Appen antar inte den här sökvägen automatiskt.",
+  "platformGuideEaOfficialItem5": "EA Desktop kan rotera EADesktopVerbose.log till EADesktopVerbose.bak; appen läser båda så att achievement-händelser inte går förlorade under loggrotation."
 }

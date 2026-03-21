@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Для виявлення конфігурації LumaPlay потрібні platform=uplay і emu=lumaplay.",
   "platformGuideRescanSummary": "Повторне сканування та регенерація схеми",
   "platformGuideRescanItem1": "Regenerate Schema використовується для оновлення схеми Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Для Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) і GOG Galaxy (Official) повторна генерація схеми навмисно заблокована.",
+  "platformGuideRescanItem2": "Для Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) і GOG Galaxy (Official) повторна генерація схеми навмисно заблокована.",
   "platformGuideRescanItem3": "Для цих платформ/емуляторів скористайтеся папками → Пересканувати, щоб відновити вихідні файли.",
   "platformGuideOnboardingSummary": "Шлюз реєстрації завантаження та запуску",
   "platformGuideOnboardingItem1": "Під час першого запуску (або під час зміни версії) запуск очікує вибору папки перед повним скануванням.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Потік запуску: boot:onboarding:*.",
   "platformGuideLogsItem3": "Початкова оцінка знімка: initial-notify:*.",
   "platformGuideLogsItem4": "Потік автоматичного вибору: auto-select:*.",
-  "platformGuideLogsItem5": "Обробка Steam Official: steam-official:*. Обробка Ubisoft Connect: ubisoft-official:*. Обробка GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Обробка Steam Official: steam-official:*. Обробка Ubisoft Connect: ubisoft-official:*. Обробка EA Desktop: ea-official:*. Обробка GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Додайте кореневі папки в Параметри → Папки.",
   "platformGuideQuickTip2": "Автоматична конфігурація запускається лише для папок, які відстежуються, і які не ігноруються.",
   "platformGuideQuickTip3": "Сповіщення надсилаються лише про нове розблокування/зміни прогресу, а не про вже імпортовані старі розблокування.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Відстежувана папка: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Прогрес зчитується з <userId>\\<productId>.spool, а схема/зображення генеруються з %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Конфіги створюються лише після того, як доступні і файл spool, і локальний архів досягнень. Спочатку генерується схема, потім конфіг.",
-  "platformGuideUbisoftOfficialItem4": "Додайте кореневу папку Ubisoft spool вручну в Налаштування → Папки. Застосунок не припускає цей шлях автоматично."
+  "platformGuideUbisoftOfficialItem4": "Додайте кореневу папку Ubisoft spool вручну в Налаштування → Папки. Застосунок не припускає цей шлях автоматично.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Офіційний)",
+  "platformGuideEaOfficialItem1": "Папка спостереження: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Схема генерується з наборів досягнень, які EA Desktop записав у лог, а прогрес під час роботи читається з EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Конфіги створюються лише після того, як EA Desktop запише повний набір досягнень для цієї гри. Спочатку генерується схема, потім конфіг.",
+  "platformGuideEaOfficialItem4": "Додайте корінь EA Desktop Logs вручну в Налаштування → Папки. Застосунок не припускає цей шлях автоматично.",
+  "platformGuideEaOfficialItem5": "EA Desktop може ротувати EADesktopVerbose.log у EADesktopVerbose.bak; застосунок читає обидва файли, щоб події досягнень не губилися під час ротації логу."
 }

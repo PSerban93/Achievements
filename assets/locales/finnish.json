@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay asetusten tunnistus vaatii platform=uplay ja emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema -mallia käytetään Steam/Uplay/Epic/GOG-skeeman päivitykseen.",
-  "platformGuideRescanItem2": "Xenian, RPCS3:n, shadPS4:n, Steam Officialin, Ubisoft Connectin (Official) ja GOG Galaxyn (Official) kohdalla skeeman uudelleenluonti on estetty tarkoituksella.",
+  "platformGuideRescanItem2": "Xenian, RPCS3:n, shadPS4:n, Steam Officialin, Ubisoft Connectin (Official), EA Desktopin (Official) ja GOG Galaxyn (Official) kohdalla skeeman uudelleenluonti on estetty tarkoituksella.",
   "platformGuideRescanItem3": "Käytä kyseisissä alustoissa/emulaattoreissa Kansiot → Hae uudelleen rakentaaksesi uudelleen lähdetiedostoista.",
   "platformGuideOnboardingSummary": "Käynnistys ja käynnistysportti",
   "platformGuideOnboardingItem1": "Ensimmäisellä käyttökerralla (tai aloitusversion muutoksella) käynnistys odottaa kansion valintaa ennen täydellistä tarkistusta.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Käynnistyskulku: boot:onboarding:*.",
   "platformGuideLogsItem3": "Ensimmäinen tilannekuvan arviointi: initial-notify:*.",
   "platformGuideLogsItem4": "Automaattinen valintaprosessi: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official -käsittely: steam-official:*. Ubisoft Connect -käsittely: ubisoft-official:*. GOG Galaxy -käsittely: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official -käsittely: steam-official:*. Ubisoft Connect -käsittely: ubisoft-official:*. EA Desktop -käsittely: ea-official:*. GOG Galaxy -käsittely: gog-official:*.",
   "platformGuideQuickTip1": "Lisää juurikansioita kohdassa Asetukset → Kansiot.",
   "platformGuideQuickTip2": "Automaattinen määritys toimii vain valvotuissa kansioissa, joita ei ole mykistetty/ohitettu.",
   "platformGuideQuickTip3": "Ilmoitukset lähetetään vain uusista lukituksen avaus-/ edistymismuutoksista, ei jo tuoduista vanhoista avauksista.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Seurattava kansio: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Edistyminen luetaan tiedostosta <userId>\\<productId>.spool, kun taas skeema/kuvat luodaan sijainnista %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Konfiguraatiot luodaan vasta, kun sekä spool-tiedosto että paikallinen saavutearkisto ovat saatavilla. Skeema luodaan ensin, sitten konfiguraatio.",
-  "platformGuideUbisoftOfficialItem4": "Lisää Ubisoftin spool-juurihakemisto manuaalisesti kohdassa Asetukset → Kansiot. Sovellus ei oleta tätä polkua automaattisesti."
+  "platformGuideUbisoftOfficialItem4": "Lisää Ubisoftin spool-juurihakemisto manuaalisesti kohdassa Asetukset → Kansiot. Sovellus ei oleta tätä polkua automaattisesti.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Virallinen)",
+  "platformGuideEaOfficialItem1": "Seurattava kansio: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Skeema luodaan EA Desktopin lokittamista achievement-seteistä, ja ajonaikainen edistyminen luetaan tiedostosta EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Konfiguraatiot luodaan vasta sen jälkeen, kun EA Desktop on kirjannut pelille täydellisen achievement-setin. Ensin luodaan skeema, sitten konfiguraatio.",
+  "platformGuideEaOfficialItem4": "Lisää EA Desktop Logs -juurikansio manuaalisesti kohtaan Asetukset → Kansiot. Sovellus ei oleta tätä polkua automaattisesti.",
+  "platformGuideEaOfficialItem5": "EA Desktop voi kierrättää EADesktopVerbose.log-tiedoston nimeksi EADesktopVerbose.bak; sovellus lukee molemmat, jotta achievement-tapahtumat eivät katoa lokin kierron aikana."
 }

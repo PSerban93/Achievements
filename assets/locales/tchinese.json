@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay 設定偵測需要 platform=uplay 和 emu=lumaplay。",
   "platformGuideRescanSummary": "重新掃描與重新生成架構",
   "platformGuideRescanItem1": "重新產生架構用於 Steam/Uplay/Epic/GOG 架構刷新。",
-  "platformGuideRescanItem2": "對於 Xenia、RPCS3、shadPS4、Steam Official、Ubisoft Connect（Official）與 GOG Galaxy（Official），重新產生 schema 在設計上已被阻止。",
+  "platformGuideRescanItem2": "對於 Xenia、RPCS3、shadPS4、Steam Official、Ubisoft Connect（Official）、EA Desktop（Official）與 GOG Galaxy（Official），重新產生 schema 在設計上已被阻止。",
   "platformGuideRescanItem3": "對於這些平台/模擬器，請使用資料夾 → 重新掃描從原始檔案重建。",
   "platformGuideOnboardingSummary": "引導載入和啟動門",
   "platformGuideOnboardingItem1": "首次運行（或載入版本變更）時，啟動會在完全掃描之前等待資料夾選擇。",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "啟動流程：boot:onboarding:*。",
   "platformGuideLogsItem3": "初步快照評估：initial-notify:*。",
   "platformGuideLogsItem4": "自動選擇流程：auto-select:*。",
-  "platformGuideLogsItem5": "Steam 官方處理：steam-official:*. Ubisoft Connect 處理：ubisoft-official:*. GOG Galaxy 處理：gog-official:*。",
+  "platformGuideLogsItem5": "Steam 官方處理：steam-official:*. Ubisoft Connect 處理：ubisoft-official:*. EA Desktop 處理：ea-official:*. GOG Galaxy 處理：gog-official:*。",
   "platformGuideQuickTip1": "在「設定」→「資料夾」中新增根資料夾。",
   "platformGuideQuickTip2": "自動配置僅針對未靜音/忽略的監視資料夾執行。",
   "platformGuideQuickTip3": "僅在新解鎖/進度變更時發送通知，而不會針對已匯入的舊解鎖發送通知。",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "監視資料夾：%LOCALAPPDATA%\\Ubisoft Game Launcher\\spool。",
   "platformGuideUbisoftOfficialItem2": "進度會從 <userId>\\<productId>.spool 讀取，而 schema/圖片會從 %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements 產生。",
   "platformGuideUbisoftOfficialItem3": "只有在 spool 檔案與本機成就封存都可用時才會建立設定。先產生 schema，再建立設定。",
-  "platformGuideUbisoftOfficialItem4": "請在 設定 → 資料夾 中手動加入 Ubisoft spool 根目錄。應用程式不會自動假定此路徑。"
+  "platformGuideUbisoftOfficialItem4": "請在 設定 → 資料夾 中手動加入 Ubisoft spool 根目錄。應用程式不會自動假定此路徑。",
+  "platformGuideEaOfficialSummary": "EA Desktop（官方）",
+  "platformGuideEaOfficialItem1": "監視資料夾：%LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs。",
+  "platformGuideEaOfficialItem2": "schema 會根據 EA Desktop 記錄的成就集合產生，而執行時進度會從 EADesktopVerbose.log 讀取。",
+  "platformGuideEaOfficialItem3": "只有在 EA Desktop 為該遊戲記錄完整的成就集合後，才會建立設定。先產生 schema，再產生設定。",
+  "platformGuideEaOfficialItem4": "在 設定 → 資料夾 中手動加入 EA Desktop Logs 根目錄。應用程式不會自動假定此路徑。",
+  "platformGuideEaOfficialItem5": "EA Desktop 可能會將 EADesktopVerbose.log 輪替為 EADesktopVerbose.bak；應用程式會同時讀取兩者，以免成就事件在日誌輪替時遺失。"
 }

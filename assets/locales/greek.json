@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Ο εντοπισμός παραμέτρων LumaPlay απαιτεί platform=uplay και emu=lumaplay.",
   "platformGuideRescanSummary": "Εκ νέου σάρωση έναντι αναγέννησης σχήματος",
   "platformGuideRescanItem1": "Το Regenerate Schema χρησιμοποιείται για την ανανέωση σχήματος Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Για Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) και GOG Galaxy (Official), η αναδημιουργία σχήματος είναι μπλοκαρισμένη εκ κατασκευής.",
+  "platformGuideRescanItem2": "Για Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) και GOG Galaxy (Official), η αναδημιουργία σχήματος είναι μπλοκαρισμένη εκ κατασκευής.",
   "platformGuideRescanItem3": "Για αυτές τις πλατφόρμες/εξομοιωτές, χρησιμοποιήστε το Folders → Rescan για να δημιουργήσετε ξανά από αρχεία προέλευσης.",
   "platformGuideOnboardingSummary": "Ενσωμάτωση εκκίνησης και πύλη εκκίνησης",
   "platformGuideOnboardingItem1": "Κατά την πρώτη εκτέλεση (ή την αλλαγή έκδοσης ενσωμάτωσης), η εκκίνηση περιμένει για την επιλογή φακέλου πριν από την πλήρη σάρωση.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Ροή εκκίνησης: boot:onboarding:*.",
   "platformGuideLogsItem3": "Αρχική αξιολόγηση στιγμιότυπου: initial-notify:*.",
   "platformGuideLogsItem4": "Ροή αυτόματης επιλογής: auto-select:*.",
-  "platformGuideLogsItem5": "Χειρισμός Steam Official: steam-official:*. Χειρισμός Ubisoft Connect: ubisoft-official:*. Χειρισμός GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Χειρισμός Steam Official: steam-official:*. Χειρισμός Ubisoft Connect: ubisoft-official:*. Χειρισμός EA Desktop: ea-official:*. Χειρισμός GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Προσθήκη ριζικών φακέλων στις Ρυθμίσεις → Φάκελοι.",
   "platformGuideQuickTip2": "Η αυτόματη ρύθμιση παραμέτρων εκτελείται μόνο για φακέλους παρακολούθησης που δεν έχουν απενεργοποιηθεί/αγνοηθεί.",
   "platformGuideQuickTip3": "Οι ειδοποιήσεις αποστέλλονται μόνο για νέες αλλαγές ξεκλειδώματος/προόδου, όχι για παλιά ξεκλειδώματα που έχουν ήδη εισαχθεί.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Παρακολουθούμενος φάκελος: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Η πρόοδος διαβάζεται από το <userId>\\<productId>.spool, ενώ το σχήμα/οι εικόνες δημιουργούνται από το %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Οι ρυθμίσεις δημιουργούνται μόνο αφού είναι διαθέσιμα τόσο το αρχείο spool όσο και το τοπικό αρχείο επιτευγμάτων. Πρώτα δημιουργείται το σχήμα και μετά το config.",
-  "platformGuideUbisoftOfficialItem4": "Προσθέστε χειροκίνητα το root spool της Ubisoft στις Ρυθμίσεις → Φάκελοι. Η εφαρμογή δεν υποθέτει αυτόματα αυτή τη διαδρομή."
+  "platformGuideUbisoftOfficialItem4": "Προσθέστε χειροκίνητα το root spool της Ubisoft στις Ρυθμίσεις → Φάκελοι. Η εφαρμογή δεν υποθέτει αυτόματα αυτή τη διαδρομή.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Επίσημο)",
+  "platformGuideEaOfficialItem1": "Φάκελος παρακολούθησης: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Το schema δημιουργείται από τα σύνολα achievements που καταγράφει το EA Desktop, ενώ η πρόοδος κατά το runtime διαβάζεται από το EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Τα configs δημιουργούνται μόνο αφού το EA Desktop έχει καταγράψει ένα πλήρες σύνολο achievements για αυτό το παιχνίδι. Πρώτα δημιουργείται το schema και μετά το config.",
+  "platformGuideEaOfficialItem4": "Προσθέστε χειροκίνητα το root του EA Desktop Logs στις Ρυθμίσεις → Φάκελοι. Η εφαρμογή δεν υποθέτει αυτό το path αυτόματα.",
+  "platformGuideEaOfficialItem5": "Το EA Desktop μπορεί να περιστρέψει το EADesktopVerbose.log σε EADesktopVerbose.bak· η εφαρμογή διαβάζει και τα δύο ώστε τα events achievements να μη χαθούν κατά την περιστροφή του log."
 }

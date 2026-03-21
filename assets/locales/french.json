@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "La détection de configuration LumaPlay nécessite platform=uplay et emu=lumaplay.",
   "platformGuideRescanSummary": "Réanalyser ou régénérer le schéma",
   "platformGuideRescanItem1": "Regenerate Schema est utilisé pour l’actualisation du schéma Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pour Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) et GOG Galaxy (Official), la régénération du schéma est bloquée par conception.",
+  "platformGuideRescanItem2": "Pour Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) et GOG Galaxy (Official), la régénération du schéma est bloquée par conception.",
   "platformGuideRescanItem3": "Pour ces plates-formes/émulateurs, utilisez Dossiers → Réanalyser pour reconstruire à partir des fichiers sources.",
   "platformGuideOnboardingSummary": "Intégration au démarrage et porte de démarrage",
   "platformGuideOnboardingItem1": "Lors de la première exécution (ou du changement de version d'intégration), le démarrage attend la sélection du dossier avant l'analyse complète.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Flux de démarrage : boot:onboarding:*.",
   "platformGuideLogsItem3": "Évaluation initiale de l'instantané : initial-notify:*.",
   "platformGuideLogsItem4": "Flux de sélection automatique : auto-select:*.",
-  "platformGuideLogsItem5": "Traitement Steam Official : steam-official:*. Traitement Ubisoft Connect : ubisoft-official:*. Traitement GOG Galaxy : gog-official:*.",
+  "platformGuideLogsItem5": "Traitement Steam Official : steam-official:*. Traitement Ubisoft Connect : ubisoft-official:*. Traitement EA Desktop : ea-official:*. Traitement GOG Galaxy : gog-official:*.",
   "platformGuideQuickTip1": "Ajoutez des dossiers racine dans Paramètres → Dossiers.",
   "platformGuideQuickTip2": "La configuration automatique s'exécute uniquement pour les dossiers surveillés qui ne sont pas mis en sourdine/ignorés.",
   "platformGuideQuickTip3": "Les notifications sont envoyées uniquement pour les nouvelles modifications de déverrouillage/progression, pas pour les anciens déverrouillages déjà importés.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Dossier surveillé : %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "La progression est lue depuis <userId>\\<productId>.spool, tandis que le schéma/les images sont générés depuis %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Les configurations sont créées uniquement lorsque le fichier spool et l’archive locale des succès sont disponibles. Le schéma est généré d’abord, puis la configuration.",
-  "platformGuideUbisoftOfficialItem4": "Ajoutez manuellement la racine spool d’Ubisoft dans Paramètres → Dossiers. L’application ne suppose pas ce chemin automatiquement."
+  "platformGuideUbisoftOfficialItem4": "Ajoutez manuellement la racine spool d’Ubisoft dans Paramètres → Dossiers. L’application ne suppose pas ce chemin automatiquement.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Officiel)",
+  "platformGuideEaOfficialItem1": "Dossier surveillé : %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Le schéma est généré à partir des ensembles d’achievements journalisés par EA Desktop, tandis que la progression en cours d’exécution est lue depuis EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Les configs sont créées seulement après qu’EA Desktop a journalisé un ensemble complet d’achievements pour ce jeu. Le schéma est généré d’abord, puis la config.",
+  "platformGuideEaOfficialItem4": "Ajoutez manuellement la racine EA Desktop Logs dans Paramètres → Dossiers. L’application ne suppose pas ce chemin automatiquement.",
+  "platformGuideEaOfficialItem5": "EA Desktop peut faire pivoter EADesktopVerbose.log vers EADesktopVerbose.bak ; l’application lit les deux afin que les événements d’achievement ne soient pas perdus lors de la rotation des logs."
 }

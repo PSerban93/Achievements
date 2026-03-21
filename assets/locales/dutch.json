@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Voor LumaPlay-configuratiedetectie zijn platform=uplay en emu=lumaplay vereist.",
   "platformGuideRescanSummary": "Opnieuw scannen versus schema opnieuw genereren",
   "platformGuideRescanItem1": "Schema opnieuw genereren wordt gebruikt voor het vernieuwen van het schema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Voor Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) en GOG Galaxy (Official) is schema-hergeneratie bewust geblokkeerd.",
+  "platformGuideRescanItem2": "Voor Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) en GOG Galaxy (Official) is schema-hergeneratie bewust geblokkeerd.",
   "platformGuideRescanItem3": "Voor deze platforms/emulators gebruikt u Mappen → Opnieuw scannen om opnieuw op te bouwen vanaf bronbestanden.",
   "platformGuideOnboardingSummary": "Boot-onboarding en opstartpoort",
   "platformGuideOnboardingItem1": "Bij de eerste keer opstarten (of bij wijziging van de onboard-versie) wacht het opstarten op mapselectie voordat het volledig wordt gescand.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Opstartstroom: boot:onboarding:*.",
   "platformGuideLogsItem3": "Initiële momentopname-evaluatie: initial-notify:*.",
   "platformGuideLogsItem4": "Automatische selectiestroom: auto-select:*.",
-  "platformGuideLogsItem5": "Afhandeling van Steam Official: steam-official:*. Afhandeling van Ubisoft Connect: ubisoft-official:*. Afhandeling van GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Afhandeling van Steam Official: steam-official:*. Afhandeling van Ubisoft Connect: ubisoft-official:*. Afhandeling van EA Desktop: ea-official:*. Afhandeling van GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Voeg hoofdmappen toe via Instellingen → Mappen.",
   "platformGuideQuickTip2": "Automatische configuratie wordt alleen uitgevoerd voor bewaakte mappen die niet zijn gedempt/genegeerd.",
   "platformGuideQuickTip3": "Er worden alleen meldingen verzonden over nieuwe ontgrendelingen/voortgangswijzigingen, niet voor reeds geïmporteerde oude ontgrendelingen.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Te volgen map: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Voortgang wordt gelezen uit <userId>\\<productId>.spool, terwijl schema/afbeeldingen worden gegenereerd vanuit %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Configuraties worden pas aangemaakt nadat zowel het spool-bestand als het lokale achievements-archief beschikbaar zijn. Eerst wordt het schema gegenereerd, daarna het configuratiebestand.",
-  "platformGuideUbisoftOfficialItem4": "Voeg de Ubisoft-spoolhoofdmap handmatig toe via Instellingen → Mappen. De app neemt dit pad niet automatisch aan."
+  "platformGuideUbisoftOfficialItem4": "Voeg de Ubisoft-spoolhoofdmap handmatig toe via Instellingen → Mappen. De app neemt dit pad niet automatisch aan.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Officieel)",
+  "platformGuideEaOfficialItem1": "Gemonitorde map: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Het schema wordt gegenereerd uit achievementsets die door EA Desktop worden gelogd, terwijl de runtime-voortgang wordt gelezen uit EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Configs worden pas aangemaakt nadat EA Desktop een volledige achievementset voor die game heeft gelogd. Eerst wordt het schema gegenereerd, daarna de config.",
+  "platformGuideEaOfficialItem4": "Voeg de hoofdmap van EA Desktop Logs handmatig toe in Instellingen → Mappen. De app gaat niet automatisch van dit pad uit.",
+  "platformGuideEaOfficialItem5": "EA Desktop kan EADesktopVerbose.log roteren naar EADesktopVerbose.bak; de app leest beide zodat achievementgebeurtenissen niet verloren gaan tijdens logrotatie."
 }

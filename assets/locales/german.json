@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Die LumaPlay-Konfigurationserkennung erfordert platform=uplay und emu=lumaplay.",
   "platformGuideRescanSummary": "Schema erneut scannen vs. neu generieren",
   "platformGuideRescanItem1": "Das Schema neu generieren wird für die Schemaaktualisierung Steam/Uplay/Epic/GOG verwendet.",
-  "platformGuideRescanItem2": "Für Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) und GOG Galaxy (Official) ist die Schema-Neugenerierung absichtlich blockiert.",
+  "platformGuideRescanItem2": "Für Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) und GOG Galaxy (Official) ist die Schema-Neugenerierung absichtlich blockiert.",
   "platformGuideRescanItem3": "Verwenden Sie für diese Plattformen/Emulatoren Ordner → Erneut scannen, um aus Quelldateien neu zu erstellen.",
   "platformGuideOnboardingSummary": "Boot-Onboarding und Startup-Gate",
   "platformGuideOnboardingItem1": "Beim ersten Start (oder beim Onboarding-Versionswechsel) wartet der Start auf die Ordnerauswahl, bevor der vollständige Scan durchgeführt wird.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Startablauf: boot:onboarding:*.",
   "platformGuideLogsItem3": "Erste Snapshot-Auswertung: initial-notify:*.",
   "platformGuideLogsItem4": "Automatischer Auswahlablauf: auto-select:*.",
-  "platformGuideLogsItem5": "Steam-Official-Verarbeitung: steam-official:*. Ubisoft-Connect-Verarbeitung: ubisoft-official:*. GOG-Galaxy-Verarbeitung: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official-Verarbeitung: steam-official:*. Ubisoft Connect-Verarbeitung: ubisoft-official:*. EA Desktop-Verarbeitung: ea-official:*. GOG Galaxy-Verarbeitung: gog-official:*.",
   "platformGuideQuickTip1": "Fügen Sie Stammordner unter Einstellungen → Ordner hinzu.",
   "platformGuideQuickTip2": "Die automatische Konfiguration wird nur für überwachte Ordner ausgeführt, die nicht stummgeschaltet/ignoriert sind.",
   "platformGuideQuickTip3": "Benachrichtigungen werden nur bei neuen Freischaltungen/Fortschrittsänderungen gesendet, nicht bei bereits importierten alten Freischaltungen.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Überwachter Ordner: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Der Fortschritt wird aus <userId>\\<productId>.spool gelesen, während Schema/Bilder aus %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements erzeugt werden.",
   "platformGuideUbisoftOfficialItem3": "Konfigurationen werden erst erstellt, wenn sowohl die Spool-Datei als auch das lokale Achievement-Archiv verfügbar sind. Zuerst wird das Schema erzeugt, dann die Konfiguration.",
-  "platformGuideUbisoftOfficialItem4": "Fügen Sie den Ubisoft-Spool-Stammordner manuell unter Einstellungen → Ordner hinzu. Die App nimmt diesen Pfad nicht automatisch an."
+  "platformGuideUbisoftOfficialItem4": "Fügen Sie den Ubisoft-Spool-Stammordner manuell unter Einstellungen → Ordner hinzu. Die App nimmt diesen Pfad nicht automatisch an.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Offiziell)",
+  "platformGuideEaOfficialItem1": "Überwachter Ordner: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Das Schema wird aus den von EA Desktop protokollierten Achievement-Sets erzeugt, während der Laufzeitfortschritt aus EADesktopVerbose.log gelesen wird.",
+  "platformGuideEaOfficialItem3": "Configs werden erst erstellt, nachdem EA Desktop ein vollständiges Achievement-Set für dieses Spiel protokolliert hat. Zuerst wird das Schema erzeugt, dann die Config.",
+  "platformGuideEaOfficialItem4": "Füge den Stammordner EA Desktop Logs manuell unter Einstellungen → Ordner hinzu. Die App nimmt diesen Pfad nicht automatisch an.",
+  "platformGuideEaOfficialItem5": "EA Desktop kann EADesktopVerbose.log in EADesktopVerbose.bak rotieren; die App liest beide, damit Achievement-Ereignisse bei der Logrotation nicht verloren gehen."
 }

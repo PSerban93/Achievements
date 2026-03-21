@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Wykrywanie konfiguracji LumaPlay wymaga platform=uplay i emu=lumaplay.",
   "platformGuideRescanSummary": "Ponowne skanowanie lub regeneracja schematu",
   "platformGuideRescanItem1": "Opcja Regeneruj schemat jest używana do odświeżania schematu Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Dla Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) i GOG Galaxy (Official) ręczna regeneracja schematu jest celowo zablokowana.",
+  "platformGuideRescanItem2": "Dla Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) i GOG Galaxy (Official) ręczna regeneracja schematu jest celowo zablokowana.",
   "platformGuideRescanItem3": "W przypadku tych platform/emulatorów użyj opcji Foldery → Skanuj ponownie, aby odbudować pliki źródłowe.",
   "platformGuideOnboardingSummary": "Boot onboarding i bramka startowa",
   "platformGuideOnboardingItem1": "Przy pierwszym uruchomieniu (lub zmianie wersji dołączającej) uruchamianie czeka na wybór folderu przed pełnym skanowaniem.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Przebieg uruchamiania: boot:onboarding:*.",
   "platformGuideLogsItem3": "Wstępna ocena migawki: initial-notify:*.",
   "platformGuideLogsItem4": "Przebieg automatycznego wyboru: auto-select:*.",
-  "platformGuideLogsItem5": "Obsługa Steam Official: steam-official:*. Obsługa Ubisoft Connect: ubisoft-official:*. Obsługa GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Obsługa Steam Official: steam-official:*. Obsługa Ubisoft Connect: ubisoft-official:*. Obsługa EA Desktop: ea-official:*. Obsługa GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Dodaj foldery główne w Ustawieniach → Foldery.",
   "platformGuideQuickTip2": "Automatyczna konfiguracja działa tylko dla obserwowanych folderów, które nie są wyciszone/ignorowane.",
   "platformGuideQuickTip3": "Powiadomienia są wysyłane tylko w przypadku nowych zmian odblokowania/postępu, a nie w przypadku już zaimportowanych starych odblokowań.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Obserwowany folder: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Postęp jest odczytywany z <userId>\\<productId>.spool, a schemat/obrazy są generowane z %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Konfiguracje są tworzone dopiero wtedy, gdy dostępne są zarówno plik spool, jak i lokalne archiwum osiągnięć. Najpierw generowany jest schemat, potem konfiguracja.",
-  "platformGuideUbisoftOfficialItem4": "Ręcznie dodaj katalog główny spool Ubisoft w Ustawienia → Foldery. Aplikacja nie zakłada tej ścieżki automatycznie."
+  "platformGuideUbisoftOfficialItem4": "Ręcznie dodaj katalog główny spool Ubisoft w Ustawienia → Foldery. Aplikacja nie zakłada tej ścieżki automatycznie.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Oficjalny)",
+  "platformGuideEaOfficialItem1": "Monitorowany folder: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Schemat jest generowany z zestawów achievementów zapisanych w logach EA Desktop, a postęp w czasie działania jest odczytywany z EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Konfiguracje są tworzone dopiero po tym, jak EA Desktop zapisze pełny zestaw achievementów dla tej gry. Najpierw generowany jest schemat, a potem konfiguracja.",
+  "platformGuideEaOfficialItem4": "Dodaj ręcznie katalog główny EA Desktop Logs w Ustawienia → Foldery. Aplikacja nie zakłada tej ścieżki automatycznie.",
+  "platformGuideEaOfficialItem5": "EA Desktop może obracać EADesktopVerbose.log do EADesktopVerbose.bak; aplikacja odczytuje oba pliki, aby zdarzenia achievementów nie ginęły podczas rotacji logów."
 }

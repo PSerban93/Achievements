@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "การตรวจหาการกำหนดค่า LumaPlay ต้องใช้ platform=uplay และ emu=lumaplay",
   "platformGuideRescanSummary": "สแกนซ้ำเทียบกับสร้างสคีมาใหม่",
   "platformGuideRescanItem1": "สร้าง Schema ใหม่สำหรับการรีเฟรชสคีมา Steam/Uplay/Epic/GOG",
-  "platformGuideRescanItem2": "สำหรับ Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) และ GOG Galaxy (Official) การสร้าง schema ใหม่ถูกบล็อกไว้ตามการออกแบบ",
+  "platformGuideRescanItem2": "สำหรับ Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) และ GOG Galaxy (Official) การสร้าง schema ใหม่ถูกบล็อกไว้ตามการออกแบบ",
   "platformGuideRescanItem3": "สำหรับแพลตฟอร์ม/อีมูเลเตอร์เหล่านั้น ให้ใช้ Folders → Rescan เพื่อสร้างใหม่จากไฟล์ต้นฉบับ",
   "platformGuideOnboardingSummary": "บูตออนบอร์ดและประตูเริ่มต้น",
   "platformGuideOnboardingItem1": "ในการเรียกใช้ครั้งแรก (หรือการเปลี่ยนเวอร์ชันการเริ่มต้นใช้งาน) การเริ่มต้นระบบจะรอการเลือกโฟลเดอร์ก่อนที่จะสแกนแบบเต็ม",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "ขั้นตอนการเริ่มต้น: boot:onboarding:*",
   "platformGuideLogsItem3": "การประเมินสแนปชอตเริ่มต้น: initial-notify:*",
   "platformGuideLogsItem4": "ขั้นตอนการเลือกอัตโนมัติ: auto-select:*",
-  "platformGuideLogsItem5": "การจัดการ Steam ทางการ: steam-official:*. การจัดการ Ubisoft Connect: ubisoft-official:*. การจัดการ GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "การจัดการ Steam ทางการ: steam-official:*. การจัดการ Ubisoft Connect: ubisoft-official:*. การจัดการ EA Desktop: ea-official:*. การจัดการ GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "เพิ่มโฟลเดอร์รูทในการตั้งค่า → โฟลเดอร์",
   "platformGuideQuickTip2": "การกำหนดค่าอัตโนมัติจะทำงานเฉพาะกับโฟลเดอร์ที่รับชมซึ่งไม่ได้ปิดเสียง/ละเว้น",
   "platformGuideQuickTip3": "การแจ้งเตือนจะถูกส่งเฉพาะเมื่อมีการปลดล็อค/การเปลี่ยนแปลงความคืบหน้าใหม่เท่านั้น ไม่ใช่สำหรับการปลดล็อคเก่าที่นำเข้าแล้ว",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "โฟลเดอร์ที่เฝ้าดู: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "ความคืบหน้าถูกอ่านจาก <userId>\\<productId>.spool ส่วน schema/รูปภาพจะถูกสร้างจาก %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "จะสร้างคอนฟิกก็ต่อเมื่อมีทั้งไฟล์ spool และ archive achievements ภายในเครื่องพร้อมแล้ว โดยจะสร้าง schema ก่อน แล้วค่อยสร้างคอนฟิก",
-  "platformGuideUbisoftOfficialItem4": "เพิ่ม root ของ Ubisoft spool ด้วยตนเองใน การตั้งค่า → โฟลเดอร์ แอปจะไม่สมมติเส้นทางนี้ให้อัตโนมัติ"
+  "platformGuideUbisoftOfficialItem4": "เพิ่ม root ของ Ubisoft spool ด้วยตนเองใน การตั้งค่า → โฟลเดอร์ แอปจะไม่สมมติเส้นทางนี้ให้อัตโนมัติ",
+  "platformGuideEaOfficialSummary": "EA Desktop (ทางการ)",
+  "platformGuideEaOfficialItem1": "โฟลเดอร์ที่เฝ้าดู: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "schema จะถูกสร้างจากชุด achievement ที่ EA Desktop บันทึกไว้ในล็อก ขณะที่ความคืบหน้าขณะรันจะอ่านจาก EADesktopVerbose.log",
+  "platformGuideEaOfficialItem3": "ระบบจะสร้าง config ก็ต่อเมื่อ EA Desktop ได้บันทึกชุด achievement แบบครบถ้วนของเกมนั้นแล้ว โดยจะสร้าง schema ก่อน แล้วจึงสร้าง config",
+  "platformGuideEaOfficialItem4": "เพิ่มรากของ EA Desktop Logs ด้วยตนเองใน การตั้งค่า → โฟลเดอร์ แอปจะไม่สมมติเส้นทางนี้ให้อัตโนมัติ",
+  "platformGuideEaOfficialItem5": "EA Desktop อาจหมุน EADesktopVerbose.log ไปเป็น EADesktopVerbose.bak; แอปจะอ่านทั้งสองไฟล์เพื่อไม่ให้เหตุการณ์ achievement สูญหายระหว่างการหมุนล็อก"
 }

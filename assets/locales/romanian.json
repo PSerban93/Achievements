@@ -497,7 +497,7 @@
   "platformGuideConfigRulesItem5": "Detectarea configurației LumaPlay necesită platform=uplay și emu=lumaplay.",
   "platformGuideRescanSummary": "Rescanare vs Regenerare Schema",
   "platformGuideRescanItem1": "Regenerare Schema este folosită pentru reîmprospătarea schemei Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pentru Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) și GOG Galaxy (Official), regenerarea schemei este blocată intenționat.",
+  "platformGuideRescanItem2": "Pentru Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) și GOG Galaxy (Official), regenerarea schemei este blocată intenționat.",
   "platformGuideRescanItem3": "Pentru acele platforme/emulatori, utilizați Folders → Rescan pentru a reconstrui din fișierele sursă.",
   "platformGuideOnboardingSummary": "Boot onboarding și poarta de pornire",
   "platformGuideOnboardingItem1": "La prima rulare (sau schimbarea versiunii de integrare), pornirea așteaptă selectarea folderului înainte de scanarea completă.",
@@ -518,7 +518,7 @@
   "platformGuideLogsItem2": "Flux de pornire: boot:onboarding:*.",
   "platformGuideLogsItem3": "Evaluare inițială instantanee: initial-notify:*.",
   "platformGuideLogsItem4": "Flux de selecție automată: auto-select:*.",
-  "platformGuideLogsItem5": "Manipulare Steam Official: steam-official:*. Manipulare Ubisoft Connect: ubisoft-official:*. Manipulare GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Manipulare Steam Official: steam-official:*. Manipulare Ubisoft Connect: ubisoft-official:*. Manipulare EA Desktop: ea-official:*. Manipulare GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Adăugați foldere rădăcină în Setări → Foldere.",
   "platformGuideQuickTip2": "Auto-config rulează numai pentru folderele urmărite care nu sunt dezactivate/ignorate.",
   "platformGuideQuickTip3": "Notificările sunt trimise numai pentru deblocări noi/modificări de progres, nu pentru deblocări vechi deja importate.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Folder urmărit: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Progresul este citit din <userId>\\<productId>.spool, iar schema/imaginile sunt generate din %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Configurile sunt create doar după ce sunt disponibile atât fișierul spool, cât și arhiva locală de achievement-uri. Schema este generată mai întâi, apoi configul.",
-  "platformGuideUbisoftOfficialItem4": "Adaugă manual rădăcina Ubisoft spool în Setări → Foldere. Aplicația nu presupune automat această cale."
+  "platformGuideUbisoftOfficialItem4": "Adaugă manual rădăcina Ubisoft spool în Setări → Foldere. Aplicația nu presupune automat această cale.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Oficial)",
+  "platformGuideEaOfficialItem1": "Folder urmărit: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Schema este generată din seturile de achievement-uri jurnalizate de EA Desktop, iar progresul în runtime este citit din EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Configurile sunt create doar după ce EA Desktop a jurnalizat un set complet de achievement-uri pentru acel joc. Schema este generată mai întâi, apoi configul.",
+  "platformGuideEaOfficialItem4": "Adaugă manual rădăcina EA Desktop Logs în Setări → Foldere. Aplicația nu presupune automat această cale.",
+  "platformGuideEaOfficialItem5": "EA Desktop poate roti EADesktopVerbose.log în EADesktopVerbose.bak; aplicația le citește pe ambele pentru ca evenimentele de achievement să nu se piardă la rotația logului."
 }

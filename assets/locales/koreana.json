@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "LumaPlay 구성 감지에는 platform=uplay 및 emu=lumaplay이 필요합니다.",
   "platformGuideRescanSummary": "재검색과 스키마 재생성",
   "platformGuideRescanItem1": "스키마 재생성은 Steam/Uplay/Epic/GOG 스키마 새로 고침에 사용됩니다.",
-  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), GOG Galaxy (Official)의 경우 스키마 재생성은 설계상 차단됩니다.",
+  "platformGuideRescanItem2": "Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official), GOG Galaxy (Official)의 경우 스키마 재생성은 설계상 차단됩니다.",
   "platformGuideRescanItem3": "해당 플랫폼/에뮬레이터의 경우 폴더 → 다시 검색을 사용하여 소스 파일에서 다시 빌드하십시오.",
   "platformGuideOnboardingSummary": "부팅 온보딩 및 시작 게이트",
   "platformGuideOnboardingItem1": "처음 실행(또는 온보딩 버전 변경) 시 시작 시 전체 검사 전에 폴더 선택을 기다립니다.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "시작 흐름: boot:onboarding:*.",
   "platformGuideLogsItem3": "초기 스냅샷 평가: initial-notify:*.",
   "platformGuideLogsItem4": "자동 선택 흐름: auto-select:*.",
-  "platformGuideLogsItem5": "Steam 공식 처리: steam-official:*. Ubisoft Connect 처리: ubisoft-official:*. GOG Galaxy 처리: gog-official:*.",
+  "platformGuideLogsItem5": "Steam 공식 처리: steam-official:*. Ubisoft Connect 처리: ubisoft-official:*. EA Desktop 처리: ea-official:*. GOG Galaxy 처리: gog-official:*.",
   "platformGuideQuickTip1": "설정 → 폴더에서 루트 폴더를 추가하세요.",
   "platformGuideQuickTip2": "자동 구성은 음소거/무시되지 않은 감시 폴더에 대해서만 실행됩니다.",
   "platformGuideQuickTip3": "이미 가져온 이전 잠금 해제에 대한 알림이 아닌 새로운 잠금 해제/진행률 변경 시에만 알림이 전송됩니다.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "감시 폴더: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "진행 상황은 <userId>\\<productId>.spool 에서 읽고, 스키마/이미지는 %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements 에서 생성합니다.",
   "platformGuideUbisoftOfficialItem3": "구성은 spool 파일과 로컬 업적 아카이브가 모두 준비된 후에만 생성됩니다. 먼저 스키마를 만들고 그다음 config를 만듭니다.",
-  "platformGuideUbisoftOfficialItem4": "설정 → 폴더에서 Ubisoft spool 루트를 수동으로 추가하세요. 앱이 이 경로를 자동으로 가정하지 않습니다."
+  "platformGuideUbisoftOfficialItem4": "설정 → 폴더에서 Ubisoft spool 루트를 수동으로 추가하세요. 앱이 이 경로를 자동으로 가정하지 않습니다.",
+  "platformGuideEaOfficialSummary": "EA Desktop (공식)",
+  "platformGuideEaOfficialItem1": "감시 폴더: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "스키마는 EA Desktop이 로그에 기록한 업적 세트로부터 생성되며, 런타임 진행 상황은 EADesktopVerbose.log에서 읽습니다.",
+  "platformGuideEaOfficialItem3": "구성은 EA Desktop이 해당 게임의 전체 업적 세트를 로그에 기록한 후에만 생성됩니다. 먼저 스키마를 생성한 뒤 구성 파일을 만듭니다.",
+  "platformGuideEaOfficialItem4": "설정 → 폴더에서 EA Desktop Logs 루트를 수동으로 추가하세요. 앱은 이 경로를 자동으로 가정하지 않습니다.",
+  "platformGuideEaOfficialItem5": "EA Desktop은 EADesktopVerbose.log를 EADesktopVerbose.bak으로 회전할 수 있으며, 로그 회전 중 업적 이벤트가 사라지지 않도록 앱이 둘 다 읽습니다."
 }

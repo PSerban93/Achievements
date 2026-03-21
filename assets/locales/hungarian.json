@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "A LumaPlay konfiguráció észleléséhez platform=uplay és emu=lumaplay szükséges.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "A Séma újragenerálása a Steam/Uplay/Epic/GOG séma frissítéséhez használatos.",
-  "platformGuideRescanItem2": "A Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) és GOG Galaxy (Official) esetén a séma újragenerálása szándékosan blokkolt.",
+  "platformGuideRescanItem2": "A Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) és GOG Galaxy (Official) esetén a séma újragenerálása szándékosan blokkolt.",
   "platformGuideRescanItem3": "Ezeknél a platformoknál/emulátoroknál használja a Mappák → Újrakeresés menüpontot a forrásfájlokból való újraépítéshez.",
   "platformGuideOnboardingSummary": "Boot onboarding és startup gate",
   "platformGuideOnboardingItem1": "Az első futtatáskor (vagy a verzióváltáskor) az indítás megvárja a mappa kiválasztását a teljes vizsgálat előtt.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Indítási folyamat: boot:onboarding:*.",
   "platformGuideLogsItem3": "A pillanatkép kezdeti kiértékelése: initial-notify:*.",
   "platformGuideLogsItem4": "Automatikus kiválasztási folyamat: auto-select:*.",
-  "platformGuideLogsItem5": "Steam Official kezelés: steam-official:*. Ubisoft Connect kezelés: ubisoft-official:*. GOG Galaxy kezelés: gog-official:*.",
+  "platformGuideLogsItem5": "Steam Official kezelés: steam-official:*. Ubisoft Connect kezelés: ubisoft-official:*. EA Desktop kezelés: ea-official:*. GOG Galaxy kezelés: gog-official:*.",
   "platformGuideQuickTip1": "Adja hozzá a gyökérmappákat a Beállítások → Mappák menüpontban.",
   "platformGuideQuickTip2": "Az automatikus konfiguráció csak azokon a figyelt mappákon fut, amelyek nincsenek elnémítva/figyelmen kívül hagyva.",
   "platformGuideQuickTip3": "A rendszer csak az új feloldási/haladásmódosításokról küld értesítést, a már importált régi feloldásokról nem.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Figyelt mappa: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "A folyamat a <userId>\\<productId>.spool fájlból olvasható, míg a séma/képek innen készülnek: %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "A konfigurációk csak akkor jönnek létre, ha a spool fájl és a helyi achievement-archívum is elérhető. Először a séma készül el, utána a konfiguráció.",
-  "platformGuideUbisoftOfficialItem4": "Az Ubisoft spool gyökérmappát kézzel add hozzá a Beállítások → Mappák alatt. Az alkalmazás ezt az útvonalat nem feltételezi automatikusan."
+  "platformGuideUbisoftOfficialItem4": "Az Ubisoft spool gyökérmappát kézzel add hozzá a Beállítások → Mappák alatt. Az alkalmazás ezt az útvonalat nem feltételezi automatikusan.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Hivatalos)",
+  "platformGuideEaOfficialItem1": "Figyelt mappa: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "A séma az EA Desktop által naplózott achievement-készletekből készül, míg a futás közbeni állapot az EADesktopVerbose.log fájlból olvasható.",
+  "platformGuideEaOfficialItem3": "A konfigurációk csak azután jönnek létre, hogy az EA Desktop teljes achievement-készletet naplózott az adott játékhoz. Először a séma készül el, utána a konfiguráció.",
+  "platformGuideEaOfficialItem4": "Az EA Desktop Logs gyökérmappáját kézzel add hozzá a Beállítások → Mappák alatt. Az alkalmazás nem feltételezi ezt az útvonalat automatikusan.",
+  "platformGuideEaOfficialItem5": "Az EA Desktop az EADesktopVerbose.log fájlt EADesktopVerbose.bak névre forgathatja; az alkalmazás mindkettőt olvassa, hogy az achievement-események ne vesszenek el a napló forgatása során."
 }

@@ -1791,6 +1791,43 @@
 
               <div class="settings-section">
                 <details class="platform-guide-item">
+                  <summary id="platformGuideEaOfficialSummary">
+                    EA Desktop (Official)
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideEaOfficialItem1">
+                      Watch folder:
+                      <code
+                        >%LOCALAPPDATA%\Electronic Arts\EA Desktop\Logs</code
+                      >.
+                    </li>
+                    <li id="platformGuideEaOfficialItem2">
+                      Schema is generated from achievement sets logged by EA
+                      Desktop, while runtime progress is read from
+                      <code>EADesktopVerbose.log</code>.
+                    </li>
+                    <li id="platformGuideEaOfficialItem3">
+                      Config generation starts only after EA Desktop has logged
+                      a full achievement set for that game. The schema is
+                      generated first, then the config.
+                    </li>
+                    <li id="platformGuideEaOfficialItem4">
+                      Add the EA Desktop Logs root manually in
+                      <strong>Settings → Folders</strong>. The app does not
+                      assume this path automatically.
+                    </li>
+                    <li id="platformGuideEaOfficialItem5">
+                      EA Desktop can rotate
+                      <code>EADesktopVerbose.log</code> into
+                      <code>EADesktopVerbose.bak</code>; the app reads both so
+                      achievement events are not lost across log rotation.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
                   <summary id="platformGuideGogOfficialSummary">
                     GOG Galaxy (Official)
                   </summary>

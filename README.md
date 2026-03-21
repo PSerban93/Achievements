@@ -298,6 +298,26 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - The config is created only after both the `.spool` file and the local achievements archive are available, so the schema can be generated first.
 - After creation, the config `save_path` points to the concrete `spool\<userId>` folder, while runtime progress is read from `<productId>.spool`.
 
+#### EA Desktop Support
+
+1. Install and sign in to **EA Desktop**.
+2. Use **Watched Folders** add the `%LOCALAPPDATA%\Electronic Arts\EA Desktop\Logs` folder manually.
+3. Start and play the game via EA Desktop at least once so `EADesktopVerbose.log` contains the local achievement query for that game.
+4. The app will:
+   - read `EADesktopVerbose.log`,
+   - resolve the local `contentId -> achievementSet -> game title` mapping from the EA Desktop verbose log,
+   - generate `achievements.json` and local images from the achievement set logged by EA Desktop,
+   - generate an `ea-official` config automatically,
+   - monitor later verbose log changes and display notifications when new achievements are unlocked.
+
+**Important notes:**
+
+- `ea-official` is auto-generated from manually watched EA Desktop log roots. It is not meant to be created manually from the platform dropdown.
+- The app does not assume the EA Desktop logs path automatically; the logs root must be added manually in **Settings → Folders**.
+- The config is created only after EA Desktop has logged a full achievement set for that game, so the schema can be generated first.
+- After creation, the config `save_path` points to the EA Desktop `Logs` folder, while runtime progress is read from `EADesktopVerbose.log`.
+- EA Desktop can rotate `EADesktopVerbose.log` into `EADesktopVerbose.bak`; the app reads both so achievement events are not lost across log rotation.
+
 ### Dashboard
 
 - Press the "Show Dashboard" button to access the game grid

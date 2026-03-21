@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Il rilevamento della configurazione LumaPlay richiede platform=uplay e emu=lumaplay.",
   "platformGuideRescanSummary": "Nuova scansione o rigenerazione dello schema",
   "platformGuideRescanItem1": "Rigenera schema viene utilizzato per l'aggiornamento dello schema Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Per Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) e GOG Galaxy (Official), la rigenerazione dello schema è bloccata intenzionalmente.",
+  "platformGuideRescanItem2": "Per Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) e GOG Galaxy (Official), la rigenerazione dello schema è bloccata intenzionalmente.",
   "platformGuideRescanItem3": "Per tali piattaforme/emulatori, utilizzare Cartelle → Nuova scansione per ricostruire dai file di origine.",
   "platformGuideOnboardingSummary": "Onboarding di avvio e gate di avvio",
   "platformGuideOnboardingItem1": "Alla prima esecuzione (o alla modifica della versione di onboarding), l'avvio attende la selezione della cartella prima della scansione completa.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Flusso di avvio: boot:onboarding:*.",
   "platformGuideLogsItem3": "Valutazione iniziale dello snapshot: initial-notify:*.",
   "platformGuideLogsItem4": "Flusso di selezione automatica: auto-select:*.",
-  "platformGuideLogsItem5": "Gestione Steam Official: steam-official:*. Gestione Ubisoft Connect: ubisoft-official:*. Gestione GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Gestione Steam Official: steam-official:*. Gestione Ubisoft Connect: ubisoft-official:*. Gestione EA Desktop: ea-official:*. Gestione GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Aggiungi le cartelle principali in Impostazioni → Cartelle.",
   "platformGuideQuickTip2": "La configurazione automatica viene eseguita solo per le cartelle controllate che non sono disattivate/ignorate.",
   "platformGuideQuickTip3": "Le notifiche vengono inviate solo in caso di nuove modifiche di sblocco/avanzamento, non per vecchi sblocchi già importati.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Cartella monitorata: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "I progressi vengono letti da <userId>\\<productId>.spool, mentre schema/immagini vengono generati da %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Le configurazioni vengono create solo dopo che sia il file spool sia l’archivio locale degli achievement sono disponibili. Prima viene generato lo schema, poi la configurazione.",
-  "platformGuideUbisoftOfficialItem4": "Aggiungi manualmente la radice spool di Ubisoft in Impostazioni → Cartelle. L’app non presume automaticamente questo percorso."
+  "platformGuideUbisoftOfficialItem4": "Aggiungi manualmente la radice spool di Ubisoft in Impostazioni → Cartelle. L’app non presume automaticamente questo percorso.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Ufficiale)",
+  "platformGuideEaOfficialItem1": "Cartella monitorata: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Lo schema viene generato dai set di achievement registrati da EA Desktop, mentre i progressi a runtime vengono letti da EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Le configurazioni vengono create solo dopo che EA Desktop ha registrato un set completo di achievement per quel gioco. Prima viene generato lo schema, poi la configurazione.",
+  "platformGuideEaOfficialItem4": "Aggiungi manualmente la radice di EA Desktop Logs in Impostazioni → Cartelle. L'app non presume automaticamente questo percorso.",
+  "platformGuideEaOfficialItem5": "EA Desktop può ruotare EADesktopVerbose.log in EADesktopVerbose.bak; l'app legge entrambi per evitare che gli eventi degli achievement vadano persi durante la rotazione del log."
 }

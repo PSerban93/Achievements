@@ -490,7 +490,7 @@
   "platformGuideConfigRulesItem5": "Detekce konfigurace LumaPlay vyžaduje platform=uplay a emu=lumaplay.",
   "platformGuideRescanSummary": "Rescan vs Regenerate Schema",
   "platformGuideRescanItem1": "Regenerate Schema se používá pro obnovení schématu Steam/Uplay/Epic/GOG.",
-  "platformGuideRescanItem2": "Pro Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official) a GOG Galaxy (Official) je ruční regenerace schématu záměrně blokována.",
+  "platformGuideRescanItem2": "Pro Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect (Official), EA Desktop (Official) a GOG Galaxy (Official) je ruční regenerace schématu záměrně blokována.",
   "platformGuideRescanItem3": "Pro tyto platformy/emulátory použijte Folders → Rescan k opětovnému sestavení ze zdrojových souborů.",
   "platformGuideOnboardingSummary": "Boot onboarding a startovací brána",
   "platformGuideOnboardingItem1": "Při prvním spuštění (nebo při změně verze) čeká spuštění před úplným skenováním na výběr složky.",
@@ -511,7 +511,7 @@
   "platformGuideLogsItem2": "Průběh spouštění: boot:onboarding:*.",
   "platformGuideLogsItem3": "Počáteční vyhodnocení snímku: initial-notify:*.",
   "platformGuideLogsItem4": "Tok automatického výběru: auto-select:*.",
-  "platformGuideLogsItem5": "Zpracování Steam Official: steam-official:*. Zpracování Ubisoft Connect: ubisoft-official:*. Zpracování GOG Galaxy: gog-official:*.",
+  "platformGuideLogsItem5": "Zpracování Steam Official: steam-official:*. Zpracování Ubisoft Connect: ubisoft-official:*. Zpracování EA Desktop: ea-official:*. Zpracování GOG Galaxy: gog-official:*.",
   "platformGuideQuickTip1": "Přidejte kořenové složky v Nastavení → Složky.",
   "platformGuideQuickTip2": "Automatická konfigurace se spustí pouze pro sledované složky, které nejsou ztlumené/ignorované.",
   "platformGuideQuickTip3": "Oznámení se zasílají pouze na nové odemknutí/změny průběhu, nikoli na již importovaná stará odemknutí.",
@@ -572,5 +572,11 @@
   "platformGuideUbisoftOfficialItem1": "Sledovaná složka: %LOCALAPPDATA%\\Ubisoft Game Launcher\\spool.",
   "platformGuideUbisoftOfficialItem2": "Průběh se čte z <userId>\\<productId>.spool, zatímco schéma/obrázky se generují z %ProgramData%\\Ubisoft\\Ubisoft Game Launcher\\cache\\achievements.",
   "platformGuideUbisoftOfficialItem3": "Konfigy se vytvářejí až poté, co jsou k dispozici soubor spool i místní archiv achievementů. Nejprve se vygeneruje schéma, potom config.",
-  "platformGuideUbisoftOfficialItem4": "Kořen složky Ubisoft spool přidejte ručně v Nastavení → Složky. Aplikace tuto cestu nepředpokládá automaticky."
+  "platformGuideUbisoftOfficialItem4": "Kořen složky Ubisoft spool přidejte ručně v Nastavení → Složky. Aplikace tuto cestu nepředpokládá automaticky.",
+  "platformGuideEaOfficialSummary": "EA Desktop (Oficiální)",
+  "platformGuideEaOfficialItem1": "Sledovaná složka: %LOCALAPPDATA%\\Electronic Arts\\EA Desktop\\Logs.",
+  "platformGuideEaOfficialItem2": "Schéma se generuje z množin achievementů zaznamenaných EA Desktopem, zatímco průběžný progress za běhu se čte z EADesktopVerbose.log.",
+  "platformGuideEaOfficialItem3": "Konfigurace se vytvoří až poté, co EA Desktop zaznamená úplnou sadu achievementů pro danou hru. Nejprve se vygeneruje schéma a potom konfigurace.",
+  "platformGuideEaOfficialItem4": "Kořen EA Desktop Logs přidejte ručně v Nastavení → Složky. Aplikace tuto cestu automaticky nepředpokládá.",
+  "platformGuideEaOfficialItem5": "EA Desktop může otočit EADesktopVerbose.log na EADesktopVerbose.bak; aplikace čte oba soubory, aby se při rotaci logu neztratily události achievementů."
 }
