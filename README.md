@@ -442,6 +442,7 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - [Manual Config](https://youtu.be/abdVuDB80Ow)
 - [Auto Config](https://youtu.be/nOoiU5lPopM)
 - [Multi-Platform Support](https://youtu.be/KwRUo53VTho)
+- [Multi-Platform Support V2 + Overlay Controller Support](https://youtu.be/vDQ_4cNeIe8)
 
 ## 👤 Author
 
