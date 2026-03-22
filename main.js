@@ -3275,6 +3275,15 @@ function updatePreferences(patch = {}) {
 
   if ("steamApiKeyMasked" in incoming) delete incoming.steamApiKeyMasked;
 
+  if (Object.prototype.hasOwnProperty.call(incoming, "soundVolume")) {
+    const parsedSoundVolume = Number.parseInt(incoming.soundVolume, 10);
+    if (Number.isFinite(parsedSoundVolume)) {
+      incoming.soundVolume = Math.max(0, Math.min(200, parsedSoundVolume));
+    } else {
+      delete incoming.soundVolume;
+    }
+  }
+
   if (Object.prototype.hasOwnProperty.call(incoming, "steamApiKey")) {
     const raw = incoming.steamApiKey;
     const trimmed =

@@ -7885,9 +7885,7 @@
         const soundSelect = document.getElementById("soundSelect");
 
         try {
-          await loadPreferencesCached();
-
-          const prefs = getCachedPreferences();
+          const prefs = await loadPreferencesFromDisk();
           try {
             window.__dashboardShowOnStart = !!prefs.showDashboardOnStart;
             window.__prepareDashboardForStartup?.();
@@ -7922,6 +7920,16 @@
             soundSelect.querySelector(`option[value="${prefs.sound}"]`)
           ) {
             soundSelect.value = prefs.sound;
+          }
+
+          const settingsSoundVolumeSlider = document.getElementById(
+            "settings-soundVolumeSlider",
+          );
+          if (settingsSoundVolumeSlider) {
+            settingsSoundVolumeSlider.value = normalizeSoundVolumePercent(
+              prefs?.soundVolume,
+            );
+            updateSettingsSoundVolumeLabel();
           }
 
           if (prefs.disableProgress !== undefined) {
@@ -7994,14 +8002,43 @@
 
       let soundAudioContext = null;
 
-      function getSoundVolumeValue() {
-        const prefs = getCachedPreferences();
+      function normalizeSoundVolumePercent(rawValue) {
+        const parsed = Number.parseInt(rawValue, 10);
+        if (!Number.isFinite(parsed)) return 100;
+        return Math.max(0, Math.min(200, parsed));
+      }
+
+      function getOpenSettingsSoundVolumePercent() {
         const slider = document.getElementById("settings-soundVolumeSlider");
-        const sliderValue = slider ? Number(slider.value) : NaN;
-        const volumeRaw = Number.isFinite(sliderValue)
-          ? sliderValue
-          : Number(prefs.soundVolume);
-        const volume = Number.isFinite(volumeRaw) ? volumeRaw / 100 : 1;
+        if (!slider || !isSettingsOpen()) return null;
+        return normalizeSoundVolumePercent(slider.value);
+      }
+
+      async function loadPreferencesFromDisk() {
+        try {
+          const prefs = await window.api.loadPreferences();
+          window.__preferencesCache = { ...(prefs || {}) };
+          return window.__preferencesCache;
+        } catch (err) {
+          console.error(
+            tUi("log.preferencesLoadFailed", "Failed to load preferences:"),
+            err,
+          );
+          return getCachedPreferences();
+        }
+      }
+
+      async function getSoundVolumeValue(options = {}) {
+        const preferPersisted = options.preferPersisted === true;
+        const liveVolumePercent = preferPersisted
+          ? null
+          : getOpenSettingsSoundVolumePercent();
+        if (Number.isFinite(liveVolumePercent)) {
+          return liveVolumePercent / 100;
+        }
+        const prefs = await loadPreferencesFromDisk();
+        const volume =
+          normalizeSoundVolumePercent(prefs?.soundVolume) / 100;
         return Math.max(0, Math.min(2, volume));
       }
 
@@ -8062,14 +8099,14 @@
         });
       }
 
-      function playSelectedSound() {
+      async function playSelectedSound() {
         const soundSelect = document.getElementById("soundSelect");
         const selectedSound = soundSelect?.value;
 
         if (!selectedSound || selectedSound === "mute") return;
 
         const audio = new Audio(`sounds/${selectedSound}`);
-        const volume = getSoundVolumeValue();
+        const volume = await getSoundVolumeValue();
         playAudioWithVolume(audio, volume, "?? Sound play error:");
       }
 
@@ -8113,7 +8150,7 @@
         try {
           const fullPath = await window.api.getSoundFullPath(fileName);
           activePreviewAudio = new Audio(fullPath);
-          const volume = getSoundVolumeValue();
+          const volume = await getSoundVolumeValue();
           playAudioWithVolume(
             activePreviewAudio,
             volume,
@@ -8142,7 +8179,9 @@
           };
           audio.addEventListener("ended", clearPlaybackRef, { once: true });
           audio.addEventListener("error", clearPlaybackRef, { once: true });
-          const volume = getSoundVolumeValue();
+          const volume = await getSoundVolumeValue({
+            preferPersisted: true,
+          });
           playAudioWithVolume(audio, volume, "?? Custom sound play error:");
         } catch (err) {
           console.error(
@@ -8153,8 +8192,7 @@
       }
 
       async function loadPreferences() {
-        await loadPreferencesCached();
-        const prefs = getCachedPreferences();
+        const prefs = await loadPreferencesFromDisk();
         renderSteamApiKeyStatusFromPrefs(prefs);
         applyShowBlacklistPreference(prefs?.showBlacklistedGames);
         await syncBlacklistList();
