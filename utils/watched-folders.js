@@ -298,6 +298,7 @@ const DEFAULT_WATCH_ROOTS = (() => {
     ["PUBLIC", ["Documents", "OnlineFix"]],
     ["PUBLIC", ["Documents", "EMPRESS"]],
     ["APPDATA", ["Goldberg SteamEmu Saves"]],
+    ["APPDATA", ["Goldberg UplayEmu Saves"]],
     ["APPDATA", ["GSE Saves"]],
     ["APPDATA", ["EMPRESS"]],
     ["LOCALAPPDATA", ["anadius", "LSX emu", "achievement_watcher"]],
@@ -383,6 +384,9 @@ module.exports = function makeWatchedFolders({
   const configPlatformPresence = new Map(); // appid -> Set(platform)
   const configSavePathIndex = new Map(); // appid -> Set(path)
   const pendingSavePathIndex = new Map(); // appid -> Set(path)
+  const pendingObservedGenerations = new Set(); // appid+platform+normalizedSavePath keys
+  const recentObservedGenerationTs = new Map(); // appid+platform+normalizedSavePath -> ts
+  const recentObservedGenerationVariantTs = new Map(); // appid+platform -> ts
   const appidSaveWatchers = new Map(); // appid -> Map(configName, watcher)
   const pendingInitialNotify = new Set(); // config names needing one-shot notify after seed
   const missingRoots = new Set(); // watched folders missing on disk
@@ -396,6 +400,7 @@ module.exports = function makeWatchedFolders({
   const tenokeIds = new Set();
   const persistedTenoke = new Set();
   const seededInitialConfigs = new Set();
+  const initialNotifyPromotedConfigs = new Set();
   const autoSelectedConfigs = new Set();
   const tenokeRelinkedConfigs = new Set();
   const pendingAutoSelect = new Set();
@@ -410,6 +415,7 @@ module.exports = function makeWatchedFolders({
   const deferredSeedActiveConfigs = new Set(); // config names currently seeding
   const steamOfficialSeedOnlyLogged = new Set(); // stats dirs logged once for root-only mode
   const strictRootSeedOnlyLogged = new Set(); // strict roots logged once for root-only mode
+  const RECENT_OBSERVED_GENERATION_TTL_MS = 8000;
   let deferredSeedPumpTimer = null;
   let deferredSeedPumpRunning = false;
   let deferredSeedOverlayGateDone = false;
@@ -504,6 +510,226 @@ module.exports = function makeWatchedFolders({
   function getPrimaryConfigMeta(appid) {
     const metas = getConfigMetas(appid);
     return metas.length ? metas[0] : null;
+  }
+
+  function getMetaNormalizedSavePath(meta) {
+    if (!meta) return "";
+    return (
+      String(meta?.normalizedSavePath || "") ||
+      normalizeObservedPath(
+        meta?.save_path || meta?.config_path || "",
+        String(meta?.appid || ""),
+      )
+    );
+  }
+
+  function findConfigMetaForGeneration(
+    appid,
+    platform = null,
+    normalizedSavePath = "",
+  ) {
+    const metas = getConfigMetas(appid);
+    if (!metas.length) return null;
+    const desiredPlatform = normalizePlatform(platform) || null;
+    const normalizedPath = String(normalizedSavePath || "");
+    let candidates = desiredPlatform
+      ? metas.filter(
+          (meta) => (normalizePlatform(meta?.platform) || "steam") === desiredPlatform,
+        )
+      : metas.slice();
+    if (!candidates.length) candidates = metas.slice();
+    if (normalizedPath) {
+      const exact = candidates.find(
+        (meta) => getMetaNormalizedSavePath(meta) === normalizedPath,
+      );
+      if (exact) return exact;
+    }
+    return candidates[0] || null;
+  }
+
+  function buildInitialSeedCandidatesForMeta(meta, rootDir = "") {
+    const id = String(meta?.appid || "").trim();
+    const normalizedRootDir = String(rootDir || "");
+    return Array.from(
+      new Set(
+        [
+          ...getSaveWatchTargets(meta),
+          meta?.gog_gameplay_db || path.join(meta?.save_path || "", GAMEPLAY_DB_NAME),
+          normalizedRootDir ? path.join(normalizedRootDir, "achievements.json") : null,
+          meta?.save_path ? path.join(meta.save_path, "achievements.json") : null,
+          meta?.save_path
+            ? path.join(meta.save_path, id, "achievements.json")
+            : null,
+          meta?.save_path
+            ? path.join(meta.save_path, "steam_settings", id, "achievements.json")
+            : null,
+          meta?.save_path
+            ? path.join(meta.save_path, "remote", id, "achievements.json")
+            : null,
+          normalizedRootDir ? path.join(normalizedRootDir, "achievements.ini") : null,
+          normalizedRootDir
+            ? path.join(normalizedRootDir, "Stats", "achievements.ini")
+            : null,
+          normalizedRootDir ? path.join(normalizedRootDir, "stats.bin") : null,
+          meta?.save_path ? path.join(meta.save_path, "achievements.ini") : null,
+          meta?.save_path
+            ? path.join(meta.save_path, "Stats", "achievements.ini")
+            : null,
+          meta?.save_path ? path.join(meta.save_path, "stats.bin") : null,
+        ].filter(Boolean),
+      ),
+    );
+  }
+
+  function promoteInitialNotifyForMeta(
+    appid,
+    meta,
+    candidates,
+    context = {},
+  ) {
+    if (!meta?.name) return false;
+    if (bootMode) return false;
+    const existingCandidates = (Array.isArray(candidates) ? candidates : []).filter(
+      (candidate) => candidate && fs.existsSync(candidate),
+    );
+    if (!existingCandidates.length) return false;
+    if (initialNotifyPromotedConfigs.has(meta.name)) return false;
+    initialNotifyPromotedConfigs.add(meta.name);
+    watcherLogger.info("seed:promote-initial-notify", {
+      appid: String(appid || meta?.appid || ""),
+      config: meta.name,
+      reason: context.reason || "post-create",
+      rootPath: context.rootPath || meta?.save_path || null,
+      platform: normalizePlatform(meta?.platform) || null,
+    });
+    runInitialSeedForMeta(String(appid || meta?.appid || ""), meta, existingCandidates, {
+      suppressInitialNotify: false,
+    });
+    return true;
+  }
+
+  function seedLumaPlaySnapshot(appid, meta, initialFlag = true, opts = {}) {
+    const id = String(appid || meta?.appid || "");
+    const configName = meta?.name || id;
+    const bootLikeSeed = bootMode || opts.bornInBoot === true;
+    const suppressInitialNotify =
+      opts.suppressInitialNotify === true || bootLikeSeed;
+    const snapKey = makeSnapshotKey(meta, id);
+
+    let cached = null;
+    if (typeof getCachedSnapshot === "function") {
+      try {
+        cached = getCachedSnapshot(configName, meta?.platform || null);
+      } catch {}
+    }
+    const cachedSnapshot =
+      cached && typeof cached === "object" && !Array.isArray(cached)
+        ? cached
+        : null;
+    const lastKnownSnapshot =
+      lastSnapshot.get(snapKey) &&
+      typeof lastSnapshot.get(snapKey) === "object" &&
+      !Array.isArray(lastSnapshot.get(snapKey))
+        ? lastSnapshot.get(snapKey)
+        : null;
+    const baselineSnapshot = cachedSnapshot || lastKnownSnapshot || null;
+    const previousSnapshot = baselineSnapshot || {};
+
+    const parsed = readLumaPlayAchievementsSnapshot({
+      appid: String(meta?.appid || id || ""),
+      configPath: meta?.config_path || "",
+      preferredUser: meta?.lumaplay_user || "",
+      preferredKeyPath: meta?.lumaplay_key_path || meta?.lumaplayKeyPath || "",
+      previousSnapshot,
+      readCache: opts.lumaPlayReadCache || null,
+    });
+
+    const parsedSnapshot =
+      parsed?.snapshot &&
+      typeof parsed.snapshot === "object" &&
+      !Array.isArray(parsed.snapshot)
+        ? parsed.snapshot
+        : {};
+    const baselineCount = Object.keys(baselineSnapshot || {}).length;
+    const parsedCount = Object.keys(parsedSnapshot).length;
+    const useBaselineSnapshot =
+      baselineSnapshot &&
+      (parsed?.found !== true || (parsedCount === 0 && baselineCount > 0));
+    const snapshot = useBaselineSnapshot
+      ? baselineSnapshot
+      : parsed?.found === true
+        ? parsedSnapshot
+        : null;
+
+    if (snapshot && typeof snapshot === "object") {
+      lastSnapshot.set(snapKey, snapshot);
+    } else if (baselineSnapshot) {
+      lastSnapshot.set(snapKey, baselineSnapshot);
+    }
+
+    if (parsed?.user && parsed.user !== meta?.lumaplay_user) {
+      meta.lumaplay_user = parsed.user;
+    }
+    if (parsed?.keyPath && parsed.keyPath !== meta?.lumaplay_key_path) {
+      meta.lumaplay_key_path = parsed.keyPath;
+    }
+
+    if (initialFlag) {
+      seededInitialConfigs.add(configName);
+    }
+
+    if (snapshot && typeof onSeedCache === "function") {
+      try {
+        const hasSnapshotEntries = Object.keys(snapshot || {}).length > 0;
+        const skipBootSeed =
+          useBaselineSnapshot ||
+          !hasSnapshotEntries ||
+          isBootSnapshotIdentical(meta, id, snapshot, {
+            bootLike: bootLikeSeed,
+          });
+        if (!skipBootSeed) {
+          onSeedCache({
+            appid: id,
+            configName,
+            platform: meta?.platform || null,
+            savePath: meta?.save_path || null,
+            snapshot,
+          });
+        } else {
+          watcherLogger.info("seed:cache-skip-identical", {
+            appid: id,
+            config: configName,
+            file:
+              parsed?.keyPath ||
+              meta?.lumaplay_key_path ||
+              meta?.save_path ||
+              null,
+            bootMode,
+          });
+        }
+      } catch {}
+    }
+
+    if (initialFlag && !suppressInitialNotify) {
+      pendingInitialNotify.add(configName);
+      watcherLogger.info("seed:pending-notify-set", {
+        appid: id,
+        config: configName,
+        file:
+          parsed?.keyPath || meta?.lumaplay_key_path || meta?.save_path || null,
+        bootMode,
+      });
+    } else if (initialFlag) {
+      watcherLogger.info("seed:pending-notify-skip", {
+        appid: id,
+        config: configName,
+        file:
+          parsed?.keyPath || meta?.lumaplay_key_path || meta?.save_path || null,
+        bootMode,
+      });
+    }
+
+    return !!snapshot;
   }
 
   async function autoSelectConfig(meta) {
@@ -670,22 +896,82 @@ module.exports = function makeWatchedFolders({
     autoSelectTimers.set(name, t);
   }
 
+  function normalizePathForMetaMatch(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    try {
+      return path.normalize(raw).toLowerCase();
+    } catch {
+      return raw.toLowerCase();
+    }
+  }
+
+  function scoreMetaForPath(meta, filePath) {
+    const normalizedFilePath = normalizePathForMetaMatch(filePath);
+    if (!meta || !normalizedFilePath) return 0;
+    let bestScore = 0;
+
+    const updateBest = (candidatePath, exactScore, parentScore) => {
+      const normalizedCandidate = normalizePathForMetaMatch(candidatePath);
+      if (!normalizedCandidate) return;
+      if (normalizedFilePath === normalizedCandidate) {
+        bestScore = Math.max(bestScore, exactScore + normalizedCandidate.length);
+        return;
+      }
+      if (normalizedFilePath.startsWith(`${normalizedCandidate}${path.sep}`)) {
+        bestScore = Math.max(bestScore, parentScore + normalizedCandidate.length);
+      }
+    };
+
+    for (const target of getSaveWatchTargets(meta)) {
+      updateBest(target, 100000, 80000);
+    }
+    updateBest(meta?.save_path || "", 70000, 60000);
+    updateBest(meta?.config_path || "", 50000, 40000);
+
+    return bestScore;
+  }
+
   function pickMetaForPath(appid, filePath) {
     const metas = getConfigMetas(appid);
     if (!metas.length) return null;
     if (!filePath) return metas[0];
-    const normalized = path.normalize(filePath).toLowerCase();
+
+    let bestMeta = null;
+    let bestScore = 0;
     for (const meta of metas) {
-      const saveBase = meta?.save_path
-        ? path.normalize(meta.save_path).toLowerCase()
-        : null;
-      if (saveBase && normalized.includes(saveBase)) return meta;
-      const cfgBase = meta?.config_path
-        ? path.normalize(meta.config_path).toLowerCase()
-        : null;
-      if (cfgBase && normalized.includes(cfgBase)) return meta;
+      const score = scoreMetaForPath(meta, filePath);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMeta = meta;
+      }
     }
-    return metas[0];
+    return bestMeta || metas[0];
+  }
+
+  function pickExistingSeedTargetForMeta(meta, candidates) {
+    const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+    if (!list.length) return "";
+
+    let bestTarget = "";
+    let bestScore = 0;
+    for (const candidate of list) {
+      let stat = null;
+      try {
+        stat = fs.statSync(candidate);
+      } catch {
+        continue;
+      }
+      if (!stat?.isFile?.()) continue;
+
+      const score = scoreMetaForPath(meta, candidate);
+      if (score > bestScore) {
+        bestScore = score;
+        bestTarget = candidate;
+      }
+    }
+
+    return bestScore > 0 ? bestTarget : "";
   }
 
   function ensureWatcherBucket(appid) {
@@ -716,6 +1002,12 @@ module.exports = function makeWatchedFolders({
     const id = String(appid || "").trim();
     if (!id) return null;
 
+    // If we already have a Uplay config but we just discovered a classic
+    // Steam-style save path, generate the Steam variant too.
+    if (hasPlatformVariant(id, "uplay") && !hasPlatformVariant(id, "steam")) {
+      return "steam";
+    }
+
     // If we already have a Steam official config but we just discovered a new
     // (non-official) save path, generate the classic Steam variant too.
     if (
@@ -727,6 +1019,89 @@ module.exports = function makeWatchedFolders({
 
     return null;
   }
+
+  function normalizeObservedGenerationPath(dir) {
+    if (!dir) return "";
+    return normalizePrefPath(dir)
+      .replace(/[\\/]+/g, path.sep)
+      .toLowerCase();
+  }
+
+  function buildObservedGenerationKey(appid, platform, normalizedSavePath) {
+    const id = String(appid || "").trim();
+    const normalizedPath = normalizeObservedGenerationPath(normalizedSavePath);
+    if (!id || !normalizedPath) return "";
+    const normalizedPlatform = normalizePlatform(platform) || "auto";
+    return `${id}::${normalizedPlatform}::${normalizedPath}`;
+  }
+
+  function buildObservedGenerationVariantKey(appid, platform) {
+    const id = String(appid || "").trim();
+    if (!id) return "";
+    const normalizedPlatform = normalizePlatform(platform) || "auto";
+    return `${id}::${normalizedPlatform}`;
+  }
+
+  function pruneRecentObservedGeneration(now = Date.now()) {
+    for (const [key, ts] of recentObservedGenerationTs.entries()) {
+      if (now - Number(ts || 0) >= RECENT_OBSERVED_GENERATION_TTL_MS) {
+        recentObservedGenerationTs.delete(key);
+      }
+    }
+    for (const [key, ts] of recentObservedGenerationVariantTs.entries()) {
+      if (now - Number(ts || 0) >= RECENT_OBSERVED_GENERATION_TTL_MS) {
+        recentObservedGenerationVariantTs.delete(key);
+      }
+    }
+  }
+
+  function isObservedGenerationPending(appid, platform, normalizedSavePath) {
+    const key = buildObservedGenerationKey(appid, platform, normalizedSavePath);
+    return key ? pendingObservedGenerations.has(key) : false;
+  }
+
+  function wasObservedGenerationRecent(appid, platform, normalizedSavePath) {
+    const key = buildObservedGenerationKey(appid, platform, normalizedSavePath);
+    if (!key) return false;
+    const now = Date.now();
+    pruneRecentObservedGeneration(now);
+    const ts = Number(recentObservedGenerationTs.get(key) || 0);
+    return ts > 0 && now - ts < RECENT_OBSERVED_GENERATION_TTL_MS;
+  }
+
+  function wasObservedGenerationVariantRecent(appid, platform) {
+    const key = buildObservedGenerationVariantKey(appid, platform);
+    if (!key) return false;
+    const now = Date.now();
+    pruneRecentObservedGeneration(now);
+    const ts = Number(recentObservedGenerationVariantTs.get(key) || 0);
+    return ts > 0 && now - ts < RECENT_OBSERVED_GENERATION_TTL_MS;
+  }
+
+  function markObservedGenerationPending(appid, platform, normalizedSavePath) {
+    const key = buildObservedGenerationKey(appid, platform, normalizedSavePath);
+    if (key) pendingObservedGenerations.add(key);
+  }
+
+  function clearObservedGenerationPending(appid, platform, normalizedSavePath) {
+    const key = buildObservedGenerationKey(appid, platform, normalizedSavePath);
+    if (key) pendingObservedGenerations.delete(key);
+  }
+
+  function markObservedGenerationRecent(appid, platform, normalizedSavePath) {
+    const key = buildObservedGenerationKey(appid, platform, normalizedSavePath);
+    if (!key) return;
+    recentObservedGenerationTs.set(key, Date.now());
+    pruneRecentObservedGeneration();
+  }
+
+  function markObservedGenerationVariantRecent(appid, platform) {
+    const key = buildObservedGenerationVariantKey(appid, platform);
+    if (!key) return;
+    recentObservedGenerationVariantTs.set(key, Date.now());
+    pruneRecentObservedGeneration();
+  }
+
   const rescanInProgress = { value: false };
   const normalize = (p) => {
     try {
@@ -975,7 +1350,7 @@ module.exports = function makeWatchedFolders({
           running++;
           (async () => {
             try {
-              const created = await generateOneAppId(
+              const generationResult = await generateOneAppId(
                 task.appid,
                 task.appDir || null,
                 {
@@ -995,7 +1370,9 @@ module.exports = function makeWatchedFolders({
                   __emu: task.__emu || null,
                 },
               );
-              if (created) generated.add(String(task.appid));
+              if (generationResult?.created === true) {
+                generated.add(String(task.appid));
+              }
             } catch {
             } finally {
               running--;
@@ -1721,10 +2098,40 @@ module.exports = function makeWatchedFolders({
   }
 
   const BLACKLIST_PREF_KEY = "blacklistedAppIds";
+  const BLACKLIST_CONFIG_PREF_KEY = "blacklistedConfigKeys";
 
   function normalizeAppIdValue(value) {
     const trimmed = String(value || "").trim();
-    return /^[0-9a-fA-F]+$/.test(trimmed) ? trimmed : "";
+    if (
+      /^[0-9a-fA-F]+$/.test(trimmed) ||
+      /^CUSA\d+$/i.test(trimmed) ||
+      /^NP[A-Z0-9_]+$/i.test(trimmed) ||
+      /^0x[0-9a-f]+$/i.test(trimmed)
+    ) {
+      return trimmed;
+    }
+    return "";
+  }
+
+  function normalizeBlacklistPlatformValue(value) {
+    return normalizePlatform(value) || "steam";
+  }
+
+  function buildBlacklistConfigKey(appid, platform) {
+    const normalizedAppId = normalizeAppIdValue(appid);
+    if (!normalizedAppId) return "";
+    return `${normalizedAppId}::${normalizeBlacklistPlatformValue(platform)}`;
+  }
+
+  function normalizeBlacklistConfigKey(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    const sepIndex = raw.indexOf("::");
+    if (sepIndex <= 0) return "";
+    const appid = normalizeAppIdValue(raw.slice(0, sepIndex));
+    if (!appid) return "";
+    const platform = normalizeBlacklistPlatformValue(raw.slice(sepIndex + 2));
+    return `${appid}::${platform}`;
   }
 
   function getBlacklistedAppIdsSet() {
@@ -1739,10 +2146,33 @@ module.exports = function makeWatchedFolders({
     }
   }
 
-  function isAppIdBlacklisted(appid, currentSet) {
+  function getBlacklistState() {
+    try {
+      const prefs = readPrefsSafe();
+      const appIds = Array.isArray(prefs[BLACKLIST_PREF_KEY])
+        ? prefs[BLACKLIST_PREF_KEY]
+        : [];
+      const configKeys = Array.isArray(prefs[BLACKLIST_CONFIG_PREF_KEY])
+        ? prefs[BLACKLIST_CONFIG_PREF_KEY]
+        : [];
+      return {
+        appIds: new Set(appIds.map(normalizeAppIdValue).filter(Boolean)),
+        configKeys: new Set(
+          configKeys.map(normalizeBlacklistConfigKey).filter(Boolean),
+        ),
+      };
+    } catch {
+      return { appIds: new Set(), configKeys: new Set() };
+    }
+  }
+
+  function isAppIdBlacklisted(appid, platform = null, currentState = null) {
     const normalized = normalizeAppIdValue(appid);
     if (!normalized) return false;
-    return (currentSet || getBlacklistedAppIdsSet()).has(normalized);
+    const state = currentState || getBlacklistState();
+    if (state?.appIds?.has(normalized)) return true;
+    const configKey = buildBlacklistConfigKey(normalized, platform);
+    return configKey ? state?.configKeys?.has(configKey) === true : false;
   }
 
   const normalizePrefPath = (p) => {
@@ -2105,6 +2535,7 @@ module.exports = function makeWatchedFolders({
     try {
       await scanRootOnce(event.logsRoot, {
         suppressInitialNotify: true,
+        promoteInitialNotifyAppIds: [missingEntry.appid],
       });
     } catch (err) {
       watcherLogger.warn("ea-official:live-discovery-failed", {
@@ -2146,6 +2577,7 @@ module.exports = function makeWatchedFolders({
     try {
       await scanRootOnce(event.spoolRoot, {
         suppressInitialNotify: true,
+        promoteInitialNotifyAppIds: [appid],
       });
     } catch (err) {
       watcherLogger.warn("ubisoft-official:live-discovery-failed", {
@@ -2240,6 +2672,7 @@ module.exports = function makeWatchedFolders({
     try {
       await scanRootOnce(event.applicationsRoot, {
         suppressInitialNotify: true,
+        promoteInitialNotifyAppIds: [productId],
       });
     } catch (err) {
       watcherLogger.warn("gog-official:live-discovery-failed", {
@@ -3152,6 +3585,7 @@ module.exports = function makeWatchedFolders({
       forceEmptyPrev = false,
       isAddEvent = false,
       lumaPlayReadCache = null,
+      preserveUnblockAutoSelectSuppression = false,
     } = opts || {};
     const isLumaPlay = isLumaPlayMeta(meta);
     if (!filePath && !isLumaPlay) return;
@@ -3272,7 +3706,20 @@ module.exports = function makeWatchedFolders({
         readCache: lumaPlayReadCache,
       });
       if (parsed?.found) {
-        cur = parsed?.snapshot || {};
+        const parsedSnapshot =
+          parsed?.snapshot &&
+          typeof parsed.snapshot === "object" &&
+          !Array.isArray(parsed.snapshot)
+            ? parsed.snapshot
+            : {};
+        if (
+          Object.keys(parsedSnapshot).length === 0 &&
+          Object.keys(prev || {}).length > 0
+        ) {
+          cur = { ...prev };
+        } else {
+          cur = parsedSnapshot;
+        }
         if (parsed.user && parsed.user !== meta?.lumaplay_user) {
           meta.lumaplay_user = parsed.user;
           try {
@@ -3417,12 +3864,17 @@ module.exports = function makeWatchedFolders({
       } catch {}
     }
 
-    if (suppressAutoSelect.has(String(appid))) {
-      // Drop suppression once we detect a change after unblocking
-      suppressAutoSelect.delete(String(appid));
-    }
-    if (justUnblocked.has(String(appid))) {
-      justUnblocked.delete(String(appid));
+    if (!preserveUnblockAutoSelectSuppression) {
+      if (suppressAutoSelect.has(String(appid))) {
+        // Drop suppression once we detect a real post-unblock change.
+        suppressAutoSelect.delete(String(appid));
+      }
+      if (meta?.name && suppressAutoSelectByConfig.has(meta.name)) {
+        suppressAutoSelectByConfig.delete(meta.name);
+      }
+      if (justUnblocked.has(String(appid))) {
+        justUnblocked.delete(String(appid));
+      }
     }
 
     const isFirstSeed =
@@ -3559,10 +4011,14 @@ module.exports = function makeWatchedFolders({
       const oldMax = Number(oldVal?.max_progress);
       const hasProgressValues =
         Number.isFinite(nowProgress) && Number.isFinite(nowMax) && nowMax > 0;
+      const hasOldProgressValues =
+        Number.isFinite(oldProgress) && Number.isFinite(oldMax) && oldMax > 0;
       const progressChanged =
         !nowVal.earned &&
         hasProgressValues &&
-        (!oldVal || nowProgress !== oldProgress || nowMax !== oldMax);
+        (hasOldProgressValues
+          ? nowProgress !== oldProgress || nowMax !== oldMax
+          : nowProgress > 0);
       if (initial) {
         watcherLogger.info("initial-notify:entry-check", {
           appid: String(appid),
@@ -3845,59 +4301,63 @@ module.exports = function makeWatchedFolders({
       bornInBoot,
     });
     if (pendingInitialNotify.has(meta.name)) {
-      const existingTarget = candidates.find((c) => c && fs.existsSync(c));
+      const existingTarget = pickExistingSeedTargetForMeta(meta, candidates);
       pendingInitialNotify.delete(meta.name);
       if (existingTarget) {
         const fromUnblock = justUnblocked.has(id);
+        const preferredMeta = pickMetaForPath(id, existingTarget) || meta;
         setTimeout(() => {
           (async () => {
             watcherLogger.info("initial-notify:attempt", {
               appid: id,
-              config: meta.name,
+              config: preferredMeta.name,
               target: existingTarget,
             });
             const doEval = async (retryFlag = false) => {
-              let lastResult = null;
-              try {
-                const evalOpts = {
-                  initial: true,
-                  retry: retryFlag,
-                  forceEmptyPrev: fromUnblock ? false : true,
-                };
-                const result = await evaluateFile(
-                  id,
-                  meta,
-                  existingTarget,
-                  evalOpts,
-                );
-                lastResult = result;
-                watcherLogger.info("initial-notify:result", {
-                  appid: id,
-                  config: meta.name,
-                  result,
-                  retry: retryFlag,
-                  fromUnblock,
-                });
-                if (result === "__retry__") {
-                  setTimeout(() => doEval(true), 1000);
-                }
-              } finally {
-                if (fromUnblock && lastResult) {
-                  justUnblocked.delete(id);
-                  suppressAutoSelect.delete(String(id));
-                }
+              const evalOpts = {
+                initial: true,
+                retry: retryFlag,
+                forceEmptyPrev: fromUnblock ? false : true,
+                preserveUnblockAutoSelectSuppression: fromUnblock,
+              };
+              const result = await evaluateFile(
+                id,
+                preferredMeta,
+                existingTarget,
+                evalOpts,
+              );
+              watcherLogger.info("initial-notify:result", {
+                appid: id,
+                config: preferredMeta.name,
+                result,
+                retry: retryFlag,
+                fromUnblock,
+              });
+              if (result === "__retry__") {
+                await sleep(1000);
+                return await doEval(true);
               }
+              return result;
             };
 
-            await doEval();
+            const evalResult = await doEval();
+
+            if (fromUnblock) {
+              watcherLogger.info("auto-select:skip-unblock-reseed", {
+                appid: id,
+                config: preferredMeta.name,
+              });
+              return;
+            }
 
             if (
+              evalResult === true &&
               !bootMode &&
-              !isConfigActive?.(meta.name) &&
-              !pendingAutoSelect.has(meta.name) &&
+              !isConfigActive?.(preferredMeta.name) &&
+              !pendingAutoSelect.has(preferredMeta.name) &&
               !suppressAutoSelect.has(String(id))
             ) {
-              enqueueAutoSelect(meta);
+              enqueueAutoSelect(preferredMeta);
             }
           })();
         });
@@ -4105,10 +4565,17 @@ module.exports = function makeWatchedFolders({
       bucket.set(meta.name, entry);
       const shouldSuppressInitialSeed =
         suppressInitialNotify || bootMode || deferInitialSeed;
-      evaluateLumaPlayWatcherEntry(entry, {
-        initial: shouldSuppressInitialSeed,
-        retry: false,
-      }).catch(() => {});
+      if (shouldSuppressInitialSeed) {
+        seedInitialSnapshot(appid, meta, [], true, {
+          suppressInitialNotify: true,
+          bornInBoot: bootMode,
+        });
+      } else {
+        evaluateLumaPlayWatcherEntry(entry, {
+          initial: false,
+          retry: false,
+        }).catch(() => {});
+      }
       watcherLogger.info("watch-lumaplay", {
         appid,
         config: meta?.name || null,
@@ -4747,13 +5214,15 @@ module.exports = function makeWatchedFolders({
         ? BOOT_ATTACH_ITEM_DELAY_MS
         : 0;
     const roots = getWatchedFolders().map(normalize);
-    const blacklist = getBlacklistedAppIdsSet();
+    const blacklistState = getBlacklistState();
     const allowed = new Map(); // appid -> Set(configName)
 
     for (const [appid, metas] of configIndex.entries()) {
       const id = String(appid);
-      if (blacklist.has(id)) continue;
       for (const meta of metas || []) {
+        if (isAppIdBlacklisted(id, meta?.platform || null, blacklistState)) {
+          continue;
+        }
         if (isLumaPlayMeta(meta)) {
           if (!isLumaPlayWatcherEnabled()) continue;
           if (!allowed.has(id)) allowed.set(id, new Set());
@@ -4776,10 +5245,7 @@ module.exports = function makeWatchedFolders({
     for (const [appid, bucket] of appidSaveWatchers.entries()) {
       if (!(bucket instanceof Map)) continue;
       for (const [configName, watcher] of bucket.entries()) {
-        const keep =
-          !blacklist.has(appid) &&
-          allowed.has(appid) &&
-          allowed.get(appid).has(configName);
+        const keep = allowed.has(appid) && allowed.get(appid).has(configName);
         if (keep) continue;
         watcherLogger.info("unwatch-save", {
           appid,
@@ -5093,7 +5559,7 @@ module.exports = function makeWatchedFolders({
     await indexExistingConfigsSync(
       forceAsyncIndex ? { forceAsync: true } : undefined,
     );
-    const blacklist = getBlacklistedAppIdsSet();
+    const blacklistState = getBlacklistState();
     try {
       const roots = getWatchedFolders().map(normalizeRoot);
       for (const r of roots) {
@@ -5104,7 +5570,7 @@ module.exports = function makeWatchedFolders({
               if (
                 ent.isDirectory() &&
                 /^\d+$/.test(ent.name) &&
-                !blacklist.has(ent.name)
+                !isAppIdBlacklisted(ent.name, null, blacklistState)
               ) {
                 knownAppIds.add(ent.name);
               }
@@ -5120,7 +5586,7 @@ module.exports = function makeWatchedFolders({
             if (
               ent.isDirectory() &&
               /^\d+$/.test(ent.name) &&
-              !blacklist.has(ent.name)
+              !isAppIdBlacklisted(ent.name, null, blacklistState)
             ) {
               knownAppIds.add(ent.name);
             }
@@ -5169,24 +5635,40 @@ module.exports = function makeWatchedFolders({
   const inflightAppIds = new Set();
   async function generateOneAppId(appid, appDir, opts = {}) {
     appid = String(appid);
-    if (isAppIdBlacklisted(appid)) return false;
     const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
+    if (isAppIdBlacklisted(appid, desiredPlatform)) {
+      return { created: false, reason: "blacklisted" };
+    }
     const skipPostIndex = opts.skipPostIndex === true;
     const allowExistingVariant = opts.allowExistingVariant === true;
     const inflightKey = `${appid}:${desiredPlatform || "auto"}`;
+    if (!desiredPlatform && existingConfigIds.has(appid)) {
+      return { created: false, reason: "existing-auto" };
+    }
     if (
-      (!desiredPlatform && existingConfigIds.has(appid)) ||
-      (desiredPlatform &&
-        hasPlatformVariant(appid, desiredPlatform) &&
-        !allowExistingVariant) ||
-      inflightAppIds.has(inflightKey)
+      desiredPlatform &&
+      hasPlatformVariant(appid, desiredPlatform) &&
+      !allowExistingVariant
     ) {
-      return false;
+      return { created: false, reason: "existing-variant" };
+    }
+    if (inflightAppIds.has(inflightKey)) {
+      return { created: false, reason: "inflight" };
+    }
+    if (wasObservedGenerationVariantRecent(appid, desiredPlatform)) {
+      return { created: false, reason: "recent-app-platform" };
     }
     const normalizedSavePath =
       opts.normalizedSavePath ||
       normalizeObservedPath(appDir || "", appid) ||
       "";
+    if (isObservedGenerationPending(appid, desiredPlatform, normalizedSavePath)) {
+      return { created: false, reason: "pending-save-path" };
+    }
+    if (wasObservedGenerationRecent(appid, desiredPlatform, normalizedSavePath)) {
+      return { created: false, reason: "recent-save-path" };
+    }
+    markObservedGenerationPending(appid, desiredPlatform, normalizedSavePath);
     inflightAppIds.add(inflightKey);
     try {
       if (typeof generateConfigForAppId === "function") {
@@ -5248,7 +5730,10 @@ module.exports = function makeWatchedFolders({
             platform: desiredPlatform || null,
             pendingSchema: result?.pendingSchema === true,
           });
-          return false;
+          return {
+            created: false,
+            reason: result?.pendingSchema === true ? "pending-schema" : "skipped",
+          };
         }
         existingConfigIds.add(appid);
         knownAppIds.add(appid);
@@ -5296,16 +5781,25 @@ module.exports = function makeWatchedFolders({
         if (!skipPostIndex) {
           await indexExistingConfigsSync();
         }
+        if (normalizedSavePath) {
+          markObservedGenerationRecent(
+            appid,
+            desiredPlatform,
+            normalizedSavePath,
+          );
+        }
+        markObservedGenerationVariantRecent(appid, desiredPlatform);
         if (opts.__emu === "tenoke") {
           try {
             attachSaveWatcherForAppId(appid, { suppressInitialNotify: true });
           } catch {}
         }
-        return true;
+        return { created: true, reason: "created" };
       }
-      return false;
+      return { created: false, reason: "missing-generator" };
     } finally {
       inflightAppIds.delete(inflightKey);
+      clearObservedGenerationPending(appid, desiredPlatform, normalizedSavePath);
       if (normalizedSavePath) {
         clearPendingSavePath(appid, normalizedSavePath);
       }
@@ -5375,7 +5869,7 @@ module.exports = function makeWatchedFolders({
       return { scanned: 0, created: 0, updated: 0 };
     }
 
-    const blacklist = getBlacklistedAppIdsSet();
+    const blacklistState = getBlacklistState();
     const createdIds = new Set();
     const updatedIds = new Set();
 
@@ -5413,7 +5907,7 @@ module.exports = function makeWatchedFolders({
       const user = String(row?.user || "").trim();
       const keyPath = String(row?.keyPath || "").trim();
       if (!appid || !/^[0-9a-fA-F]+$/.test(appid)) continue;
-      if (blacklist.has(appid)) continue;
+      if (isAppIdBlacklisted(appid, "uplay", blacklistState)) continue;
 
       knownAppIds.add(appid);
       const metas = getConfigMetas(appid);
@@ -5421,6 +5915,9 @@ module.exports = function makeWatchedFolders({
       if (hasLumaPlay) {
         for (const meta of metas) {
           if (!isLumaPlayMeta(meta)) continue;
+          if (isAppIdBlacklisted(appid, meta?.platform || "uplay", blacklistState)) {
+            continue;
+          }
           if (markConfigAsLumaPlay(meta, user, keyPath)) {
             updatedIds.add(appid);
           }
@@ -5428,13 +5925,13 @@ module.exports = function makeWatchedFolders({
         continue;
       }
 
-      const created = await generateOneAppId(appid, null, {
+      const generationResult = await generateOneAppId(appid, null, {
         forcePlatform: "uplay",
         __emu: "lumaplay",
         __lumaplayUser: user,
         __lumaplayKeyPath: keyPath,
       });
-      if (created) {
+      if (generationResult?.created === true) {
         createdIds.add(appid);
         continue;
       }
@@ -5557,6 +6054,24 @@ module.exports = function makeWatchedFolders({
           });
         }
       } catch {}
+    }
+
+    if (isLumaPlayMeta(meta)) {
+      const seeded = seedLumaPlaySnapshot(appid, meta, initialFlag, opts);
+      if (
+        !seeded &&
+        typeof getCachedSnapshot === "function" &&
+        !lastSnapshot.has(snapKey)
+      ) {
+        const cached = getCachedSnapshot(
+          meta?.name || appid,
+          meta?.platform || null,
+        );
+        if (cached && typeof cached === "object") {
+          lastSnapshot.set(snapKey, cached);
+        }
+      }
+      return;
     }
 
     for (const fp of candidates) {
@@ -5828,12 +6343,22 @@ module.exports = function makeWatchedFolders({
 
   async function scanRootOnce(rootPath, opts = {}) {
     const suppressInitialNotify = opts.suppressInitialNotify === true;
+    const promoteSingleGeneratedInitialNotify =
+      opts.promoteSingleGeneratedInitialNotify === true;
+    const promoteInitialNotifyAppIds = new Set(
+      (Array.isArray(opts.promoteInitialNotifyAppIds)
+        ? opts.promoteInitialNotifyAppIds
+        : [opts.promoteInitialNotifyAppIds]
+      )
+        .map((value) => String(value || "").trim())
+        .filter(Boolean),
+    );
     try {
       if (!rootPath || !fs.existsSync(rootPath)) return;
       const base = path.basename(rootPath);
       const scanBase = isAppIdName(base) ? path.dirname(rootPath) : rootPath;
 
-      const blacklist = getBlacklistedAppIdsSet();
+      const blacklistState = getBlacklistState();
       const yieldIfNeeded = createTimeSlicer(BOOT_SCAN_SLICE_MS);
       const strictRootProfile = getStrictRootProfile(scanBase);
       const attachSeedOptions = rescanInProgress.value
@@ -5858,7 +6383,11 @@ module.exports = function makeWatchedFolders({
           const schemaRoot = path.join(configsDir, "schema");
           const handleGpd = async (gpdPath) => {
             const appid = path.basename(gpdPath, path.extname(gpdPath));
-            if (!appid || blacklist.has(appid) || xeniaAppIds.has(appid)) {
+            if (
+              !appid ||
+              isAppIdBlacklisted(appid, "xenia", blacklistState) ||
+              xeniaAppIds.has(appid)
+            ) {
               return;
             }
             try {
@@ -5936,7 +6465,11 @@ module.exports = function makeWatchedFolders({
           let rpcs3Changed = false;
           const handleTrophyDir = async (trophyDir) => {
             const appid = path.basename(trophyDir);
-            if (!appid || blacklist.has(appid) || rpcs3AppIds.has(appid)) {
+            if (
+              !appid ||
+              isAppIdBlacklisted(appid, "rpcs3", blacklistState) ||
+              rpcs3AppIds.has(appid)
+            ) {
               return;
             }
             try {
@@ -6023,7 +6556,13 @@ module.exports = function makeWatchedFolders({
           let ps4Changed = false;
           const handlePs4Dir = async (trophyDir) => {
             const appid = path.basename(path.dirname(trophyDir));
-            if (!appid || blacklist.has(appid) || ps4AppIds.has(appid)) return;
+            if (
+              !appid ||
+              isAppIdBlacklisted(appid, "shadps4", blacklistState) ||
+              ps4AppIds.has(appid)
+            ) {
+              return;
+            }
             try {
               const result = await generateConfigFromPs4Dir(
                 trophyDir,
@@ -6140,7 +6679,15 @@ module.exports = function makeWatchedFolders({
                 appidFromBin &&
                 shouldSkipSteamOfficialGeneration(appidFromBin)
               ) {
-                if (blacklist.has(appidFromBin)) return;
+                if (
+                  isAppIdBlacklisted(
+                    appidFromBin,
+                    "steam-official",
+                    blacklistState,
+                  )
+                ) {
+                  return;
+                }
                 steamIds.add(appidFromBin);
                 knownAppIds.add(appidFromBin);
                 return;
@@ -6152,7 +6699,15 @@ module.exports = function makeWatchedFolders({
               );
               if (!result || result.skipped) return;
               const resultAppId = String(result.appid);
-              if (blacklist.has(resultAppId)) return;
+              if (
+                isAppIdBlacklisted(
+                  resultAppId,
+                  "steam-official",
+                  blacklistState,
+                )
+              ) {
+                return;
+              }
               steamIds.add(resultAppId);
               knownAppIds.add(resultAppId);
               if (result.created || result.schemaUpdated) steamChanged = true;
@@ -6236,7 +6791,12 @@ module.exports = function makeWatchedFolders({
           const entriesByAppId = new Map();
           for (const entry of achievementSets) {
             const productId = String(entry?.appid || "").trim();
-            if (!productId || blacklist.has(productId)) continue;
+            if (
+              !productId ||
+              isAppIdBlacklisted(productId, "ea-official", blacklistState)
+            ) {
+              continue;
+            }
             const existingOfficial =
               getConfigMetas(productId).find((meta) => isEaOfficialMeta(meta)) ||
               null;
@@ -6314,7 +6874,16 @@ module.exports = function makeWatchedFolders({
           const entriesByAppId = new Map();
           for (const entry of spoolEntries) {
             const productId = String(entry?.appid || "").trim();
-            if (!productId || blacklist.has(productId)) continue;
+            if (
+              !productId ||
+              isAppIdBlacklisted(
+                productId,
+                "ubisoft-official",
+                blacklistState,
+              )
+            ) {
+              continue;
+            }
             const existingOfficial =
               getConfigMetas(productId).find((meta) => isUbisoftOfficialMeta(meta)) ||
               null;
@@ -6390,7 +6959,12 @@ module.exports = function makeWatchedFolders({
           const entriesByProduct = new Map();
           for (const entry of gameplayEntries) {
             const productId = String(entry?.productId || "").trim();
-            if (!productId || blacklist.has(productId)) continue;
+            if (
+              !productId ||
+              isAppIdBlacklisted(productId, "gog-official", blacklistState)
+            ) {
+              continue;
+            }
             const existingOfficial =
               getConfigMetas(productId).find((meta) => isGogOfficialMeta(meta)) ||
               null;
@@ -6447,7 +7021,7 @@ module.exports = function makeWatchedFolders({
           );
           if (gogInfoFound) {
             const gogId = String(gogInfoFound.appid || "").trim();
-            if (gogId && !blacklist.has(gogId)) {
+            if (gogId && !isAppIdBlacklisted(gogId, "gog", blacklistState)) {
               const shippingDir = await findShippingExeDir(scanBase, 6);
               const saveRoot = shippingDir || gogInfoFound.baseDir || scanBase;
               const normalizedPath = normalizeObservedPath(saveRoot, gogId);
@@ -6510,6 +7084,14 @@ module.exports = function makeWatchedFolders({
               (pendingSet && pendingSet.has(normalizedDir)));
 
           if (!existingConfigIds.has(id)) {
+            const autoInflightKey = `${String(id)}:auto`;
+            if (
+              inflightAppIds.has(autoInflightKey) ||
+              wasObservedGenerationVariantRecent(id, null)
+            ) {
+              continue;
+            }
+            if (isAppIdBlacklisted(id, null, blacklistState)) continue;
             if (alreadyTracked) continue;
             brandNewIds.push(id);
             generationTasks.push({
@@ -6522,10 +7104,16 @@ module.exports = function makeWatchedFolders({
             continue;
           }
 
-          if (!normalizedDir || alreadyTracked || blacklist.has(id)) continue;
-
           const targetPlatform = determineAlternatePlatform(id);
-          if (!targetPlatform) continue;
+          if (!normalizedDir || alreadyTracked || !targetPlatform) continue;
+          if (isAppIdBlacklisted(id, targetPlatform, blacklistState)) continue;
+          const targetInflightKey = `${String(id)}:${targetPlatform || "auto"}`;
+          if (
+            inflightAppIds.has(targetInflightKey) ||
+            wasObservedGenerationVariantRecent(id, targetPlatform)
+          ) {
+            continue;
+          }
           watcherLogger.info("watcher:force-platform-new-path", {
             appid: id,
             target: targetPlatform,
@@ -6561,14 +7149,16 @@ module.exports = function makeWatchedFolders({
         ).catch(() => null);
         if (!tenokeFound && !gogInfoFound && !universeFound) {
           for (const id of discovered) {
-            if (!blacklist.has(id)) knownAppIds.add(id);
+            if (!isAppIdBlacklisted(id, null, blacklistState)) {
+              knownAppIds.add(id);
+            }
             if (yieldIfNeeded) await yieldIfNeeded();
           }
           return;
         }
         if (tenokeFound) {
           const tenokeId = String(tenokeFound.appid || "").trim();
-          if (tenokeId && !blacklist.has(tenokeId)) {
+          if (tenokeId && !isAppIdBlacklisted(tenokeId, null, blacklistState)) {
             const shippingDir = await findShippingExeDir(scanBase, 6);
             const saveRoot = shippingDir || tenokeFound.baseDir || scanBase;
             tenokeIds.add(tenokeId);
@@ -6590,7 +7180,7 @@ module.exports = function makeWatchedFolders({
         }
         if (gogInfoFound) {
           const gogId = String(gogInfoFound.appid || "").trim();
-          if (gogId && !blacklist.has(gogId)) {
+          if (gogId && !isAppIdBlacklisted(gogId, "gog", blacklistState)) {
             const shippingDir = await findShippingExeDir(scanBase, 6);
             const saveRoot = shippingDir || gogInfoFound.baseDir || scanBase;
             generationTasks.push({
@@ -6605,7 +7195,7 @@ module.exports = function makeWatchedFolders({
           }
         } else if (universeFound) {
           const uniId = String(universeFound.appid || "").trim();
-          if (uniId && !blacklist.has(uniId)) {
+          if (uniId && !isAppIdBlacklisted(uniId, "gog", blacklistState)) {
             const shippingDir = await findShippingExeDir(scanBase, 6);
             const saveRoot = shippingDir || universeFound.baseDir || scanBase;
             generationTasks.push({
@@ -6622,6 +7212,7 @@ module.exports = function makeWatchedFolders({
 
       if (typeof generateConfigForAppId === "function") {
         let generatedIds = new Set();
+        const createdGenerationTasks = [];
         pauseDashboardPoll(true);
 
         if (bootMode) {
@@ -6629,7 +7220,7 @@ module.exports = function makeWatchedFolders({
         } else {
           generatedIds = new Set();
           for (const task of generationTasks) {
-            const created = await generateOneAppId(
+            const generationResult = await generateOneAppId(
               task.appid,
               task.appDir || null,
                 {
@@ -6649,13 +7240,45 @@ module.exports = function makeWatchedFolders({
                   __emu: task.__emu || null,
                 },
               );
-            if (created) generatedIds.add(String(task.appid));
+            if (generationResult?.created === true) {
+              generatedIds.add(String(task.appid));
+              createdGenerationTasks.push(task);
+            }
           }
         }
 
         const createdAny = generatedIds.size > 0;
         if (createdAny) {
           await indexExistingConfigsSync();
+
+          const createdTaskInfoByMetaName = new Map();
+          for (const task of createdGenerationTasks) {
+            const createdMeta = findConfigMetaForGeneration(
+              String(task.appid || ""),
+              task.forcePlatform,
+              task.normalizedPath || "",
+            );
+            if (!createdMeta?.name) continue;
+            const taskRootDir =
+              task.appDir ||
+              discoveredMap?.get(String(task.appid || "")) ||
+              tenokeFound?.baseDir ||
+              rootPath;
+            createdTaskInfoByMetaName.set(createdMeta.name, {
+              id: String(task.appid || ""),
+              rootDir: taskRootDir,
+              candidates: buildInitialSeedCandidatesForMeta(
+                createdMeta,
+                taskRootDir,
+              ),
+            });
+          }
+          const singleGeneratedPromotionName =
+            !bootMode &&
+            promoteSingleGeneratedInitialNotify &&
+            createdTaskInfoByMetaName.size === 1
+              ? Array.from(createdTaskInfoByMetaName.keys())[0]
+              : null;
 
           if (bootMode) {
             await attachSaveWatchersBatched(generatedIds, {
@@ -6672,6 +7295,25 @@ module.exports = function makeWatchedFolders({
           for (const id of generatedIds) {
             const metas = getConfigMetas(id);
             for (const m of metas) {
+              const createdTaskInfo = createdTaskInfoByMetaName.get(m.name) || null;
+              const rootDir =
+                createdTaskInfo?.rootDir ||
+                discoveredMap?.get(id) ||
+                tenokeFound?.baseDir ||
+                rootPath;
+              const maybe =
+                createdTaskInfo?.candidates ||
+                buildInitialSeedCandidatesForMeta(m, rootDir);
+              const shouldPromoteInitialNotify =
+                !bootMode &&
+                ((promoteInitialNotifyAppIds.has(String(id)) &&
+                  createdTaskInfoByMetaName.size > 0 &&
+                  !!createdTaskInfo) ||
+                  singleGeneratedPromotionName === m.name);
+              const canPromoteInitialNotify =
+                shouldPromoteInitialNotify &&
+                !initialNotifyPromotedConfigs.has(m.name) &&
+                maybe.some((candidate) => candidate && fs.existsSync(candidate));
               const bucket = appidSaveWatchers.get(id);
               const alreadySeeded = bucket && bucket.has(m.name);
               const seededBefore = seededInitialConfigs.has(m.name);
@@ -6684,6 +7326,12 @@ module.exports = function makeWatchedFolders({
                   });
                   // auto-select will be triggered after notifications/evaluations
                 } catch {}
+                if (canPromoteInitialNotify) {
+                  promoteInitialNotifyForMeta(id, m, maybe, {
+                    reason: "scan-root-generated",
+                    rootPath,
+                  });
+                }
                 continue;
               }
               try {
@@ -6694,41 +7342,16 @@ module.exports = function makeWatchedFolders({
                 });
                 // auto-select will be triggered after notifications/evaluations
               } catch {}
-
-              const rootDir =
-                discoveredMap?.get(id) || tenokeFound?.baseDir || rootPath;
-              const maybe = [
-                m.gog_gameplay_db || path.join(m.save_path || "", GAMEPLAY_DB_NAME),
-                path.join(rootDir || "", "achievements.json"),
-                path.join(m.save_path || "", "achievements.json"),
-                path.join(m.save_path || "", String(id), "achievements.json"),
-                path.join(
-                  m.save_path || "",
-                  "steam_settings",
-                  String(id),
-                  "achievements.json",
-                ),
-                path.join(
-                  m.save_path || "",
-                  "remote",
-                  String(id),
-                  "achievements.json",
-                ),
-                rootDir ? path.join(rootDir, "achievements.ini") : null,
-                rootDir
-                  ? path.join(rootDir, "Stats", "achievements.ini")
-                  : null,
-                rootDir ? path.join(rootDir, "stats.bin") : null,
-                m.save_path ? path.join(m.save_path, "achievements.ini") : null,
-                m.save_path
-                  ? path.join(m.save_path, "Stats", "achievements.ini")
-                  : null,
-                m.save_path ? path.join(m.save_path, "stats.bin") : null,
-              ].filter(Boolean);
-
-              seedInitialSnapshot(id, m, maybe, true, {
-                suppressInitialNotify,
-              });
+              if (canPromoteInitialNotify) {
+                promoteInitialNotifyForMeta(id, m, maybe, {
+                  reason: "scan-root-generated",
+                  rootPath,
+                });
+              } else {
+                seedInitialSnapshot(id, m, maybe, true, {
+                  suppressInitialNotify,
+                });
+              }
             }
           }
 
@@ -6807,6 +7430,21 @@ module.exports = function makeWatchedFolders({
           activeRoots.delete(root);
         }
       }, 300);
+    };
+
+    const getPendingAlternatePlatformForEvent = (appid, eventPath, meta) => {
+      if (!appid || !eventPath || !meta) return null;
+      const alternatePlatform = determineAlternatePlatform(appid);
+      if (!alternatePlatform) return null;
+      const currentPlatform = normalizePlatform(meta?.platform) || null;
+      if (currentPlatform && currentPlatform === alternatePlatform) {
+        return null;
+      }
+      const currentPathScore = scoreMetaForPath(meta, eventPath);
+      if (currentPathScore > 0) {
+        return null;
+      }
+      return alternatePlatform;
     };
 
     if (initialScan && !rescanInProgress.value) {
@@ -6996,6 +7634,22 @@ module.exports = function makeWatchedFolders({
           meta = pickMetaForPath(appid, filePath);
         }
         if (!meta) return;
+
+        const pendingAlternatePlatform = getPendingAlternatePlatformForEvent(
+          appid,
+          filePath,
+          meta,
+        );
+        if (pendingAlternatePlatform) {
+          watcherLogger.info("strict-root:defer-existing-meta", {
+            appid: String(appid),
+            config: meta?.name || null,
+            platform: normalizePlatform(meta?.platform) || null,
+            pendingPlatform: pendingAlternatePlatform,
+            filePath,
+          });
+          return;
+        }
 
         const tenokeReady =
           meta.__tenoke !== true || tenokeRelinkedConfigs.has(meta.name);
@@ -7213,6 +7867,22 @@ module.exports = function makeWatchedFolders({
         }
         if (!meta) return;
 
+        const pendingAlternatePlatform = getPendingAlternatePlatformForEvent(
+          appid,
+          filePath,
+          meta,
+        );
+        if (pendingAlternatePlatform) {
+          watcherLogger.info("strict-root:defer-existing-meta", {
+            appid: String(appid),
+            config: meta?.name || null,
+            platform: normalizePlatform(meta?.platform) || null,
+            pendingPlatform: pendingAlternatePlatform,
+            filePath,
+          });
+          return;
+        }
+
         const appKey = String(appid);
         const runEval = async (retryFlag = false) => {
           let result = false;
@@ -7319,23 +7989,99 @@ module.exports = function makeWatchedFolders({
             }
           }
           try {
-            const needsSteamVariant =
-              hasPlatformVariant(base, "uplay") &&
-              !hasPlatformVariant(base, "steam");
-            const created = await generateOneAppId(base, dir, {
-              forcePlatform: needsSteamVariant ? "steam" : null,
-            });
-            if (created) {
-              await indexExistingConfigsSync();
-              broadcastAll("refresh-achievements-table");
-              emitDashboardRefresh();
-
-              const metas = getConfigMetas(String(base));
-              if (metas.length) {
-                attachSaveWatcherForAppId(String(base));
+            const alternatePlatform = determineAlternatePlatform(base);
+            const normalizedDir = normalizeObservedPath(dir, base);
+            if (normalizedDir) markPendingSavePath(base, normalizedDir);
+            let generationResult = {
+              created: false,
+              reason: "not-started",
+            };
+            try {
+              generationResult = await generateOneAppId(base, dir, {
+                forcePlatform: alternatePlatform,
+                normalizedSavePath: normalizedDir || "",
+              });
+            } finally {
+              if (
+                normalizedDir &&
+                generationResult?.reason !== "inflight"
+              ) {
+                clearPendingSavePath(base, normalizedDir);
               }
-              // ensure renderer refreshes configs list
-              broadcastAll("configs:changed");
+            }
+            if (generationResult?.created === true) {
+              try {
+                await indexExistingConfigsSync();
+              } catch (indexErr) {
+                watcherLogger.warn("watcher:addDir-post-create-index-failed", {
+                  appid: String(base),
+                  path: dir,
+                  error: indexErr?.message || String(indexErr),
+                });
+              }
+
+              const createdMeta =
+                findConfigMetaForGeneration(
+                  String(base),
+                  alternatePlatform,
+                  normalizedDir || "",
+                ) || pickMetaForPath(String(base), dir);
+
+              if (createdMeta) {
+                const createdBucket = ensureWatcherBucket(String(base));
+                if (createdBucket.has(createdMeta.name)) {
+                  const maybe = buildInitialSeedCandidatesForMeta(createdMeta, dir);
+                  runInitialSeedForMeta(String(base), createdMeta, maybe, {
+                    suppressInitialNotify: false,
+                  });
+                } else {
+                  attachWatcherForMeta(createdMeta, {
+                    suppressInitialNotify: false,
+                  });
+                }
+              } else {
+                const metas = getConfigMetas(String(base));
+                if (metas.length) {
+                  attachSaveWatcherForAppId(String(base), {
+                    suppressInitialNotify: false,
+                  });
+                } else {
+                  watcherLogger.warn("watcher:addDir-created-meta-missing", {
+                    appid: String(base),
+                    path: dir,
+                    platform: alternatePlatform || null,
+                    normalizedPath: normalizedDir || null,
+                  });
+                }
+              }
+
+              try {
+                broadcastAll("refresh-achievements-table");
+              } catch {}
+              try {
+                emitDashboardRefresh();
+              } catch {}
+              try {
+                broadcastAll("configs:changed");
+              } catch {}
+              return;
+            }
+            if (
+              [
+                "inflight",
+                "existing-auto",
+                "existing-variant",
+                "blacklisted",
+                "pending-save-path",
+                "recent-save-path",
+                "recent-app-platform",
+              ].includes(generationResult?.reason || "")
+            ) {
+              watcherLogger.info("watcher:addDir-skip-fallback", {
+                appid: String(base),
+                path: dir,
+                reason: generationResult.reason,
+              });
               return;
             }
           } catch (e) {
@@ -7594,7 +8340,10 @@ module.exports = function makeWatchedFolders({
       const cur = getWatchedFolders();
       if (!cur.includes(p)) saveWatchedFolders([...cur, p]);
       startFolderWatcher(p);
-      await scanRootOnce(p, { suppressInitialNotify: true });
+      await scanRootOnce(p, {
+        suppressInitialNotify: true,
+        promoteSingleGeneratedInitialNotify: true,
+      });
       watcherLogger.info("folders:add", { folder: p });
       return {
         ok: true,

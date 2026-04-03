@@ -208,6 +208,13 @@ contextBridge.exposeInMainWorld("api", {
   dashboardReady: () => ipcRenderer.send("dashboard:ready"),
   onDashboardPollPause: (handler) =>
     ipcRenderer.on("dashboard:poll-pause", (_e, state) => handler(state)),
+  onOverlayControllerRuntimeState: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("overlay-controller-runtime-state", handler);
+    return () =>
+      ipcRenderer.removeListener("overlay-controller-runtime-state", handler);
+  },
   onPlaytimeUpdate: (callback) => {
     if (typeof callback !== "function") return () => {};
     const handler = (_event, data) => callback(data);
@@ -239,6 +246,7 @@ contextBridge.exposeInMainWorld("electron", {
         "achgen:log",
         "set-language",
         "load-overlay-data",
+        "overlay-controller-runtime-state",
         "show-notification",
         "zoom-factor-changed",
         "request-current-config",

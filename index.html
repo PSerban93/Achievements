@@ -265,6 +265,18 @@
         outline: none;
         box-shadow: 0 0 0 2px rgba(139, 233, 253, 0.35);
       }
+
+      .dashboard-filter-btn {
+        min-width: 50px;
+        justify-content: center;
+      }
+
+      .dashboard-filter-btn .filter-label {
+        max-width: 104px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     </style>
   </head>
 
@@ -401,6 +413,30 @@
                   >
                   <button id="overlay-shortcut-btn" type="button">
                     Set Shortcut
+                  </button>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="overlay-controller-shortcut-btn"
+                    style="margin-top: -10px"
+                    >Controller Shortcut:</label
+                  >
+                  <button id="overlay-controller-shortcut-btn" type="button">
+                    Select + Start
+                  </button>
+                </div>
+                <div class="settings-control">
+                  <label
+                    id="overlay-controller-control-mode-shortcut-label"
+                    for="overlay-controller-control-mode-shortcut-btn"
+                    style="margin-top: -10px"
+                    >Overlay Control Mode</label
+                  >
+                  <button
+                    id="overlay-controller-control-mode-shortcut-btn"
+                    type="button"
+                  >
+                    LB + RB
                   </button>
                 </div>
                 <div class="settings-section">
@@ -812,9 +848,40 @@
                       type="checkbox"
                       id="settings-overlayControllerSupportCheckbox"
                     />
-                    <label for="settings-overlayControllerSupportCheckbox">
+                    <label
+                      for="settings-overlayControllerSupportCheckbox"
+                      data-i18n="label.settings-overlayControllerSupportCheckbox"
+                    >
                       Enable controller support for overlay
                     </label>
+                  </div>
+                  <div class="settings-control">
+                    <label
+                      for="settings-overlayControllerBackendSelect"
+                      data-i18n="label.settings-overlayControllerBackendSelect"
+                    >
+                      Overlay controller backend
+                    </label>
+                    <select id="settings-overlayControllerBackendSelect">
+                      <option
+                        value="auto"
+                        data-i18n="option.overlayControllerBackendAuto"
+                      >
+                        Auto
+                      </option>
+                      <option
+                        value="gameinput"
+                        data-i18n="option.overlayControllerBackendGameInput"
+                      >
+                        GameInput
+                      </option>
+                      <option
+                        value="xinput"
+                        data-i18n="option.overlayControllerBackendXInput"
+                      >
+                        XInput
+                      </option>
+                    </select>
                   </div>
                   <div class="checkbox-control">
                     <input
@@ -874,7 +941,10 @@
                   <h4 id="settings-globalTitle">Global</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsGlobalSettings">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsGlobalSettings"
+                      >
                         Settings
                       </div>
                       <div class="ctl-line">
@@ -893,7 +963,9 @@
                         <div class="ctl-line sub">
                           <span class="ctl ctl-xb">
                             <span data-i18n="shortcutsBrandXbox">Xbox:</span>
-                            <span class="btn xb-view" data-i18n="shortcutsButtonView"
+                            <span
+                              class="btn xb-view"
+                              data-i18n="shortcutsButtonView"
                               >View</span
                             >
                           </span>
@@ -914,7 +986,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="settings-dashboardTitle">
+                      <div
+                        class="ctl-label"
+                        data-i18n="settings-dashboardTitle"
+                      >
                         Dashboard
                       </div>
                       <div class="ctl-line">
@@ -997,7 +1072,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsGlobalOptionsMain">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsGlobalOptionsMain"
+                      >
                         Show/Hide Options panel (on Main)
                       </div>
                       <div class="ctl-line">
@@ -1028,7 +1106,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsGlobalBackClose">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsGlobalBackClose"
+                      >
                         Back / Close
                       </div>
                       <div class="ctl-line">
@@ -1060,7 +1141,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsGlobalPlayLaunch">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsGlobalPlayLaunch"
+                      >
                         Play (launch)
                       </div>
                       <div class="ctl-line">
@@ -1082,7 +1166,9 @@
                         <div class="ctl-line sub">
                           <span class="ctl ctl-xb">
                             <span data-i18n="shortcutsBrandXbox">Xbox:</span>
-                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
+                            <span
+                              class="btn xb-menu"
+                              data-i18n="shortcutsButtonMenu"
                               >Menu</span
                             >
                           </span>
@@ -1138,7 +1224,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsGlobalPageScroll">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsGlobalPageScroll"
+                      >
                         Page scroll
                       </div>
                       <div class="ctl-line">
@@ -1168,7 +1257,10 @@
                         <span class="hint" data-i18n="shortcutsHintKeyboard"
                           >Keyboard:</span
                         >
-                        <div class="ctl-line sub" data-i18n="shortcutsCommonArrowKeys">
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsCommonArrowKeys"
+                        >
                           Arrow Keys
                         </div>
                       </div>
@@ -1176,7 +1268,10 @@
                         <span class="hint" data-i18n="shortcutsHintController"
                           >Controller:</span
                         >
-                        <div class="ctl-line sub" data-i18n="shortcutsCommonDpad">
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsCommonDpad"
+                        >
                           D-pad
                         </div>
                         <div class="ctl-line sub">
@@ -1210,38 +1305,17 @@
                         <span class="hint" data-i18n="shortcutsHintController"
                           >Controller:</span
                         >
-                        <div class="ctl-line sub">
-                          <span class="ctl ctl-xb">
-                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
-                            <span class="btn xb-view" data-i18n="shortcutsButtonView"
-                              >View</span
-                            >
-                            +
-                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
-                              >Menu</span
-                            >
-                          </span>
-                        </div>
-                        <div class="ctl-line sub">
-                          <span class="ctl ctl-ps">
-                            <span data-i18n="shortcutsBrandPlayStation"
-                              >PlayStation:</span
-                            >
-                            <span
-                              class="btn ps-share"
-                              data-i18n="shortcutsButtonShare"
-                              >Share</span
-                            >
-                            +
-                            <span
-                              class="btn ps-options"
-                              data-i18n="shortcutsButtonOptions"
-                              >Options</span
-                            >
-                          </span>
+                        <div
+                          class="ctl-line sub"
+                          id="shortcutsOverlayControllerShortcutValue"
+                        >
+                          Select + Start
                         </div>
                       </div>
-                      <div class="ctl-line sub" id="shortcutsOverlayEnableInSettings">
+                      <div
+                        class="ctl-line sub"
+                        id="shortcutsOverlayEnableInSettings"
+                      >
                         Enable controller support in Settings: Advanced →
                         Rendering
                       </div>
@@ -1264,7 +1338,8 @@
                             >Interact Key from Settings (default</span
                           >
                           <kbd>\</kbd>
-                          <span data-i18n="shortcutsOverlayToggleInteractionConfigEnd"
+                          <span
+                            data-i18n="shortcutsOverlayToggleInteractionConfigEnd"
                             >)</span
                           >
                         </div>
@@ -1278,40 +1353,37 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" id="shortcutsOverlayControlModeTitle">
+                      <div
+                        class="ctl-label"
+                        id="shortcutsOverlayControlModeTitle"
+                      >
                         Overlay Control Mode
                       </div>
                       <div class="ctl-line">
                         <span class="hint" data-i18n="shortcutsHintController"
                           >Controller:</span
                         >
-                        <div class="ctl-line sub">
-                          <span class="ctl ctl-xb">
-                            <span data-i18n="shortcutsBrandXbox">Xbox:</span>
-                            <span id="shortcutsOverlayControlModeXboxHold">Hold</span>
-                            <span class="btn shoulder">LB</span> +
-                            <span class="btn shoulder">RB</span>
-                          </span>
-                        </div>
-                        <div class="ctl-line sub">
-                          <span class="ctl ctl-ps">
-                            <span data-i18n="shortcutsBrandPlayStation"
-                              >PlayStation:</span
-                            >
-                            <span id="shortcutsOverlayControlModePsHold">Hold</span>
-                            <span class="btn shoulder">L1</span> +
-                            <span class="btn shoulder">R1</span>
-                          </span>
+                        <div
+                          class="ctl-line sub"
+                          id="shortcutsOverlayControlModeValue"
+                        >
+                          Hold LB + RB
                         </div>
                       </div>
-                      <div class="ctl-line sub" id="shortcutsOverlayControlModeEnd">
+                      <div
+                        class="ctl-line sub"
+                        id="shortcutsOverlayControlModeEnd"
+                      >
                         Ends when the shoulder buttons are released, the
                         controller disconnects, or the overlay is unavailable
                       </div>
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" id="shortcutsOverlayPageScrollTitle">
+                      <div
+                        class="ctl-label"
+                        id="shortcutsOverlayPageScrollTitle"
+                      >
                         Overlay Page Scroll
                       </div>
                       <div class="ctl-line">
@@ -1341,7 +1413,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" id="shortcutsOverlayMoveOverlayTitle">
+                      <div
+                        class="ctl-label"
+                        id="shortcutsOverlayMoveOverlayTitle"
+                      >
                         Move Overlay
                       </div>
                       <div class="ctl-line">
@@ -1451,7 +1526,8 @@
                           <span class="ctl ctl-xb">
                             <span data-i18n="shortcutsBrandXbox">Xbox:</span>
                             <span class="btn xb-y">Y</span>
-                            <span id="shortcutsOverlaySnapGridControllerCycleXbox"
+                            <span
+                              id="shortcutsOverlaySnapGridControllerCycleXbox"
                               >(cycle presets)</span
                             >
                           </span>
@@ -1516,7 +1592,10 @@
                         <span class="hint" data-i18n="shortcutsHintKeyboard"
                           >Keyboard:</span
                         >
-                        <div class="ctl-line sub" data-i18n="shortcutsCommonArrows">
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsCommonArrows"
+                        >
                           Arrows
                         </div>
                         <div class="ctl-line sub"><kbd>Home</kbd></div>
@@ -1528,7 +1607,10 @@
                         <span class="hint" data-i18n="shortcutsHintController"
                           >Controller:</span
                         >
-                        <div class="ctl-line sub" data-i18n="shortcutsCommonDpad">
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsCommonDpad"
+                        >
                           D-pad
                         </div>
                         <div class="ctl-line sub">
@@ -1538,7 +1620,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsDashboardSearch">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsDashboardSearch"
+                      >
                         Search
                       </div>
                       <div class="ctl-line">
@@ -1569,7 +1654,9 @@
                         </div>
                       </div>
                       <div class="ctl-line sub">
-                        <span data-i18n="shortcutsDashboardSearchIn">In search:</span>
+                        <span data-i18n="shortcutsDashboardSearchIn"
+                          >In search:</span
+                        >
                         <div class="ctl-line sub">
                           <kbd>Enter</kbd> |
                           <span class="btn ps-cross">✕</span> |
@@ -1595,7 +1682,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsDashboardOpenGame">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsDashboardOpenGame"
+                      >
                         Open game (select card)
                       </div>
                       <div class="ctl-line">
@@ -1626,12 +1716,20 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsDashboardPlayFromCard">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsDashboardPlayFromCard"
+                      >
                         Play from card
                       </div>
                       <div class="ctl-line">
-                        <span class="hint" data-i18n="shortcutsHintMouse">Mouse:</span>
-                        <div class="ctl-line sub" data-i18n="shortcutsCommonClickPlay">
+                        <span class="hint" data-i18n="shortcutsHintMouse"
+                          >Mouse:</span
+                        >
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsCommonClickPlay"
+                        >
                           Click Play
                         </div>
                       </div>
@@ -1654,7 +1752,9 @@
                         <div class="ctl-line sub">
                           <span class="ctl ctl-xb">
                             <span data-i18n="shortcutsBrandXbox">Xbox:</span>
-                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
+                            <span
+                              class="btn xb-menu"
+                              data-i18n="shortcutsButtonMenu"
                               >Menu</span
                             >
                           </span>
@@ -1682,7 +1782,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsDashboardSortCycles">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsDashboardSortCycles"
+                      >
                         Sort cycles
                       </div>
                       <div class="ctl-line">
@@ -1740,7 +1843,10 @@
                   <h4 id="settings-panelTitle">Settings panel</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsSettingsOpenClose">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsSettingsOpenClose"
+                      >
                         Open/Close
                       </div>
                       <div class="ctl-line">
@@ -1759,7 +1865,9 @@
                         <div class="ctl-line sub">
                           <span class="ctl ctl-xb">
                             <span data-i18n="shortcutsBrandXbox">Xbox:</span>
-                            <span class="btn xb-view" data-i18n="shortcutsButtonView"
+                            <span
+                              class="btn xb-view"
+                              data-i18n="shortcutsButtonView"
                               >View</span
                             >
                           </span>
@@ -1780,14 +1888,20 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsSettingsTabsMode">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsSettingsTabsMode"
+                      >
                         Tabs mode
                       </div>
                       <div class="ctl-line">
                         <span class="hint" data-i18n="shortcutsHintKeyboard"
                           >Keyboard:</span
                         >
-                        <div class="ctl-line sub" data-i18n="shortcutsSettingsTabsMove">
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsSettingsTabsMove"
+                        >
                           ↑/↓ move
                         </div>
                         <div class="ctl-line sub">
@@ -1826,7 +1940,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsSettingsSectionMode">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsSettingsSectionMode"
+                      >
                         Section mode
                       </div>
                       <div class="ctl-line">
@@ -1847,7 +1964,9 @@
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Enter</kbd>
-                          <span data-i18n="shortcutsCommonActivate">activate</span>
+                          <span data-i18n="shortcutsCommonActivate"
+                            >activate</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Esc</kbd>
@@ -1870,7 +1989,9 @@
                             class="btn ps-cross"
                             >✕</span
                           >
-                          <span data-i18n="shortcutsCommonActivate">activate</span>
+                          <span data-i18n="shortcutsCommonActivate"
+                            >activate</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-b">B</span>/<span
@@ -1883,7 +2004,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsSettingsCycleTabs">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsSettingsCycleTabs"
+                      >
                         Cycle tabs
                       </div>
                       <div class="ctl-line">
@@ -1916,7 +2040,10 @@
                   <h4 id="settings-mainScreenTitle">Main screen</h4>
                   <ul class="shortcut-list">
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsMainToggleOptions">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsMainToggleOptions"
+                      >
                         Toggle Options
                       </div>
                       <div class="ctl-line">
@@ -1968,7 +2095,10 @@
                         <span class="hint" data-i18n="shortcutsHintKeyboard"
                           >Keyboard:</span
                         >
-                        <div class="ctl-line sub" data-i18n="shortcutsMainMoveKeyboard">
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsMainMoveKeyboard"
+                        >
                           ↑/↓
                         </div>
                       </div>
@@ -1976,7 +2106,10 @@
                         <span class="hint" data-i18n="shortcutsHintController"
                           >Controller:</span
                         >
-                        <div class="ctl-line sub" data-i18n="shortcutsCommonDpad">
+                        <div
+                          class="ctl-line sub"
+                          data-i18n="shortcutsCommonDpad"
+                        >
                           D-pad
                         </div>
                         <div class="ctl-line sub">
@@ -1986,7 +2119,9 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="dashboard.play">Play</div>
+                      <div class="ctl-label" data-i18n="dashboard.play">
+                        Play
+                      </div>
                       <div class="ctl-line">
                         <span class="hint" data-i18n="shortcutsHintKeyboard"
                           >Keyboard:</span
@@ -2006,7 +2141,9 @@
                         <div class="ctl-line sub">
                           <span class="ctl ctl-xb">
                             <span data-i18n="shortcutsBrandXbox">Xbox:</span>
-                            <span class="btn xb-menu" data-i18n="shortcutsButtonMenu"
+                            <span
+                              class="btn xb-menu"
+                              data-i18n="shortcutsButtonMenu"
                               >Menu</span
                             >
                           </span>
@@ -2045,7 +2182,10 @@
                     </li>
 
                     <li class="shortcut-item" tabindex="0">
-                      <div class="ctl-label" data-i18n="shortcutsDropdownsWhileOpen">
+                      <div
+                        class="ctl-label"
+                        data-i18n="shortcutsDropdownsWhileOpen"
+                      >
                         While open
                       </div>
 
@@ -2061,7 +2201,9 @@
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Enter</kbd>
-                          <span data-i18n="shortcutsCommonConfirm">confirm</span>
+                          <span data-i18n="shortcutsCommonConfirm"
+                            >confirm</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <kbd>Esc</kbd>/<kbd>Backspace</kbd>
@@ -2084,7 +2226,9 @@
                             class="btn ps-cross"
                             >✕</span
                           >
-                          <span data-i18n="shortcutsCommonConfirm">confirm</span>
+                          <span data-i18n="shortcutsCommonConfirm"
+                            >confirm</span
+                          >
                         </div>
                         <div class="ctl-line sub">
                           <span class="btn xb-b">B</span>/<span
@@ -2332,8 +2476,7 @@
                   <ul class="platform-guide-list">
                     <li id="platformGuideEaOfficialItem1">
                       Watch folder:
-                      <code
-                        >%LOCALAPPDATA%\Electronic Arts\EA Desktop\Logs</code
+                      <code>%LOCALAPPDATA%\Electronic Arts\EA Desktop\Logs</code
                       >.
                     </li>
                     <li id="platformGuideEaOfficialItem2">
@@ -2678,10 +2821,10 @@
                       If overlay display/presentation issues appear, or the
                       hotkey works but nothing is visible, toggle Disable
                       Hardware Acceleration in Advanced &gt; Rendering and
-                      restart the app. If issues remain, especially with
-                      Special K active, enable the globalShortcut compatibility
-                      option for overlay. This disables hook-based drag and can
-                      improve compatibility on some systems.
+                      restart the app. If issues remain, especially with Special
+                      K active, enable the globalShortcut compatibility option
+                      for overlay. This disables hook-based drag and can improve
+                      compatibility on some systems.
                     </li>
                   </ul>
                 </details>
@@ -3362,12 +3505,55 @@
                 <span class="dir">↓</span>
               </button>
             </div>
+
+            <button
+              id="dashboardPlatformFilterBtn"
+              class="sort-btn dashboard-filter-btn"
+              type="button"
+              title="Filter by platform"
+            >
+              <i class="fa-solid fa-filter fa-icon" aria-hidden="true"></i>
+              <span class="fa-fallback" aria-hidden="true">⌕</span>
+              <span id="dashboardPlatformFilterLabel" class="filter-label"
+                >All</span
+              >
+            </button>
           </div>
 
           <button id="closeDashboard" type="button" title="Close">×</button>
         </div>
 
         <div id="dashboardBody">
+          <div
+            id="dashboardSelectionBar"
+            class="hidden"
+            aria-live="polite"
+          >
+            <div id="dashboardSelectionSummary">0 selected</div>
+            <div class="dashboard-selection-actions">
+              <button
+                id="dashboardSelectionIgnore"
+                type="button"
+                class="dash-selection-btn"
+              >
+                Ignore Selected
+              </button>
+              <button
+                id="dashboardSelectionDelete"
+                type="button"
+                class="dash-selection-btn is-danger"
+              >
+                Delete Selected
+              </button>
+              <button
+                id="dashboardSelectionClear"
+                type="button"
+                class="dash-selection-btn is-secondary"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
           <div
             class="dashboard-grid"
             id="dashboardGrid"
@@ -3423,6 +3609,30 @@
           data-action="ignore"
         >
           Ignore Game
+        </button>
+        <button
+          id="dashboardMenuSelect"
+          class="dash-menu-item"
+          type="button"
+          data-action="select"
+        >
+          Select
+        </button>
+        <button
+          id="dashboardMenuSelectVisible"
+          class="dash-menu-item"
+          type="button"
+          data-action="select-visible"
+        >
+          Select All Visible
+        </button>
+        <button
+          id="dashboardMenuClearSelection"
+          class="dash-menu-item"
+          type="button"
+          data-action="clear-selection"
+        >
+          Clear Selection
         </button>
         <button
           id="dashboardMenuDelete"
@@ -3760,6 +3970,23 @@
             platform === "ps4"
           );
         }
+        function shouldUseSteamCoverSources(
+          platformValue,
+          targetAppId,
+          fetchAppId,
+        ) {
+          const platform = normalizeCoverPlatform(platformValue);
+          const target = String(targetAppId || "").trim();
+          const remote = String(fetchAppId || "").trim();
+          if (!platform) return /^\d+$/.test(remote);
+          if (platform === "steam" || platform === "steam-official") {
+            return /^\d+$/.test(remote);
+          }
+          if (platform === "uplay" || platform === "ubisoft-official") {
+            return /^\d+$/.test(remote) && remote !== target;
+          }
+          return false;
+        }
         function stripCoverSuffix(name) {
           let out = String(name || "").trim();
           if (!out) return "";
@@ -3970,7 +4197,8 @@
           fetchAppIdOverride = null,
           options = {},
         ) {
-          const key = String(targetAppId);
+          const explicitPlatform = normalizeCoverPlatform(options?.platform);
+          const key = `${String(targetAppId)}::${explicitPlatform || "auto"}`;
           if (inFlightCovers.has(key)) {
             return inFlightCovers.get(key);
           }
@@ -3986,7 +4214,13 @@
             const fallbackName =
               stripCoverSuffix(rawFallbackName) || rawFallbackName;
             const normalizedPlatform = normalizeCoverPlatform(platform);
-            const steamGridOnly = isSteamGridOnlyPlatform(normalizedPlatform);
+            const steamSourceAllowed = shouldUseSteamCoverSources(
+              normalizedPlatform,
+              targetAppId,
+              fetchAppId,
+            );
+            const fallbackOnly =
+              isSteamGridOnlyPlatform(normalizedPlatform) || !steamSourceAllowed;
             const steamGridSize =
               options?.gridSize && String(options.gridSize).trim().length
                 ? String(options.gridSize)
@@ -4002,11 +4236,12 @@
               targetAppId,
               fetchAppId,
               platform,
-              steamGridOnly,
+              steamSourceAllowed,
+              fallbackOnly,
               coverName: fallbackName || null,
               steamGridSize,
             });
-            if (steamGridOnly) {
+            if (fallbackOnly) {
               if (fallbackName) {
                 const ok = await downloadFromSteamGrid(
                   targetAppId,
@@ -4024,9 +4259,10 @@
                   return true;
                 }
               }
-              logCover("warn", "steamgrid:only-miss", {
+              logCover("warn", "cover:fallback-only-miss", {
                 targetAppId,
                 fetchAppId,
+                platform,
                 term: fallbackName || null,
               });
               return false;
@@ -4075,7 +4311,11 @@
             }
 
             try {
-              await downloadFromStoreHeader(fetchAppId, targetAppId);
+              await downloadFromStoreHeader(
+                fetchAppId,
+                targetAppId,
+                platform,
+              );
               logCover("info", "store:hit", {
                 targetAppId,
                 fetchAppId,
@@ -4120,6 +4360,7 @@
         async function downloadFromStoreHeader(
           fetchAppId,
           targetAppId = fetchAppId,
+          platformHint = null,
         ) {
           try {
             const res = await fetch(
@@ -4142,7 +4383,7 @@
               throw err;
             }
 
-            await downloadAndSave(targetAppId, headerUrl);
+            await downloadAndSave(targetAppId, headerUrl, platformHint);
             return true;
           } catch (err) {
             if (!err.tag) err.tag = NOT_FOUND_TAG;
@@ -4151,7 +4392,7 @@
         }
 
         // --- loader: local -> (fallback) -> CDN -> local ---
-        async function loadLocalCover(appid) {
+        async function loadLocalCover(appid, platformHint = null) {
           if (!appid) {
             showFallbackLogo();
             return;
@@ -4160,7 +4401,9 @@
           const fetchAppId = await resolveRemoteAppId(appid);
           const coverNameHint = getCoverSearchTerm(appid) || "";
           const platform =
-            (await resolvePlatformForCurrentApp(appid)) || "steam";
+            normalizeCoverPlatform(platformHint) ||
+            (await resolvePlatformForCurrentApp(appid)) ||
+            "steam";
 
           try {
             const localPath = await window.api.checkLocalGameImage(
@@ -4205,13 +4448,16 @@
             showFallbackLogo();
           }
         }
-        window.__applyEmbeddedGameImageForAppId = async function (appid) {
+        window.__applyEmbeddedGameImageForAppId = async function (
+          appid,
+          platformHint = null,
+        ) {
           if (!appid) {
             showFallbackLogo();
             return;
           }
           try {
-            await loadLocalCover(String(appid));
+            await loadLocalCover(String(appid), platformHint);
           } catch {
             showFallbackLogo();
           }
@@ -4292,12 +4538,29 @@
                 : /^\d+$/.test(String(payload))
                   ? String(payload)
                   : null;
-            if (appid) await loadLocalCover(appid);
-            else showFallbackLogo();
+            if (!appid) return;
+            const platformHint =
+              typeof payload === "object" && payload?.platform
+                ? String(payload.platform)
+                : null;
+            let selectedAppId = null;
+            try {
+              const selectedConfig = document.getElementById("configList")?.value;
+              if (selectedConfig && window.api.getConfigByName) {
+                const cfg = await window.api.getConfigByName(selectedConfig);
+                selectedAppId = String(
+                  cfg?.appid || cfg?.appId || cfg?.steamAppId || "",
+                ).trim();
+              }
+            } catch {}
+            if (!selectedAppId || selectedAppId !== appid) return;
+            await loadLocalCover(appid, platformHint);
           });
 
           window.__imageListenerAttached = true;
         }
+        window.__coverResolveRemoteAppId = resolveRemoteAppId;
+        window.__coverDownloadFromCdnAndCache = downloadFromCdnAndCache;
         window.loadLocalCover = loadLocalCover;
       });
 
@@ -5784,7 +6047,10 @@
         }
 
         try {
-          const check = await window.api.isAppIdBlacklisted(appid);
+          const check = await window.api.isAppIdBlacklisted({
+            appid,
+            platform: selectedPlatform,
+          });
           if (check?.blacklisted) {
             showNotification(
               tUiFmt(
@@ -5880,7 +6146,10 @@
           }
 
           try {
-            const check = await window.api.isAppIdBlacklisted(appid);
+            const check = await window.api.isAppIdBlacklisted({
+              appid,
+              platform: selectedPlatform,
+            });
             if (check?.blacklisted) {
               showNotification(
                 tUiFmt(
@@ -6049,7 +6318,7 @@
         const config = await window.api.getConfigByName(name);
         if (!config?.executable) return;
         const appid = config?.appid ? String(config.appid) : "";
-        if (appid && isAppIdInBlacklist(appid)) {
+        if (appid && isAppIdInBlacklist(appid, config?.platform || null)) {
           updateMainPlayButtonState(config);
           return;
         }
@@ -6320,6 +6589,15 @@
         if (typeof window.refreshShortcutLabel === "function") {
           window.refreshShortcutLabel();
         }
+        if (typeof window.refreshOverlayControllerShortcutLabel === "function") {
+          window.refreshOverlayControllerShortcutLabel();
+        }
+        if (
+          typeof window.refreshOverlayControllerControlModeShortcutLabel ===
+          "function"
+        ) {
+          window.refreshOverlayControllerControlModeShortcutLabel();
+        }
         if (typeof window.refreshInteractShortcutLabel === "function") {
           window.refreshInteractShortcutLabel();
         }
@@ -6410,6 +6688,8 @@
       const configMetaIndex = new Map();
       const blacklistState = {
         appids: new Set(),
+        configKeys: new Set(),
+        entries: [],
         showBlacklisted: false,
       };
       let lastSelectedConfigMeta = null;
@@ -6461,30 +6741,61 @@
         });
       }
 
-      function isAppIdInBlacklist(appid) {
+      function normalizeBlacklistPlatformValue(platform) {
+        const normalized = String(platform || "")
+          .trim()
+          .toLowerCase();
+        return normalized || "steam";
+      }
+
+      function buildBlacklistConfigKey(appid, platform) {
+        const id = appid ? String(appid).trim() : "";
+        if (!id) return "";
+        return `${id}::${normalizeBlacklistPlatformValue(platform)}`;
+      }
+
+      function applyBlacklistPayload(payload = {}) {
+        blacklistState.appids = new Set(payload?.appids || []);
+        blacklistState.configKeys = new Set(payload?.configKeys || []);
+        blacklistState.entries = Array.isArray(payload?.entries)
+          ? payload.entries
+          : [];
+      }
+
+      function isAppIdInBlacklist(appid, platform = null) {
         if (!appid) return false;
-        return blacklistState.appids.has(String(appid));
+        const normalizedId = String(appid);
+        if (blacklistState.appids.has(normalizedId)) return true;
+        const configKey = buildBlacklistConfigKey(normalizedId, platform);
+        return configKey ? blacklistState.configKeys.has(configKey) : false;
       }
 
       async function syncBlacklistList() {
         try {
           const res = await window.api.getBlacklist();
-          blacklistState.appids = new Set(res?.appids || []);
+          applyBlacklistPayload(res);
         } catch (err) {
           console.warn(
             tUi("log.blacklistLoadFailed", "Failed to load blacklist:"),
             err,
           );
-          blacklistState.appids = new Set();
+          applyBlacklistPayload();
         }
       }
 
-      function resolveBlacklistName(appid) {
+      function resolveBlacklistName(appid, platform = null) {
         if (!appid) return null;
         // Prefer cached meta by appid
         for (const meta of configMetaIndex.values()) {
           if (!meta?.appid) continue;
           if (String(meta.appid) === String(appid)) {
+            if (
+              platform &&
+              normalizeBlacklistPlatformValue(meta.platform) !==
+                normalizeBlacklistPlatformValue(platform)
+            ) {
+              continue;
+            }
             return (
               meta.displayName ||
               meta.name ||
@@ -6496,7 +6807,10 @@
         }
         if (
           lastSelectedConfigMeta &&
-          String(lastSelectedConfigMeta.appid || "") === String(appid || "")
+          String(lastSelectedConfigMeta.appid || "") === String(appid || "") &&
+          (!platform ||
+            normalizeBlacklistPlatformValue(lastSelectedConfigMeta.platform) ===
+              normalizeBlacklistPlatformValue(platform))
         ) {
           return (
             lastSelectedConfigMeta.displayName ||
@@ -6512,7 +6826,7 @@
         if (!listEl) return;
         listEl.innerHTML = "";
 
-        const entries = Array.from(blacklistState.appids || []);
+        const entries = Array.from(blacklistState.entries || []);
         if (entries.length === 0) {
           listEl.innerHTML = `<div style="padding:10px; color:#aaa;"><small>${tUi(
             "blacklist.empty",
@@ -6521,36 +6835,42 @@
           return;
         }
 
-        // Build a map appid -> displayName from cached configs
-        const nameById = new Map();
+        // Build a map appid::platform -> displayName from cached configs
+        const nameByKey = new Map();
         configMetaIndex.forEach((cfg) => {
           if (cfg?.appid) {
-            const id = String(cfg.appid);
+            const id = buildBlacklistConfigKey(cfg.appid, cfg.platform);
             const name =
               cfg.displayName ||
               cfg.name ||
               cfg.appid ||
               cfg.appId ||
-              `App ${id}`;
-            nameById.set(id, name);
+              `App ${cfg.appid}`;
+            nameByKey.set(id, name);
           }
         });
 
-        for (const appid of entries) {
+        for (const entry of entries) {
+          const appid = String(entry?.appid || "").trim();
+          const platform = entry?.platform || null;
+          const rowKey = entry?.key || buildBlacklistConfigKey(appid, platform);
+          const displayKey =
+            platform && !entry?.legacy ? `${appid} [${platform}]` : appid;
           const row = document.createElement("div");
           row.className = "wf-row";
           row.setAttribute("role", "listitem");
-          row.dataset.appid = appid;
+          row.dataset.blacklistKey = rowKey;
 
           const pathEl = document.createElement("div");
           pathEl.className = "wf-path";
-          const cachedLabel = blacklistLabelCache.get(appid);
+          const cachedLabel = blacklistLabelCache.get(rowKey);
+          const nameKey = buildBlacklistConfigKey(appid, platform);
           const label =
             cachedLabel ||
-            nameById.get(appid) ||
-            resolveBlacklistName(appid) ||
+            nameByKey.get(nameKey) ||
+            resolveBlacklistName(appid, platform) ||
             `App ${appid}`;
-          pathEl.textContent = `${appid} — ${label}`;
+          pathEl.textContent = `${displayKey} — ${label}`;
           pathEl.title = pathEl.textContent;
 
           const actions = document.createElement("div");
@@ -6567,6 +6887,7 @@
             try {
               await window.api.blacklistConfig({
                 appid,
+                platform,
                 remove: true,
               });
               await syncBlacklistList();
@@ -6600,19 +6921,20 @@
           // Async resolve label from config if missing
           if (
             !cachedLabel &&
-            (!nameById.has(appid) || label === `App ${appid}`)
+            !nameByKey.has(nameKey) &&
+            label === `App ${appid}`
           ) {
             (async () => {
               try {
                 const res = await window.api.getConfigByAppId(appid);
                 const fetchedLabel =
                   res?.displayName || res?.name || `App ${appid}`;
-                blacklistLabelCache.set(appid, fetchedLabel);
+                blacklistLabelCache.set(rowKey, fetchedLabel);
                 const currentRow = listEl.querySelector(
-                  `.wf-row[data-appid="${appid}"] .wf-path`,
+                  `.wf-row[data-blacklist-key="${CSS.escape(rowKey)}"] .wf-path`,
                 );
                 if (currentRow) {
-                  currentRow.textContent = `${appid} — ${fetchedLabel}`;
+                  currentRow.textContent = `${displayKey} — ${fetchedLabel}`;
                   currentRow.title = currentRow.textContent;
                 }
               } catch {}
@@ -6640,7 +6962,10 @@
             : "";
         const hasExecutable = !!executable;
         const appid = configMeta?.appid ? String(configMeta.appid) : "";
-        const blocked = hasExecutable && appid && isAppIdInBlacklist(appid);
+        const blocked =
+          hasExecutable &&
+          appid &&
+          isAppIdInBlacklist(appid, configMeta?.platform || null);
 
         playBtn.style.display = hasExecutable ? "inline-block" : "none";
         playBtn.disabled = !!blocked;
@@ -6658,8 +6983,20 @@
         }
       }
 
-      function updateBlacklistButtonState(appid) {
+      function updateBlacklistButtonState(configOrAppid, platform = null) {
         if (!blacklistConfigBtn) return;
+        const appid =
+          configOrAppid && typeof configOrAppid === "object"
+            ? configOrAppid?.appid
+              ? String(configOrAppid.appid)
+              : ""
+            : configOrAppid
+              ? String(configOrAppid)
+              : "";
+        const resolvedPlatform =
+          configOrAppid && typeof configOrAppid === "object"
+            ? configOrAppid?.platform || platform || null
+            : platform || null;
         if (!appid) {
           blacklistConfigBtn.disabled = true;
           blacklistConfigBtn.textContent = tUi(
@@ -6669,7 +7006,7 @@
           return;
         }
         blacklistConfigBtn.disabled = false;
-        const isBlacklisted = isAppIdInBlacklist(appid);
+        const isBlacklisted = isAppIdInBlacklist(appid, resolvedPlatform);
         if (blacklistState.showBlacklisted && isBlacklisted) {
           blacklistConfigBtn.textContent = tUi(
             "dashboardMenuRemoveBlacklist",
@@ -7041,53 +7378,7 @@
           });
 
           if (wasSelected && configList) {
-            logUiEvent("info", "ui:delete-config:preclear:start", {
-              configName,
-            });
-            configChangeRequestSeq += 1;
-            lastSelectedConfigMeta = null;
-            configList.value = "";
-            document.getElementById("backButton").style.display = "none";
-
-            const selectOption = configList.querySelector('option[value=""]');
-            if (selectOption) {
-              selectOption.selected = true;
-              selectOption.disabled = true;
-            }
-
-            document.getElementById("deleteConfigBtn").style.display = "none";
-            document.getElementById("blacklistConfigBtn").style.display = "none";
-            document.getElementById("editConfigBtn").style.display = "none";
-            document.getElementById("playBtn").style.display = "none";
-            document.getElementById("achStats").style.display = "none";
-            updateMainPlayButtonState(null);
-            updateBlacklistButtonState(null);
-            setAchievementsHeaderVisible(false);
-            updateMuteProgressUI().catch(() => {});
-            resetConfigForm();
-
-            const tableBody = document.getElementById("achievementsTableBody");
-            if (tableBody) tableBody.innerHTML = "";
-
-            window.__showFallbackLogo?.();
-            window.__setEmbeddedPlatinumBadgeByConfig?.(null);
-
-            try {
-              const clearResponse = await window.api.clearActiveConfig({
-                reason: "delete-config-ui",
-                configName,
-              });
-              logUiEvent("info", "ui:delete-config:preclear:result", {
-                configName,
-                success: clearResponse?.success === true,
-                error: clearResponse?.error || null,
-              });
-            } catch (clearError) {
-              logUiEvent("warn", "ui:delete-config:preclear:failed", {
-                configName,
-                error: clearError?.message || String(clearError),
-              });
-            }
+            await preclearDeletedConfigUi(configName);
           }
 
           const response = await window.api.deleteConfig(configName, {
@@ -7132,6 +7423,145 @@
           });
           console.error(tUi("log.deleteError", "Error on delete:"), error);
         }
+      }
+
+      async function preclearDeletedConfigUi(configName) {
+        if (!configName || !configList || configList.value !== configName) {
+          return false;
+        }
+        logUiEvent("info", "ui:delete-config:preclear:start", {
+          configName,
+        });
+        configChangeRequestSeq += 1;
+        lastSelectedConfigMeta = null;
+        configList.value = "";
+        document.getElementById("backButton").style.display = "none";
+
+        const selectOption = configList.querySelector('option[value=""]');
+        if (selectOption) {
+          selectOption.selected = true;
+          selectOption.disabled = true;
+        }
+
+        document.getElementById("deleteConfigBtn").style.display = "none";
+        document.getElementById("blacklistConfigBtn").style.display = "none";
+        document.getElementById("editConfigBtn").style.display = "none";
+        document.getElementById("playBtn").style.display = "none";
+        document.getElementById("achStats").style.display = "none";
+        updateMainPlayButtonState(null);
+        updateBlacklistButtonState(null);
+        setAchievementsHeaderVisible(false);
+        updateMuteProgressUI().catch(() => {});
+        resetConfigForm();
+
+        const tableBody = document.getElementById("achievementsTableBody");
+        if (tableBody) tableBody.innerHTML = "";
+
+        window.__showFallbackLogo?.();
+        window.__setEmbeddedPlatinumBadgeByConfig?.(null);
+
+        try {
+          const clearResponse = await window.api.clearActiveConfig({
+            reason: "delete-config-ui",
+            configName,
+          });
+          logUiEvent("info", "ui:delete-config:preclear:result", {
+            configName,
+            success: clearResponse?.success === true,
+            error: clearResponse?.error || null,
+          });
+        } catch (clearError) {
+          logUiEvent("warn", "ui:delete-config:preclear:failed", {
+            configName,
+            error: clearError?.message || String(clearError),
+          });
+        }
+        return true;
+      }
+
+      async function deleteConfigsBulk(entries) {
+        const batch = Array.isArray(entries)
+          ? entries.filter((entry) => entry?.name)
+          : [];
+        if (!batch.length) return false;
+
+        const plural = batch.length !== 1;
+        const confirmDelete = await safeConfirmWithCheckbox({
+          title: plural
+            ? tUi("confirm.deleteConfigBulk.title", "Delete selected configs")
+            : tUi("confirm.deleteConfig.title", "Delete config"),
+          message: plural
+            ? tUiFmt(
+                "confirm.deleteConfigBulk.message",
+                { count: batch.length },
+                `Do you want to delete ${batch.length} selected configs?`,
+              )
+            : tUiFmt(
+                "confirm.deleteConfig.message",
+                { name: batch[0].displayName || batch[0].name },
+                `Do you want to delete: ${batch[0].displayName || batch[0].name}?`,
+              ),
+          checkboxLabel: tUi(
+            "confirm.deleteConfig.deleteExtras",
+            "Do you want to delete also the Schema, Cache and Images?",
+          ),
+          checkboxLabel2: tUi(
+            "confirm.deleteConfig.deleteSave",
+            "Do you want to delete save data from the save path?",
+          ),
+        });
+        if (!confirmDelete?.confirmed) return false;
+
+        await safeRefocus();
+
+        const names = new Set(batch.map((entry) => String(entry.name)));
+        const activeName = String(configList?.value || "");
+        if (activeName && names.has(activeName)) {
+          await preclearDeletedConfigUi(activeName);
+        }
+
+        const warnings = [];
+        const failures = [];
+        for (const entry of batch) {
+          try {
+            const response = await window.api.deleteConfig(entry.name, {
+              deleteExtras: confirmDelete.checked === true,
+              deleteSaveFiles: confirmDelete.checked2 === true,
+            });
+            if (response?.success) {
+              localStorage.removeItem(
+                `dashboard:lastProgress:${entry.name}`,
+              );
+              localStorage.removeItem(`dashboard:lastImage:${entry.name}`);
+              if (Array.isArray(response?.warnings) && response.warnings.length) {
+                warnings.push(...response.warnings);
+              }
+            } else {
+              failures.push(
+                `${entry.displayName || entry.name}: ${response?.error || "delete-failed"}`,
+              );
+            }
+          } catch (error) {
+            failures.push(
+              `${entry.displayName || entry.name}: ${error?.message || String(error)}`,
+            );
+          }
+        }
+
+        if (typeof reloadConfigsDropdown === "function") {
+          await reloadConfigsDropdown(true);
+        }
+        if (typeof window.buildDashboard === "function") {
+          await window.buildDashboard();
+        }
+
+        if (warnings.length) {
+          console.warn("Delete config warnings:", warnings);
+        }
+        if (failures.length) {
+          alert(failures.join("\n"));
+        }
+        return true;
       }
       window.deleteConfigByName = deleteConfigByName;
 
@@ -7191,12 +7621,14 @@
               '<option value="" disabled selected>Select</option>';
             const visibleConfigs = blacklistState.showBlacklisted
               ? configs
-              : configs.filter((cfg) => !isAppIdInBlacklist(cfg.appid));
+              : configs.filter(
+                  (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
+                );
             visibleConfigs.forEach((config) => {
               const option = document.createElement("option");
               option.value = config.name;
               option.textContent = config.displayName || config.name;
-              if (isAppIdInBlacklist(config.appid)) {
+              if (isAppIdInBlacklist(config.appid, config.platform)) {
                 option.textContent += " (Ignored)";
               }
               configList.appendChild(option);
@@ -7242,9 +7674,9 @@
           const cachedMeta = configMetaIndex.get(selectedConfig) || null;
           const blocked =
             !!cachedMeta?.appid &&
-            blacklistState.appids.has(String(cachedMeta.appid));
+            isAppIdInBlacklist(cachedMeta.appid, cachedMeta?.platform || null);
 
-          updateBlacklistButtonState(cachedMeta?.appid || null);
+          updateBlacklistButtonState(cachedMeta || null);
           updateMainPlayButtonState(cachedMeta);
 
           if (selectedConfig && !blocked) {
@@ -7280,7 +7712,7 @@
           }
           lastSelectedConfigMeta = configForUi || null;
           window.__setEmbeddedPlatinumBadgeByConfig?.(configForUi || null);
-          updateBlacklistButtonState(configForUi?.appid || null);
+          updateBlacklistButtonState(configForUi || null);
           if (configForUi?.appid) {
             const resolvedName =
               configForUi.displayName || configForUi.name || configForUi.appid;
@@ -7513,13 +7945,18 @@
               return;
             }
 
-            const currentlyBlacklisted = isAppIdInBlacklist(targetAppId);
+            const targetPlatform = configMeta?.platform || null;
+            const currentlyBlacklisted = isAppIdInBlacklist(
+              targetAppId,
+              targetPlatform,
+            );
             const removeMode =
               blacklistState.showBlacklisted && currentlyBlacklisted;
 
             logUiEvent("info", "ui:blacklist-config:click", {
               configName: selectedConfig,
               appid: targetAppId,
+              platform: targetPlatform,
               remove: removeMode,
             });
 
@@ -7581,8 +8018,8 @@
               return;
             }
 
-            if (Array.isArray(response.blacklist)) {
-              blacklistState.appids = new Set(response.blacklist);
+            if (response?.blacklistPayload) {
+              applyBlacklistPayload(response.blacklistPayload);
             } else {
               await syncBlacklistList();
             }
@@ -7857,13 +8294,16 @@
           }
         });
 
-      window.api.onToggleOverlayShortcut(() => {
-        const selectedConfig = document.getElementById("configList").value;
-        if (!selectedConfig) {
-          alert(tUi("alert.selectConfig", "Select a config!"));
-          return;
-        }
+      function handleOverlayToggleShortcutFromUi() {
+        const selectedConfig =
+          String(document.getElementById("configList").value || "").trim() ||
+          null;
         window.api.toggleOverlay(selectedConfig);
+        return true;
+      }
+
+      window.api.onToggleOverlayShortcut(() => {
+        handleOverlayToggleShortcutFromUi();
       });
 
       configList.addEventListener("change", () => {
@@ -7969,8 +8409,12 @@
       if (window.api?.on) {
         window.api.on("blacklist:updated", async (_evt, payload) => {
           try {
-            if (Array.isArray(payload?.appids)) {
-              blacklistState.appids = new Set(payload.appids);
+            if (
+              Array.isArray(payload?.appids) ||
+              Array.isArray(payload?.configKeys) ||
+              Array.isArray(payload?.entries)
+            ) {
+              applyBlacklistPayload(payload);
             } else {
               await syncBlacklistList();
             }
@@ -7978,7 +8422,7 @@
             const selectedMeta = selectedName
               ? configMetaIndex.get(selectedName) || lastSelectedConfigMeta
               : null;
-            updateBlacklistButtonState(selectedMeta?.appid || null);
+            updateBlacklistButtonState(selectedMeta || null);
             updateMainPlayButtonState(selectedMeta);
             renderBlacklistList();
             window.__dashboardNeedsRebuild = true;
@@ -8037,8 +8481,7 @@
           return liveVolumePercent / 100;
         }
         const prefs = await loadPreferencesFromDisk();
-        const volume =
-          normalizeSoundVolumePercent(prefs?.soundVolume) / 100;
+        const volume = normalizeSoundVolumePercent(prefs?.soundVolume) / 100;
         return Math.max(0, Math.min(2, volume));
       }
 
@@ -8325,6 +8768,16 @@
           if (cb) cb.checked = prefs?.overlayControllerSupportEnabled === true;
         }
         {
+          const select = document.getElementById(
+            "settings-overlayControllerBackendSelect",
+          );
+          if (select) {
+            select.value = String(
+              prefs?.overlayControllerBackend || "auto",
+            ).toLowerCase();
+          }
+        }
+        {
           const hwCb = document.getElementById(
             "settings-disableHardwareAccelerationCheckbox",
           );
@@ -8359,6 +8812,8 @@
           document.getElementById("overlay-shortcut-btn").textContent =
             prefs.overlayShortcut;
         }
+        updateOverlayControllerShortcutUiFromPrefs(prefs);
+        updateOverlayControllerControlModeShortcutUiFromPrefs(prefs);
         if (prefs.overlayInteractShortcut) {
           document.getElementById("overlay-interact-shortcut-btn").textContent =
             formatInteractShortcutLabel(prefs.overlayInteractShortcut);
@@ -8521,6 +8976,8 @@
                 "Set Shortcut",
               );
             }
+            updateOverlayControllerShortcutUiFromPrefs(prefs);
+            updateOverlayControllerControlModeShortcutUiFromPrefs(prefs);
             if (prefs?.overlayInteractShortcut) {
               document.getElementById(
                 "overlay-interact-shortcut-btn",
@@ -8819,6 +9276,24 @@
           });
         }
 
+        const overlayControllerBackendEl = document.getElementById(
+          "settings-overlayControllerBackendSelect",
+        );
+        if (overlayControllerBackendEl) {
+          overlayControllerBackendEl.value = String(
+            prefs?.overlayControllerBackend || "auto",
+          ).toLowerCase();
+          overlayControllerBackendEl.addEventListener(
+            "change",
+            async (e) => {
+              await window.api.savePreferences({
+                overlayControllerBackend: e.target.value,
+              });
+              await loadPreferencesCached().catch(() => {});
+            },
+          );
+        }
+
         const showDashEl = document.getElementById(
           "settings-showDashboardOnStartCheckbox",
         );
@@ -8965,7 +9440,7 @@
         if (
           !blacklistState.showBlacklisted &&
           cached?.appid &&
-          isAppIdInBlacklist(cached.appid)
+          isAppIdInBlacklist(cached.appid, cached?.platform || null)
         ) {
           return;
         }
@@ -9019,13 +9494,15 @@
 
         const visibleConfigs = blacklistState.showBlacklisted
           ? configs
-          : configs.filter((cfg) => !isAppIdInBlacklist(cfg.appid));
+          : configs.filter(
+              (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
+            );
 
         visibleConfigs.forEach((config) => {
           const option = document.createElement("option");
           option.value = config.name;
           option.textContent = config.displayName || config.name;
-          if (isAppIdInBlacklist(config.appid)) {
+          if (isAppIdInBlacklist(config.appid, config.platform)) {
             option.textContent += " (Ignored)";
           }
           dropdown.appendChild(option);
@@ -9056,7 +9533,7 @@
         if (currentValue) {
           const cachedMeta = configMetaIndex.get(currentValue);
           lastSelectedConfigMeta = cachedMeta || null;
-          updateBlacklistButtonState(cachedMeta?.appid || null);
+          updateBlacklistButtonState(cachedMeta || null);
           updateMainPlayButtonState(cachedMeta);
         } else {
           lastSelectedConfigMeta = null;
@@ -10004,6 +10481,14 @@
           overlayControllerSupportEnabled: checkbox(
             "settings-overlayControllerSupportCheckbox",
           ),
+          overlayControllerBackend: pick(
+            getVal("settings-overlayControllerBackendSelect"),
+            base.overlayControllerBackend || "auto",
+          ),
+          overlayControllerToggleBinding:
+            getOverlayControllerToggleBindingFromPrefs(base),
+          overlayControllerControlModeBinding:
+            getOverlayControllerControlModeBindingFromPrefs(base),
           schemaLanguages: getSchemaLanguageSelectionFromUi(),
           startMaximized: checkbox("settings-startMaximizedCheckbox"),
           startInTray: checkbox("settings-startInTrayCheckbox"),
@@ -10071,6 +10556,809 @@
           window.api.setZoom(zoomValue);
           window.api.savePreferences({ windowZoomFactor: zoomValue });
         });
+
+      const DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING = Object.freeze([
+        "BACK",
+        "START",
+      ]);
+      const DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING = Object.freeze([
+        "LEFT_SHOULDER",
+        "RIGHT_SHOULDER",
+      ]);
+      const OVERLAY_CONTROLLER_CAPTURE_BUTTON_ORDER = Object.freeze([
+        "BACK",
+        "START",
+        "GUIDE",
+        "A",
+        "B",
+        "X",
+        "LEFT_SHOULDER",
+        "RIGHT_SHOULDER",
+        "LEFT_THUMB",
+        "RIGHT_THUMB",
+      ]);
+      const OVERLAY_CONTROLLER_TOGGLE_CAPTURE_BUTTON_SET = new Set([
+        "BACK",
+        "START",
+        "GUIDE",
+        "A",
+        "B",
+        "X",
+        "LEFT_THUMB",
+        "RIGHT_THUMB",
+      ]);
+      const OVERLAY_CONTROLLER_CONTROL_MODE_CAPTURE_BUTTON_SET = new Set(
+        OVERLAY_CONTROLLER_CAPTURE_BUTTON_ORDER,
+      );
+      const OVERLAY_CONTROLLER_GAMEPAD_INDEX_TO_BUTTON = Object.freeze({
+        0: "A",
+        1: "B",
+        2: "X",
+        4: "LEFT_SHOULDER",
+        5: "RIGHT_SHOULDER",
+        8: "BACK",
+        9: "START",
+        10: "LEFT_THUMB",
+        11: "RIGHT_THUMB",
+        16: "GUIDE",
+      });
+      const OVERLAY_CONTROLLER_BUTTON_LABELS = Object.freeze({
+        A: "A",
+        B: "B",
+        X: "X",
+        BACK: "Select",
+        START: "Start",
+        GUIDE: "Guide / PS",
+        LEFT_SHOULDER: "LB",
+        RIGHT_SHOULDER: "RB",
+        LEFT_THUMB: "L3",
+        RIGHT_THUMB: "R3",
+      });
+
+      function normalizeOverlayControllerBinding(
+        value,
+        options = {},
+      ) {
+        const fallback =
+          Object.prototype.hasOwnProperty.call(options, "fallback")
+            ? options.fallback
+            : null;
+        const allowedButtons = new Set(
+          Array.isArray(options.allowedButtons)
+            ? options.allowedButtons
+            : OVERLAY_CONTROLLER_CAPTURE_BUTTON_ORDER,
+        );
+        const allowSingle = options.allowSingle !== false;
+        const maxButtons = Math.max(1, Number(options.maxButtons) || 2);
+        const source = Array.isArray(value)
+          ? value
+          : value && typeof value === "object" && Array.isArray(value.buttons)
+            ? value.buttons
+            : typeof value === "string"
+              ? value.split("+")
+              : [];
+        const seen = new Set();
+        const out = [];
+        for (const raw of source) {
+          const normalized = String(raw || "")
+            .trim()
+            .toUpperCase();
+          if (
+            !allowedButtons.has(normalized) ||
+            seen.has(normalized)
+          ) {
+            continue;
+          }
+          seen.add(normalized);
+          out.push(normalized);
+        }
+        out.sort(
+          (a, b) =>
+            OVERLAY_CONTROLLER_CAPTURE_BUTTON_ORDER.indexOf(a) -
+            OVERLAY_CONTROLLER_CAPTURE_BUTTON_ORDER.indexOf(b),
+        );
+        const isValid =
+          (allowSingle ? out.length >= 1 : out.length >= 2) &&
+          out.length <= maxButtons;
+        if (isValid) return out;
+        if (fallback) {
+          return normalizeOverlayControllerBinding(fallback, {
+            fallback: null,
+            allowedButtons: [...allowedButtons],
+            allowSingle,
+            maxButtons,
+          });
+        }
+        return null;
+      }
+
+      function normalizeOverlayControllerToggleBinding(
+        value,
+        fallback = DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING,
+      ) {
+        return normalizeOverlayControllerBinding(value, {
+          fallback,
+          allowedButtons: [...OVERLAY_CONTROLLER_TOGGLE_CAPTURE_BUTTON_SET],
+          allowSingle: true,
+          maxButtons: 2,
+        });
+      }
+
+      function normalizeOverlayControllerControlModeBinding(
+        value,
+        fallback = DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
+      ) {
+        return normalizeOverlayControllerBinding(value, {
+          fallback,
+          allowedButtons: [...OVERLAY_CONTROLLER_CONTROL_MODE_CAPTURE_BUTTON_SET],
+          allowSingle: true,
+          maxButtons: 2,
+        });
+      }
+
+      function getOverlayControllerToggleBindingFromPrefs(source = null) {
+        return normalizeOverlayControllerToggleBinding(
+          source?.overlayControllerToggleBinding,
+        );
+      }
+
+      function getOverlayControllerControlModeBindingFromPrefs(source = null) {
+        return normalizeOverlayControllerControlModeBinding(
+          source?.overlayControllerControlModeBinding,
+        );
+      }
+
+      const OVERLAY_CONTROLLER_MAIN_COMBO_PENDING_MS = 160;
+      const overlayControllerRuntimeState = {
+        supportEnabled: false,
+        toggleBinding: [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
+        controlModeBinding: [...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING],
+        controlModeActive: false,
+        controlModeUserIndex: null,
+      };
+      const overlayControllerPendingMainActions = new Map();
+
+      function applyOverlayControllerRuntimeState(source = null) {
+        if (!source || typeof source !== "object") return;
+        if (typeof source.supportEnabled === "boolean") {
+          overlayControllerRuntimeState.supportEnabled =
+            source.supportEnabled === true;
+        }
+        if (Array.isArray(source.toggleBinding)) {
+          overlayControllerRuntimeState.toggleBinding =
+            normalizeOverlayControllerToggleBinding(source.toggleBinding) ||
+            [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING];
+        }
+        if (Array.isArray(source.controlModeBinding)) {
+          overlayControllerRuntimeState.controlModeBinding =
+            normalizeOverlayControllerControlModeBinding(
+              source.controlModeBinding,
+            ) || [...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING];
+        }
+        overlayControllerRuntimeState.controlModeActive =
+          source.controlModeActive === true;
+        overlayControllerRuntimeState.controlModeUserIndex =
+          Number.isFinite(Number(source.controlModeUserIndex)) &&
+          Number(source.controlModeUserIndex) >= 0
+            ? Number(source.controlModeUserIndex)
+            : null;
+      }
+
+      function getOverlayControllerRuntimeStateSnapshot(source = null) {
+        const prefs =
+          source && typeof source === "object" ? source : getCachedPreferences();
+        return {
+          supportEnabled:
+            typeof overlayControllerRuntimeState.supportEnabled === "boolean"
+              ? overlayControllerRuntimeState.supportEnabled
+              : prefs?.overlayControllerSupportEnabled === true,
+          toggleBinding:
+            normalizeOverlayControllerToggleBinding(
+              overlayControllerRuntimeState.toggleBinding?.length
+                ? overlayControllerRuntimeState.toggleBinding
+                : prefs?.overlayControllerToggleBinding,
+            ) || [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
+          controlModeBinding:
+            normalizeOverlayControllerControlModeBinding(
+              overlayControllerRuntimeState.controlModeBinding?.length
+                ? overlayControllerRuntimeState.controlModeBinding
+                : prefs?.overlayControllerControlModeBinding,
+            ) || [...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING],
+          controlModeActive:
+            overlayControllerRuntimeState.controlModeActive === true,
+          controlModeUserIndex:
+            Number.isFinite(
+              Number(overlayControllerRuntimeState.controlModeUserIndex),
+            ) &&
+            Number(overlayControllerRuntimeState.controlModeUserIndex) >= 0
+              ? Number(overlayControllerRuntimeState.controlModeUserIndex)
+              : null,
+        };
+      }
+
+      function overlayControllerBindingIncludesButton(binding, buttonName) {
+        return Array.isArray(binding) && binding.includes(buttonName);
+      }
+
+      function overlayControllerBindingPressed(binding, pressedMap) {
+        return (
+          Array.isArray(binding) &&
+          binding.length > 0 &&
+          binding.every((buttonName) => pressedMap?.[buttonName] === true)
+        );
+      }
+
+      function overlayControllerBindingWasPressed(binding, previousButtons) {
+        return (
+          Array.isArray(binding) &&
+          binding.length > 0 &&
+          binding.every((buttonName) => previousButtons?.[buttonName] === true)
+        );
+      }
+
+      function queueOverlayControllerPendingMainAction(buttonName, execute) {
+        if (!buttonName || typeof execute !== "function") return;
+        overlayControllerPendingMainActions.set(buttonName, {
+          execute,
+          executeAt:
+            performance.now() + OVERLAY_CONTROLLER_MAIN_COMBO_PENDING_MS,
+        });
+      }
+
+      function cancelOverlayControllerPendingMainAction(buttonName) {
+        if (!buttonName) return;
+        overlayControllerPendingMainActions.delete(buttonName);
+      }
+
+      function cancelOverlayControllerPendingActionsForBinding(binding = []) {
+        if (!Array.isArray(binding)) return;
+        binding.forEach((buttonName) =>
+          cancelOverlayControllerPendingMainAction(buttonName)
+        );
+      }
+
+      function flushOverlayControllerPendingMainActions(now = performance.now()) {
+        for (const [buttonName, entry] of overlayControllerPendingMainActions) {
+          if (!entry || now < Number(entry.executeAt || 0)) continue;
+          overlayControllerPendingMainActions.delete(buttonName);
+          try {
+            entry.execute();
+          } catch {}
+        }
+      }
+
+      if (window.api?.onOverlayControllerRuntimeState) {
+        window.api.onOverlayControllerRuntimeState((state) => {
+          applyOverlayControllerRuntimeState(state);
+        });
+      }
+
+      function overlayControllerBindingsOverlap(a, b) {
+        const first = normalizeOverlayControllerBinding(a, { fallback: null });
+        const second = normalizeOverlayControllerBinding(b, { fallback: null });
+        if (!first?.length || !second?.length) return false;
+        const firstSet = new Set(first);
+        return second.some((button) => firstSet.has(button));
+      }
+
+      function formatOverlayControllerBinding(value, options = {}) {
+        const normalize =
+          typeof options.normalize === "function"
+            ? options.normalize
+            : normalizeOverlayControllerBinding;
+        const binding = normalize(value);
+        if (!binding?.length) return "Select + Start";
+        return binding
+          .map((button) => OVERLAY_CONTROLLER_BUTTON_LABELS[button] || button)
+          .join(" + ");
+      }
+
+      function formatOverlayControllerToggleBinding(value) {
+        return formatOverlayControllerBinding(value, {
+          normalize: normalizeOverlayControllerToggleBinding,
+        });
+      }
+
+      function formatOverlayControllerControlModeBinding(value) {
+        const hold = tUi("shortcutsOverlayControlModeXboxHold", "Hold");
+        return `${hold} ${formatOverlayControllerBinding(value, {
+          normalize: normalizeOverlayControllerControlModeBinding,
+        })}`;
+      }
+
+      function getPressedOverlayControllerCaptureButtons(
+        pad,
+        allowedButtonsSet = OVERLAY_CONTROLLER_TOGGLE_CAPTURE_BUTTON_SET,
+      ) {
+        const pressed = [];
+        if (!pad?.buttons) return pressed;
+        for (const [index, buttonName] of Object.entries(
+          OVERLAY_CONTROLLER_GAMEPAD_INDEX_TO_BUTTON,
+        )) {
+          if (
+            allowedButtonsSet.has(buttonName) &&
+            pad.buttons?.[Number(index)]?.pressed
+          ) {
+            pressed.push(buttonName);
+          }
+        }
+        return (
+          normalizeOverlayControllerBinding(pressed, {
+            fallback: null,
+            allowedButtons: [...allowedButtonsSet],
+            allowSingle: true,
+            maxButtons: 2,
+          }) || []
+        );
+      }
+
+      const overlayControllerShortcutBtn = document.getElementById(
+        "overlay-controller-shortcut-btn",
+      );
+      const overlayControllerControlModeShortcutBtn = document.getElementById(
+        "overlay-controller-control-mode-shortcut-btn",
+      );
+      const overlayControllerControlModeShortcutLabel = document.getElementById(
+        "overlay-controller-control-mode-shortcut-label",
+      );
+      const shortcutsOverlayControllerShortcutValueEl = document.getElementById(
+        "shortcutsOverlayControllerShortcutValue",
+      );
+      const shortcutsOverlayControlModeValueEl = document.getElementById(
+        "shortcutsOverlayControlModeValue",
+      );
+      const shortcutsOverlayControlModeEndEl = document.getElementById(
+        "shortcutsOverlayControlModeEnd",
+      );
+      let isListeningForOverlayControllerShortcut = false;
+      let overlayControllerShortcutCaptureFrame = 0;
+      let overlayControllerShortcutWaitingForNeutral = false;
+      let overlayControllerShortcutCandidate = [];
+      let overlayControllerShortcutStartedAt = 0;
+      let isListeningForOverlayControllerControlModeShortcut = false;
+      let overlayControllerControlModeShortcutCaptureFrame = 0;
+      let overlayControllerControlModeShortcutWaitingForNeutral = false;
+      let overlayControllerControlModeShortcutCandidate = [];
+      let overlayControllerControlModeShortcutStartedAt = 0;
+      const OVERLAY_CONTROLLER_CAPTURE_SETTLE_MS = 220;
+      const getPressButtonsLabel = () =>
+        tUi("ui.shortcut.pressButtons", "Press buttons...");
+
+      function updateOverlayControllerShortcutUiFromPrefs(source = null) {
+        const prefs = source && typeof source === "object"
+          ? source
+          : getCachedPreferences();
+        const label = formatOverlayControllerToggleBinding(
+          getOverlayControllerToggleBindingFromPrefs(prefs),
+        );
+        if (
+          overlayControllerShortcutBtn &&
+          !overlayControllerShortcutBtn.classList.contains("listening")
+        ) {
+          overlayControllerShortcutBtn.textContent = label;
+        }
+        if (shortcutsOverlayControllerShortcutValueEl) {
+          shortcutsOverlayControllerShortcutValueEl.textContent = label;
+        }
+      }
+
+      function updateOverlayControllerControlModeShortcutUiFromPrefs(
+        source = null,
+      ) {
+        const prefs = source && typeof source === "object"
+          ? source
+          : getCachedPreferences();
+        if (overlayControllerControlModeShortcutLabel) {
+          overlayControllerControlModeShortcutLabel.textContent = tUi(
+            "shortcutsOverlayControlModeTitle",
+            "Overlay Control Mode",
+          );
+        }
+        const label = formatOverlayControllerBinding(
+          getOverlayControllerControlModeBindingFromPrefs(prefs),
+          {
+            normalize: normalizeOverlayControllerControlModeBinding,
+          },
+        );
+        const helpLabel = formatOverlayControllerControlModeBinding(
+          getOverlayControllerControlModeBindingFromPrefs(prefs),
+        );
+        if (
+          overlayControllerControlModeShortcutBtn &&
+          !overlayControllerControlModeShortcutBtn.classList.contains(
+            "listening",
+          )
+        ) {
+          overlayControllerControlModeShortcutBtn.textContent = label;
+        }
+        if (shortcutsOverlayControlModeValueEl) {
+          shortcutsOverlayControlModeValueEl.textContent = helpLabel;
+        }
+        if (shortcutsOverlayControlModeEndEl) {
+          shortcutsOverlayControlModeEndEl.textContent = tUi(
+            "shortcutsOverlayControlModeEndGeneric",
+            "Ends when the controller shortcut is released, the controller disconnects, or the overlay is unavailable",
+          );
+        }
+      }
+
+      async function restoreSavedOverlayControllerShortcutLabel() {
+        await refreshPreferencesCache();
+        updateOverlayControllerShortcutUiFromPrefs(getCachedPreferences());
+      }
+
+      async function restoreSavedOverlayControllerControlModeShortcutLabel() {
+        await refreshPreferencesCache();
+        updateOverlayControllerControlModeShortcutUiFromPrefs(
+          getCachedPreferences(),
+        );
+      }
+
+      function cleanupOverlayControllerShortcutRecording() {
+        isListeningForOverlayControllerShortcut = false;
+        overlayControllerShortcutWaitingForNeutral = false;
+        overlayControllerShortcutCandidate = [];
+        overlayControllerShortcutStartedAt = 0;
+        if (overlayControllerShortcutCaptureFrame) {
+          cancelAnimationFrame(overlayControllerShortcutCaptureFrame);
+          overlayControllerShortcutCaptureFrame = 0;
+        }
+        overlayControllerShortcutBtn?.classList?.remove("listening");
+      }
+
+      function cleanupOverlayControllerControlModeShortcutRecording() {
+        isListeningForOverlayControllerControlModeShortcut = false;
+        overlayControllerControlModeShortcutWaitingForNeutral = false;
+        overlayControllerControlModeShortcutCandidate = [];
+        overlayControllerControlModeShortcutStartedAt = 0;
+        if (overlayControllerControlModeShortcutCaptureFrame) {
+          cancelAnimationFrame(overlayControllerControlModeShortcutCaptureFrame);
+          overlayControllerControlModeShortcutCaptureFrame = 0;
+        }
+        overlayControllerControlModeShortcutBtn?.classList?.remove("listening");
+      }
+
+      function showOverlayControllerBindingInvalidState(
+        buttonEl,
+        restoreFn,
+        message = null,
+      ) {
+        if (!buttonEl) return;
+        buttonEl.textContent = message ||
+          tUi("ui.shortcut.invalidCombo", "Invalid combo");
+        setTimeout(() => restoreFn?.().catch?.(() => {}), 1200);
+      }
+
+      async function commitOverlayControllerShortcutBinding(binding) {
+        const normalized = normalizeOverlayControllerToggleBinding(binding);
+        if (!normalized?.length) return;
+        const controlModeBinding =
+          getOverlayControllerControlModeBindingFromPrefs(
+            getCachedPreferences(),
+          );
+        if (overlayControllerBindingsOverlap(normalized, controlModeBinding)) {
+          showOverlayControllerBindingInvalidState(
+            overlayControllerShortcutBtn,
+            restoreSavedOverlayControllerShortcutLabel,
+          );
+          return;
+        }
+        window.__preferencesCache = {
+          ...getCachedPreferences(),
+          overlayControllerToggleBinding: [...normalized],
+        };
+        updateOverlayControllerShortcutUiFromPrefs(getCachedPreferences());
+        await window.api.savePreferences({
+          overlayControllerToggleBinding: normalized,
+        });
+        await refreshPreferencesCache();
+        updateOverlayControllerShortcutUiFromPrefs(getCachedPreferences());
+      }
+
+      async function commitOverlayControllerControlModeShortcutBinding(
+        binding,
+      ) {
+        const normalized =
+          normalizeOverlayControllerControlModeBinding(binding);
+        if (!normalized?.length) return;
+        const toggleBinding = getOverlayControllerToggleBindingFromPrefs(
+          getCachedPreferences(),
+        );
+        if (overlayControllerBindingsOverlap(normalized, toggleBinding)) {
+          showOverlayControllerBindingInvalidState(
+            overlayControllerControlModeShortcutBtn,
+            restoreSavedOverlayControllerControlModeShortcutLabel,
+          );
+          return;
+        }
+        window.__preferencesCache = {
+          ...getCachedPreferences(),
+          overlayControllerControlModeBinding: [...normalized],
+        };
+        updateOverlayControllerControlModeShortcutUiFromPrefs(
+          getCachedPreferences(),
+        );
+        await window.api.savePreferences({
+          overlayControllerControlModeBinding: normalized,
+        });
+        await refreshPreferencesCache();
+        updateOverlayControllerControlModeShortcutUiFromPrefs(
+          getCachedPreferences(),
+        );
+      }
+
+      function pollOverlayControllerShortcutCapture() {
+        if (!isListeningForOverlayControllerShortcut) return;
+        const pads = navigator.getGamepads
+          ? Array.from(navigator.getGamepads()).filter(Boolean)
+          : [];
+        const pad = pads[0];
+        const pressed = getPressedOverlayControllerCaptureButtons(pad);
+        const now = performance.now();
+
+        if (overlayControllerShortcutWaitingForNeutral) {
+          if (!pressed.length) {
+            overlayControllerShortcutWaitingForNeutral = false;
+            overlayControllerShortcutCandidate = [];
+            overlayControllerShortcutStartedAt = 0;
+          }
+          overlayControllerShortcutCaptureFrame = requestAnimationFrame(
+            pollOverlayControllerShortcutCapture,
+          );
+          return;
+        }
+
+        if (!overlayControllerShortcutCandidate.length) {
+          if (pressed.length) {
+            overlayControllerShortcutCandidate = pressed;
+            overlayControllerShortcutStartedAt = now;
+            if (overlayControllerShortcutBtn) {
+              overlayControllerShortcutBtn.textContent =
+                formatOverlayControllerToggleBinding(
+                  overlayControllerShortcutCandidate,
+                );
+            }
+          }
+          overlayControllerShortcutCaptureFrame = requestAnimationFrame(
+            pollOverlayControllerShortcutCapture,
+          );
+          return;
+        }
+
+        const merged = normalizeOverlayControllerToggleBinding(
+          [...overlayControllerShortcutCandidate, ...pressed],
+          null,
+        );
+        if (merged?.length) {
+          overlayControllerShortcutCandidate = merged;
+          if (overlayControllerShortcutBtn) {
+            overlayControllerShortcutBtn.textContent =
+              formatOverlayControllerToggleBinding(
+                overlayControllerShortcutCandidate,
+              );
+          }
+        }
+
+        const shouldCommit =
+          !pressed.length ||
+          now - overlayControllerShortcutStartedAt >=
+            OVERLAY_CONTROLLER_CAPTURE_SETTLE_MS;
+        if (shouldCommit) {
+          const binding = [...overlayControllerShortcutCandidate];
+          cleanupOverlayControllerShortcutRecording();
+          commitOverlayControllerShortcutBinding(binding).catch((err) => {
+            console.error(
+              tUi(
+                "log.preferencesSaveFailed",
+                "Failed to save preferences:",
+              ),
+              err,
+            );
+            restoreSavedOverlayControllerShortcutLabel().catch(() => {});
+          });
+          return;
+        }
+
+        overlayControllerShortcutCaptureFrame = requestAnimationFrame(
+          pollOverlayControllerShortcutCapture,
+        );
+      }
+
+      function pollOverlayControllerControlModeShortcutCapture() {
+        if (!isListeningForOverlayControllerControlModeShortcut) return;
+        const pads = navigator.getGamepads
+          ? Array.from(navigator.getGamepads()).filter(Boolean)
+          : [];
+        const pad = pads[0];
+        const pressed = getPressedOverlayControllerCaptureButtons(
+          pad,
+          OVERLAY_CONTROLLER_CONTROL_MODE_CAPTURE_BUTTON_SET,
+        );
+        const now = performance.now();
+
+        if (overlayControllerControlModeShortcutWaitingForNeutral) {
+          if (!pressed.length) {
+            overlayControllerControlModeShortcutWaitingForNeutral = false;
+            overlayControllerControlModeShortcutCandidate = [];
+            overlayControllerControlModeShortcutStartedAt = 0;
+          }
+          overlayControllerControlModeShortcutCaptureFrame =
+            requestAnimationFrame(
+              pollOverlayControllerControlModeShortcutCapture,
+            );
+          return;
+        }
+
+        if (!overlayControllerControlModeShortcutCandidate.length) {
+          if (pressed.length) {
+            overlayControllerControlModeShortcutCandidate = pressed;
+            overlayControllerControlModeShortcutStartedAt = now;
+            if (overlayControllerControlModeShortcutBtn) {
+              overlayControllerControlModeShortcutBtn.textContent =
+                formatOverlayControllerBinding(
+                  overlayControllerControlModeShortcutCandidate,
+                  {
+                    normalize: normalizeOverlayControllerControlModeBinding,
+                  },
+                );
+            }
+          }
+          overlayControllerControlModeShortcutCaptureFrame =
+            requestAnimationFrame(
+              pollOverlayControllerControlModeShortcutCapture,
+            );
+          return;
+        }
+
+        const merged = normalizeOverlayControllerControlModeBinding(
+          [...overlayControllerControlModeShortcutCandidate, ...pressed],
+          null,
+        );
+        if (merged?.length) {
+          overlayControllerControlModeShortcutCandidate = merged;
+          if (overlayControllerControlModeShortcutBtn) {
+            overlayControllerControlModeShortcutBtn.textContent =
+              formatOverlayControllerBinding(
+                overlayControllerControlModeShortcutCandidate,
+                {
+                  normalize: normalizeOverlayControllerControlModeBinding,
+                },
+              );
+          }
+        }
+
+        const shouldCommit =
+          !pressed.length ||
+          now - overlayControllerControlModeShortcutStartedAt >=
+            OVERLAY_CONTROLLER_CAPTURE_SETTLE_MS;
+        if (shouldCommit) {
+          const binding = [...overlayControllerControlModeShortcutCandidate];
+          cleanupOverlayControllerControlModeShortcutRecording();
+          commitOverlayControllerControlModeShortcutBinding(binding).catch(
+            (err) => {
+              console.error(
+                tUi(
+                  "log.preferencesSaveFailed",
+                  "Failed to save preferences:",
+                ),
+                err,
+              );
+              restoreSavedOverlayControllerControlModeShortcutLabel().catch(
+                () => {},
+              );
+            },
+          );
+          return;
+        }
+
+        overlayControllerControlModeShortcutCaptureFrame =
+          requestAnimationFrame(
+            pollOverlayControllerControlModeShortcutCapture,
+          );
+      }
+
+      if (overlayControllerShortcutBtn) {
+        overlayControllerShortcutBtn.addEventListener("click", () => {
+          if (
+            overlayControllerShortcutBtn.classList.contains("listening") ||
+            overlayControllerShortcutBtn.textContent === getPressButtonsLabel()
+          ) {
+            cleanupOverlayControllerShortcutRecording();
+            restoreSavedOverlayControllerShortcutLabel().catch(() => {});
+            return;
+          }
+
+          if (isListeningForShortcut) {
+            cleanupShortcutRecording();
+            restoreSavedShortcutLabel();
+          }
+          if (isListeningForInteractShortcut) {
+            cleanupInteractShortcutRecording();
+            restoreSavedInteractShortcutLabel();
+          }
+          if (isListeningForOverlayControllerControlModeShortcut) {
+            cleanupOverlayControllerControlModeShortcutRecording();
+            restoreSavedOverlayControllerControlModeShortcutLabel().catch(
+              () => {},
+            );
+          }
+
+          isListeningForOverlayControllerShortcut = true;
+          overlayControllerShortcutWaitingForNeutral = true;
+          overlayControllerShortcutCandidate = [];
+          overlayControllerShortcutStartedAt = 0;
+          overlayControllerShortcutBtn.textContent = getPressButtonsLabel();
+          overlayControllerShortcutBtn.classList.add("listening");
+          overlayControllerShortcutCaptureFrame = requestAnimationFrame(
+            pollOverlayControllerShortcutCapture,
+          );
+        });
+      }
+
+      if (overlayControllerControlModeShortcutBtn) {
+        overlayControllerControlModeShortcutBtn.addEventListener("click", () => {
+          if (
+            overlayControllerControlModeShortcutBtn.classList.contains(
+              "listening",
+            ) ||
+            overlayControllerControlModeShortcutBtn.textContent ===
+              getPressButtonsLabel()
+          ) {
+            cleanupOverlayControllerControlModeShortcutRecording();
+            restoreSavedOverlayControllerControlModeShortcutLabel().catch(
+              () => {},
+            );
+            return;
+          }
+
+          if (isListeningForShortcut) {
+            cleanupShortcutRecording();
+            restoreSavedShortcutLabel();
+          }
+          if (isListeningForInteractShortcut) {
+            cleanupInteractShortcutRecording();
+            restoreSavedInteractShortcutLabel();
+          }
+          if (isListeningForOverlayControllerShortcut) {
+            cleanupOverlayControllerShortcutRecording();
+            restoreSavedOverlayControllerShortcutLabel().catch(() => {});
+          }
+
+          isListeningForOverlayControllerControlModeShortcut = true;
+          overlayControllerControlModeShortcutWaitingForNeutral = true;
+          overlayControllerControlModeShortcutCandidate = [];
+          overlayControllerControlModeShortcutStartedAt = 0;
+          overlayControllerControlModeShortcutBtn.textContent =
+            getPressButtonsLabel();
+          overlayControllerControlModeShortcutBtn.classList.add("listening");
+          overlayControllerControlModeShortcutCaptureFrame =
+            requestAnimationFrame(
+              pollOverlayControllerControlModeShortcutCapture,
+            );
+        });
+      }
+
+      window.refreshOverlayControllerShortcutLabel = () => {
+        if (
+          !overlayControllerShortcutBtn ||
+          overlayControllerShortcutBtn.classList.contains("listening")
+        ) {
+          return;
+        }
+        updateOverlayControllerShortcutUiFromPrefs(getCachedPreferences());
+      };
+
+      window.refreshOverlayControllerControlModeShortcutLabel = () => {
+        if (
+          !overlayControllerControlModeShortcutBtn ||
+          overlayControllerControlModeShortcutBtn.classList.contains("listening")
+        ) {
+          return;
+        }
+        updateOverlayControllerControlModeShortcutUiFromPrefs(
+          getCachedPreferences(),
+        );
+      };
 
       // Overlay shortcut functionality
       const overlayShortcutBtn = document.getElementById(
@@ -10613,6 +11901,27 @@
         const gridEl = document.getElementById("dashboardGrid");
         const btnToggle = document.getElementById("toggleDashboardBtn");
         const btnClose = document.getElementById("closeDashboard");
+        const dashboardPlatformFilterBtn = document.getElementById(
+          "dashboardPlatformFilterBtn",
+        );
+        const dashboardPlatformFilterLabel = document.getElementById(
+          "dashboardPlatformFilterLabel",
+        );
+        const dashboardSelectionBar = document.getElementById(
+          "dashboardSelectionBar",
+        );
+        const dashboardSelectionSummary = document.getElementById(
+          "dashboardSelectionSummary",
+        );
+        const dashboardSelectionIgnoreBtn = document.getElementById(
+          "dashboardSelectionIgnore",
+        );
+        const dashboardSelectionDeleteBtn = document.getElementById(
+          "dashboardSelectionDelete",
+        );
+        const dashboardSelectionClearBtn = document.getElementById(
+          "dashboardSelectionClear",
+        );
         const dashboardContextMenu = document.getElementById(
           "dashboardContextMenu",
         );
@@ -10685,13 +11994,20 @@
         const dashboardImageCache = new Map();
         let dashboardLazyObserver = null;
         const IMG_CACHE_PREFIX = "dashboard:lastImage:";
+        const DASH_PLATFORM_FILTER_STORE = "dashFilter:platform";
         const DASH_DETAIL_CONCURRENCY = 3;
         const DASH_DETAIL_BATCH_SIZE = 24;
         const DASH_DETAIL_BATCH_PAUSE_MS = 25;
         const DASH_BOOT_IMG_BATCH = 10;
+        const DASH_COVER_ENSURE_CONCURRENCY = 2;
+        const dashboardSelection = new Set();
+        let dashboardPlatformFilterOptions = ["all"];
         const dashImgQueue = [];
         const dashImgQueued = new Set();
         let dashImgFlushScheduled = false;
+        const dashboardCoverEnsureQueue = [];
+        const dashboardCoverEnsureState = new Map();
+        let dashboardCoverEnsureRunning = 0;
         let detailJobsSeedReady = window.__bootManualSeedComplete === true;
         const detailJobsSeedWaiters = [];
 
@@ -10788,9 +12104,11 @@
                   if (!entry.isIntersecting) continue;
                   const img = entry.target;
                   dashboardLazyObserver.unobserve(img);
+                  const card = img?.closest?.(".dash-card") || null;
                   const src = img.dataset.src;
                   if (src)
                     scheduleIdle(() => queueDashboardImageLoad(img, src));
+                  scheduleIdle(() => queueDashboardCoverEnsureForCard(card));
                 }
               },
               { rootMargin: "80px" },
@@ -10801,6 +12119,8 @@
                 scheduleIdle(() => {
                   const src = img.dataset?.src;
                   if (src) queueDashboardImageLoad(img, src);
+                  const card = img?.closest?.(".dash-card") || null;
+                  queueDashboardCoverEnsureForCard(card);
                 });
               },
               unobserve() {},
@@ -10833,6 +12153,27 @@
           return `${id}::${normalizeDashboardImagePlatform(platform)}`;
         };
 
+        const makeDashboardCoverEnsureKey = (appid, platform) =>
+          makeDashboardImageCacheKey(appid, platform);
+
+        const clearDashboardCoverEnsureState = (appid, platformHint = null) => {
+          const id = String(appid || "").trim();
+          if (!id) return;
+          const hintedPlatform = normalizeDashboardImagePlatform(platformHint);
+          if (hintedPlatform) {
+            dashboardCoverEnsureState.delete(
+              makeDashboardCoverEnsureKey(id, hintedPlatform),
+            );
+            return;
+          }
+          const prefix = `${id}::`;
+          for (const key of Array.from(dashboardCoverEnsureState.keys())) {
+            if (key === id || key.startsWith(prefix)) {
+              dashboardCoverEnsureState.delete(key);
+            }
+          }
+        };
+
         const clearDashboardImageCacheByAppId = (appid) => {
           const id = String(appid || "").trim();
           if (!id) return;
@@ -10851,6 +12192,152 @@
           if (!isDashboardBooting()) {
             img.src = src;
           }
+        };
+
+        const attachDashboardCardImageErrorHandler = (img, card, name = "") => {
+          if (!img || img.dataset.dashboardErrorHandlerAttached === "1") return;
+          img.dataset.dashboardErrorHandlerAttached = "1";
+          img.addEventListener("error", () => {
+            const appid = String(card?.dataset?.appid || "").trim();
+            const platform = normalizeDashboardImagePlatform(
+              card?.dataset?.platform,
+            );
+            img.onerror = null;
+            applyDashboardCardImage(img, fallbackIcon);
+            if (name) localStorage.removeItem(IMG_CACHE_PREFIX + name);
+            if (appid) {
+              const cacheKey = makeDashboardImageCacheKey(appid, platform);
+              if (cacheKey) dashboardImageCache.delete(cacheKey);
+              clearDashboardCoverEnsureState(appid, platform || null);
+            }
+            scheduleIdle(() => queueDashboardCoverEnsureForCard(card));
+          });
+        };
+
+        async function ensureDashboardCoverNow(task) {
+          const appid = String(task?.appid || "").trim();
+          if (!appid) return false;
+          const platform = normalizeDashboardImagePlatform(task?.platform);
+          const cacheKey = makeDashboardImageCacheKey(appid, platform);
+          if (cacheKey && dashboardImageCache.has(cacheKey)) {
+            return true;
+          }
+
+          try {
+            const localPath = await window.api.checkLocalGameImage(
+              appid,
+              platform || null,
+            );
+            if (localPath) {
+              await refreshDashboardImageByAppId(appid, platform || null);
+              return true;
+            }
+          } catch {}
+
+          const coverName = String(
+            getCoverSearchTerm(appid) || task?.displayName || task?.name || "",
+          ).trim();
+          if (coverName) {
+            rememberCoverName(appid, coverName);
+          }
+
+          const resolveCoverRemoteAppId = window.__coverResolveRemoteAppId;
+          const downloadCoverFromCdnAndCache =
+            window.__coverDownloadFromCdnAndCache;
+          if (
+            typeof resolveCoverRemoteAppId !== "function" ||
+            typeof downloadCoverFromCdnAndCache !== "function"
+          ) {
+            return false;
+          }
+
+          let fetchAppId = appid;
+          try {
+            fetchAppId = (await resolveCoverRemoteAppId(appid)) || appid;
+          } catch {}
+
+          try {
+            const ok = await downloadCoverFromCdnAndCache(
+              appid,
+              fetchAppId,
+              {
+                gameName: coverName,
+                platform: platform || null,
+              },
+            );
+            if (ok) {
+              await refreshDashboardImageByAppId(appid, platform || null);
+            }
+            return !!ok;
+          } catch {
+            return false;
+          }
+        }
+
+        const pumpDashboardCoverEnsureQueue = () => {
+          while (
+            dashboardCoverEnsureRunning < DASH_COVER_ENSURE_CONCURRENCY &&
+            dashboardCoverEnsureQueue.length
+          ) {
+            const task = dashboardCoverEnsureQueue.shift();
+            const key = task?.key || "";
+            if (key) dashboardCoverEnsureState.set(key, "running");
+            dashboardCoverEnsureRunning += 1;
+            ensureDashboardCoverNow(task)
+              .catch(() => false)
+              .then((ok) => {
+                if (!key) return;
+                if (ok) {
+                  dashboardCoverEnsureState.delete(key);
+                } else {
+                  dashboardCoverEnsureState.set(key, "failed");
+                }
+              })
+              .finally(() => {
+                dashboardCoverEnsureRunning = Math.max(
+                  0,
+                  dashboardCoverEnsureRunning - 1,
+                );
+                if (dashboardCoverEnsureQueue.length) {
+                  scheduleIdle(pumpDashboardCoverEnsureQueue);
+                }
+              });
+          }
+        };
+
+        const queueDashboardCoverEnsureForCard = (card) => {
+          if (!card || !window.api) return;
+          const appid = String(card?.dataset?.appid || "").trim();
+          if (!appid) return;
+          const platform = normalizeDashboardImagePlatform(
+            card?.dataset?.platform,
+          );
+          const key = makeDashboardCoverEnsureKey(appid, platform);
+          const state = key ? dashboardCoverEnsureState.get(key) : null;
+          if (
+            !key ||
+            state === "queued" ||
+            state === "running" ||
+            state === "failed"
+          ) {
+            return;
+          }
+
+          const img = card.querySelector(".dash-thumb");
+          const src = String(
+            img?.dataset?.src || img?.getAttribute("src") || "",
+          );
+          if (src && src !== fallbackIcon) return;
+
+          dashboardCoverEnsureState.set(key, "queued");
+          dashboardCoverEnsureQueue.push({
+            key,
+            appid,
+            platform,
+            name: String(card?.dataset?.name || "").trim(),
+            displayName: String(card?.dataset?.display || "").trim(),
+          });
+          scheduleIdle(pumpDashboardCoverEnsureQueue);
         };
 
         async function refreshDashboardImageByAppId(
@@ -10899,6 +12386,7 @@
             const cacheKey = makeDashboardImageCacheKey(id, platform);
             if (imgSrc) {
               dashboardImageCache.set(cacheKey, imgSrc);
+              clearDashboardCoverEnsureState(id, platform);
               for (const card of platformCards) {
                 const name = String(card?.dataset?.name || "").trim();
                 if (name) localStorage.setItem(IMG_CACHE_PREFIX + name, imgSrc);
@@ -10933,6 +12421,7 @@
               typeof payload === "object" && payload?.platform
                 ? String(payload.platform)
                 : null;
+            clearDashboardCoverEnsureState(appid, platformHint);
             await refreshDashboardImageByAppId(appid, platformHint);
           });
           window.__dashboardImageListenerAttached = true;
@@ -10941,6 +12430,7 @@
         async function handleDashboardBlacklistAction(
           configName,
           appid,
+          platform,
           removeMode,
         ) {
           if (!appid) {
@@ -10955,6 +12445,7 @@
           logUiEvent("info", "ui:blacklist-dashboard:click", {
             configName,
             appid,
+            platform: platform || null,
             remove: removeMode,
           });
           const confirmed = await safeConfirm({
@@ -10976,6 +12467,7 @@
           logUiEvent("info", "ui:blacklist-dashboard:confirm", {
             configName,
             appid,
+            platform: platform || null,
             remove: removeMode,
             confirmed,
           });
@@ -10986,11 +12478,13 @@
           logUiEvent("info", "ui:blacklist-dashboard:ipc-start", {
             configName,
             appid,
+            platform: platform || null,
             remove: removeMode,
           });
           const response = await window.api.blacklistConfig({
             configName,
             appid,
+            platform,
             remove: removeMode,
           });
           logUiEvent(
@@ -10999,6 +12493,7 @@
             {
               configName,
               appid,
+              platform: platform || null,
               remove: removeMode,
               success: response?.success === true,
               error: response?.error || null,
@@ -11018,8 +12513,8 @@
           localStorage.removeItem(`${DASH_PROGRESS_PREFIX}${configName}`);
           localStorage.removeItem(`${IMG_CACHE_PREFIX}${configName}`);
           clearDashboardImageCacheByAppId(appid);
-          if (Array.isArray(response.blacklist)) {
-            blacklistState.appids = new Set(response.blacklist);
+          if (response?.blacklistPayload) {
+            applyBlacklistPayload(response.blacklistPayload);
           } else {
             await syncBlacklistList();
           }
@@ -11029,6 +12524,339 @@
           }
           await buildDashboard();
         }
+
+        const getDashboardSelectionNames = () =>
+          Array.from(dashboardSelection);
+
+        const isDashboardSelected = (name) =>
+          !!name && dashboardSelection.has(String(name));
+
+        const setDashboardCardSelected = (card, selected) => {
+          if (!card) return;
+          card.classList.toggle("selected", !!selected);
+          card.setAttribute("aria-selected", selected ? "true" : "false");
+          const indicator = card.querySelector(".dash-select-indicator");
+          if (indicator) {
+            indicator.setAttribute("aria-hidden", selected ? "false" : "true");
+          }
+        };
+
+        const getDashboardSelectionScope = (target = null) => {
+          const targetName = String(target?.name || "").trim();
+          if (targetName && dashboardSelection.has(targetName)) {
+            const selectedEntries = getDashboardSelectionNames();
+            if (selectedEntries.length > 1) {
+              return { mode: "selection", names: selectedEntries };
+            }
+          }
+          return targetName ? { mode: "single", names: [targetName] } : null;
+        };
+
+        const reconcileDashboardSelection = () => {
+          const available = new Set(
+            getDashCards(false)
+              .map((card) => String(card?.dataset?.name || "").trim())
+              .filter(Boolean),
+          );
+          for (const name of Array.from(dashboardSelection)) {
+            if (!available.has(name)) {
+              dashboardSelection.delete(name);
+            }
+          }
+        };
+
+        const getDashboardSearchQuery = () =>
+          String(
+            document.getElementById("dashboardSearchInput")?.value || "",
+          )
+            .trim()
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/\p{Diacritic}/gu, "");
+
+        const matchesDashboardCardCurrentFilters = (
+          card,
+          {
+            query = getDashboardSearchQuery(),
+            hideBlacklisted = !blacklistState.showBlacklisted,
+            platformFilter = getDashboardPlatformFilter(),
+          } = {},
+        ) => {
+          if (!card) return false;
+          if (hideBlacklisted && card.dataset.blacklisted === "1") {
+            return false;
+          }
+          if (platformFilter !== "all") {
+            const cardPlatform = normalizeDashboardPlatformValue(
+              card.dataset.platform,
+            );
+            if (cardPlatform !== platformFilter) return false;
+          }
+          if (!query) return true;
+          const searchToken = String(card.dataset._search || "")
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/\p{Diacritic}/gu, "");
+          return searchToken.includes(query);
+        };
+
+        const getDashboardSelectedVisibleCount = () =>
+          getDashCards(false).filter(
+            (card) =>
+              isDashboardSelected(card?.dataset?.name || "") &&
+              matchesDashboardCardCurrentFilters(card),
+          ).length;
+
+        const getDashboardSelectedEntriesFromCards = () => {
+          const entries = [];
+          const seen = new Set();
+          for (const card of getDashCards(false)) {
+            const name = String(card?.dataset?.name || "").trim();
+            if (!name || !dashboardSelection.has(name) || seen.has(name)) {
+              continue;
+            }
+            seen.add(name);
+            entries.push({
+              name,
+              displayName: String(card?.dataset?.display || name).trim(),
+              appid: String(card?.dataset?.appid || "").trim(),
+              platform: String(card?.dataset?.platform || "").trim() || null,
+              blacklisted: card?.dataset?.blacklisted === "1",
+            });
+          }
+          return entries;
+        };
+
+        const selectionCanRemoveFromBlacklist = (entries = []) =>
+          !!entries.length &&
+          blacklistState.showBlacklisted &&
+          entries.every((entry) => entry?.blacklisted === true);
+
+        const updateDashboardSelectionUI = () => {
+          const selectedNames = getDashboardSelectionNames();
+          const count = selectedNames.length;
+          getDashCards(false).forEach((card) =>
+            setDashboardCardSelected(
+              card,
+              dashboardSelection.has(String(card?.dataset?.name || "").trim()),
+            ),
+          );
+
+          if (!dashboardSelectionBar || !dashboardSelectionSummary) return;
+          dashboardSelectionBar.classList.toggle("hidden", count === 0);
+          if (!count) {
+            dashboardSelectionSummary.textContent = tUi(
+              "dashboard.selection.none",
+              "0 selected",
+            );
+            return;
+          }
+          const visibleCount = getDashboardSelectedVisibleCount();
+          dashboardSelectionSummary.textContent = tUiFmt(
+            "dashboard.selection.summary",
+            { count, visible: visibleCount },
+            visibleCount !== count
+              ? `${count} selected (${visibleCount} visible)`
+              : `${count} selected`,
+          );
+          const selectedEntries = getDashboardSelectedEntriesFromCards();
+          const removeMode = selectionCanRemoveFromBlacklist(selectedEntries);
+          if (dashboardSelectionIgnoreBtn) {
+            dashboardSelectionIgnoreBtn.textContent = removeMode
+              ? tUi(
+                  "dashboard.selection.removeBlacklist",
+                  "Remove Selected from Blacklist",
+                )
+              : tUi("dashboard.selection.ignore", "Ignore Selected");
+          }
+          if (dashboardSelectionDeleteBtn) {
+            dashboardSelectionDeleteBtn.textContent = tUi(
+              "dashboard.selection.delete",
+              "Delete Selected",
+            );
+          }
+          if (dashboardSelectionClearBtn) {
+            dashboardSelectionClearBtn.textContent = tUi(
+              "dashboard.selection.clear",
+              "Clear",
+            );
+          }
+        };
+
+        const toggleDashboardSelectionForCard = (card) => {
+          const name = String(card?.dataset?.name || "").trim();
+          if (!name) return;
+          if (dashboardSelection.has(name)) {
+            dashboardSelection.delete(name);
+          } else {
+            dashboardSelection.add(name);
+          }
+          updateDashboardSelectionUI();
+        };
+
+        const clearDashboardSelection = () => {
+          if (!dashboardSelection.size) return;
+          dashboardSelection.clear();
+          updateDashboardSelectionUI();
+        };
+
+        const selectAllVisibleDashboardCards = () => {
+          const visibleCards = getDashCards(true);
+          for (const card of visibleCards) {
+            const name = String(card?.dataset?.name || "").trim();
+            if (name) dashboardSelection.add(name);
+          }
+          updateDashboardSelectionUI();
+        };
+
+        const getDashboardSelectionEntriesSnapshot = (names = []) => {
+          const selected = Array.isArray(names)
+            ? names.map((name) => String(name || "").trim()).filter(Boolean)
+            : [];
+          if (!selected.length) return [];
+
+          const cardByName = new Map(
+            getDashCards(false).map((card) => [
+              String(card?.dataset?.name || "").trim(),
+              card,
+            ]),
+          );
+          return selected.map((name) => {
+            const card = cardByName.get(name) || null;
+            return {
+              name,
+              displayName: String(card?.dataset?.display || name).trim(),
+              appid: String(card?.dataset?.appid || "").trim(),
+              platform:
+                String(card?.dataset?.platform || "").trim() || null,
+              blacklisted: card?.dataset?.blacklisted === "1",
+            };
+          });
+        };
+
+        const resolveDashboardSelectionEntries = async (names = []) => {
+          const selected = getDashboardSelectionEntriesSnapshot(names);
+          if (!selected.length) return [];
+
+          return Promise.all(
+            selected.map(async (entry) => {
+              let cfg = null;
+              if (!entry.appid || !entry.platform || !entry.displayName) {
+                cfg = await getConfigCached(entry.name);
+              }
+              const appid = String(entry.appid || cfg?.appid || "").trim();
+              const platform =
+                String(entry.platform || cfg?.platform || "").trim() || null;
+              return {
+                name: entry.name,
+                displayName: String(
+                  entry.displayName || cfg?.displayName || entry.name,
+                ).trim(),
+                appid,
+                platform,
+                blacklisted: appid
+                  ? isAppIdInBlacklist(appid, platform)
+                  : entry.blacklisted,
+              };
+            }),
+          );
+        };
+
+        const ignoreDashboardSelection = async () => {
+          const selectionNames = getDashboardSelectionNames();
+          const entries = getDashboardSelectionEntriesSnapshot(selectionNames);
+          if (!entries.length) return;
+
+          const removeMode = selectionCanRemoveFromBlacklist(entries);
+          const confirmed = await safeConfirm({
+            title: removeMode
+              ? tUi(
+                  "confirm.blacklistRemoveBulk.title",
+                  "Remove selected from blacklist",
+                )
+              : tUi("confirm.blacklistBulk.title", "Ignore selected games"),
+            message: removeMode
+              ? tUiFmt(
+                  "confirm.blacklistRemoveBulk.message",
+                  { count: actionable.length },
+                  `Remove ${actionable.length} selected games from blacklist?`,
+                )
+              : tUiFmt(
+                  "confirm.blacklistBulk.message",
+                  { count: entries.length },
+                  `Ignore ${entries.length} selected games and stop tracking them?`,
+                ),
+          });
+          if (!confirmed) return;
+
+          await safeRefocus();
+          const resolvedEntries =
+            await resolveDashboardSelectionEntries(selectionNames);
+          const actionable = resolvedEntries.filter((entry) => entry.appid);
+          if (!actionable.length) {
+            alert(
+              tUi(
+                "alert.missingAppIdConfig",
+                "Missing AppID for this configuration.",
+              ),
+            );
+            return;
+          }
+
+          let latestPayload = null;
+          const failures = [];
+          for (const entry of actionable) {
+            try {
+              const response = await window.api.blacklistConfig({
+                configName: entry.name,
+                appid: entry.appid,
+                platform: entry.platform,
+                remove: removeMode,
+              });
+              if (response?.success) {
+                localStorage.removeItem(`${DASH_PROGRESS_PREFIX}${entry.name}`);
+                localStorage.removeItem(`${IMG_CACHE_PREFIX}${entry.name}`);
+                clearDashboardImageCacheByAppId(entry.appid);
+                if (response?.blacklistPayload) {
+                  latestPayload = response.blacklistPayload;
+                }
+              } else {
+                failures.push(
+                  `${entry.displayName}: ${response?.error || "blacklist-update-failed"}`,
+                );
+              }
+            } catch (error) {
+              failures.push(
+                `${entry.displayName}: ${error?.message || String(error)}`,
+              );
+            }
+          }
+
+          if (latestPayload) {
+            applyBlacklistPayload(latestPayload);
+          } else {
+            await syncBlacklistList();
+          }
+          if (typeof reloadConfigsDropdown === "function") {
+            await reloadConfigsDropdown(true);
+          }
+          clearDashboardSelection();
+          await buildDashboard();
+          if (failures.length) {
+            alert(failures.join("\n"));
+          }
+        };
+
+        const deleteDashboardSelection = async () => {
+          const entries = getDashboardSelectionEntriesSnapshot(
+            getDashboardSelectionNames(),
+          );
+          if (!entries.length) return;
+          const deleted = await deleteConfigsBulk(entries);
+          if (deleted) {
+            clearDashboardSelection();
+          }
+        };
 
         let __dashNav = { index: 0, cols: 1 };
         let __gpLoopId = null;
@@ -11370,10 +13198,50 @@
           btn.classList.toggle("is-disabled", !!disabled);
         }
 
+        async function resolveDashboardSteamLinkAppId(target) {
+          if (!target?.name) return "";
+          const cfg = await getConfigCached(target.name);
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || cfg?.platform || "",
+          );
+          const localAppId = String(target.appid || cfg?.appid || "").trim();
+
+          if (platform === "uplay" || platform === "ubisoft-official") {
+            const configSteamAppId = String(cfg?.steamAppId || "").trim();
+            if (/^\d+$/.test(configSteamAppId)) {
+              return configSteamAppId;
+            }
+            if (/^\d+$/.test(localAppId) && window.api?.getSteamLookupAppId) {
+              try {
+                const mapped = await window.api.getSteamLookupAppId(localAppId);
+                const mappedSteamId = String(mapped || "").trim();
+                if (/^\d+$/.test(mappedSteamId)) {
+                  return mappedSteamId;
+                }
+              } catch {}
+            }
+            return "";
+          }
+
+          return /^\d+$/.test(localAppId) ? localAppId : "";
+        }
+
         function updateDashboardContextMenuLabels(target) {
           if (!dashboardContextMenu || !target) return;
           const ignoreBtn = dashboardContextMenu.querySelector(
             '.dash-menu-item[data-action="ignore"]',
+          );
+          const selectBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="select"]',
+          );
+          const selectVisibleBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="select-visible"]',
+          );
+          const clearSelectionBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="clear-selection"]',
+          );
+          const deleteBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="delete"]',
           );
           const regenBtn = dashboardContextMenu.querySelector(
             '.dash-menu-item[data-action="regen"]',
@@ -11384,15 +13252,67 @@
           const steamDbBtn = dashboardContextMenu.querySelector(
             '.dash-menu-item[data-action="steamdb"]',
           );
+          const scope = getDashboardSelectionScope(target);
+          const selectedEntries = getDashboardSelectedEntriesFromCards();
+          const selectionHasActionableAppId = selectedEntries.some(
+            (entry) => !!String(entry?.appid || "").trim(),
+          );
+          const selectionRemoveMode = selectionCanRemoveFromBlacklist(
+            selectedEntries,
+          );
           const removeMode =
-            blacklistState.showBlacklisted && target.blacklisted;
+            scope?.mode === "selection"
+              ? selectionRemoveMode
+              : blacklistState.showBlacklisted && target.blacklisted;
           if (ignoreBtn) {
             ignoreBtn.textContent = removeMode
-              ? tUi("dashboardMenuRemoveBlacklist", "Remove from Blacklist")
-              : tUi("dashboardMenuIgnore", "Ignore Game");
+              ? scope?.mode === "selection"
+                ? tUi(
+                    "dashboard.selection.removeBlacklist",
+                    "Remove Selected from Blacklist",
+                  )
+                : tUi("dashboardMenuRemoveBlacklist", "Remove from Blacklist")
+              : scope?.mode === "selection"
+                ? tUi("dashboard.selection.ignore", "Ignore Selected")
+                : tUi("dashboardMenuIgnore", "Ignore Game");
             ignoreBtn.title = ignoreBtn.textContent;
           }
+          if (selectBtn) {
+            const isSelected = isDashboardSelected(target.name);
+            selectBtn.textContent = isSelected
+              ? tUi("dashboard.selection.deselect", "Deselect")
+              : tUi("dashboard.selection.select", "Select");
+            selectBtn.title = selectBtn.textContent;
+          }
+          if (selectVisibleBtn) {
+            selectVisibleBtn.textContent = tUi(
+              "dashboard.selection.selectVisible",
+              "Select All Visible",
+            );
+          }
+          if (clearSelectionBtn) {
+            clearSelectionBtn.textContent = tUi(
+              "dashboard.selection.clear",
+              "Clear Selection",
+            );
+          }
+          if (deleteBtn) {
+            deleteBtn.textContent =
+              scope?.mode === "selection"
+                ? tUi("dashboard.selection.delete", "Delete Selected")
+                : tUi("dashboardMenuDelete", "Delete");
+            deleteBtn.title = deleteBtn.textContent;
+          }
+          const normalizedPlatform = normalizeDashboardPlatformValue(
+            target.platform || "",
+          );
           const hasSteamAppId = /^\d+$/.test(String(target.appid || "").trim());
+          const hasResolvedSteamTarget =
+            normalizedPlatform === "uplay" ||
+            normalizedPlatform === "ubisoft-official"
+              ? /^\d+$/.test(String(target.steamAppId || "").trim()) ||
+                hasSteamAppId
+              : hasSteamAppId;
           if (steamBtn) {
             steamBtn.textContent = tUi("dashboardMenuSteam", "Steam");
             steamBtn.title = steamBtn.textContent;
@@ -11401,10 +13321,22 @@
             steamDbBtn.textContent = tUi("dashboardMenuSteamDb", "SteamDB");
             steamDbBtn.title = steamDbBtn.textContent;
           }
-          setMenuItemDisabled(ignoreBtn, !target.appid);
+          setMenuItemDisabled(
+            ignoreBtn,
+            scope?.mode === "selection"
+              ? !selectionHasActionableAppId
+              : !target.appid,
+          );
+          setMenuItemDisabled(
+            selectVisibleBtn,
+            getDashCards(true).filter(
+              (card) => !isDashboardSelected(card?.dataset?.name || ""),
+            ).length === 0,
+          );
+          setMenuItemDisabled(clearSelectionBtn, dashboardSelection.size === 0);
           setMenuItemDisabled(regenBtn, !target.appid);
-          setMenuItemDisabled(steamBtn, !hasSteamAppId);
-          setMenuItemDisabled(steamDbBtn, !hasSteamAppId);
+          setMenuItemDisabled(steamBtn, !hasResolvedSteamTarget);
+          setMenuItemDisabled(steamDbBtn, !hasResolvedSteamTarget);
         }
 
         function focusDashboardMenuItem(index) {
@@ -11474,19 +13406,18 @@
           if (!target.name) return;
           dashboardContextTarget = target;
           updateDashboardContextMenuLabels(target);
-          if (!target.appid) {
-            getConfigCached(target.name).then((cfg) => {
-              if (!window.__dashboardContextMenuOpen) return;
-              if (!cfg || !cfg.appid) return;
-              if (dashboardContextTarget?.name !== target.name) return;
-              dashboardContextTarget.appid = String(cfg.appid);
-              dashboardContextTarget.platform = cfg.platform || "";
-              dashboardContextTarget.blacklisted = isAppIdInBlacklist(
-                String(cfg.appid),
-              );
-              updateDashboardContextMenuLabels(dashboardContextTarget);
-            });
-          }
+          getConfigCached(target.name).then((cfg) => {
+            if (!window.__dashboardContextMenuOpen) return;
+            if (!cfg) return;
+            if (dashboardContextTarget?.name !== target.name) return;
+            if (cfg.appid) dashboardContextTarget.appid = String(cfg.appid);
+            dashboardContextTarget.platform = cfg.platform || "";
+            dashboardContextTarget.steamAppId = cfg?.steamAppId || "";
+            dashboardContextTarget.blacklisted = cfg.appid
+              ? isAppIdInBlacklist(String(cfg.appid), cfg.platform || "")
+              : target.blacklisted;
+            updateDashboardContextMenuLabels(dashboardContextTarget);
+          });
           dashboardContextMenu.classList.remove("hidden");
           dashboardContextMenu.setAttribute("aria-hidden", "false");
           window.__dashboardContextMenuOpen = true;
@@ -11582,6 +13513,148 @@
           return;
         }
 
+        function normalizeDashboardPlatformValue(value) {
+          const normalized = String(value || "")
+            .trim()
+            .toLowerCase();
+          return normalized || "unknown";
+        }
+
+        function getDashboardPlatformFilter() {
+          const stored = String(
+            localStorage.getItem(DASH_PLATFORM_FILTER_STORE) || "all",
+          )
+            .trim()
+            .toLowerCase();
+          return stored || "all";
+        }
+
+        function getDashboardPlatformLabel(platform) {
+          const normalized = normalizeDashboardPlatformValue(platform);
+          switch (normalized) {
+            case "all":
+              return tUi("dashboard.platformFilter.all", "All");
+            case "steam":
+              return "Steam";
+            case "steam-official":
+              return "Steam Official";
+            case "uplay":
+              return "Uplay";
+            case "ubisoft-official":
+              return "Ubisoft Official";
+            case "ea-official":
+              return "EA Official";
+            case "epic":
+              return "Epic";
+            case "gog":
+              return "GOG";
+            case "gog-official":
+              return "GOG Official";
+            case "xenia":
+              return "Xenia";
+            case "rpcs3":
+              return "RPCS3";
+            case "shadps4":
+              return "PS4";
+            case "unknown":
+              return tUi("dashboard.platformFilter.unknown", "Unknown");
+            default:
+              return normalized
+                .split("-")
+                .map((part) =>
+                  part ? part.charAt(0).toUpperCase() + part.slice(1) : part,
+                )
+                .join(" ");
+          }
+        }
+
+        function collectDashboardPlatformOptions(items = []) {
+          const found = new Set();
+          for (const item of Array.isArray(items) ? items : []) {
+            const normalized = normalizeDashboardPlatformValue(item?.platform);
+            if (normalized && normalized !== "unknown") found.add(normalized);
+          }
+          if (!found.size) {
+            const cards = Array.from(
+              document.querySelectorAll("#dashboardGrid .dash-card"),
+            );
+            for (const card of cards) {
+              const normalized = normalizeDashboardPlatformValue(
+                card?.dataset?.platform,
+              );
+              if (normalized && normalized !== "unknown") found.add(normalized);
+            }
+          }
+          return [
+            "all",
+            ...Array.from(found).sort((a, b) =>
+              getDashboardPlatformLabel(a).localeCompare(
+                getDashboardPlatformLabel(b),
+                undefined,
+                { sensitivity: "base" },
+              ),
+            ),
+          ];
+        }
+
+        function updateDashboardPlatformFilterUi() {
+          if (!dashboardPlatformFilterBtn || !dashboardPlatformFilterLabel)
+            return;
+          const current = getDashboardPlatformFilter();
+          const normalized =
+            current !== "all" &&
+            dashboardPlatformFilterOptions.includes(current)
+              ? current
+              : "all";
+          if (normalized !== current) {
+            localStorage.setItem(DASH_PLATFORM_FILTER_STORE, normalized);
+          }
+          dashboardPlatformFilterLabel.textContent =
+            getDashboardPlatformLabel(normalized);
+          dashboardPlatformFilterBtn.classList.toggle(
+            "active",
+            normalized !== "all",
+          );
+          dashboardPlatformFilterBtn.title = tUiFmt(
+            "dashboard.platformFilter.title",
+            { platform: getDashboardPlatformLabel(normalized) },
+            `Filter by platform: ${getDashboardPlatformLabel(normalized)}`,
+          );
+        }
+
+        function setDashboardPlatformFilterOptions(items = []) {
+          dashboardPlatformFilterOptions =
+            collectDashboardPlatformOptions(items);
+          const current = getDashboardPlatformFilter();
+          if (
+            current !== "all" &&
+            !dashboardPlatformFilterOptions.includes(current)
+          ) {
+            localStorage.setItem(DASH_PLATFORM_FILTER_STORE, "all");
+          }
+          updateDashboardPlatformFilterUi();
+        }
+
+        function cycleDashboardPlatformFilter(delta = 1) {
+          if (!dashboardPlatformFilterOptions.length) {
+            dashboardPlatformFilterOptions = ["all"];
+          }
+          const current = getDashboardPlatformFilter();
+          const index = Math.max(
+            0,
+            dashboardPlatformFilterOptions.indexOf(current),
+          );
+          const nextIndex =
+            (index + delta + dashboardPlatformFilterOptions.length) %
+            dashboardPlatformFilterOptions.length;
+          localStorage.setItem(
+            DASH_PLATFORM_FILTER_STORE,
+            dashboardPlatformFilterOptions[nextIndex],
+          );
+          updateDashboardPlatformFilterUi();
+          applyDashboardSortAndFilter();
+        }
+
         function setupDashboardSearch(gridEl) {
           const input = document.getElementById("dashboardSearchInput");
           if (!input || !gridEl) return;
@@ -11612,24 +13685,7 @@
 
           const applyFilter = () => {
             prepareCards();
-            const q = norm(input.value.trim());
-            const all = getDashCards(false);
-            const hideBlacklisted = !blacklistState.showBlacklisted;
-
-            if (!q) {
-              all.forEach((c) => {
-                const blocked =
-                  hideBlacklisted && c.dataset.blacklisted === "1";
-                c.style.display = blocked ? "none" : "";
-              });
-            } else {
-              all.forEach((c) => {
-                const matches = c.dataset._search.includes(q);
-                const blocked =
-                  hideBlacklisted && c.dataset.blacklisted === "1";
-                c.style.display = matches && !blocked ? "" : "none";
-              });
-            }
+            applyDashboardSortAndFilter();
           };
 
           if (input._filterHandler)
@@ -11753,7 +13809,9 @@
             let items = normalizeConfigList(await window.api.loadConfigs());
             cacheConfigMeta(items);
             if (!blacklistState.showBlacklisted) {
-              items = items.filter((cfg) => !isAppIdInBlacklist(cfg.appid));
+              items = items.filter(
+                (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
+              );
             }
 
             const quickCards = items.map((it) => {
@@ -11777,9 +13835,12 @@
                 name: it.name,
                 displayName: it.displayName || it.name,
                 appid: it.appid || null,
+                platform: it.platform || null,
                 executable: it.executable || null,
                 arguments: it.arguments || "",
-                blacklisted: it.appid ? isAppIdInBlacklist(it.appid) : false,
+                blacklisted: it.appid
+                  ? isAppIdInBlacklist(it.appid, it.platform)
+                  : false,
                 progress: normalized,
                 img: cachedImg || fallbackIcon,
                 hasCachedImg: Boolean(cachedImg),
@@ -11798,6 +13859,7 @@
               card.className = "dash-card";
               card.tabIndex = 0;
               card.setAttribute("role", "button");
+              card.setAttribute("aria-selected", "false");
               card.setAttribute(
                 "aria-label",
                 `${cardData.displayName} – ${cardData.progress.pct}% complete`,
@@ -11811,6 +13873,9 @@
               card.dataset.blacklisted = cardData.blacklisted ? "1" : "0";
               if (cardData.appid) {
                 card.dataset.appid = String(cardData.appid);
+              }
+              if (cardData.platform) {
+                card.dataset.platform = String(cardData.platform);
               }
 
               const pill = document.createElement("div");
@@ -11830,6 +13895,11 @@
               if (cardData.img) {
                 img.dataset.src = cardData.img;
               }
+              attachDashboardCardImageErrorHandler(
+                img,
+                card,
+                cardData.name || "",
+              );
               ensureLazyObserver().observe(img);
 
               const nameWrap = document.createElement("div");
@@ -11837,7 +13907,18 @@
               const title = document.createElement("div");
               title.className = "dash-title";
               title.title = cardData.displayName;
-              title.textContent = cardData.displayName;
+              const titleText = document.createElement("span");
+              titleText.className = "dash-title-text";
+              titleText.textContent = cardData.displayName;
+              const selectIndicator = document.createElement("div");
+              selectIndicator.className = "dash-select-indicator";
+              selectIndicator.setAttribute("aria-hidden", "true");
+              selectIndicator.innerHTML = faWithFallback(
+                "fa-solid fa-check",
+                "✓",
+              );
+              title.appendChild(titleText);
+              title.appendChild(selectIndicator);
               const bar = document.createElement("div");
               bar.className = "dash-progressbar";
               const span = document.createElement("span");
@@ -11850,6 +13931,9 @@
               card.appendChild(pill);
               card.appendChild(img);
               card.appendChild(nameWrap);
+              if (isDashboardSelected(cardData.name)) {
+                setDashboardCardSelected(card, true);
+              }
               (container || gridEl).appendChild(card);
 
               return {
@@ -11883,10 +13967,13 @@
 
             // image loading is handled by IntersectionObserver + boot queue
 
+            setDashboardPlatformFilterOptions(items);
             setupDashboardSearch(gridEl);
             updateDashboardCounts(items, quickCards);
             updateSortIconsUI();
             applyDashboardSortAndFilter();
+            reconcileDashboardSelection();
+            updateDashboardSelectionUI();
 
             (async () => {
               await waitForDetailJobsSeedReady(20000);
@@ -11917,7 +14004,8 @@
                   const platform = cfg?.platform || null;
                   const normalizedPlatform =
                     normalizeDashboardImagePlatform(platform);
-                  const cardBlacklisted = appid && isAppIdInBlacklist(appid);
+                  const cardBlacklisted =
+                    appid && isAppIdInBlacklist(appid, platform);
                   meta.element.dataset.blacklisted = cardBlacklisted
                     ? "1"
                     : "0";
@@ -11941,8 +14029,29 @@
                       normalizedPlatform,
                     );
                     if (meta.data?.hasCachedImg && meta.data?.img) {
-                      imgSrc = meta.data.img;
-                      dashboardImageCache.set(dashboardCacheKey, imgSrc);
+                      try {
+                        const p = await window.api.checkLocalGameImage(
+                          appid,
+                          normalizedPlatform || null,
+                        );
+                        imgSrc = p ? fileUrl(p) : null;
+                      } catch {
+                        imgSrc = null;
+                      }
+                      if (imgSrc) {
+                        dashboardImageCache.set(dashboardCacheKey, imgSrc);
+                        localStorage.setItem(
+                          IMG_CACHE_PREFIX + it.name,
+                          imgSrc,
+                        );
+                      } else {
+                        dashboardImageCache.delete(dashboardCacheKey);
+                        localStorage.removeItem(IMG_CACHE_PREFIX + it.name);
+                        clearDashboardCoverEnsureState(
+                          appid,
+                          normalizedPlatform || null,
+                        );
+                      }
                     } else if (dashboardImageCache.has(dashboardCacheKey)) {
                       imgSrc = dashboardImageCache.get(dashboardCacheKey);
                     } else {
@@ -11974,12 +14083,11 @@
                       applyDashboardImg(meta.img, fallbackIcon);
                     }
                     const cardImg = meta.img;
-                    if (cardImg) {
-                      cardImg.addEventListener("error", () => {
-                        applyDashboardImg(cardImg, fallbackIcon);
-                        localStorage.removeItem(IMG_CACHE_PREFIX + it.name);
-                      });
-                    }
+                    attachDashboardCardImageErrorHandler(
+                      cardImg,
+                      meta.element,
+                      it.name,
+                    );
                   }
 
                   const progress = await computeCardProgress(it.name);
@@ -12010,6 +14118,7 @@
                 updateDashboardCounts(items, ready);
                 scheduleIdle(() => updateDashboardCounts(items, ready));
                 applyDashboardSortAndFilter();
+                updateDashboardSelectionUI();
               }
               signalDashboardReady();
             })().catch(() => {
@@ -12029,7 +14138,8 @@
                 const args = data.arguments || "";
                 const appidValue = data.appid ? String(data.appid) : null;
                 const cardBlacklisted =
-                  appidValue && isAppIdInBlacklist(appidValue);
+                  appidValue &&
+                  isAppIdInBlacklist(appidValue, data.platform || null);
                 if (card.querySelector(".dash-play")) return;
 
                 const btn = document.createElement("button");
@@ -12072,7 +14182,12 @@
                   ev.preventDefault();
                   ev.stopPropagation();
                   if (btn.classList.contains("is-disabled")) return;
-                  if (appidValue && isAppIdInBlacklist(appidValue)) return;
+                  if (
+                    appidValue &&
+                    isAppIdInBlacklist(appidValue, data.platform || null)
+                  ) {
+                    return;
+                  }
 
                   try {
                     const preset =
@@ -12146,6 +14261,7 @@
                     await handleDashboardBlacklistAction(
                       cfgName,
                       appidValue,
+                      data.platform || null,
                       removeMode,
                     );
                   } catch (err) {
@@ -12202,13 +14318,32 @@
                 await window.openEditConfigModalByName?.(target.name);
                 return;
               }
+              if (action === "select") {
+                const card = target.el || null;
+                if (card) {
+                  toggleDashboardSelectionForCard(card);
+                }
+                return;
+              }
+              if (action === "select-visible") {
+                selectAllVisibleDashboardCards();
+                return;
+              }
+              if (action === "clear-selection") {
+                clearDashboardSelection();
+                return;
+              }
               if (action === "delete") {
-                await deleteConfigByName(target.name, target.displayName);
+                const scope = getDashboardSelectionScope(target);
+                if (scope?.mode === "selection") {
+                  await deleteDashboardSelection();
+                } else {
+                  await deleteConfigByName(target.name, target.displayName);
+                }
                 return;
               }
               if (action === "steam" || action === "steamdb") {
-                const cfg = await getConfigCached(target.name);
-                const appid = String(target.appid || cfg?.appid || "").trim();
+                const appid = await resolveDashboardSteamLinkAppId(target);
                 if (!/^\d+$/.test(appid)) {
                   showNotification(
                     tUi(
@@ -12238,18 +14373,25 @@
                 return;
               }
               if (action === "ignore") {
-                const cfg = await getConfigCached(target.name);
-                const appid = target.appid || cfg?.appid || "";
-                const isBlacklisted = appid
-                  ? isAppIdInBlacklist(String(appid))
-                  : false;
-                const removeMode =
-                  blacklistState.showBlacklisted && isBlacklisted;
-                await handleDashboardBlacklistAction(
-                  target.name,
-                  String(appid || ""),
-                  removeMode,
-                );
+                const scope = getDashboardSelectionScope(target);
+                if (scope?.mode === "selection") {
+                  await ignoreDashboardSelection();
+                } else {
+                  const cfg = await getConfigCached(target.name);
+                  const appid = target.appid || cfg?.appid || "";
+                  const platform = target.platform || cfg?.platform || null;
+                  const isBlacklisted = appid
+                    ? isAppIdInBlacklist(String(appid), platform)
+                    : false;
+                  const removeMode =
+                    blacklistState.showBlacklisted && isBlacklisted;
+                  await handleDashboardBlacklistAction(
+                    target.name,
+                    String(appid || ""),
+                    platform,
+                    removeMode,
+                  );
+                }
                 return;
               }
               if (action === "regen") {
@@ -12518,8 +14660,6 @@
           window.refreshDashboardProgress = refreshDashboardProgress;
         } catch {}
 
-        setupDashboardSearch(gridEl);
-
         function selectConfigInDropdown(name) {
           const sel = document.getElementById("configList");
           if (!sel) return false;
@@ -12600,6 +14740,11 @@
           }
           const card = e.target.closest(".dash-card");
           if (!card) return;
+          if ((e.ctrlKey || e.metaKey) && !e.target.closest(".dash-play")) {
+            toggleDashboardSelectionForCard(card);
+            card.focus({ preventScroll: true });
+            return;
+          }
           openCardFromDashboard(card);
 
           const safeName = card.getAttribute("data-name");
@@ -12617,6 +14762,16 @@
           openOptionsPanel();
           closeDashboard();
         };
+
+        dashboardSelectionIgnoreBtn?.addEventListener("click", async () => {
+          await ignoreDashboardSelection();
+        });
+        dashboardSelectionDeleteBtn?.addEventListener("click", async () => {
+          await deleteDashboardSelection();
+        });
+        dashboardSelectionClearBtn?.addEventListener("click", () => {
+          clearDashboardSelection();
+        });
 
         // --- MULTI-SORT ---
         const SORT_KEYS = ["name", "progress", "updated"];
@@ -12726,6 +14881,17 @@
           const grid = document.getElementById("dashboardGrid");
           if (!grid) return;
           const dashboardBody = document.getElementById("dashboardBody");
+          const searchInput = document.getElementById("dashboardSearchInput");
+          const activeElement = document.activeElement;
+          const preserveControlFocus =
+            !!activeElement &&
+            (activeElement === searchInput ||
+              activeElement.closest?.(
+                "#dashboardSearchInput, .dashboard-sortbar button, .dashboard-sortbar input, .dashboard-sortbar select",
+              ));
+          const query = getDashboardSearchQuery();
+          const hideBlacklisted = !blacklistState.showBlacklisted;
+          const platformFilter = getDashboardPlatformFilter();
           const isCardVisibleInViewport = (card) => {
             if (!card) return false;
             if (
@@ -12755,7 +14921,6 @@
             grid.querySelectorAll(".dash-card"),
           ).map((card) => ({
             card,
-            display: card.style.display,
           }));
 
           const pri = ["updated", "progress", "name"];
@@ -12779,6 +14944,14 @@
             );
             sortTitleCache.set(card, normalized);
             return normalized;
+          };
+
+          const shouldShowDashboardCard = (card) => {
+            return matchesDashboardCardCurrentFilters(card, {
+              query,
+              hideBlacklisted,
+              platformFilter,
+            });
           };
 
           const cmp = (a, b) => {
@@ -12818,14 +14991,14 @@
 
           cardStates.sort(cmp);
           const frag = document.createDocumentFragment();
-          cardStates.forEach(({ card, display }) => {
-            card.style.display = display;
+          cardStates.forEach(({ card }) => {
+            card.style.display = shouldShowDashboardCard(card) ? "" : "none";
             frag.appendChild(card);
           });
           grid.appendChild(frag);
 
           let restoredFocus = false;
-          if (keepName) {
+          if (!preserveControlFocus && keepName) {
             const keepCard = grid.querySelector(
               `.dash-card[data-name="${CSS.escape(keepName)}"]`,
             );
@@ -12847,9 +15020,10 @@
             }
           }
 
-          if (!restoredFocus) {
+          if (!preserveControlFocus && !restoredFocus) {
             window.focusFirstVisibleDashCard?.();
           }
+          updateDashboardSelectionUI();
         }
 
         window.applyDashboardSortAndFilter = applyDashboardSortAndFilter;
@@ -15559,6 +17733,70 @@
           last.ts = performance.now();
         }
 
+        function isOverlayControllerMainControlModeReservedButton(
+          buttonName,
+          runtimeState,
+        ) {
+          if (runtimeState?.supportEnabled !== true) return false;
+          if (runtimeState?.controlModeActive !== true) return false;
+          return (
+            buttonName === "Y" ||
+            buttonName === "LEFT_SHOULDER" ||
+            buttonName === "RIGHT_SHOULDER" ||
+            overlayControllerBindingIncludesButton(
+              runtimeState.controlModeBinding,
+              buttonName,
+            )
+          );
+        }
+
+        function handleOverlayReservedMainButtonAction({
+          buttonName,
+          edgePressed,
+          currentButtons,
+          runtimeState,
+          execute,
+        }) {
+          if (!edgePressed || typeof execute !== "function") return false;
+          if (runtimeState?.supportEnabled !== true) {
+            execute();
+            return true;
+          }
+
+          if (
+            isOverlayControllerMainControlModeReservedButton(
+              buttonName,
+              runtimeState,
+            )
+          ) {
+            cancelOverlayControllerPendingMainAction(buttonName);
+            return true;
+          }
+
+          const bindings = [
+            runtimeState.toggleBinding,
+            runtimeState.controlModeBinding,
+          ];
+          for (const binding of bindings) {
+            if (!overlayControllerBindingIncludesButton(binding, buttonName)) {
+              continue;
+            }
+            if (binding.length === 1) {
+              cancelOverlayControllerPendingMainAction(buttonName);
+              return true;
+            }
+            if (overlayControllerBindingPressed(binding, currentButtons)) {
+              cancelOverlayControllerPendingActionsForBinding(binding);
+              return true;
+            }
+            queueOverlayControllerPendingMainAction(buttonName, execute);
+            return true;
+          }
+
+          execute();
+          return true;
+        }
+
         function gpLoop() {
           const pads = navigator.getGamepads
             ? Array.from(navigator.getGamepads()).filter(Boolean)
@@ -15578,6 +17816,8 @@
             return;
           }
 
+          flushOverlayControllerPendingMainActions(performance.now());
+
           if (pad && !recording) {
             const Abtn = !!pad.buttons?.[0]?.pressed; // A / Cross
             const Bbtn = !!pad.buttons?.[1]?.pressed; // B / Circle
@@ -15593,18 +17833,88 @@
             const R = !!pad.buttons?.[15]?.pressed;
             const TPbtn = !!pad.buttons?.[17]?.pressed; //Touchopad button
             const XBbtn = !!pad.buttons?.[16]?.pressed; //Guide/Xbox button
+            const LSbtn = !!pad.buttons?.[10]?.pressed; // L3
+            const RSbtn = !!pad.buttons?.[11]?.pressed; // R3
             const lx = pad.axes?.[0] || 0;
             const ly = pad.axes?.[1] || 0;
             const rx = pad.axes?.[2] || 0; // Right Stick X
             const ry = pad.axes?.[3] || 0; // Right Stick Y
+            const prefs = getCachedPreferences() || {};
+            const runtimeState =
+              getOverlayControllerRuntimeStateSnapshot(prefs);
+            const overlay = getActiveOverlaySafe?.() || "main";
+            const currentButtons = {
+              A: Abtn,
+              B: Bbtn,
+              X: Xbtn,
+              Y: Ybtn,
+              LEFT_SHOULDER: LB,
+              RIGHT_SHOULDER: RB,
+              BACK: SEL,
+              START,
+              GUIDE: XBbtn,
+              LEFT_THUMB: LSbtn,
+              RIGHT_THUMB: RSbtn,
+              DPAD_UP: U,
+              DPAD_DOWN: D,
+              DPAD_LEFT: L,
+              DPAD_RIGHT: R,
+              TOUCHPAD: TPbtn,
+            };
+            const buttonEdges = {
+              A: edge("A", Abtn),
+              B: edge("B", Bbtn),
+              X: edge("X", Xbtn),
+              Y: edge("Y", Ybtn),
+              LEFT_SHOULDER: edge("LEFT_SHOULDER", LB),
+              RIGHT_SHOULDER: edge("RIGHT_SHOULDER", RB),
+              BACK: edge("BACK", SEL),
+              START: edge("START", START),
+              GUIDE: edge("GUIDE", XBbtn),
+              TOUCHPAD: edge("TOUCHPAD", TPbtn),
+              LEFT_THUMB: edge("LEFT_THUMB", LSbtn),
+              RIGHT_THUMB: edge("RIGHT_THUMB", RSbtn),
+            };
+            const suppressMainControlModeNavigation =
+              runtimeState.supportEnabled === true &&
+              runtimeState.controlModeActive === true;
+
+            if (
+              runtimeState.supportEnabled === true &&
+              overlayControllerBindingPressed(
+                runtimeState.toggleBinding,
+                currentButtons,
+              )
+            ) {
+              cancelOverlayControllerPendingActionsForBinding(
+                runtimeState.toggleBinding,
+              );
+            }
+            if (
+              runtimeState.supportEnabled === true &&
+              overlayControllerBindingPressed(
+                runtimeState.controlModeBinding,
+                currentButtons,
+              )
+            ) {
+              cancelOverlayControllerPendingActionsForBinding(
+                runtimeState.controlModeBinding,
+              );
+            }
+
+            flushOverlayControllerPendingMainActions(performance.now());
 
             const rsDy = rsAxisToDelta(ry);
             const rsDx = rsAxisToDelta(rx);
-            if (rsDy !== 0 || rsDx !== 0) {
+            if (
+              !suppressMainControlModeNavigation &&
+              (rsDy !== 0 || rsDx !== 0)
+            ) {
               rightStickScroll(rsDy, rsDx);
             }
             // Right Stick -> scroll/select
             if (
+              !suppressMainControlModeNavigation &&
               (Math.abs(rx) > RS_DEADZONE || Math.abs(ry) > RS_DEADZONE) &&
               canRepeatRS()
             ) {
@@ -15612,37 +17922,100 @@
               tickRepeatRS();
             }
             // Global shortcuts
-            const overlay = getActiveOverlaySafe?.() || "main";
-            if (edge("SEL", SEL)) route(A.SETTINGS);
-            if (edge("TPbtn", TPbtn)) route(A.DASHBOARD);
-            if (edge("GUIDE", XBbtn)) route(A.DASHBOARD);
-            if (edge("B", Bbtn)) route(A.BACK);
-            if (edge("X", Xbtn)) {
-              if (overlay === "main") {
-                route(A.OPTIONS);
-              } else if (overlay === "dashboard") {
-                route(A.SEARCH);
-              }
-            }
-            if (edge("Y", Ybtn)) {
-              if (overlay === "dashboard") {
-                route(A.MENU);
-              }
-            }
-            if (edge("START", START)) route(A.PLAY);
+            handleOverlayReservedMainButtonAction({
+              buttonName: "BACK",
+              edgePressed: buttonEdges.BACK,
+              currentButtons,
+              runtimeState,
+              execute: () => route(A.SETTINGS),
+            });
+            if (buttonEdges.TOUCHPAD) route(A.DASHBOARD);
+            handleOverlayReservedMainButtonAction({
+              buttonName: "GUIDE",
+              edgePressed: buttonEdges.GUIDE,
+              currentButtons,
+              runtimeState,
+              execute: () => route(A.DASHBOARD),
+            });
+            handleOverlayReservedMainButtonAction({
+              buttonName: "B",
+              edgePressed: buttonEdges.B,
+              currentButtons,
+              runtimeState,
+              execute: () => route(A.BACK),
+            });
+            handleOverlayReservedMainButtonAction({
+              buttonName: "X",
+              edgePressed: buttonEdges.X,
+              currentButtons,
+              runtimeState,
+              execute: () => {
+                if (overlay === "main") {
+                  route(A.OPTIONS);
+                } else if (overlay === "dashboard") {
+                  route(A.SEARCH);
+                }
+              },
+            });
+            handleOverlayReservedMainButtonAction({
+              buttonName: "Y",
+              edgePressed: buttonEdges.Y,
+              currentButtons,
+              runtimeState,
+              execute: () => {
+                if (overlay === "dashboard") {
+                  route(A.MENU);
+                }
+              },
+            });
+            handleOverlayReservedMainButtonAction({
+              buttonName: "START",
+              edgePressed: buttonEdges.START,
+              currentButtons,
+              runtimeState,
+              execute: () => route(A.PLAY),
+            });
             if (overlay === "dashboard") {
-              if (edge("LB", LB)) window.__dashboardCycleSort?.("updated");
-              if (edge("RB", RB)) window.__dashboardCycleSort?.("progress");
-              if (edge("LS", pad.buttons?.[10]?.pressed)) {
-                window.__dashboardCycleSort?.("name");
-              }
+              handleOverlayReservedMainButtonAction({
+                buttonName: "LEFT_SHOULDER",
+                edgePressed: buttonEdges.LEFT_SHOULDER,
+                currentButtons,
+                runtimeState,
+                execute: () => window.__dashboardCycleSort?.("updated"),
+              });
+              handleOverlayReservedMainButtonAction({
+                buttonName: "RIGHT_SHOULDER",
+                edgePressed: buttonEdges.RIGHT_SHOULDER,
+                currentButtons,
+                runtimeState,
+                execute: () => window.__dashboardCycleSort?.("progress"),
+              });
+              handleOverlayReservedMainButtonAction({
+                buttonName: "LEFT_THUMB",
+                edgePressed: buttonEdges.LEFT_THUMB,
+                currentButtons,
+                runtimeState,
+                execute: () => window.__dashboardCycleSort?.("name"),
+              });
             } else {
-              if (edge("LB", LB)) settingsTabCycle(-1); // LB = tab
-              if (edge("RB", RB)) settingsTabCycle(+1);
+              handleOverlayReservedMainButtonAction({
+                buttonName: "LEFT_SHOULDER",
+                edgePressed: buttonEdges.LEFT_SHOULDER,
+                currentButtons,
+                runtimeState,
+                execute: () => settingsTabCycle(-1),
+              });
+              handleOverlayReservedMainButtonAction({
+                buttonName: "RIGHT_SHOULDER",
+                edgePressed: buttonEdges.RIGHT_SHOULDER,
+                currentButtons,
+                runtimeState,
+                execute: () => settingsTabCycle(+1),
+              });
             }
 
             // D-pad + stick repeat
-            if (canRepeat()) {
+            if (!suppressMainControlModeNavigation && canRepeat()) {
               if (U || ly < -DEADZONE) {
                 route(A.UP);
                 tickRepeat();
@@ -15657,7 +18030,13 @@
                 tickRepeat();
               }
             }
-            if (edge("A", Abtn)) route(A.CONFIRM);
+            handleOverlayReservedMainButtonAction({
+              buttonName: "A",
+              edgePressed: buttonEdges.A,
+              currentButtons,
+              runtimeState,
+              execute: () => route(A.CONFIRM),
+            });
           }
 
           requestAnimationFrame(gpLoop);

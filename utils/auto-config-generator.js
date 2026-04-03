@@ -2173,7 +2173,11 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
   }
   if (!targetFile) {
     autoConfigLogger.warn("generate-single:target-missing", { appid });
-    return;
+    return {
+      appid,
+      skipped: true,
+      pendingSchema: false,
+    };
   }
   if (appDir) {
     try {
@@ -2237,5 +2241,34 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
     targetFile,
     appDir: appDir || null,
   });
+  try {
+    const cfg = JSON.parse(fs.readFileSync(targetFile, "utf8"));
+    return {
+      appid: String(cfg?.appid || appid),
+      name: path.basename(targetFile, ".json"),
+      filePath: targetFile,
+      platform: normalizePlatform(cfg?.platform) || "steam",
+      save_path: cfg?.save_path || "",
+      config_path: cfg?.config_path || "",
+      created: true,
+      updated: true,
+      skipped: false,
+    };
+  } catch (err) {
+    autoConfigLogger.warn("generate-single:return-parse-failed", {
+      appid,
+      targetFile,
+      error: err?.message || String(err),
+    });
+    return {
+      appid,
+      name: path.basename(targetFile, ".json"),
+      filePath: targetFile,
+      platform: desiredPlatform || "steam",
+      created: true,
+      updated: true,
+      skipped: false,
+    };
+  }
 }
 module.exports = { generateGameConfigs, generateConfigForAppId };

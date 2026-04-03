@@ -210,6 +210,7 @@ _Note_: If `config_path` points to a custom location, schema regeneration/cleanu
    - %PUBLIC%\Documents\OnlineFix
    - %PUBLIC%\Documents\EMPRESS
    - %APPDATA%\Goldberg SteamEmu Saves
+   - %APPDATA%\Goldberg UplayEmu Saves
    - %APPDATA%\GSE Saves
    - %APPDATA%\EMPRESS
    - %LOCALAPPDATA%\anadius\LSX emu\achievement_watcher

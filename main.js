@@ -84,9 +84,18 @@ const {
   parseShortcutAccelerator: parseOverlayShortcutAccelerator,
 } = require("./utils/overlay-shortcut-manager");
 const {
-  createControllerInputManager,
+  DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
+  DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING,
+  OVERLAY_CONTROLLER_CONTROL_MODE_ALLOWED_BUTTONS,
+  OVERLAY_CONTROLLER_TOGGLE_ALLOWED_BUTTONS,
   inspectControllerBackendAvailability,
+  normalizeBackendPreference,
+  normalizeControllerBinding,
 } = require("./utils/controller-input-manager");
+const {
+  createOverlayControllerService,
+} = require("./utils/overlay-controller-service");
+const { autoUpdater } = require("electron-updater");
 const getConfigInflight = new Map();
 const { createLogger } = require("./utils/logger");
 
@@ -104,6 +113,7 @@ const persistenceLogger = createLogger("persistence");
 const execLogger = createLogger("execution");
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
+const updateLogger = createLogger("updates");
 const controllerLogger = createLogger("controller", {
   level: process.env.CONTROLLER_LOG_LEVEL || "info",
 });
@@ -586,6 +596,12 @@ const DEFAULT_PREFERENCES = {
   disableProcessNameWatcher: false,
   forceGlobalOverlayShortcuts: false,
   overlayControllerSupportEnabled: false,
+  overlayControllerBackend: "auto",
+  overlayControllerDebugLogging: false,
+  overlayControllerToggleBinding: [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
+  overlayControllerControlModeBinding: [
+    ...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
+  ],
   ignoreLeadingArticlesSort: true,
   schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
@@ -683,19 +699,33 @@ function ensurePreferencesFile() {
 }
 
 const BLACKLIST_PREF_KEY = "blacklistedAppIds";
+const BLACKLIST_CONFIG_PREF_KEY = "blacklistedConfigKeys";
 const blacklistedAppIdsSet = new Set();
+const blacklistedConfigKeysSet = new Set();
 let watchedFoldersApi = null;
 let cachedPreferences = {};
 let mainWindow;
 let selectedConfigPath = null;
 let selectedConfig = null;
 let selectedPlatform = null;
-let overlayControllerManager = null;
+let overlayControllerService = null;
+let overlayControllerRuntimeStateCache = {
+  supportEnabled: false,
+  toggleBinding: [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
+  controlModeBinding: [...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING],
+  controlModeActive: false,
+  controlModeUserIndex: null,
+};
 let mainWindowUserZoom = 1;
 let mainWindowZoomTimer = null;
 let displayMetricsListenerAdded = false;
 const ZOOM_LOG_EPS = 0.001;
 let lastZoomLog = null;
+const STARTUP_APP_UPDATE_CHECK_DELAY_MS = 4000;
+let appUpdateCheckStarted = false;
+let appUpdatePromptActive = false;
+let appUpdateDownloadRequested = false;
+let appUpdateDownloadInFlight = false;
 let selectedSound = "mute";
 let selectedPreset = "default";
 let selectedPosition = "center-bottom";
@@ -734,12 +764,44 @@ function normalizeAppIdValue(value) {
   return "";
 }
 
+function normalizeBlacklistPlatformValue(value) {
+  const trimmed = String(value || "").trim().toLowerCase();
+  return trimmed || "steam";
+}
+
+function buildBlacklistConfigKey(appid, platform) {
+  const normalizedAppId = normalizeAppIdValue(appid);
+  if (!normalizedAppId) return "";
+  const normalizedPlatform = normalizeBlacklistPlatformValue(platform);
+  return `${normalizedAppId}::${normalizedPlatform}`;
+}
+
+function normalizeBlacklistConfigKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const sepIndex = raw.indexOf("::");
+  if (sepIndex <= 0) return "";
+  const appid = normalizeAppIdValue(raw.slice(0, sepIndex));
+  if (!appid) return "";
+  const platform = normalizeBlacklistPlatformValue(raw.slice(sepIndex + 2));
+  return `${appid}::${platform}`;
+}
+
 function setBlacklistedAppIds(list) {
   blacklistedAppIdsSet.clear();
   const arr = Array.isArray(list) ? list : [];
   for (const id of arr) {
     const normalized = normalizeAppIdValue(id);
     if (normalized) blacklistedAppIdsSet.add(normalized);
+  }
+}
+
+function setBlacklistedConfigKeys(list) {
+  blacklistedConfigKeysSet.clear();
+  const arr = Array.isArray(list) ? list : [];
+  for (const entry of arr) {
+    const normalized = normalizeBlacklistConfigKey(entry);
+    if (normalized) blacklistedConfigKeysSet.add(normalized);
   }
 }
 
@@ -792,44 +854,122 @@ function readBlacklistFromPrefs() {
   return arr.map(normalizeAppIdValue).filter(Boolean);
 }
 
-function persistBlacklist(appIds) {
-  const nextList = Array.from(new Set(appIds))
+function readBlacklistedConfigKeysFromPrefs() {
+  const prefs = readPrefsSafe();
+  const arr = Array.isArray(prefs[BLACKLIST_CONFIG_PREF_KEY])
+    ? prefs[BLACKLIST_CONFIG_PREF_KEY]
+    : [];
+  return arr.map(normalizeBlacklistConfigKey).filter(Boolean);
+}
+
+function buildBlacklistPayload({
+  appIds = readBlacklistFromPrefs(),
+  configKeys = readBlacklistedConfigKeysFromPrefs(),
+} = {}) {
+  const entries = [
+    ...appIds.map((appid) => ({
+      key: `appid:${appid}`,
+      appid,
+      platform: null,
+      legacy: true,
+    })),
+    ...configKeys.map((configKey) => {
+      const [appid, platform] = String(configKey).split("::");
+      return {
+        key: configKey,
+        appid,
+        platform: platform || null,
+        legacy: false,
+      };
+    }),
+  ];
+  return {
+    appids: Array.from(new Set(appIds)),
+    configKeys: Array.from(new Set(configKeys)),
+    entries,
+  };
+}
+
+function persistBlacklist({ appIds = [], configKeys = [] } = {}) {
+  const nextAppIds = Array.from(new Set(appIds))
     .map(normalizeAppIdValue)
     .filter(Boolean);
+  const nextConfigKeys = Array.from(new Set(configKeys))
+    .map(normalizeBlacklistConfigKey)
+    .filter(Boolean);
   try {
-    const prefs = updatePreferences({ [BLACKLIST_PREF_KEY]: nextList });
-    return prefs[BLACKLIST_PREF_KEY] || [];
+    const prefs = updatePreferences({
+      [BLACKLIST_PREF_KEY]: nextAppIds,
+      [BLACKLIST_CONFIG_PREF_KEY]: nextConfigKeys,
+    });
+    return buildBlacklistPayload({
+      appIds: Array.isArray(prefs?.[BLACKLIST_PREF_KEY])
+        ? prefs[BLACKLIST_PREF_KEY]
+        : nextAppIds,
+      configKeys: Array.isArray(prefs?.[BLACKLIST_CONFIG_PREF_KEY])
+        ? prefs[BLACKLIST_CONFIG_PREF_KEY]
+        : nextConfigKeys,
+    });
   } catch (err) {
     prefsLogger.error("blacklist:write-failed", { error: err.message });
   }
-  return readBlacklistFromPrefs();
+  return buildBlacklistPayload();
 }
 
 function addAppIdToBlacklist(appid) {
   const normalized = normalizeAppIdValue(appid);
-  if (!normalized) return readBlacklistFromPrefs();
+  if (!normalized) return buildBlacklistPayload();
   const next = new Set(readBlacklistFromPrefs());
   next.add(normalized);
-  return persistBlacklist(Array.from(next));
+  return persistBlacklist({
+    appIds: Array.from(next),
+    configKeys: readBlacklistedConfigKeysFromPrefs(),
+  });
 }
 
 function removeAppIdFromBlacklist(appid) {
   const normalized = normalizeAppIdValue(appid);
-  if (!normalized) return readBlacklistFromPrefs();
+  if (!normalized) return buildBlacklistPayload();
   const next = new Set(readBlacklistFromPrefs());
   next.delete(normalized);
-  return persistBlacklist(Array.from(next));
+  return persistBlacklist({
+    appIds: Array.from(next),
+    configKeys: readBlacklistedConfigKeysFromPrefs(),
+  });
+}
+
+function addConfigKeyToBlacklist(appid, platform) {
+  const normalized = buildBlacklistConfigKey(appid, platform);
+  if (!normalized) return buildBlacklistPayload();
+  const next = new Set(readBlacklistedConfigKeysFromPrefs());
+  next.add(normalized);
+  return persistBlacklist({
+    appIds: readBlacklistFromPrefs(),
+    configKeys: Array.from(next),
+  });
+}
+
+function removeConfigKeyFromBlacklist(appid, platform) {
+  const normalized = buildBlacklistConfigKey(appid, platform);
+  if (!normalized) return buildBlacklistPayload();
+  const next = new Set(readBlacklistedConfigKeysFromPrefs());
+  next.delete(normalized);
+  return persistBlacklist({
+    appIds: readBlacklistFromPrefs(),
+    configKeys: Array.from(next),
+  });
 }
 
 function resetBlacklist() {
-  return persistBlacklist([]);
+  return persistBlacklist({ appIds: [], configKeys: [] });
 }
 
-function isAppIdBlacklisted(appid) {
+function isAppIdBlacklisted(appid, platform = null) {
   const normalized = normalizeAppIdValue(appid);
   if (!normalized) return false;
-  const current = readBlacklistFromPrefs();
-  return current.includes(normalized);
+  if (blacklistedAppIdsSet.has(normalized)) return true;
+  const configKey = buildBlacklistConfigKey(normalized, platform);
+  return configKey ? blacklistedConfigKeysSet.has(configKey) : false;
 }
 
 function refreshBlacklistEffects() {
@@ -1468,6 +1608,196 @@ function notifyInfo(message) {
   }
 }
 
+function isPrereleaseAppVersion(version = app.getVersion()) {
+  return typeof version === "string" && /-[0-9A-Za-z]/.test(version);
+}
+
+function getUpdateDialogParentWindow() {
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    mainWindow.isVisible?.() === true
+  ) {
+    return mainWindow;
+  }
+  return null;
+}
+
+function showUpdateMessageBox(options = {}) {
+  const parentWindow = getUpdateDialogParentWindow();
+  return parentWindow
+    ? dialog.showMessageBox(parentWindow, options)
+    : dialog.showMessageBox(options);
+}
+
+function getAppUpdateConfigPath() {
+  return path.join(process.resourcesPath, "app-update.yml");
+}
+
+function getUpdateVersionLabel(info = null) {
+  const version = String(info?.version || "").trim();
+  return version || "new";
+}
+
+async function promptForAvailableAppUpdate(info = null) {
+  if (appUpdatePromptActive) return;
+  appUpdatePromptActive = true;
+  const version = getUpdateVersionLabel(info);
+  try {
+    const result = await showUpdateMessageBox({
+      type: "info",
+      buttons: [
+        tUi("main.update.available.updateNow", {}, "Update now"),
+        tUi("main.update.available.later", {}, "Later"),
+      ],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      title: tUi("main.update.available.title", {}, "Update available"),
+      message: tUi(
+        "main.update.available.message",
+        { version },
+        `Version ${version} is available.`,
+      ),
+      detail: tUi(
+        "main.update.available.detail",
+        {},
+        "Do you want to download and install it now?",
+      ),
+    });
+    if (result.response !== 0) {
+      updateLogger.info("app-update:download-deferred", { version });
+      return;
+    }
+    if (appUpdateDownloadInFlight) return;
+    appUpdatePromptActive = false;
+    appUpdateDownloadRequested = true;
+    appUpdateDownloadInFlight = true;
+    updateLogger.info("app-update:download-start", { version });
+    await autoUpdater.downloadUpdate();
+  } catch (err) {
+    appUpdateDownloadRequested = false;
+    updateLogger.error("app-update:download-failed", {
+      error: err?.message || String(err),
+    });
+    await showUpdateMessageBox({
+      type: "error",
+      buttons: [tUi("main.update.error.ok", {}, "OK")],
+      defaultId: 0,
+      noLink: true,
+      title: tUi("main.update.error.title", {}, "Update failed"),
+      message: tUi(
+        "main.update.error.message",
+        {},
+        "The update could not be downloaded.",
+      ),
+      detail: err?.message || String(err),
+    }).catch(() => {});
+  } finally {
+    appUpdatePromptActive = false;
+    appUpdateDownloadInFlight = false;
+  }
+}
+
+async function promptToInstallDownloadedAppUpdate(info = null) {
+  if (appUpdatePromptActive) return;
+  appUpdatePromptActive = true;
+  const version = getUpdateVersionLabel(info);
+  try {
+    const result = await showUpdateMessageBox({
+      type: "info",
+      buttons: [
+        tUi("main.update.downloaded.restartNow", {}, "Restart now"),
+        tUi("main.update.downloaded.later", {}, "Later"),
+      ],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      title: tUi("main.update.downloaded.title", {}, "Update downloaded"),
+      message: tUi(
+        "main.update.downloaded.message",
+        { version },
+        `Update ${version} downloaded. Restart to install.`,
+      ),
+      detail: tUi(
+        "main.update.downloaded.detail",
+        {},
+        "The update will install after the application restarts.",
+      ),
+    });
+    if (result.response !== 0) {
+      updateLogger.info("app-update:install-deferred", { version });
+      return;
+    }
+    updateLogger.info("app-update:install-now", { version });
+    isQuitting = true;
+    autoUpdater.quitAndInstall();
+  } finally {
+    appUpdatePromptActive = false;
+  }
+}
+
+function initializeStartupAppUpdater() {
+  if (appUpdateCheckStarted) return;
+  appUpdateCheckStarted = true;
+  if (!app.isPackaged) {
+    updateLogger.info("app-update:skip", { reason: "not-packaged" });
+    return;
+  }
+  const appUpdateConfigPath = getAppUpdateConfigPath();
+  if (!fs.existsSync(appUpdateConfigPath)) {
+    updateLogger.warn("app-update:skip", {
+      reason: "missing-app-update-config",
+      path: appUpdateConfigPath,
+    });
+    return;
+  }
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowPrerelease = isPrereleaseAppVersion();
+  autoUpdater.on("error", async (err) => {
+    updateLogger.error("app-update:error", {
+      error: err?.message || String(err),
+    });
+  });
+  autoUpdater.on("checking-for-update", () => {
+    updateLogger.info("app-update:checking", {
+      allowPrerelease: autoUpdater.allowPrerelease === true,
+    });
+  });
+  autoUpdater.on("update-available", (info) => {
+    updateLogger.info("app-update:available", {
+      version: info?.version || null,
+    });
+    void promptForAvailableAppUpdate(info);
+  });
+  autoUpdater.on("update-not-available", (info) => {
+    updateLogger.info("app-update:not-available", {
+      version: info?.version || null,
+    });
+  });
+  autoUpdater.on("download-progress", (progress) => {
+    updateLogger.debug?.("app-update:download-progress", {
+      percent: Number(progress?.percent || 0),
+      bytesPerSecond: Number(progress?.bytesPerSecond || 0),
+    });
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    appUpdateDownloadRequested = false;
+    updateLogger.info("app-update:downloaded", {
+      version: info?.version || null,
+    });
+    void promptToInstallDownloadedAppUpdate(info);
+  });
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch((err) => {
+      updateLogger.error("app-update:check-failed", {
+        error: err?.message || String(err),
+      });
+    });
+  }, STARTUP_APP_UPDATE_CHECK_DELAY_MS);
+}
+
 function isNonEmptyString(s) {
   return typeof s === "string" && s.trim().length > 0;
 }
@@ -1505,6 +1835,66 @@ function isOverlayControllerSupportEnabled(prefs = null) {
         ? cachedPreferences
         : readPrefsSafe?.() || {};
   return source?.overlayControllerSupportEnabled === true;
+}
+
+function getOverlayControllerBackendPreference(prefs = null) {
+  const source =
+    prefs && typeof prefs === "object"
+      ? prefs
+      : cachedPreferences && typeof cachedPreferences === "object"
+        ? cachedPreferences
+        : readPrefsSafe?.() || {};
+  return normalizeBackendPreference(source?.overlayControllerBackend);
+}
+
+function isOverlayControllerDebugLoggingEnabled(prefs = null) {
+  const source =
+    prefs && typeof prefs === "object"
+      ? prefs
+      : cachedPreferences && typeof cachedPreferences === "object"
+        ? cachedPreferences
+        : readPrefsSafe?.() || {};
+  return source?.overlayControllerDebugLogging === true;
+}
+
+function getOverlayControllerToggleBinding(prefs = null) {
+  const source =
+    prefs && typeof prefs === "object"
+      ? prefs
+      : cachedPreferences && typeof cachedPreferences === "object"
+        ? cachedPreferences
+        : readPrefsSafe?.() || {};
+  return normalizeControllerBinding(source?.overlayControllerToggleBinding, {
+    allowSingle: true,
+    maxButtons: 2,
+    allowedButtons: OVERLAY_CONTROLLER_TOGGLE_ALLOWED_BUTTONS,
+    defaultBinding: DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING,
+  });
+}
+
+function getOverlayControllerControlModeBinding(prefs = null) {
+  const source =
+    prefs && typeof prefs === "object"
+      ? prefs
+      : cachedPreferences && typeof cachedPreferences === "object"
+        ? cachedPreferences
+        : readPrefsSafe?.() || {};
+  return normalizeControllerBinding(source?.overlayControllerControlModeBinding, {
+    allowSingle: true,
+    maxButtons: 2,
+    allowedButtons: OVERLAY_CONTROLLER_CONTROL_MODE_ALLOWED_BUTTONS,
+    defaultBinding: DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
+  });
+}
+
+function overlayControllerBindingsCanConflict(toggleBinding, controlModeBinding) {
+  const toggleButtons = Array.isArray(toggleBinding) ? toggleBinding : [];
+  const controlButtons = Array.isArray(controlModeBinding)
+    ? controlModeBinding
+    : [];
+  if (!toggleButtons.length || !controlButtons.length) return false;
+  const toggleSet = new Set(toggleButtons);
+  return controlButtons.some((button) => toggleSet.has(button));
 }
 
 //Achievements Image
@@ -2136,6 +2526,12 @@ function reassertOverlayAlwaysOnTop(reason) {
 // 4) Avoid aggressive `setAlwaysOnTop` retoggles during movement (z-order churn/focus side effects).
 function setOverlayPresented(next) {
   overlayPresented = !!next;
+  try {
+    overlayControllerService?.notifyOverlayPresentationChanged?.(
+      overlayPresented,
+      "setOverlayPresented",
+    );
+  } catch {}
   overlayLogger.info("overlay:presented:set", {
     next: overlayPresented,
     hasWindow: !!overlayWindow && !overlayWindow.isDestroyed(),
@@ -2599,19 +2995,61 @@ function toggleOverlayFromController(payload = {}) {
   }
 }
 
+function buildOverlayControllerRuntimeState(prefs = null, overrides = {}) {
+  return {
+    supportEnabled: isOverlayControllerSupportEnabled(prefs),
+    toggleBinding: getOverlayControllerToggleBinding(prefs),
+    controlModeBinding: getOverlayControllerControlModeBinding(prefs),
+    controlModeActive:
+      Object.prototype.hasOwnProperty.call(overrides || {}, "controlModeActive")
+        ? overrides.controlModeActive === true
+        : overlayControllerRuntimeStateCache.controlModeActive === true,
+    controlModeUserIndex: Number.isFinite(
+      Number(overrides?.controlModeUserIndex),
+    )
+      ? Number(overrides.controlModeUserIndex)
+      : Number.isFinite(
+            Number(overlayControllerRuntimeStateCache.controlModeUserIndex),
+          )
+        ? Number(overlayControllerRuntimeStateCache.controlModeUserIndex)
+        : null,
+  };
+}
+
+function broadcastOverlayControllerRuntimeState(prefs = null, overrides = {}) {
+  overlayControllerRuntimeStateCache = buildOverlayControllerRuntimeState(
+    prefs,
+    overrides,
+  );
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(
+        "overlay-controller-runtime-state",
+        overlayControllerRuntimeStateCache,
+      );
+    }
+  } catch {}
+  return overlayControllerRuntimeStateCache;
+}
+
 function handleOverlayControllerAction(type, payload = {}) {
   const action = String(type || "");
   if (!action) return;
 
   if (action === "overlay.control-mode") {
+    const controlModeUserIndex =
+      Number.isFinite(Number(payload?.userIndex)) &&
+      Number(payload?.userIndex) >= 0
+        ? Number(payload?.userIndex)
+        : null;
     controllerLogger.info("controller:overlay-control-mode", {
       active: payload?.active === true,
       reason: payload?.reason || null,
-      userIndex:
-        Number.isFinite(Number(payload?.userIndex)) &&
-        Number(payload?.userIndex) >= 0
-          ? Number(payload?.userIndex)
-          : null,
+      userIndex: controlModeUserIndex,
+    });
+    broadcastOverlayControllerRuntimeState(cachedPreferences, {
+      controlModeActive: payload?.active === true,
+      controlModeUserIndex,
     });
     return;
   }
@@ -2652,37 +3090,33 @@ function handleOverlayControllerAction(type, payload = {}) {
   });
 }
 
-function ensureOverlayControllerManager() {
-  if (overlayControllerManager) return overlayControllerManager;
-  overlayControllerManager = createControllerInputManager({
-    logger: controllerLogger,
-    canEnterOverlayControlMode: () => isOverlayControllable(),
-    onAction: handleOverlayControllerAction,
-  });
-  return overlayControllerManager;
-}
-
 function syncOverlayControllerSupportState(reason, prefs = null) {
-  const enabled = isOverlayControllerSupportEnabled(prefs);
-  if (!enabled && !overlayControllerManager) {
-    return {
-      enabled: false,
-      running: false,
-      available: false,
-      dllName: null,
-      backendError: null,
-      controlModeActive: false,
-      controlModeUserIndex: null,
-    };
-  }
-  const manager = ensureOverlayControllerManager();
-  const status = manager.setEnabled(enabled, reason || "preferences");
-  if (enabled && !status.available) {
-    controllerLogger.warn("controller:preference-sync:unavailable", {
-      reason: String(reason || "preferences"),
-      backendError: status.backendError || null,
+  if (!overlayControllerService) {
+    overlayControllerService = createOverlayControllerService({
+      logger: controllerLogger,
+      isSupportEnabled: (source) => isOverlayControllerSupportEnabled(source),
+      getPreferredBackend: (source) =>
+        getOverlayControllerBackendPreference(source),
+      isDebugLoggingEnabled: (source) =>
+        isOverlayControllerDebugLoggingEnabled(source),
+      getOverlayToggleBinding: (source) =>
+        getOverlayControllerToggleBinding(source),
+      getOverlayControlModeBinding: (source) =>
+        getOverlayControllerControlModeBinding(source),
+      canEnterOverlayControlMode: () => isOverlayControllable(),
+      isOverlayPresented: () => isOverlayEffectivelyPresented(),
+      onAction: handleOverlayControllerAction,
     });
   }
+  const status = overlayControllerService.sync(reason, prefs);
+  broadcastOverlayControllerRuntimeState(prefs, {
+    controlModeActive: status?.controlModeActive === true,
+    controlModeUserIndex:
+      Number.isFinite(Number(status?.controlModeUserIndex)) &&
+      Number(status?.controlModeUserIndex) >= 0
+        ? Number(status.controlModeUserIndex)
+        : null,
+  });
   return status;
 }
 
@@ -2691,23 +3125,78 @@ function validateOverlayControllerSupportPreference(
   mergedPrefs,
   incomingPatch,
 ) {
+  const currentBackend = getOverlayControllerBackendPreference(currentPrefs);
+  const mergedBackend = getOverlayControllerBackendPreference(mergedPrefs);
   const enablingNow =
     currentPrefs?.overlayControllerSupportEnabled !== true &&
     mergedPrefs?.overlayControllerSupportEnabled === true;
-  if (!enablingNow) return mergedPrefs;
+  const backendChanged = currentBackend !== mergedBackend;
+  const supportEnabled = mergedPrefs?.overlayControllerSupportEnabled === true;
+  if (!supportEnabled || (!enablingNow && !backendChanged)) return mergedPrefs;
 
   const availability = inspectControllerBackendAvailability();
-  if (!availability.anyAvailable) {
+  const preferredBackend = mergedBackend;
+  const selectedBackendAvailable =
+    preferredBackend === "gameinput"
+      ? availability.gameInput.available
+      : preferredBackend === "xinput"
+        ? availability.xInput.available
+        : availability.anyAvailable;
+
+  if (!selectedBackendAvailable) {
+    if (backendChanged && !enablingNow) {
+      controllerLogger.warn("controller:preference-backend-rejected", {
+        reason: "selected-backend-unavailable",
+        requestedBackend: preferredBackend,
+        fallbackBackend: currentBackend,
+        gameInputError: availability.gameInput.error,
+        xInputError: availability.xInput.error,
+      });
+      notifyError(
+        tUi(
+          preferredBackend === "xinput"
+            ? "main.notify.overlayControllerSupportXInputUnavailable"
+            : "main.notify.overlayControllerSupportGameInputUnavailable",
+          {},
+          preferredBackend === "xinput"
+            ? "The XInput backend is not available on this PC. The previous overlay controller backend was kept."
+            : "The GameInput backend is not available on this PC. The previous overlay controller backend was kept.",
+        ),
+      );
+      mergedPrefs.overlayControllerBackend = currentBackend;
+      if (
+        Object.prototype.hasOwnProperty.call(
+          incomingPatch || {},
+          "overlayControllerBackend",
+        )
+      ) {
+        incomingPatch.overlayControllerBackend = currentBackend;
+      }
+      return mergedPrefs;
+    }
+
     controllerLogger.warn("controller:preference-enable:rejected", {
-      reason: "no-backend-available",
+      reason:
+        preferredBackend === "auto"
+          ? "no-backend-available"
+          : "selected-backend-unavailable",
+      preferredBackend,
       gameInputError: availability.gameInput.error,
       xInputError: availability.xInput.error,
     });
     notifyError(
       tUi(
-        "main.notify.overlayControllerSupportUnavailable",
+        preferredBackend === "xinput"
+          ? "main.notify.overlayControllerSupportXInputUnavailable"
+          : preferredBackend === "gameinput"
+            ? "main.notify.overlayControllerSupportGameInputUnavailable"
+            : "main.notify.overlayControllerSupportUnavailable",
         {},
-        "No supported controller runtime was found. Install Microsoft GameInput or use an XInput-compatible controller.",
+        preferredBackend === "xinput"
+          ? "The XInput backend is not available on this PC. Switch the overlay controller backend to Auto or GameInput."
+          : preferredBackend === "gameinput"
+            ? "The GameInput backend is not available on this PC. Install Microsoft GameInput or switch the overlay controller backend to Auto or XInput."
+            : "No supported controller runtime was found. Install Microsoft GameInput or use an XInput-compatible controller.",
       ),
     );
     mergedPrefs.overlayControllerSupportEnabled = false;
@@ -2722,7 +3211,7 @@ function validateOverlayControllerSupportPreference(
     return mergedPrefs;
   }
 
-  if (!availability.gameInput.available) {
+  if (preferredBackend === "auto" && !availability.gameInput.available) {
     controllerLogger.warn("controller:preference-enable:gameinput-missing", {
       xInputDllName: availability.xInput.dllName,
       gameInputError: availability.gameInput.error,
@@ -3092,6 +3581,7 @@ if (!cachedPreferences || typeof cachedPreferences !== "object") {
 }
 try {
   setBlacklistedAppIds(cachedPreferences?.[BLACKLIST_PREF_KEY]);
+  setBlacklistedConfigKeys(cachedPreferences?.[BLACKLIST_CONFIG_PREF_KEY]);
 } catch {}
 const fileSteamApiKey = readSteamApiKeyFromFile();
 if (fileSteamApiKey && !cachedPreferences.steamApiKey) {
@@ -3148,6 +3638,11 @@ function applyPreferenceSideEffects(
       setBlacklistedAppIds(prefsSnapshot?.[BLACKLIST_PREF_KEY]);
     } catch {}
   }
+  if (Object.prototype.hasOwnProperty.call(patch, BLACKLIST_CONFIG_PREF_KEY)) {
+    try {
+      setBlacklistedConfigKeys(prefsSnapshot?.[BLACKLIST_CONFIG_PREF_KEY]);
+    } catch {}
+  }
   if ("language" in patch && typeof prefsSnapshot.language === "string") {
     selectedLanguage = prefsSnapshot.language;
   }
@@ -3194,6 +3689,12 @@ function applyPreferenceSideEffects(
   }
   if (
     Object.prototype.hasOwnProperty.call(patch, "overlayControllerSupportEnabled")
+    || Object.prototype.hasOwnProperty.call(patch, "overlayControllerBackend")
+    || Object.prototype.hasOwnProperty.call(patch, "overlayControllerToggleBinding")
+    || Object.prototype.hasOwnProperty.call(
+      patch,
+      "overlayControllerControlModeBinding",
+    )
   ) {
     syncOverlayControllerSupportState(
       "preferences:overlay-controller-support",
@@ -3296,12 +3797,68 @@ function updatePreferences(patch = {}) {
     }
   }
 
+  if (Object.prototype.hasOwnProperty.call(incoming, "overlayControllerBackend")) {
+    incoming.overlayControllerBackend = normalizeBackendPreference(
+      incoming.overlayControllerBackend,
+    );
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(
+      incoming,
+      "overlayControllerDebugLogging",
+    )
+  ) {
+    incoming.overlayControllerDebugLogging =
+      incoming.overlayControllerDebugLogging === true;
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(incoming, "overlayControllerToggleBinding")
+  ) {
+    incoming.overlayControllerToggleBinding = getOverlayControllerToggleBinding(
+      incoming,
+    );
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(
+      incoming,
+      "overlayControllerControlModeBinding",
+    )
+  ) {
+    incoming.overlayControllerControlModeBinding =
+      getOverlayControllerControlModeBinding(incoming);
+  }
+
   try {
     const current = readPrefsSafe();
     const merged = mergeWithDefaultPreferences({
       ...current,
       ...incoming,
     });
+    merged.overlayControllerToggleBinding = getOverlayControllerToggleBinding(
+      merged,
+    );
+    merged.overlayControllerControlModeBinding =
+      getOverlayControllerControlModeBinding(merged);
+    if (
+      overlayControllerBindingsCanConflict(
+        merged.overlayControllerToggleBinding,
+        merged.overlayControllerControlModeBinding,
+      )
+    ) {
+      prefsLogger.warn("preferences:update:overlay-controller-binding-conflict", {
+        toggleBinding: merged.overlayControllerToggleBinding,
+        controlModeBinding: merged.overlayControllerControlModeBinding,
+      });
+      notifyError(
+        tUi(
+          "main.notify.overlayControllerBindingConflict",
+          {},
+          "Overlay controller bindings cannot use the same buttons.",
+        ),
+      );
+      return current;
+    }
     validateOverlayControllerSupportPreference(current, merged, incoming);
     if (removeSteamKey) delete merged.steamApiKey;
 
@@ -3446,7 +4003,7 @@ async function runAchievementsGenerator(
   userDataDir,
   opts = {},
 ) {
-  if (isAppIdBlacklisted(appid)) {
+  if (isAppIdBlacklisted(appid, opts?.platform || null)) {
     schemaLogger.warn("schema:skip-blacklisted", { appid });
     throw new Error(`AppID ${appid} is blacklisted. Remove it to continue.`);
   }
@@ -3753,6 +4310,10 @@ ipcMain.handle("load-preferences", () => {
     cachedPreferences.overlayInteractShortcut =
       DEFAULT_PREFERENCES.overlayInteractShortcut;
   }
+  cachedPreferences.overlayControllerToggleBinding =
+    getOverlayControllerToggleBinding(cachedPreferences);
+  cachedPreferences.overlayControllerControlModeBinding =
+    getOverlayControllerControlModeBinding(cachedPreferences);
   const overlayShortcutPreferenceValidation =
     validateOverlayShortcutPreferencePair(cachedPreferences);
   if (overlayShortcutPreferenceValidation?.reason === "conflict") {
@@ -3784,9 +4345,21 @@ ipcMain.handle("load-preferences", () => {
 });
 
 ipcMain.handle("blacklist:check", async (_event, appid) => {
-  const normalized = normalizeAppIdValue(appid);
-  const blacklisted = normalized ? isAppIdBlacklisted(normalized) : false;
-  return { appid: normalized, blacklisted };
+  const payload =
+    appid && typeof appid === "object" && !Array.isArray(appid) ? appid : {};
+  const rawAppId =
+    typeof appid === "string" || typeof appid === "number"
+      ? appid
+      : payload?.appid;
+  const normalized = normalizeAppIdValue(rawAppId);
+  const blacklisted = normalized
+    ? isAppIdBlacklisted(normalized, payload?.platform || null)
+    : false;
+  return {
+    appid: normalized,
+    platform: payload?.platform || null,
+    blacklisted,
+  };
 });
 
 ipcMain.handle("config:get-by-appid", async (_event, appid) => {
@@ -4092,7 +4665,7 @@ ipcMain.handle("saveConfig", async (event, config) => {
     if (!sanitizedAppId) {
       return { success: false, message: tUi("main.message.appidRequired") };
     }
-    if (isAppIdBlacklisted(sanitizedAppId)) {
+    if (isAppIdBlacklisted(sanitizedAppId, payload.platform)) {
       const message = `AppID ${sanitizedAppId} is blacklisted. Remove it to continue.`;
       ipcLogger.info("saveConfig:blocked-blacklist", {
         appid: sanitizedAppId,
@@ -4349,7 +4922,6 @@ ipcMain.handle("saveConfig", async (event, config) => {
 // Handler for config load
 ipcMain.handle("loadConfigs", () => {
   ipcLogger.info("loadConfigs:request");
-  const blacklist = new Set(readBlacklistFromPrefs());
   const lang = cachedPreferences?.language || "english";
   const configFiles = fs
     .readdirSync(configsDir)
@@ -4449,7 +5021,7 @@ ipcMain.handle("loadConfigs", () => {
       }
       if (raw?.appid) {
         meta.appid = String(raw.appid);
-        meta.blacklisted = blacklist.has(meta.appid);
+        meta.blacklisted = isAppIdBlacklisted(meta.appid, meta.platform);
       }
       if (raw?.executable) {
         meta.executable = raw.executable;
@@ -5552,6 +6124,9 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
   const rawName = payload.configName || "";
   const safeName = rawName ? sanitizeConfigName(rawName) : null;
   let resolvedAppId = payload.appid ? String(payload.appid) : null;
+  let resolvedPlatform = payload.platform
+    ? normalizeBlacklistPlatformValue(payload.platform)
+    : null;
   const configPath = safeName
     ? path.join(configsDir, `${safeName}.json`)
     : null;
@@ -5560,6 +6135,7 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
   ipcLogger.info("config:blacklist:request", {
     configName: safeName || null,
     appid: resolvedAppId || null,
+    platform: resolvedPlatform || null,
     remove: removeFlag,
   });
 
@@ -5567,12 +6143,19 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
     if (!resolvedAppId && configPath && fs.existsSync(configPath)) {
       const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
       if (parsed?.appid) resolvedAppId = String(parsed.appid);
+      if (!resolvedPlatform && parsed?.platform) {
+        resolvedPlatform = normalizeBlacklistPlatformValue(parsed.platform);
+      }
     }
     if (!resolvedAppId) throw new Error("AppID missing");
 
     const updatedList = removeFlag
-      ? removeAppIdFromBlacklist(resolvedAppId)
-      : addAppIdToBlacklist(resolvedAppId);
+      ? resolvedPlatform
+        ? removeConfigKeyFromBlacklist(resolvedAppId, resolvedPlatform)
+        : removeAppIdFromBlacklist(resolvedAppId)
+      : resolvedPlatform
+        ? addConfigKeyToBlacklist(resolvedAppId, resolvedPlatform)
+        : addAppIdToBlacklist(resolvedAppId);
 
     if (removeFlag) {
       try {
@@ -5582,23 +6165,28 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
 
     refreshBlacklistEffects();
     try {
-      broadcastToAll("blacklist:updated", { appids: updatedList });
+      broadcastToAll("blacklist:updated", updatedList);
     } catch {}
 
     ipcLogger.info("config:blacklist:success", {
       configName: safeName || null,
       appid: resolvedAppId,
+      platform: resolvedPlatform || null,
       remove: removeFlag,
     });
     return {
       success: true,
       appid: resolvedAppId,
+      platform: resolvedPlatform || null,
       blacklisted: !removeFlag,
-      blacklist: updatedList,
+      blacklist: updatedList.entries,
+      blacklistPayload: updatedList,
     };
   } catch (err) {
     ipcLogger.error("config:blacklist:error", {
       configName: safeName || null,
+      appid: resolvedAppId || null,
+      platform: resolvedPlatform || null,
       error: err?.message || String(err),
     });
     return { success: false, error: err?.message || "Blacklist failed" };
@@ -5606,25 +6194,27 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
 });
 
 ipcMain.handle("blacklist:list", async () => {
-  return { appids: readBlacklistFromPrefs() };
+  return buildBlacklistPayload();
 });
 
 ipcMain.handle("blacklist:reset", async () => {
   ipcLogger.info("blacklist:reset:request");
   try {
-    const before = readBlacklistFromPrefs();
+    const before = buildBlacklistPayload();
     resetBlacklist();
-    if (Array.isArray(before) && before.length) {
+    if ((before?.appids?.length || 0) > 0 || (before?.configKeys?.length || 0) > 0) {
       try {
-        ipcMain.emit("blacklist:removed-appid", null, before);
+        ipcMain.emit("blacklist:removed-appid", null, null);
       } catch {}
     }
     refreshBlacklistEffects();
     try {
-      broadcastToAll("blacklist:updated", { appids: readBlacklistFromPrefs() });
+      broadcastToAll("blacklist:updated", buildBlacklistPayload());
     } catch {}
-    ipcLogger.info("blacklist:reset:success", { count: before?.length || 0 });
-    return { success: true, appids: [] };
+    ipcLogger.info("blacklist:reset:success", {
+      count: (before?.appids?.length || 0) + (before?.configKeys?.length || 0),
+    });
+    return { success: true, appids: [], configKeys: [], entries: [] };
   } catch (err) {
     ipcLogger.error("blacklist:reset:error", {
       error: err?.message || String(err),
@@ -5743,7 +6333,7 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
     if (!appid) {
       return { success: false, message: tUi("main.message.appidRequired") };
     }
-    if (isAppIdBlacklisted(appid)) {
+    if (isAppIdBlacklisted(appid, platform)) {
       const message = tUi("main.message.appidBlacklisted", { appid });
       ipcLogger.info("schema:regenerate-blocked-blacklist", {
         appid,
@@ -6283,6 +6873,7 @@ function createMainWindow(options = {}) {
     windowLogger.info("create-main-window:visible", {
       maximized: mainWindow.isMaximized(),
     });
+    broadcastOverlayControllerRuntimeState(cachedPreferences);
     mainWindow.webContents.send(
       "window-state-change",
       mainWindow.isMaximized(),
@@ -8654,7 +9245,7 @@ ipcMain.on(
     const appIdString =
       config?.appid != null ? String(config.appid).trim() : "";
 
-    if (appIdString && isAppIdBlacklisted(appIdString)) {
+    if (appIdString && isAppIdBlacklisted(appIdString, config?.platform)) {
       ipcLogger.info("update-config:ignored-blacklisted", {
         configName: configName || null,
         appid: appIdString,
@@ -9391,7 +9982,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     if (!sanitizedAppId) {
       return { success: false, message: tUi("main.message.appidRequired") };
     }
-    if (isAppIdBlacklisted(sanitizedAppId)) {
+    if (isAppIdBlacklisted(sanitizedAppId, payload.platform)) {
       const message = `AppID ${sanitizedAppId} is blacklisted. Remove it to continue.`;
       ipcLogger.info("renameConfig:blocked-blacklist", {
         appid: sanitizedAppId,
@@ -10875,6 +11466,12 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
 
   overlayWindow.on("closed", () => {
     overlayLogger.info("create-overlay:closed");
+    try {
+      overlayControllerService?.notifyOverlayPresentationChanged?.(
+        false,
+        "overlay-window:closed",
+      );
+    } catch {}
     clearOverlayVisibilityAckTimeout();
     clearOverlayTopmostBoostTimer();
     stopOverlayGlobalDrag();
@@ -10892,6 +11489,12 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
 
   overlayWindow.on("show", () => {
     overlayPresented = true;
+    try {
+      overlayControllerService?.notifyOverlayPresentationChanged?.(
+        true,
+        "overlay-window:show",
+      );
+    } catch {}
     overlayShownAtLeastOnce = true;
     clearOverlayPendingShowState();
     overlayLogger.info("create-overlay:show", {
@@ -10927,6 +11530,12 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
 
   overlayWindow.on("hide", () => {
     overlayPresented = false;
+    try {
+      overlayControllerService?.notifyOverlayPresentationChanged?.(
+        false,
+        "overlay-window:hide",
+      );
+    } catch {}
     clearOverlayPendingShowState();
     clearOverlayVisibilityAckTimeout();
     overlayLogger.info("create-overlay:hide", {
@@ -11086,17 +11695,14 @@ ipcMain.handle("launchExecutable", async (_event, exePath, argsString) => {
 let currentAppId = null;
 
 ipcMain.on("toggle-overlay", (_event, selectedConfig) => {
-  if (!selectedConfig) {
-    if (isOverlayEffectivelyPresented()) {
-      setOverlayPresented(false);
-    }
-    return;
-  }
   if (isBootOnboardingGatePending() || global.bootOnboardingRequired) return;
+  const requestedConfig = isNonEmptyString(selectedConfig)
+    ? sanitizeConfigName(selectedConfig)
+    : null;
   if (!overlayWindow || overlayWindow.isDestroyed()) {
-    createOverlayWindow(selectedConfig);
+    createOverlayWindow(requestedConfig);
   } else {
-    overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+    overlayWindow.webContents.send("load-overlay-data", requestedConfig);
     overlayWindow.webContents.send("set-language", {
       language: selectedLanguage,
       uiLanguage: selectedUiLanguage,
@@ -11380,6 +11986,7 @@ app.whenReady().then(async () => {
   scheduleAutoSelectProcessPollerAfterBoot();
   mainWindow.hide();
   schedulePostBootUiInitialization();
+  initializeStartupAppUpdater();
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createMainWindow();
@@ -11388,9 +11995,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
-  if (overlayControllerManager) {
-    overlayControllerManager.shutdown("app:will-quit");
-  }
+  overlayControllerService?.shutdown?.("app:will-quit");
   clearOverlayShortcutRegistration();
   clearOverlayInteractShortcut();
   clearOverlayGlobalDragHookRegistration();
@@ -12235,7 +12840,7 @@ async function autoSelectRunningGameConfig(processes) {
     const isBlacklisted = (entry) => {
       const id = String(entry?.appid || "").trim();
       if (!id) return false;
-      return blacklistedAppIdsSet.has(id);
+      return isAppIdBlacklisted(id, entry?.data?.platform || null);
     };
 
     const isEntryRunning = (entry, configName) => {

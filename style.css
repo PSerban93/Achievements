@@ -90,7 +90,8 @@ html {
 .titlebar-fallback {
   font-size: 16px;
   line-height: 1;
-  font-family: "Segoe UI Symbol", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family:
+    "Segoe UI Symbol", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
 html.fa-ready .titlebar-controls i {
@@ -110,7 +111,8 @@ html.fa-ready .titlebar-fallback {
 }
 
 .fa-fallback {
-  font-family: "Segoe UI Symbol", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family:
+    "Segoe UI Symbol", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
 html:not(.fa-ready) .fa-icon {
@@ -1254,18 +1256,21 @@ body::-webkit-scrollbar {
   top: 5px;
 }
 
-#overlay-shortcut-btn {
+#overlay-shortcut-btn,
+#overlay-controller-shortcut-btn {
   background-color: var(--dracula-purple);
   color: var(--dracula-background);
   text-align: center;
   font-weight: 500;
 }
 
-#overlay-shortcut-btn:hover {
+#overlay-shortcut-btn:hover,
+#overlay-controller-shortcut-btn:hover {
   background-color: var(--dracula-pink);
 }
 
-#overlay-shortcut-btn.listening {
+#overlay-shortcut-btn.listening,
+#overlay-controller-shortcut-btn.listening {
   background-color: var(--dracula-orange);
   color: var(--dracula-background);
 }
@@ -1614,6 +1619,71 @@ body::-webkit-scrollbar {
   scrollbar-gutter: stable;
 }
 
+#dashboardSelectionBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  max-height: 30px;
+  margin: 0 0 10px;
+  padding: 3px 10px;
+  border: 1px solid rgba(139, 233, 253, 0.2);
+  border-radius: 10px;
+  background: rgba(24, 27, 36, 0.92);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+  margin-bottom: 30px;
+}
+
+#dashboardSelectionSummary {
+  color: #eef4ff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.dashboard-selection-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dash-selection-btn {
+  min-height: 22px;
+  margin-top: 10px;
+  margin-bottom: 10px;
+  padding: 3px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #eef4ff;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.08s ease;
+}
+
+.dash-selection-btn:hover {
+  background: rgba(139, 233, 253, 0.12);
+  border-color: rgba(139, 233, 253, 0.3);
+}
+
+.dash-selection-btn:active {
+  transform: translateY(1px);
+}
+
+.dash-selection-btn.is-danger:hover {
+  background: rgba(255, 107, 107, 0.16);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+.dash-selection-btn.is-secondary:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
 /* Grid */
 .dashboard-grid {
   display: grid;
@@ -1654,6 +1724,19 @@ body::-webkit-scrollbar {
   outline-offset: 0;
 }
 
+.dash-card.selected {
+  border-color: rgba(189, 147, 249, 0.48);
+  box-shadow: 0 0 0 2px rgba(189, 147, 249, 0.18);
+}
+
+.dash-card.selected.active,
+.dash-card.selected:focus,
+.dash-card.selected:focus-visible {
+  box-shadow:
+    0 0 0 2px rgba(189, 147, 249, 0.18),
+    0 0 0 4px rgba(139, 233, 253, 0.25);
+}
+
 .dash-card:focus {
   outline: 2px solid #6ee7ff;
   outline-offset: 0;
@@ -1673,6 +1756,37 @@ body::-webkit-scrollbar {
   transform: translateZ(0);
   will-change: opacity, transform;
   backface-visibility: hidden;
+}
+
+.dash-select-indicator {
+  display: none;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(11, 12, 18, 0.78);
+  border: 1px solid rgba(189, 147, 249, 0.45);
+  color: #d5bbff;
+  opacity: 0;
+  transform: scale(0.85);
+  transition:
+    opacity 0.15s ease,
+    transform 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+  pointer-events: none;
+  margin-left: 6px;
+  font-size: 11px;
+}
+
+.dash-card.selected .dash-select-indicator {
+  display: inline-flex;
+  opacity: 1;
+  transform: scale(1);
+  background: rgba(189, 147, 249, 0.24);
+  border-color: rgba(189, 147, 249, 0.75);
 }
 
 /* Name */
@@ -1696,13 +1810,22 @@ body::-webkit-scrollbar {
 .dash-title {
   width: 100%;
   max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  color: #eaeaea;
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.dash-title-text {
+  min-width: 0;
+  max-width: 100%;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #eaeaea;
-  font-size: 13px;
-  line-height: 1.25;
 }
 
 /* Progress pill & bar */

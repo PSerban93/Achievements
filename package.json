@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -83,13 +83,21 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Achievements"
     },
-    "afterPack": "build/afterPack.js"
+    "afterPack": "build/afterPack.js",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "PSerban93",
+        "repo": "Achievements"
+      }
+    ]
   },
   "dependencies": {
     "axios": "^1.12.0",
     "cheerio": "^1.1.2",
     "chokidar": "^4.0.3",
     "crc-32": "^1.2.2",
+    "electron-updater": "^6.8.3",
     "ini": "^4.1.1",
     "jsdom": "^26.1.0",
     "koffi": "^2.15.2",
