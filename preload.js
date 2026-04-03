@@ -215,6 +215,20 @@ contextBridge.exposeInMainWorld("api", {
     return () =>
       ipcRenderer.removeListener("overlay-controller-runtime-state", handler);
   },
+  onAppUpdateAvailable: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("app-update:available", handler);
+    return () => ipcRenderer.removeListener("app-update:available", handler);
+  },
+  onAppUpdateDownloaded: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("app-update:downloaded", handler);
+    return () => ipcRenderer.removeListener("app-update:downloaded", handler);
+  },
+  downloadAppUpdate: () => ipcRenderer.invoke("app:update-download"),
+  installAppUpdate: () => ipcRenderer.invoke("app:update-install"),
   onPlaytimeUpdate: (callback) => {
     if (typeof callback !== "function") return () => {};
     const handler = (_event, data) => callback(data);

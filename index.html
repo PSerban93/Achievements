@@ -3655,6 +3655,11 @@
       <div class="modal-content confirm-modal">
         <h3 id="appConfirmTitle">Confirm</h3>
         <p id="appConfirmMessage"></p>
+        <p id="appConfirmDetail" class="confirm-detail hidden"></p>
+        <div id="appConfirmNotes" class="confirm-notes hidden">
+          <div id="appConfirmNotesTitle" class="confirm-notes-title hidden"></div>
+          <pre id="appConfirmNotesBody" class="confirm-notes-body"></pre>
+        </div>
         <label id="appConfirmCheckboxRow" class="confirm-checkbox-row hidden">
           <input id="appConfirmCheckbox" type="checkbox" />
           <span id="appConfirmCheckboxLabel"></span>
@@ -7030,6 +7035,12 @@
       const confirmModal = document.getElementById("appConfirmModal");
       const confirmTitleEl = document.getElementById("appConfirmTitle");
       const confirmMessageEl = document.getElementById("appConfirmMessage");
+      const confirmDetailEl = document.getElementById("appConfirmDetail");
+      const confirmNotesEl = document.getElementById("appConfirmNotes");
+      const confirmNotesTitleEl = document.getElementById(
+        "appConfirmNotesTitle",
+      );
+      const confirmNotesBodyEl = document.getElementById("appConfirmNotesBody");
       const confirmCheckboxRow = document.getElementById(
         "appConfirmCheckboxRow",
       );
@@ -7101,11 +7112,24 @@
           !confirmModal ||
           !confirmTitleEl ||
           !confirmMessageEl ||
+          !confirmDetailEl ||
+          !confirmNotesEl ||
+          !confirmNotesTitleEl ||
+          !confirmNotesBodyEl ||
           !confirmOkBtn ||
           !confirmCancelBtn
         ) {
-          return window.confirm(
+          const fallbackMessage = [
             opts?.message ||
+              tUi("main.dialog.confirm.message", "Are you sure?"),
+            opts?.detail || "",
+            opts?.notesTitle || "",
+            opts?.notes || "",
+          ]
+            .filter((part) => typeof part === "string" && part.trim())
+            .join("\n\n");
+          return window.confirm(
+            fallbackMessage ||
               tUi("main.dialog.confirm.message", "Are you sure?"),
           );
         }
@@ -7123,6 +7147,29 @@
           opts.title || tUi("appConfirmTitle", "Confirm");
         confirmMessageEl.textContent =
           opts.message || tUi("main.dialog.confirm.message", "Are you sure?");
+        if (opts.detail) {
+          confirmDetailEl.textContent = opts.detail;
+          confirmDetailEl.classList.remove("hidden");
+        } else {
+          confirmDetailEl.textContent = "";
+          confirmDetailEl.classList.add("hidden");
+        }
+        if (opts.notes) {
+          confirmNotesBodyEl.textContent = opts.notes;
+          if (opts.notesTitle) {
+            confirmNotesTitleEl.textContent = opts.notesTitle;
+            confirmNotesTitleEl.classList.remove("hidden");
+          } else {
+            confirmNotesTitleEl.textContent = "";
+            confirmNotesTitleEl.classList.add("hidden");
+          }
+          confirmNotesEl.classList.remove("hidden");
+        } else {
+          confirmNotesBodyEl.textContent = "";
+          confirmNotesTitleEl.textContent = "";
+          confirmNotesTitleEl.classList.add("hidden");
+          confirmNotesEl.classList.add("hidden");
+        }
         confirmOkBtn.textContent = opts.okText || tUi("appConfirmOkBtn", "OK");
         confirmCancelBtn.textContent =
           opts.cancelText || tUi("appConfirmCancelBtn", "Cancel");
@@ -7251,6 +7298,128 @@
           return { confirmed: false, checked: false, checked2: false };
         }
       }
+
+      let appUpdateAvailablePromptVersion = "";
+      let appUpdateDownloadedPromptVersion = "";
+      let appUpdateAvailablePromptBusy = false;
+      let appUpdateDownloadedPromptBusy = false;
+
+      async function handleAppUpdateAvailable(payload = {}) {
+        const version = String(payload?.version || "").trim();
+        const releaseName = String(payload?.releaseName || "").trim();
+        const releaseNotes = String(payload?.releaseNotes || "").trim();
+        if (!version) return;
+        if (appUpdateAvailablePromptBusy) return;
+        if (appUpdateAvailablePromptVersion === version) return;
+        appUpdateAvailablePromptBusy = true;
+        appUpdateAvailablePromptVersion = version;
+        try {
+          const confirmed = await safeConfirm({
+            title: tUi(
+              "main.update.available.title",
+              "Update available",
+            ),
+            message: tUiFmt(
+              "main.update.available.message",
+              { version },
+              `Version ${version} is available.`,
+            ),
+            detail: tUi(
+              "main.update.available.detail",
+              "Do you want to download and install it now?",
+            ),
+            notesTitle: releaseName,
+            notes: releaseNotes,
+            okText: tUi(
+              "main.update.available.updateNow",
+              "Update now",
+            ),
+            cancelText: tUi("main.update.available.later", "Later"),
+          });
+          if (!confirmed) {
+            logUiEvent("info", "app-update:download-deferred-ui", {
+              version,
+            });
+            return;
+          }
+          const result = await window.api?.downloadAppUpdate?.();
+          if (!result?.success) {
+            showNotification(
+              result?.error
+                ? `${tUi("main.update.error.message", "The update could not be downloaded.")}\n${result.error}`
+                : tUi(
+                    "main.update.error.message",
+                    "The update could not be downloaded.",
+                  ),
+              "#f44336",
+            );
+            return;
+          }
+          logUiEvent("info", "app-update:download-requested-ui", {
+            version,
+            state: result?.state || null,
+          });
+        } catch (err) {
+          logUiEvent("error", "app-update:available-prompt-failed", {
+            version,
+            message: err?.message || String(err),
+          });
+        } finally {
+          appUpdateAvailablePromptBusy = false;
+        }
+      }
+
+      async function handleAppUpdateDownloaded(payload = {}) {
+        const version = String(payload?.version || "").trim();
+        if (!version) return;
+        if (appUpdateDownloadedPromptBusy) return;
+        if (appUpdateDownloadedPromptVersion === version) return;
+        appUpdateDownloadedPromptBusy = true;
+        appUpdateDownloadedPromptVersion = version;
+        try {
+          const confirmed = await safeConfirm({
+            title: tUi(
+              "main.update.downloaded.title",
+              "Update downloaded",
+            ),
+            message: tUiFmt(
+              "main.update.downloaded.message",
+              { version },
+              `Update ${version} downloaded. Restart to install.`,
+            ),
+            detail: tUi(
+              "main.update.downloaded.detail",
+              "The update will install after the application restarts.",
+            ),
+            okText: tUi(
+              "main.update.downloaded.restartNow",
+              "Restart now",
+            ),
+            cancelText: tUi("main.update.downloaded.later", "Later"),
+          });
+          if (!confirmed) {
+            logUiEvent("info", "app-update:install-deferred-ui", {
+              version,
+            });
+            return;
+          }
+          await window.api?.installAppUpdate?.();
+        } catch (err) {
+          logUiEvent("error", "app-update:downloaded-prompt-failed", {
+            version,
+            message: err?.message || String(err),
+          });
+        } finally {
+          appUpdateDownloadedPromptBusy = false;
+        }
+      }
+
+      window.api?.onAppUpdateAvailable?.((payload) => {
+        void handleAppUpdateAvailable(payload);
+      });
+      window.api?.onAppUpdateDownloaded?.((payload) => {
+        void handleAppUpdateDownloaded(payload);
+      });
 
       async function safeRefocus() {
         try {

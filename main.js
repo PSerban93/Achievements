@@ -1642,18 +1642,6 @@ function ensureMainWindowVisibleForUpdatePrompt() {
   return mainWindow;
 }
 
-function showUpdateMessageBox(options = {}) {
-  const parentWindow =
-    getUpdateDialogParentWindow() || ensureMainWindowVisibleForUpdatePrompt();
-  updateLogger.info("app-update:prompt", {
-    title: options?.title || null,
-    hasParentWindow: Boolean(parentWindow && !parentWindow.isDestroyed?.()),
-  });
-  return parentWindow
-    ? dialog.showMessageBox(parentWindow, options)
-    : dialog.showMessageBox(options);
-}
-
 function getAppUpdateConfigPath() {
   return path.join(process.resourcesPath, "app-update.yml");
 }
@@ -1663,102 +1651,57 @@ function getUpdateVersionLabel(info = null) {
   return version || "new";
 }
 
-async function promptForAvailableAppUpdate(info = null) {
-  if (appUpdatePromptActive) return;
-  appUpdatePromptActive = true;
-  const version = getUpdateVersionLabel(info);
-  try {
-    const result = await showUpdateMessageBox({
-      type: "info",
-      buttons: [
-        tUi("main.update.available.updateNow", {}, "Update now"),
-        tUi("main.update.available.later", {}, "Later"),
-      ],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-      title: tUi("main.update.available.title", {}, "Update available"),
-      message: tUi(
-        "main.update.available.message",
-        { version },
-        `Version ${version} is available.`,
-      ),
-      detail: tUi(
-        "main.update.available.detail",
-        {},
-        "Do you want to download and install it now?",
-      ),
-    });
-    if (result.response !== 0) {
-      updateLogger.info("app-update:download-deferred", { version });
-      return;
-    }
-    if (appUpdateDownloadInFlight) return;
-    appUpdatePromptActive = false;
-    appUpdateDownloadRequested = true;
-    appUpdateDownloadInFlight = true;
-    updateLogger.info("app-update:download-start", { version });
-    await autoUpdater.downloadUpdate();
-  } catch (err) {
-    appUpdateDownloadRequested = false;
-    updateLogger.error("app-update:download-failed", {
-      error: err?.message || String(err),
-    });
-    await showUpdateMessageBox({
-      type: "error",
-      buttons: [tUi("main.update.error.ok", {}, "OK")],
-      defaultId: 0,
-      noLink: true,
-      title: tUi("main.update.error.title", {}, "Update failed"),
-      message: tUi(
-        "main.update.error.message",
-        {},
-        "The update could not be downloaded.",
-      ),
-      detail: err?.message || String(err),
-    }).catch(() => {});
-  } finally {
-    appUpdatePromptActive = false;
-    appUpdateDownloadInFlight = false;
-  }
+function normalizeUpdateReleaseName(info = null) {
+  const releaseName = String(info?.releaseName || "").trim();
+  return releaseName || "";
 }
 
-async function promptToInstallDownloadedAppUpdate(info = null) {
-  if (appUpdatePromptActive) return;
-  appUpdatePromptActive = true;
-  const version = getUpdateVersionLabel(info);
-  try {
-    const result = await showUpdateMessageBox({
-      type: "info",
-      buttons: [
-        tUi("main.update.downloaded.restartNow", {}, "Restart now"),
-        tUi("main.update.downloaded.later", {}, "Later"),
-      ],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-      title: tUi("main.update.downloaded.title", {}, "Update downloaded"),
-      message: tUi(
-        "main.update.downloaded.message",
-        { version },
-        `Update ${version} downloaded. Restart to install.`,
-      ),
-      detail: tUi(
-        "main.update.downloaded.detail",
-        {},
-        "The update will install after the application restarts.",
-      ),
-    });
-    if (result.response !== 0) {
-      updateLogger.info("app-update:install-deferred", { version });
-      return;
-    }
-    updateLogger.info("app-update:install-now", { version });
-    isQuitting = true;
-    autoUpdater.quitAndInstall();
-  } finally {
-    appUpdatePromptActive = false;
+function normalizeUpdateReleaseNotes(info = null) {
+  const rawNotes = info?.releaseNotes;
+  if (typeof rawNotes === "string") {
+    return rawNotes.trim();
   }
+  if (Array.isArray(rawNotes)) {
+    return rawNotes
+      .map((entry) => {
+        const version = String(entry?.version || "").trim();
+        const note = String(entry?.note || "").trim();
+        if (!note) return "";
+        return version ? `${version}\n${note}` : note;
+      })
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  return "";
+}
+
+function emitAppUpdateEvent(channel, payload = {}) {
+  const send = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    try {
+      mainWindow.webContents.send(channel, payload);
+      updateLogger.info("app-update:prompt", {
+        channel,
+        version: payload?.version || null,
+      });
+    } catch (err) {
+      updateLogger.error("app-update:prompt-failed", {
+        channel,
+        error: err?.message || String(err),
+      });
+    }
+  };
+
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow({ forceShow: true });
+  }
+  ensureMainWindowVisibleForUpdatePrompt();
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.webContents.isLoading()) {
+    mainWindow.webContents.once("did-finish-load", send);
+    return;
+  }
+  send();
 }
 
 function initializeStartupAppUpdater() {
@@ -1793,7 +1736,11 @@ function initializeStartupAppUpdater() {
     updateLogger.info("app-update:available", {
       version: info?.version || null,
     });
-    void promptForAvailableAppUpdate(info);
+    emitAppUpdateEvent("app-update:available", {
+      version: getUpdateVersionLabel(info),
+      releaseName: normalizeUpdateReleaseName(info),
+      releaseNotes: normalizeUpdateReleaseNotes(info),
+    });
   });
   autoUpdater.on("update-not-available", (info) => {
     updateLogger.info("app-update:not-available", {
@@ -1808,10 +1755,13 @@ function initializeStartupAppUpdater() {
   });
   autoUpdater.on("update-downloaded", (info) => {
     appUpdateDownloadRequested = false;
+    appUpdateDownloadInFlight = false;
     updateLogger.info("app-update:downloaded", {
       version: info?.version || null,
     });
-    void promptToInstallDownloadedAppUpdate(info);
+    emitAppUpdateEvent("app-update:downloaded", {
+      version: getUpdateVersionLabel(info),
+    });
   });
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch((err) => {
@@ -1821,6 +1771,37 @@ function initializeStartupAppUpdater() {
     });
   }, STARTUP_APP_UPDATE_CHECK_DELAY_MS);
 }
+
+ipcMain.handle("app:update-download", async () => {
+  if (appUpdateDownloadInFlight) {
+    return { success: true, state: "downloading" };
+  }
+  appUpdateDownloadRequested = true;
+  appUpdateDownloadInFlight = true;
+  try {
+    updateLogger.info("app-update:download-start", {});
+    await autoUpdater.downloadUpdate();
+    return { success: true, state: "started" };
+  } catch (err) {
+    appUpdateDownloadRequested = false;
+    appUpdateDownloadInFlight = false;
+    updateLogger.error("app-update:download-failed", {
+      error: err?.message || String(err),
+    });
+    return {
+      success: false,
+      state: "failed",
+      error: err?.message || String(err),
+    };
+  }
+});
+
+ipcMain.handle("app:update-install", async () => {
+  updateLogger.info("app-update:install-now", {});
+  isQuitting = true;
+  autoUpdater.quitAndInstall();
+  return { success: true };
+});
 
 function isNonEmptyString(s) {
   return typeof s === "string" && s.trim().length > 0;
@@ -3464,6 +3445,16 @@ const UI_CONSOLE_SUPPRESS_PATTERNS = [
   /--trace-deprecation/i,
   /node:internal\/process\/warning/i,
   /fs\.rmdir\(path,\s*\{\s*recursive:\s*true\s*\}\)/i,
+  /No published versions on GitHub/i,
+  /latest\.yml/i,
+  /builder-util-runtime/i,
+  /electron-updater/i,
+  /GitHubProvider\.getLatestVersion/i,
+  /\bNsisUpdater\b/i,
+  /\bAppUpdater\b/i,
+  /\bUpdate\s+[0-9][^ ]*\s+found\b/i,
+  /Download block maps/i,
+  /disableWebInstaller is set to false/i,
 ];
 
 function shouldSuppressConsoleMessageInUI(msg) {
