@@ -1623,8 +1623,32 @@ function getUpdateDialogParentWindow() {
   return null;
 }
 
+function ensureMainWindowVisibleForUpdatePrompt() {
+  showMainWindowRespectingPrefs();
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  try {
+    if (mainWindow.isMinimized?.()) {
+      mainWindow.restore();
+    }
+  } catch {}
+  try {
+    if (!mainWindow.isVisible?.()) {
+      mainWindow.show();
+    }
+  } catch {}
+  try {
+    mainWindow.focus();
+  } catch {}
+  return mainWindow;
+}
+
 function showUpdateMessageBox(options = {}) {
-  const parentWindow = getUpdateDialogParentWindow();
+  const parentWindow =
+    getUpdateDialogParentWindow() || ensureMainWindowVisibleForUpdatePrompt();
+  updateLogger.info("app-update:prompt", {
+    title: options?.title || null,
+    hasParentWindow: Boolean(parentWindow && !parentWindow.isDestroyed?.()),
+  });
   return parentWindow
     ? dialog.showMessageBox(parentWindow, options)
     : dialog.showMessageBox(options);
