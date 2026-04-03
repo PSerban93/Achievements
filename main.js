@@ -1720,7 +1720,9 @@ function initializeStartupAppUpdater() {
     return;
   }
   autoUpdater.autoDownload = false;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // "Later" after update-downloaded must defer installation, not trigger it on
+  // the next normal app quit.
+  autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = isPrereleaseAppVersion();
   autoUpdater.on("error", async (err) => {
     updateLogger.error("app-update:error", {
@@ -3452,9 +3454,37 @@ const UI_CONSOLE_SUPPRESS_PATTERNS = [
   /GitHubProvider\.getLatestVersion/i,
   /\bNsisUpdater\b/i,
   /\bAppUpdater\b/i,
-  /\bUpdate\s+[0-9][^ ]*\s+found\b/i,
+  /\bUpdate\b.*\bfound\b/i,
+  /\bFound version\b/i,
   /Download block maps/i,
   /disableWebInstaller is set to false/i,
+  /releases\/download\//i,
+  /\bNew version\b.*\bdownloaded to\b/i,
+  /\bUpdate has already been downloaded to\b/i,
+  /\bChecking for update\b/i,
+  /Checking for update \(already in progress\)/i,
+  /\bUpdate for version\b.*\bis not available\b/i,
+  /Downloading update \(already in progress\)/i,
+  /\bDownloading update from\b/i,
+  /Cannot download differentially,\s*fallback to full download/i,
+  /^\s*cancelled\s*$/i,
+  /Install on explicit quitAndInstall/i,
+  /\bInstall:\s*isSilent:\b/i,
+  /install call ignored: quitAndInstallCalled is set to true/i,
+  /Update installer has already been triggered/i,
+  /Update will not be installed on quit because autoInstallOnAppQuit is set to false/i,
+  /Update will be not installed on quit because application is quitting with exit code/i,
+  /Auto install update on quit/i,
+  /\bExecuting:\b.*\bwith args:\b/i,
+  /isAdminRightsRequired is set to true/i,
+  /Cannot run installer: error code:/i,
+  /Error on remove temp update file/i,
+  /Cannot rename temp file to final file/i,
+  /Generated new staging user ID/i,
+  /Staging percentage:/i,
+  /Staging percentage is NaN/i,
+  /Failed to compare current OS version/i,
+  /Current OS version .* is less than the minimum OS version required/i,
 ];
 
 function shouldSuppressConsoleMessageInUI(msg) {

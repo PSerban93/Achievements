@@ -5658,6 +5658,37 @@
         /GitHubProvider\.getLatestVersion/i,
         /\bNsisUpdater\b/i,
         /\bAppUpdater\b/i,
+        /\bUpdate\b.*\bfound\b/i,
+        /\bFound version\b/i,
+        /Download block maps/i,
+        /disableWebInstaller is set to false/i,
+        /releases\/download\//i,
+        /\bNew version\b.*\bdownloaded to\b/i,
+        /\bUpdate has already been downloaded to\b/i,
+        /\bChecking for update\b/i,
+        /Checking for update \(already in progress\)/i,
+        /\bUpdate for version\b.*\bis not available\b/i,
+        /Downloading update \(already in progress\)/i,
+        /\bDownloading update from\b/i,
+        /Cannot download differentially,\s*fallback to full download/i,
+        /^\s*cancelled\s*$/i,
+        /Install on explicit quitAndInstall/i,
+        /\bInstall:\s*isSilent:\b/i,
+        /install call ignored: quitAndInstallCalled is set to true/i,
+        /Update installer has already been triggered/i,
+        /Update will not be installed on quit because autoInstallOnAppQuit is set to false/i,
+        /Update will be not installed on quit because application is quitting with exit code/i,
+        /Auto install update on quit/i,
+        /\bExecuting:\b.*\bwith args:\b/i,
+        /isAdminRightsRequired is set to true/i,
+        /Cannot run installer: error code:/i,
+        /Error on remove temp update file/i,
+        /Cannot rename temp file to final file/i,
+        /Generated new staging user ID/i,
+        /Staging percentage:/i,
+        /Staging percentage is NaN/i,
+        /Failed to compare current OS version/i,
+        /Current OS version .* is less than the minimum OS version required/i,
       ];
 
       const _shownWarns = new Set();
@@ -7304,10 +7335,114 @@
       let appUpdateAvailablePromptBusy = false;
       let appUpdateDownloadedPromptBusy = false;
 
+      function normalizeUpdateNotesText(raw = "") {
+        const source = String(raw || "").trim();
+        if (!source) return "";
+        if (!/[<>]/.test(source)) return source;
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(source, "text/html");
+          const text = formatUpdateNotesNode(doc.body, 0)
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+          return text || source;
+        } catch {
+          return source
+            .replace(/<br\s*\/?>/gi, "\n")
+            .replace(/<\/(p|div|li|ul|ol|h[1-6])>/gi, "\n")
+            .replace(/<[^>]+>/g, "")
+            .replace(/\n{3,}/g, "\n\n")
+            .trim();
+        }
+      }
+
+      function formatUpdateNotesNode(node, depth = 0) {
+        if (!node) return "";
+        if (node.nodeType === Node.TEXT_NODE) {
+          return node.textContent || "";
+        }
+        if (node.nodeType !== Node.ELEMENT_NODE) {
+          return "";
+        }
+
+        const tag = node.tagName.toLowerCase();
+        if (tag === "br") return "\n";
+
+        if (tag === "ul" || tag === "ol") {
+          const items = Array.from(node.children).filter(
+            (child) => child.tagName?.toLowerCase() === "li",
+          );
+          return items
+            .map((item, index) =>
+              formatUpdateNotesListItem(
+                item,
+                depth,
+                tag === "ol" ? index + 1 : null,
+              ),
+            )
+            .filter(Boolean)
+            .join("\n");
+        }
+
+        const childText = Array.from(node.childNodes)
+          .map((child) => formatUpdateNotesNode(child, depth))
+          .join("");
+
+        if (/^h[1-6]$/.test(tag) || tag === "p" || tag === "div") {
+          return `${childText.trim()}\n\n`;
+        }
+
+        return childText;
+      }
+
+      function formatUpdateNotesListItem(node, depth = 0, orderedIndex = null) {
+        let inlineText = "";
+        const nestedBlocks = [];
+        for (const child of Array.from(node.childNodes)) {
+          const childTag = child.tagName?.toLowerCase?.() || "";
+          if (childTag === "ul" || childTag === "ol") {
+            const nestedText = formatUpdateNotesNode(child, depth + 1).trim();
+            if (nestedText) nestedBlocks.push(nestedText);
+            continue;
+          }
+          inlineText += formatUpdateNotesNode(child, depth);
+        }
+
+        const cleanedInline = inlineText
+          .replace(/\s+\n/g, "\n")
+          .replace(/\n\s+/g, "\n")
+          .replace(/[ \t]{2,}/g, " ")
+          .trim();
+        const prefix = `${"  ".repeat(depth)}${
+          orderedIndex != null ? `${orderedIndex}. ` : "- "
+        }`;
+        const inlineLines = cleanedInline
+          ? cleanedInline.split("\n").map((line) => line.trim()).filter(Boolean)
+          : [];
+
+        let formatted = "";
+        if (inlineLines.length > 0) {
+          formatted = `${prefix}${inlineLines[0]}`;
+          if (inlineLines.length > 1) {
+            formatted += inlineLines
+              .slice(1)
+              .map((line) => `\n${"  ".repeat(depth + 1)}${line}`)
+              .join("");
+          }
+        } else {
+          formatted = prefix.trimEnd();
+        }
+
+        if (nestedBlocks.length > 0) {
+          formatted += `\n${nestedBlocks.join("\n")}`;
+        }
+        return formatted.trimEnd();
+      }
+
       async function handleAppUpdateAvailable(payload = {}) {
         const version = String(payload?.version || "").trim();
         const releaseName = String(payload?.releaseName || "").trim();
-        const releaseNotes = String(payload?.releaseNotes || "").trim();
+        const releaseNotes = normalizeUpdateNotesText(payload?.releaseNotes);
         if (!version) return;
         if (appUpdateAvailablePromptBusy) return;
         if (appUpdateAvailablePromptVersion === version) return;
