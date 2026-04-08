@@ -776,9 +776,15 @@
   {
     "uplay_id": "6245",
     "uplay_name": "Anno 117: Pax Romana (Steam Demo)",
+    "steam_appid": 3919760,
+    "steam_name": "Anno 117: Pax Romana Demo"
+  },
+  {
+    "uplay_id": "",
+    "uplay_name": "Anno 117: Pax Romana (Steam)",
     "steam_appid": 3274580,
     "steam_name": "Anno 117: Pax Romana"
-  },
+  },  
   {
     "uplay_id": "13800",
     "uplay_name": "Anno 1800 - Open Beta",
@@ -1744,5 +1750,23 @@
     "uplay_name": "Far Cry® 6",
     "steam_appid": 2369390,
     "steam_name": "Far Cry 6"
+  },
+  {
+    "uplay_id": "8005",
+    "uplay_name": "The Rogue Prince of Persia",
+    "steam_appid": 2717880,
+    "steam_name": "The Rogue Prince of Persia"
+  },
+  {
+    "uplay_id": "922",
+    "uplay_name": "The Crew Motorfest (Steam)",
+    "steam_appid": 2698940,
+    "steam_name": "The Crew Motorfest"
+  },
+  {
+    "uplay_id": "65601",
+    "uplay_name": "Star Wars Outlaws (Demo)",
+    "steam_appid": 2842040,
+    "steam_name": "Star Wars Outlaws"
   }
 ]

@@ -3074,7 +3074,7 @@
                         <input
                           type="text"
                           id="processName"
-                          placeholder="Optional – real .exe name"
+                          placeholder="Optional – real .exe name(s), comma-separated"
                         />
                         <label for="platformSelect">Platform:</label>
                         <select id="platformSelect">
@@ -4139,18 +4139,43 @@
           "https://cdn.akamai.steamstatic.com/",
         ];
         const remoteAppIdCache = new Map();
-        async function resolveRemoteAppId(appid) {
-          const key = String(appid || "");
+        async function resolveRemoteAppId(
+          appid,
+          options = {},
+        ) {
+          const key = String(appid || "").trim();
           if (!/^\d+$/.test(key)) return key;
-          if (remoteAppIdCache.has(key)) return remoteAppIdCache.get(key);
+          const platform = normalizeCoverPlatform(options?.platform);
+          const steamAppIdHint = String(options?.steamAppId || "").trim();
+          const cacheKey = `${key}::${platform || "auto"}::${
+            /^\d+$/.test(steamAppIdHint) ? steamAppIdHint : ""
+          }`;
+          if (remoteAppIdCache.has(cacheKey)) {
+            return remoteAppIdCache.get(cacheKey);
+          }
+
+          if (platform === "steam" || platform === "steam-official") {
+            remoteAppIdCache.set(cacheKey, key);
+            return key;
+          }
+
+          if (
+            (platform === "uplay" || platform === "ubisoft-official") &&
+            /^\d+$/.test(steamAppIdHint) &&
+            steamAppIdHint !== key
+          ) {
+            remoteAppIdCache.set(cacheKey, steamAppIdHint);
+            return steamAppIdHint;
+          }
+
           try {
             const mapped = await window.api.getSteamLookupAppId(key);
             const effective =
               mapped && /^\d+$/.test(String(mapped)) ? String(mapped) : key;
-            remoteAppIdCache.set(key, effective);
+            remoteAppIdCache.set(cacheKey, effective);
             return effective;
           } catch {
-            remoteAppIdCache.set(key, key);
+            remoteAppIdCache.set(cacheKey, key);
             return key;
           }
         }
@@ -4190,6 +4215,26 @@
               const cfgAppId = cfg?.appid || cfg?.appId;
               if (cfg && String(cfgAppId || "") === String(appid || cfgAppId)) {
                 return cfg.platform || null;
+              }
+            }
+          } catch {}
+          return null;
+        }
+        async function resolveSteamAppIdForCurrentApp(appid) {
+          try {
+            const selectedConfig = document.getElementById("configList")?.value;
+            if (selectedConfig && window.api.getConfigByName) {
+              const cfg = await window.api.getConfigByName(selectedConfig);
+              const cfgAppId = cfg?.appid || cfg?.appId;
+              if (cfg && String(cfgAppId || "") === String(appid || cfgAppId)) {
+                const localPlatform = normalizeCoverPlatform(cfg?.platform);
+                if (
+                  (localPlatform === "uplay" ||
+                    localPlatform === "ubisoft-official") &&
+                  /^\d+$/.test(String(cfg?.steamAppId || "").trim())
+                ) {
+                  return String(cfg.steamAppId).trim();
+                }
               }
             }
           } catch {}
@@ -4297,7 +4342,10 @@
             }
 
             try {
-              const r = await window.api.getSteamDbCover(fetchAppId);
+              const r = await window.api.getSteamDbCover({
+                appid: fetchAppId,
+                platform,
+              });
               if (r?.url) {
                 await downloadAndSave(targetAppId, r.url, platform);
                 logCover("info", "steamdb:hit", {
@@ -4403,12 +4451,16 @@
             return;
           }
 
-          const fetchAppId = await resolveRemoteAppId(appid);
           const coverNameHint = getCoverSearchTerm(appid) || "";
           const platform =
             normalizeCoverPlatform(platformHint) ||
             (await resolvePlatformForCurrentApp(appid)) ||
             "steam";
+          const steamAppIdHint = await resolveSteamAppIdForCurrentApp(appid);
+          const fetchAppId = await resolveRemoteAppId(appid, {
+            platform,
+            steamAppId: steamAppIdHint,
+          });
 
           try {
             const localPath = await window.api.checkLocalGameImage(
@@ -5967,7 +6019,7 @@
           document.getElementById("exeArgs").value =
             currentConfig.arguments || "";
           document.getElementById("processName").value =
-            currentConfig.process_name || "";
+            serializeProcessNameFieldValue(currentConfig.process_name);
           const currentPlatform = (
             currentConfig.platform || "auto"
           ).toLowerCase();
@@ -6765,6 +6817,16 @@
           arguments: entry.arguments || "",
           process_name: entry.process_name || entry.processName || "",
         };
+      }
+
+      function serializeProcessNameFieldValue(value) {
+        if (Array.isArray(value)) {
+          return value
+            .map((item) => String(item || "").trim())
+            .filter(Boolean)
+            .join(", ");
+        }
+        return String(value || "").trim();
       }
 
       function normalizeConfigList(list) {
@@ -12564,7 +12626,10 @@
 
           let fetchAppId = appid;
           try {
-            fetchAppId = (await resolveCoverRemoteAppId(appid)) || appid;
+            fetchAppId =
+              (await resolveCoverRemoteAppId(appid, {
+                platform,
+              })) || appid;
           } catch {}
 
           try {
@@ -15111,6 +15176,15 @@
           applyDashboardSortAndFilter();
         }
         window.__dashboardCycleSort = setSort;
+
+        dashboardPlatformFilterBtn?.addEventListener("click", (event) => {
+          event.preventDefault();
+          cycleDashboardPlatformFilter(event.shiftKey ? -1 : 1);
+        });
+        dashboardPlatformFilterBtn?.addEventListener("contextmenu", (event) => {
+          event.preventDefault();
+          cycleDashboardPlatformFilter(-1);
+        });
 
         function updateSortIconsUI(st = getMultiSortState()) {
           const setBtn = (id, state, title) => {

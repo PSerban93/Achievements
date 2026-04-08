@@ -192,7 +192,7 @@ contextBridge.exposeInMainWorld("api", {
   applyBootOnboardingSelection: (selectedPaths = []) =>
     ipcRenderer.invoke("boot:onboarding:apply-selection", { selectedPaths }),
   skipBootOnboarding: () => ipcRenderer.invoke("boot:onboarding:skip-all"),
-  getSteamDbCover: (appid) => ipcRenderer.invoke("covers:steamdb", appid),
+  getSteamDbCover: (payload) => ipcRenderer.invoke("covers:steamdb", payload),
   getSteamGridDbCover: (payload) =>
     ipcRenderer.invoke("covers:steamgriddb", payload),
   openExternalUrl: (url) => ipcRenderer.invoke("open-external-url", url),

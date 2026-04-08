@@ -18,6 +18,12 @@ const {
   buildRarityEntriesForSchema,
   writeAchievementPercentagesSidecar,
 } = require("./achievement-rarity");
+const { lookupSteamDbName } = require("./local-game-name-cache");
+const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
+const {
+  hasProcessNameValue,
+  normalizeProcessNameValue,
+} = require("./process-name-utils");
 const autoConfigLogger = createLogger("autoconfig");
 const schemaLogger = createLogger("achschema");
 const coverLogger = createLogger("covers");
@@ -25,6 +31,25 @@ const rarityLogger = createLogger("rarity");
 
 function sanitizeFileName(name) {
   return sanitizeConfigName(name);
+}
+
+function applyLaunchMetadataToConfig(configData, metadata) {
+  if (!configData || !metadata) return false;
+  let changed = false;
+  const processName = normalizeProcessNameValue(metadata.process_name);
+  const args = String(metadata.arguments || "");
+  if (
+    hasProcessNameValue(processName) &&
+    !hasProcessNameValue(configData.process_name)
+  ) {
+    configData.process_name = processName;
+    changed = true;
+  }
+  if (args && !String(configData.arguments || "").trim()) {
+    configData.arguments = args;
+    changed = true;
+  }
+  return changed;
 }
 
 const steamStoreCache = new Map();
@@ -98,6 +123,16 @@ async function fetchSteamStoreName(appid, fetchImpl = global.fetch) {
   if (!appid) return null;
   const key = String(appid);
   if (steamStoreCache.has(key)) return steamStoreCache.get(key);
+  const localSteamDbName = lookupSteamDbName(appid);
+  if (localSteamDbName) {
+    steamStoreCache.set(key, localSteamDbName);
+    autoConfigLogger.info("local-name:steamdb-hit", {
+      appid,
+      platform: "steam-official",
+      name: localSteamDbName,
+    });
+    return localSteamDbName;
+  }
   if (typeof fetchImpl !== "function") {
     const fallback = await getGameNameFromSteamHunters(appid);
     if (fallback) {
@@ -641,6 +676,9 @@ async function generateConfigFromAppcacheBin(statsDir, schemaBinPath, configsDir
     platform: "steam-official",
     config_path: schemaRoot,
     save_path: statsDir,
+    executable: "",
+    arguments: "",
+    process_name: "",
   };
   let created = true;
   if (existing || fs.existsSync(cfgPath)) {
@@ -671,11 +709,27 @@ async function generateConfigFromAppcacheBin(statsDir, schemaBinPath, configsDir
           });
         }
       }
+      const needsLaunchMetadata =
+        !hasProcessNameValue(existingData.process_name) ||
+        !String(existingData.arguments || "").trim();
+      if (
+        needsLaunchMetadata &&
+        applyLaunchMetadataToConfig(
+          existingData,
+          await fetchSteamDbLaunchMetadata(appid)
+        )
+      ) {
+        dirty = true;
+      }
       if (dirty) {
         fs.writeFileSync(cfgPath, JSON.stringify(existingData, null, 2));
       }
     } catch {}
   } else {
+    applyLaunchMetadataToConfig(
+      payload,
+      await fetchSteamDbLaunchMetadata(appid)
+    );
     fs.writeFileSync(cfgPath, JSON.stringify(payload, null, 2));
     autoConfigLogger.info("steam-appcache:config:created", {
       appid,

@@ -39,6 +39,7 @@ const {
   buildRarityEntriesForSchema,
   writeAchievementPercentagesSidecar: writeRaritySidecar,
 } = require("./achievement-rarity");
+const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
 const DEFAULT_UPLAY_MAP_PATH = path.join(
   __dirname,
   "..",
@@ -177,6 +178,13 @@ function emitRarity(level, message, data = {}) {
           : console.log;
     fn(message);
   }
+}
+
+function emitLaunchMetadata(data = {}) {
+  if (!HAS_IPC) return;
+  try {
+    process.send({ type: "achgen:launch-metadata", ...data });
+  } catch {}
 }
 
 function reloadUplayMappingFromDisk() {
@@ -1994,11 +2002,13 @@ async function buildAchievementsFromScrape(
   let scraped = [];
   let scrapedTitle = "";
   const session = sharedSession;
+  let sourceUsed = "";
   const runSteamDb = async () => {
     const data = session
       ? await scrapeSteamDB(appid, session)
       : await scrapeSteamDB(appid);
     emit("info", "steam-scrape:source", { appid, source: "steamdb" });
+    sourceUsed = "steamdb";
     if (Array.isArray(data)) {
       scraped = data;
     } else {
@@ -2009,6 +2019,7 @@ async function buildAchievementsFromScrape(
   const runSteamHunters = async () => {
     const data = await scrapeSteamHunters(appid, session);
     emit("info", "steam-scrape:source", { appid, source: "steamhunters" });
+    sourceUsed = "steamhunters";
     if (Array.isArray(data)) {
       scraped = data;
     } else {
@@ -2146,7 +2157,10 @@ async function buildAchievementsFromScrape(
     }
   }
 
-  return results;
+  return {
+    achievements: results,
+    source: sourceUsed,
+  };
 }
 
 /* ---------- Process ---------- */
@@ -2176,6 +2190,8 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
 
   const achievements = [];
   const epicRarityByApi = new Map();
+  let steamLaunchMetadata = null;
+  let steamLaunchMetadataSent = false;
   let steamSession = null;
   const ensureSteamSession = async () => {
     if (!steamSession) {
@@ -2408,29 +2424,39 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
         });
       }
       if (achievements.length === 0) {
-        achievements.push(
-          ...(await buildAchievementsFromScrape(
-            appid,
-            imgDir,
-            {
-              platform: meta?.platform || targetPlatform,
-            },
-            await ensureSteamSession(),
-          )),
-        );
-      }
-    } else {
-      // ===== STEAMDB-ONLY =====
-      achievements.push(
-        ...(await buildAchievementsFromScrape(
+        const scrapeResult = await buildAchievementsFromScrape(
           appid,
           imgDir,
           {
             platform: meta?.platform || targetPlatform,
           },
           await ensureSteamSession(),
-        )),
+        );
+        achievements.push(...(scrapeResult?.achievements || []));
+        if (scrapeResult?.source === "steamdb") {
+          steamLaunchMetadata = await fetchSteamDbLaunchMetadata(
+            appid,
+            await ensureSteamSession()
+          );
+        }
+      }
+    } else {
+      // ===== STEAMDB-ONLY =====
+      const scrapeResult = await buildAchievementsFromScrape(
+        appid,
+        imgDir,
+        {
+          platform: meta?.platform || targetPlatform,
+        },
+        await ensureSteamSession(),
       );
+      achievements.push(...(scrapeResult?.achievements || []));
+      if (scrapeResult?.source === "steamdb") {
+        steamLaunchMetadata = await fetchSteamDbLaunchMetadata(
+          appid,
+          await ensureSteamSession()
+        );
+      }
     }
   } finally {
     await closeSteamSession();
@@ -2486,6 +2512,18 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
       `⏭ [${folderId}] Achievements schema skipped. No Achievements found!`,
     );
   } else {
+    if (
+      !steamLaunchMetadataSent &&
+      steamLaunchMetadata &&
+      !wantsGog &&
+      !wantsEpic
+    ) {
+      emitLaunchMetadata({
+        appid,
+        ...steamLaunchMetadata,
+      });
+      steamLaunchMetadataSent = true;
+    }
     emit("info", `✅ [${folderId}] Achievements schema done.`);
 
     // RPCS3: attempt Exophase multilanguage (trophies)
@@ -2557,7 +2595,7 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
   }
 
   //console.log(`✔ [${appid}] ${count} achievements -> ${path.join(outDir, 'achievements.json')}`);
-  return { outDir, count };
+  return { outDir, count, launchMetadata: steamLaunchMetadata || null };
 }
 
 /* ---------- MAIN (multi-APPID) ---------- */

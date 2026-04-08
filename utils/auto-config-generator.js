@@ -37,6 +37,15 @@ const {
   inferPlatformAndSteamId,
   sanitizeAppId,
 } = require("./config-platform-migrator");
+const {
+  lookupSteamDbName,
+  lookupUplayMappingEntry,
+} = require("./local-game-name-cache");
+const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
+const {
+  hasProcessNameValue,
+  normalizeProcessNameValue,
+} = require("./process-name-utils");
 const userDataDir = app?.getPath("userData")
   ? app.getPath("userData")
   : path.join(os.tmpdir(), "Achievements");
@@ -447,6 +456,22 @@ function sanitizeFilename(name) {
   return name.replace(/[\/\\:*?"<>|]/g, "");
 }
 
+function applyLaunchMetadataToConfig(configData, metadata) {
+  if (!configData || !metadata) return false;
+  let changed = false;
+  const processName = normalizeProcessNameValue(metadata.process_name);
+  const args = String(metadata.arguments || "");
+  if (hasProcessNameValue(processName) && !hasProcessNameValue(configData.process_name)) {
+    configData.process_name = processName;
+    changed = true;
+  }
+  if (args && !String(configData.arguments || "").trim()) {
+    configData.arguments = args;
+    changed = true;
+  }
+  return changed;
+}
+
 async function generateGogOfficialConfigForProduct(appid, outputDir, opts = {}) {
   const productId = String(appid || "").trim();
   if (!/^\d+$/.test(productId)) {
@@ -618,10 +643,7 @@ async function generateGogOfficialConfigForProduct(appid, outputDir, opts = {}) 
       typeof existingConfig.executable === "string" ? existingConfig.executable : "",
     arguments:
       typeof existingConfig.arguments === "string" ? existingConfig.arguments : "",
-    process_name:
-      typeof existingConfig.process_name === "string"
-        ? existingConfig.process_name
-        : "",
+    process_name: normalizeProcessNameValue(existingConfig.process_name),
   };
   if (nextConfig.steamAppId) delete nextConfig.steamAppId;
 
@@ -854,10 +876,7 @@ async function generateUbisoftOfficialConfigForProduct(appid, outputDir, opts = 
       typeof existingConfig.executable === "string" ? existingConfig.executable : "",
     arguments:
       typeof existingConfig.arguments === "string" ? existingConfig.arguments : "",
-    process_name:
-      typeof existingConfig.process_name === "string"
-        ? existingConfig.process_name
-        : "",
+    process_name: normalizeProcessNameValue(existingConfig.process_name),
   };
 
   const previousSerialized = fs.existsSync(targetInfo.filePath)
@@ -1067,8 +1086,8 @@ async function generateEaOfficialConfigForProduct(appid, outputDir, opts = {}) {
       typeof existingConfig.arguments === "string" ? existingConfig.arguments : "",
     process_name:
       entry.processName ||
-      (typeof existingConfig.process_name === "string"
-        ? existingConfig.process_name
+      (hasProcessNameValue(existingConfig.process_name)
+        ? normalizeProcessNameValue(existingConfig.process_name)
         : entry.exePath
           ? path.basename(entry.exePath)
           : ""),
@@ -1520,6 +1539,16 @@ async function getGameName(appid, opts = {}, retries = 2) {
     return preferredName || null;
   }
 
+  const localSteamDbName = lookupSteamDbName(appid, { userDataDir });
+  if (localSteamDbName) {
+    autoConfigLogger.info("local-name:steamdb-hit", {
+      appid,
+      platform: platformHint || "steam",
+      name: localSteamDbName,
+    });
+    return localSteamDbName;
+  }
+
   let nameFromStore = null;
   try {
     const url = `https://store.steampowered.com/api/appdetails?appids=${appid}`;
@@ -1554,6 +1583,20 @@ async function getGameName(appid, opts = {}, retries = 2) {
   const gogName = await getGameNameFromGogDb(appid);
   if (gogName) return gogName;
   autoConfigLogger.warn("fallback:gog-name-failed", { appid });
+  return null;
+}
+
+function resolveLocalUplayName(appid, mapping = null) {
+  const id = String(appid || "").trim();
+  if (!id) return null;
+  const entry =
+    mapping && String(mapping?.uplay_id || "").trim() === id
+      ? mapping
+      : lookupUplayMappingEntry(id, { userDataDir });
+  const uplayName = String(entry?.uplay_name || "").trim();
+  if (uplayName) return uplayName;
+  const steamName = String(entry?.steam_name || "").trim();
+  if (steamName) return steamName;
   return null;
 }
 // run generate_achievements_schema.js
@@ -1593,6 +1636,7 @@ function runAchievementsGenerator(
       args,
       script,
     });
+    let launchMetadata = null;
     const cp = fork(script, args, {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
       env: {
@@ -1624,6 +1668,16 @@ function runAchievementsGenerator(
         } catch {
           autoConfigLogger.info("achgen:child-log", payload);
         }
+      } else if (msg && msg.type === "achgen:launch-metadata") {
+        launchMetadata = {
+          process_name: normalizeProcessNameValue(msg.process_name),
+          arguments: String(msg.arguments || ""),
+        };
+        autoConfigLogger.info("achgen:launch-metadata", {
+          appid,
+          process_name: launchMetadata.process_name || null,
+          hasArguments: !!launchMetadata.arguments,
+        });
       }
     });
     cp.stdout.on("data", (buf) => {
@@ -1648,7 +1702,7 @@ function runAchievementsGenerator(
     cp.on("close", (code) => {
       if (code === 0) {
         autoConfigLogger.info("achgen:process-exit", { appid, code });
-        resolve();
+        resolve({ launchMetadata });
       } else {
         autoConfigLogger.error("achgen:process-exit", { appid, code });
         reject(new Error(`Code: ${code}`));
@@ -1731,6 +1785,11 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       uplayId,
       gameSaveDir
     );
+    const initialPlatformMeta = resolvePlatformMetadata({
+      appid: uplayId,
+      mapping: mappingForRun,
+      forcePlatform: forcedPlatform,
+    });
     let name = existingByPath?.name || null;
     autoConfigLogger.info("scan:processing-appid", {
       appid,
@@ -1743,8 +1802,20 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
         configName: name,
       });
     } else {
+      if (initialPlatformMeta.platform === "uplay") {
+        const localUplayName = resolveLocalUplayName(uplayId, mappingForRun);
+        if (localUplayName) {
+          name = localUplayName;
+          autoConfigLogger.info("local-name:uplay-map-hit", {
+            appid: uplayId,
+            name: localUplayName,
+          });
+        }
+      }
+    }
+    if (!name) {
       name = await getGameName(nameSourceId, {
-        platform: forcedPlatform,
+        platform: forcedPlatform || initialPlatformMeta.platform,
         preferredName: opts.preferredName || "",
       });
     }
@@ -1758,11 +1829,10 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       continue;
     }
     let safeName = sanitizeFilename(name);
-    const platformMeta = resolvePlatformMetadata({
-      appid: uplayId,
-      mapping: mappingForRun,
-      forcePlatform: forcedPlatform,
-    });
+    const platformMeta = {
+      platform: initialPlatformMeta.platform,
+      steamAppId: initialPlatformMeta.steamAppId,
+    };
     const existingPlatform = normalizePlatform(existingByPath?.config?.platform);
     if (existingPlatform && !forcedPlatform) {
       platformMeta.platform = existingPlatform;
@@ -1810,6 +1880,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
     if (!fs.existsSync(destSchemaDir))
       fs.mkdirSync(destSchemaDir, { recursive: true });
     const ensureSchema = async () => {
+      let schemaLaunchMetadata = null;
       try {
         if (!fs.existsSync(destAchievementsJson)) {
           const userDataDir = app.getPath("userData");
@@ -1827,10 +1898,18 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
           let lastError = null;
           for (const platformMode of attemptPlatforms) {
             try {
-              await runAchievementsGenerator(uplayId, schemaBase, userDataDir, {
+              const generatorResult = await runAchievementsGenerator(
+                uplayId,
+                schemaBase,
+                userDataDir,
+                {
                 platform: platformMode,
                 langs: schemaLanguages,
-              });
+              }
+              );
+              if (generatorResult?.launchMetadata) {
+                schemaLaunchMetadata = generatorResult.launchMetadata;
+              }
               if (
                 platformMode === "uplay" &&
                 (!mappingForRun || !mappingForRun.steam_appid)
@@ -1918,10 +1997,11 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
         failed++;
         // continue
       }
+      return schemaLaunchMetadata;
     };
     if (fs.existsSync(filePath)) {
       // if config exist, complete only
-      await ensureSchema();
+      const schemaLaunchMetadata = await ensureSchema();
       try {
         const curr = JSON.parse(fs.readFileSync(filePath, "utf8"));
         let changed = false;
@@ -1955,6 +2035,17 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
         if (opts.emu && curr.emu !== opts.emu) {
           curr.emu = opts.emu;
           changed = true;
+        }
+        if (platformMeta.platform === "steam") {
+          const launchMetadata =
+            schemaLaunchMetadata ||
+            (hasProcessNameValue(curr.process_name) &&
+            String(curr.arguments || "").trim()
+              ? null
+              : await fetchSteamDbLaunchMetadata(appid));
+          if (applyLaunchMetadataToConfig(curr, launchMetadata)) {
+            changed = true;
+          }
         }
         if (changed) {
           fs.writeFileSync(filePath, JSON.stringify(curr, null, 2));
@@ -1994,7 +2085,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       continue;
     }
     // generate schema if missing
-    await ensureSchema();
+    const schemaLaunchMetadata = await ensureSchema();
     const gameData = {
       name: safeName,
       appid,
@@ -2013,6 +2104,11 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
     }
     if (opts.emu) {
       gameData.emu = opts.emu;
+    }
+    if (platformMeta.platform === "steam") {
+      const launchMetadata =
+        schemaLaunchMetadata || (await fetchSteamDbLaunchMetadata(appid));
+      applyLaunchMetadataToConfig(gameData, launchMetadata);
     }
     fs.writeFileSync(filePath, JSON.stringify(gameData, null, 2));
     registerConfigVariant(configVariantIndex, uplayId, platformMeta.platform, {

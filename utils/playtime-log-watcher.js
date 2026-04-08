@@ -9,6 +9,11 @@ const { accumulatePlaytime, sanitizeConfigName } = require("./playtime-store");
 const { fetchSteamGridDbImage } = require("./game-cover");
 const { normalizePlatform } = require("./config-platform-migrator");
 const processPoller = require("./process-poller");
+const {
+  getProcessExecutableNames,
+  getProcessNameSignature,
+  normalizeProcessNameList,
+} = require("./process-name-utils");
 
 const defaultUplaySteamMapPath = path.join(
   __dirname,
@@ -339,12 +344,12 @@ function formatDuration(ms) {
 
 /* ----------------- Main watcher ----------------- */
 /**
- * @param {{appid:number|string, name?:string, displayName?:string, process_name?:string}} configData
+ * @param {{appid:number|string, name?:string, displayName?:string, process_name?:string|string[]}} configData
  * @returns {() => void}
  */
 function startPlaytimeLogWatcher(configData) {
   const appid = String(configData?.appid || "").trim();
-  const processName = String(configData?.process_name || "").trim();
+  const processNames = normalizeProcessNameList(configData?.process_name);
   const platform = normalizePlatform(configData?.platform) || "steam";
   const isSteamGridOnly =
     platform === "xenia" || platform === "rpcs3" || platform === "shadps4";
@@ -353,13 +358,14 @@ function startPlaytimeLogWatcher(configData) {
     Number(configData.__launchPid) > 0
       ? Number(configData.__launchPid)
       : null;
-  const normalizedProcessName = path.basename(processName).toLowerCase();
+  const normalizedProcessNames = getProcessExecutableNames(processNames);
+  const processNameSignature = getProcessNameSignature(processNames);
   const existing = activeWatchers.get(appid);
   if (existing) {
     if (configData?.__playtimeKey) {
       existing.playtimeKey = configData.__playtimeKey;
     }
-    if (normalizedProcessName === existing.processNameNormalized) {
+    if (processNameSignature === existing.processNameSignature) {
       return existing.cleanup;
     }
     existing.cleanup();
@@ -371,7 +377,7 @@ function startPlaytimeLogWatcher(configData) {
     notifyError("🚨 Missing appid in configData!");
     return () => {};
   }
-  if (!processName) {
+  if (!processNames.length) {
     notifyError(`⚠️ Missing executable for app ${appid}`);
     return () => {};
   }
@@ -429,7 +435,7 @@ function startPlaytimeLogWatcher(configData) {
       configData?.__playtimeKey ||
       sanitizeConfigName(configData?.name || configData?.displayName || appid),
     cleanup: () => {},
-    processNameNormalized: normalizedProcessName,
+    processNameSignature,
   };
   activeWatchers.set(appid, tracker);
   const cleanup = () => {
@@ -515,10 +521,12 @@ function startPlaytimeLogWatcher(configData) {
     if (closed) return;
     const list = Array.isArray(processes) ? processes : [];
     if (!list.length) return;
-    const exeName = path.basename(processName).toLowerCase();
     const running = list.some((p) => {
       if (launchPid && p.pid === launchPid) return true;
-      if (String(p.name || "").toLowerCase() !== exeName) return false;
+      if (!normalizedProcessNames.length) return false;
+      if (!normalizedProcessNames.includes(String(p.name || "").toLowerCase())) {
+        return false;
+      }
       return true;
     });
 

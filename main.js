@@ -98,6 +98,12 @@ const {
 const { autoUpdater } = require("electron-updater");
 const getConfigInflight = new Map();
 const { createLogger } = require("./utils/logger");
+const {
+  getProcessExecutableNames,
+  hasProcessNameValue,
+  normalizeProcessNameValue,
+  processNameValuesEqual,
+} = require("./utils/process-name-utils");
 
 const appLogger = createLogger("app");
 const notificationLogger = createLogger("notifications");
@@ -2062,6 +2068,11 @@ function registerOverlayShortcut(newShortcut) {
       const onboardingBlocked =
         isBootOnboardingGatePending() || global.bootOnboardingRequired;
       const currentlyPresented = isOverlayEffectivelyPresented();
+      const overlayLabel = tUi(
+        "settings-overlayControlsTitle",
+        {},
+        "Overlay",
+      );
       overlayLogger.info("overlay:shortcut-trigger", {
         shortcut: newShortcut,
         onboardingBlocked,
@@ -2072,23 +2083,28 @@ function registerOverlayShortcut(newShortcut) {
           !overlayWindow.isDestroyed() &&
           overlayWindow.isVisible(),
       });
-      console.log(
-        tUi(
-          "main.notify.overlayShortcutPressed",
-          { shortcut: newShortcut },
-          `Overlay Shortcut Pressed : ${newShortcut}`,
-        ),
-      );
       if (onboardingBlocked) {
         return;
       }
       if (overlayWindow && !overlayWindow.isDestroyed()) {
+        const nextPresented = !currentlyPresented;
         overlayLogger.debug("overlay:present-path", {
           path: "reuse-existing-window",
-          nextPresented: !currentlyPresented,
+          nextPresented,
           state: getOverlayWindowLogState(),
         });
-        setOverlayPresented(!currentlyPresented);
+        setOverlayPresented(nextPresented);
+        console.log(
+          tUi(
+            nextPresented
+              ? "main.notify.overlayOpened"
+              : "main.notify.overlayClosed",
+            { shortcut: newShortcut },
+            nextPresented
+              ? `${overlayLabel} opened.`
+              : `${overlayLabel} closed.`,
+          ),
+        );
       } else {
         overlayLogger.debug("overlay:present-path", {
           path: "create-new-window",
@@ -2096,6 +2112,13 @@ function registerOverlayShortcut(newShortcut) {
           state: getOverlayWindowLogState(),
         });
         createOverlayWindow(selectedConfig);
+        console.log(
+          tUi(
+            "main.notify.overlayCreated",
+            { shortcut: newShortcut },
+            `${overlayLabel} created.`,
+          ),
+        );
       }
     };
 
@@ -4696,8 +4719,10 @@ ipcMain.handle("saveConfig", async (event, config) => {
       save_path: isNonEmptyString(config.save_path) ? config.save_path : null,
       executable: exePath,
       arguments: isNonEmptyString(config.arguments) ? config.arguments : "",
-      process_name: isNonEmptyString(config.process_name)
-        ? config.process_name
+      process_name: hasProcessNameValue(config.process_name, {
+        splitString: true,
+      })
+        ? normalizeProcessNameValue(config.process_name, { splitString: true })
         : exePath
           ? path.basename(exePath)
           : "",
@@ -5074,8 +5099,8 @@ ipcMain.handle("loadConfigs", () => {
       if (raw?.arguments !== undefined) {
         meta.arguments = raw.arguments;
       }
-      if (raw?.process_name) {
-        meta.process_name = raw.process_name;
+      if (raw && Object.prototype.hasOwnProperty.call(raw, "process_name")) {
+        meta.process_name = normalizeProcessNameValue(raw.process_name);
       }
     } catch (err) {
       ipcLogger.warn("loadConfigs:parse-failed", {
@@ -5633,10 +5658,11 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
         const nextOfferId = entry?.offerId || config?.ea_offer_id || "";
         const nextInstallPath = entry?.installPath || config?.ea_install_path || "";
         const nextExecutable = entry?.exePath || config?.executable || "";
-        const nextProcessName =
+        const nextProcessName = normalizeProcessNameValue(
           entry?.processName ||
-          config?.process_name ||
-          (nextExecutable ? path.basename(nextExecutable) : "");
+            config?.process_name ||
+            (nextExecutable ? path.basename(nextExecutable) : ""),
+        );
         if (
           nextSavePath !== config.save_path ||
           nextLogFile !== (config?.ea_log_file || "") ||
@@ -5644,7 +5670,7 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
           nextOfferId !== (config?.ea_offer_id || "") ||
           nextInstallPath !== (config?.ea_install_path || "") ||
           nextExecutable !== (config?.executable || "") ||
-          nextProcessName !== (config?.process_name || "")
+          !processNameValuesEqual(nextProcessName, config?.process_name)
         ) {
           config.save_path = nextSavePath;
           config.ea_log_file = nextLogFile;
@@ -9617,10 +9643,12 @@ ipcMain.on(
             (entry?.installPath || config.ea_install_path || "") ||
           (config.executable || "") !==
             (entry?.exePath || config.executable || "") ||
-          (config.process_name || "") !==
-            (entry?.processName ||
+          !processNameValuesEqual(
+            config.process_name,
+            entry?.processName ||
               config.process_name ||
-              (entry?.exePath ? path.basename(entry.exePath) : "")))
+              (entry?.exePath ? path.basename(entry.exePath) : ""),
+          ))
       ) {
         config.save_path = resolved.logsRoot || config.save_path || "";
         config.ea_log_file = resolved.logFilePath || config.ea_log_file || "";
@@ -9630,10 +9658,11 @@ ipcMain.on(
         config.ea_install_path =
           entry?.installPath || config.ea_install_path || "";
         config.executable = entry?.exePath || config.executable || "";
-        config.process_name =
+        config.process_name = normalizeProcessNameValue(
           entry?.processName ||
-          config.process_name ||
-          (entry?.exePath ? path.basename(entry.exePath) : "");
+            config.process_name ||
+            (entry?.exePath ? path.basename(entry.exePath) : ""),
+        );
         try {
           fs.writeFileSync(cfgFile, JSON.stringify(config, null, 2));
         } catch {}
@@ -10013,8 +10042,12 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
       arguments: isNonEmptyString(newConfig.arguments)
         ? newConfig.arguments
         : "",
-      process_name: isNonEmptyString(newConfig.process_name)
-        ? newConfig.process_name
+      process_name: hasProcessNameValue(newConfig.process_name, {
+        splitString: true,
+      })
+        ? normalizeProcessNameValue(newConfig.process_name, {
+            splitString: true,
+          })
         : exePath
           ? path.basename(exePath)
           : "",
@@ -12494,7 +12527,7 @@ const autoSelectIndex = {
   buildPromise: null,
   lastBuildAt: 0,
   exeToConfigs: new Map(), // exeLower -> Set(configName)
-  configEntries: new Map(), // configName -> { name, exeLower, appid, data }
+  configEntries: new Map(), // configName -> { name, exeLower, exeLowers, appid, data }
 };
 const autoSelectIndexTimers = new Map(); // configName -> timeout
 const AUTO_SELECT_INDEX_UPSERT_DEBOUNCE_MS = 120;
@@ -12506,16 +12539,6 @@ function getConfigNameFromConfigFilePath(filePath) {
     return path.basename(String(filePath), ".json");
   } catch {
     return "";
-  }
-}
-
-function normalizeExeNameFromProcessName(processName) {
-  const raw = String(processName || "").trim();
-  if (!raw) return "";
-  try {
-    return path.basename(raw).toLowerCase();
-  } catch {
-    return raw.toLowerCase();
   }
 }
 
@@ -12534,13 +12557,16 @@ function removeAutoSelectIndexEntry(configName) {
   if (!safeName) return;
 
   const existing = autoSelectIndex.configEntries.get(safeName);
-  if (existing?.exeLower) {
-    const set = autoSelectIndex.exeToConfigs.get(existing.exeLower);
-    if (set) {
-      set.delete(safeName);
-      if (set.size === 0)
-        autoSelectIndex.exeToConfigs.delete(existing.exeLower);
-    }
+  const exeLowers = Array.isArray(existing?.exeLowers)
+    ? existing.exeLowers
+    : existing?.exeLower
+      ? [existing.exeLower]
+      : [];
+  for (const exeLower of exeLowers) {
+    const set = autoSelectIndex.exeToConfigs.get(exeLower);
+    if (!set) continue;
+    set.delete(safeName);
+    if (set.size === 0) autoSelectIndex.exeToConfigs.delete(exeLower);
   }
   autoSelectIndex.configEntries.delete(safeName);
 }
@@ -12563,8 +12589,8 @@ async function upsertAutoSelectIndexEntryFromPath(filePath) {
     return;
   }
 
-  const exeLower = normalizeExeNameFromProcessName(data?.process_name);
-  if (!exeLower) {
+  const exeLowers = getProcessExecutableNames(data?.process_name);
+  if (!exeLowers.length) {
     removeAutoSelectIndexEntry(safeName);
     return;
   }
@@ -12572,26 +12598,21 @@ async function upsertAutoSelectIndexEntryFromPath(filePath) {
   const appid = normalizeConfigAppIdValue(data);
   if (!data.name) data.name = safeName;
 
-  const prev = autoSelectIndex.configEntries.get(safeName);
-  if (prev?.exeLower && prev.exeLower !== exeLower) {
-    const prevSet = autoSelectIndex.exeToConfigs.get(prev.exeLower);
-    if (prevSet) {
-      prevSet.delete(safeName);
-      if (prevSet.size === 0)
-        autoSelectIndex.exeToConfigs.delete(prev.exeLower);
-    }
-  }
+  removeAutoSelectIndexEntry(safeName);
 
   autoSelectIndex.configEntries.set(safeName, {
     name: safeName,
-    exeLower,
+    exeLower: exeLowers[0],
+    exeLowers,
     appid,
     data,
   });
-  if (!autoSelectIndex.exeToConfigs.has(exeLower)) {
-    autoSelectIndex.exeToConfigs.set(exeLower, new Set());
+  for (const exeLower of exeLowers) {
+    if (!autoSelectIndex.exeToConfigs.has(exeLower)) {
+      autoSelectIndex.exeToConfigs.set(exeLower, new Set());
+    }
+    autoSelectIndex.exeToConfigs.get(exeLower).add(safeName);
   }
-  autoSelectIndex.exeToConfigs.get(exeLower).add(safeName);
 }
 
 function queueAutoSelectIndexUpsertFromConfigPath(filePath) {
@@ -12842,9 +12863,12 @@ function getConfigProcessArgTokens(configData) {
 }
 
 function processMatchesConfig(proc, configData, configName) {
-  if (!proc || !proc.name || !configData?.process_name) return false;
-  const exeName = path.basename(configData.process_name).toLowerCase();
-  if (String(proc.name || "").toLowerCase() !== exeName) return false;
+  if (!proc || !proc.name || !hasProcessNameValue(configData?.process_name)) {
+    return false;
+  }
+  const exeNames = getProcessExecutableNames(configData.process_name);
+  if (!exeNames.length) return false;
+  if (!exeNames.includes(String(proc.name || "").toLowerCase())) return false;
   const mapped = manualLaunchPidMap.get(proc.pid);
   if (mapped) return mapped === configName;
   const argTokens = getConfigProcessArgTokens(configData);
@@ -12889,10 +12913,21 @@ async function autoSelectRunningGameConfig(processes) {
     };
 
     const isEntryRunning = (entry, configName) => {
-      if (!entry?.exeLower || !entry?.data?.process_name) return false;
-      const procs = procsByExe.get(entry.exeLower) || [];
-      if (!procs.length) return false;
-      return procs.some((p) => processMatchesConfig(p, entry.data, configName));
+      const exeLowers = Array.isArray(entry?.exeLowers)
+        ? entry.exeLowers
+        : entry?.exeLower
+          ? [entry.exeLower]
+          : [];
+      if (!exeLowers.length || !hasProcessNameValue(entry?.data?.process_name)) {
+        return false;
+      }
+      return exeLowers.some((exeLower) => {
+        const procs = procsByExe.get(exeLower) || [];
+        if (!procs.length) return false;
+        return procs.some((p) =>
+          processMatchesConfig(p, entry.data, configName),
+        );
+      });
     };
 
     if (manualLaunchInProgress) {
@@ -14190,12 +14225,35 @@ const {
   fetchSteamGridDbImage,
 } = require("./utils/game-cover");
 
-ipcMain.handle("covers:steamdb", async (_evt, appid) => {
+ipcMain.handle("covers:steamdb", async (_evt, payload) => {
   try {
-    const mapping = uplayToSteam.get(String(appid));
-    const steamAppId = mapping?.steam_appid
-      ? String(mapping.steam_appid)
-      : String(appid);
+    const rawAppId =
+      payload && typeof payload === "object" ? payload?.appid : payload;
+    const appid = String(rawAppId || "").trim();
+    const platform =
+      payload && typeof payload === "object"
+        ? normalizePlatform(payload?.platform)
+        : "";
+    const explicitSteamAppId =
+      payload && typeof payload === "object"
+        ? sanitizeAppId(payload?.steamAppId)
+        : "";
+    let steamAppId = appid;
+
+    if (platform === "steam" || platform === "steam-official") {
+      steamAppId = appid;
+    } else if (platform === "uplay" || platform === "ubisoft-official") {
+      if (explicitSteamAppId && explicitSteamAppId !== appid) {
+        steamAppId = explicitSteamAppId;
+      } else {
+        const mapping = uplayToSteam.get(appid);
+        steamAppId = mapping?.steam_appid ? String(mapping.steam_appid) : appid;
+      }
+    } else {
+      const mapping = uplayToSteam.get(appid);
+      steamAppId = mapping?.steam_appid ? String(mapping.steam_appid) : appid;
+    }
+
     const url = await fetchSteamDbLibraryCover(String(steamAppId));
     return { ok: true, url };
   } catch (err) {
