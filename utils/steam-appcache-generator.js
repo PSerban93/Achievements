@@ -10,7 +10,7 @@ const {
   extractUserStats,
   buildSnapshotFromAppcache,
   normalizeSteamIconUrl,
-  pickLatestUserBin,
+  pickPreferredUserBin,
 } = require("./steam-appcache");
 const {
   RARITY_SOURCES,
@@ -610,11 +610,20 @@ function findExistingSteamOfficialConfig(configsDir, appid) {
   return null;
 }
 
-async function generateConfigFromAppcacheBin(statsDir, schemaBinPath, configsDir) {
+async function generateConfigFromAppcacheBin(
+  statsDir,
+  schemaBinPath,
+  configsDir,
+  options = {},
+) {
   const appidMatch = path.basename(schemaBinPath).match(/UserGameStatsSchema_(\d+)\.bin/i);
   if (!appidMatch) return null;
   const appid = appidMatch[1];
-  const userBin = pickLatestUserBin(statsDir, appid);
+  const userBin = pickPreferredUserBin(
+    statsDir,
+    appid,
+    options?.preferredAccountId,
+  );
   if (!userBin) return null;
 
   const schemaKV = parseKVBinary(fs.readFileSync(schemaBinPath));

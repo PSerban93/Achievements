@@ -277,6 +277,147 @@
         text-overflow: ellipsis;
         white-space: nowrap;
       }
+
+      .generation-progress-rail {
+        position: fixed;
+        left: 50%;
+        bottom: 18px;
+        transform: translateX(-50%) translateY(18px);
+        width: min(560px, calc(100vw - 32px));
+        padding: 14px 16px 12px;
+        border-radius: 14px;
+        border: 1px solid rgba(189, 147, 249, 0.55);
+        background: linear-gradient(
+          180deg,
+          rgba(40, 42, 54, 0.97) 0%,
+          rgba(32, 34, 44, 0.98) 100%
+        );
+        box-shadow:
+          0 10px 24px rgba(0, 0, 0, 0.32),
+          0 0 0 1px rgba(139, 233, 253, 0.08);
+        color: #f8f8f2;
+        z-index: 10001;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 0.22s ease,
+          transform 0.22s ease,
+          border-color 0.22s ease,
+          box-shadow 0.22s ease;
+      }
+
+      .generation-progress-rail.is-visible {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+      }
+
+      .generation-progress-rail.is-success {
+        border-color: rgba(80, 250, 123, 0.55);
+        box-shadow:
+          0 10px 24px rgba(0, 0, 0, 0.32),
+          0 0 0 1px rgba(80, 250, 123, 0.1);
+      }
+
+      .generation-progress-rail.is-failed {
+        border-color: rgba(255, 85, 85, 0.58);
+        box-shadow:
+          0 10px 24px rgba(0, 0, 0, 0.32),
+          0 0 0 1px rgba(255, 85, 85, 0.12);
+      }
+
+      .generation-progress-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .generation-progress-title {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--dracula-cyan, #8be9fd);
+      }
+
+      .generation-progress-percent {
+        min-width: 56px;
+        text-align: right;
+        font-size: 13px;
+        font-weight: 700;
+        color: #f8f8f2;
+      }
+
+      .generation-progress-item {
+        margin-top: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #f8f8f2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .generation-progress-sub {
+        margin-top: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 12px;
+        color: var(--dracula-comment, #b6b9c9);
+      }
+
+      .generation-progress-detail {
+        min-width: 0;
+        flex: 1 1 auto;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .generation-progress-count {
+        flex: 0 0 auto;
+        color: #f8f8f2;
+      }
+
+      .generation-progress-bar {
+        margin-top: 10px;
+        width: 100%;
+        height: 9px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(68, 71, 90, 0.9);
+        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+      }
+
+      .generation-progress-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: inherit;
+        background: linear-gradient(
+          90deg,
+          rgba(139, 233, 253, 0.88) 0%,
+          rgba(98, 114, 164, 0.92) 100%
+        );
+        transition:
+          width 0.24s ease,
+          background 0.22s ease;
+      }
+
+      .generation-progress-rail.is-success .generation-progress-fill {
+        background: linear-gradient(
+          90deg,
+          rgba(80, 250, 123, 0.92) 0%,
+          rgba(39, 174, 96, 0.95) 100%
+        );
+      }
+
+      .generation-progress-rail.is-failed .generation-progress-fill {
+        background: linear-gradient(
+          90deg,
+          rgba(255, 85, 85, 0.92) 0%,
+          rgba(180, 43, 43, 0.95) 100%
+        );
+      }
     </style>
   </head>
 
@@ -776,6 +917,32 @@
                     <button type="button" id="settings-steamApiKeyClear">
                       Remove
                     </button>
+                  </div>
+                </div>
+                <div class="settings-section" style="margin-bottom: 5px">
+                  <h4 id="settings-steamOfficialAccountTitle">
+                    Steam Official Account
+                  </h4>
+                  <div class="settings-control">
+                    <label for="settings-steamOfficialAccountSelect">
+                      Tracked Steam account
+                    </label>
+                    <select id="settings-steamOfficialAccountSelect">
+                      <option
+                        value=""
+                        data-i18n="settings.steamOfficialAccount.auto"
+                      >
+                        Auto (Last Modified)
+                      </option>
+                    </select>
+                  </div>
+                  <div
+                    id="settings-steamOfficialAccountHint"
+                    data-i18n="settings.steamOfficialAccount.hint"
+                    class="hint"
+                    style="margin-top: 6px; margin-bottom: 30px"
+                  >
+                    Uses Steam loginusers.vdf when available.
                   </div>
                 </div>
                 <div class="settings-section">
@@ -3524,11 +3691,7 @@
         </div>
 
         <div id="dashboardBody">
-          <div
-            id="dashboardSelectionBar"
-            class="hidden"
-            aria-live="polite"
-          >
+          <div id="dashboardSelectionBar" class="hidden" aria-live="polite">
             <div id="dashboardSelectionSummary">0 selected</div>
             <div class="dashboard-selection-actions">
               <button
@@ -3657,7 +3820,10 @@
         <p id="appConfirmMessage"></p>
         <p id="appConfirmDetail" class="confirm-detail hidden"></p>
         <div id="appConfirmNotes" class="confirm-notes hidden">
-          <div id="appConfirmNotesTitle" class="confirm-notes-title hidden"></div>
+          <div
+            id="appConfirmNotesTitle"
+            class="confirm-notes-title hidden"
+          ></div>
           <pre id="appConfirmNotesBody" class="confirm-notes-body"></pre>
         </div>
         <label id="appConfirmCheckboxRow" class="confirm-checkbox-row hidden">
@@ -3709,6 +3875,38 @@
             <button id="bootOnboardingDoneOkBtn" type="button">OK</button>
           </div>
         </div>
+      </div>
+    </div>
+    <div
+      id="generationProgressRail"
+      class="generation-progress-rail hidden"
+      aria-hidden="true"
+      role="status"
+      aria-live="polite"
+    >
+      <div class="generation-progress-head">
+        <div id="generationProgressTitle" class="generation-progress-title">
+          Generating Configs
+        </div>
+        <div id="generationProgressPercent" class="generation-progress-percent">
+          0%
+        </div>
+      </div>
+      <div
+        id="generationProgressItem"
+        class="generation-progress-item hidden"
+      ></div>
+      <div class="generation-progress-bar" aria-hidden="true">
+        <div id="generationProgressFill" class="generation-progress-fill"></div>
+      </div>
+      <div class="generation-progress-sub">
+        <div id="generationProgressDetail" class="generation-progress-detail">
+          Preparing
+        </div>
+        <div
+          id="generationProgressCount"
+          class="generation-progress-count hidden"
+        ></div>
       </div>
     </div>
 
@@ -4139,10 +4337,7 @@
           "https://cdn.akamai.steamstatic.com/",
         ];
         const remoteAppIdCache = new Map();
-        async function resolveRemoteAppId(
-          appid,
-          options = {},
-        ) {
+        async function resolveRemoteAppId(appid, options = {}) {
           const key = String(appid || "").trim();
           if (!/^\d+$/.test(key)) return key;
           const platform = normalizeCoverPlatform(options?.platform);
@@ -4270,7 +4465,8 @@
               fetchAppId,
             );
             const fallbackOnly =
-              isSteamGridOnlyPlatform(normalizedPlatform) || !steamSourceAllowed;
+              isSteamGridOnlyPlatform(normalizedPlatform) ||
+              !steamSourceAllowed;
             const steamGridSize =
               options?.gridSize && String(options.gridSize).trim().length
                 ? String(options.gridSize)
@@ -4364,11 +4560,7 @@
             }
 
             try {
-              await downloadFromStoreHeader(
-                fetchAppId,
-                targetAppId,
-                platform,
-              );
+              await downloadFromStoreHeader(fetchAppId, targetAppId, platform);
               logCover("info", "store:hit", {
                 targetAppId,
                 fetchAppId,
@@ -4602,7 +4794,8 @@
                 : null;
             let selectedAppId = null;
             try {
-              const selectedConfig = document.getElementById("configList")?.value;
+              const selectedConfig =
+                document.getElementById("configList")?.value;
               if (selectedConfig && window.api.getConfigByName) {
                 const cfg = await window.api.getConfigByName(selectedConfig);
                 selectedAppId = String(
@@ -5644,6 +5837,210 @@
 
       const notificationQueue = [];
       let isNotificationActive = false;
+      let generationProgressState = null;
+      let generationProgressHideTimer = null;
+      window.__generationProgressActive = false;
+
+      function clampGenerationProgressPercent(value, fallback = 0) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return fallback;
+        if (n <= 0) return 0;
+        if (n >= 100) return 100;
+        return Math.round(n);
+      }
+
+      function getGenerationProgressTitle(state) {
+        if (state?.kind === "schema-regenerate") {
+          return tUi(
+            "main.generation.progress.regenerateSchema",
+            "Regenerating Schema",
+          );
+        }
+        if (state?.scope === "single") {
+          return tUi(
+            "main.generation.progress.generateSingle",
+            "Generating Config",
+          );
+        }
+        return tUi(
+          "main.generation.progress.generateBatch",
+          "Generating Configs",
+        );
+      }
+
+      function getGenerationProgressPhaseLabel(phase, detail = "") {
+        if (detail) return detail;
+        switch (String(phase || "")) {
+          case "preparing":
+            return tUi("main.generation.progress.preparing", "Preparing");
+          case "resolvingName":
+            return tUi(
+              "main.generation.progress.resolvingName",
+              "Resolving game name",
+            );
+          case "writingConfig":
+            return tUi(
+              "main.generation.progress.writingConfig",
+              "Writing config",
+            );
+          case "generatingSchema":
+            return tUi(
+              "main.generation.progress.generatingSchema",
+              "Generating schema",
+            );
+          case "fetchSteamApi":
+            return tUi(
+              "main.generation.progress.fetchSteamApi",
+              "Fetching Steam API",
+            );
+          case "fetchSteamDb":
+            return tUi(
+              "main.generation.progress.fetchSteamDb",
+              "Fetching SteamDB",
+            );
+          case "fetchSteamSchema":
+            return tUi(
+              "main.generation.progress.fetchSteamSchema",
+              "Fetching Steam schema",
+            );
+          case "fetchExtraLanguages":
+            return tUi(
+              "main.generation.progress.fetchExophase",
+              "Fetching Extra Languages",
+            );
+          case "fetchEpic":
+            return tUi(
+              "main.generation.progress.fetchEpic",
+              "Fetching Epic achievements",
+            );
+          case "finalizing":
+            return tUi("main.generation.progress.finalizing", "Finalizing");
+          case "completed":
+            return tUi("main.generation.progress.completed", "Completed");
+          case "failed":
+            return tUi("main.generation.progress.failed", "Failed");
+          case "skipped":
+            return tUi("main.generation.progress.skipped", "Skipped");
+          default:
+            return detail || "";
+        }
+      }
+
+      function formatGenerationProgressCount(state) {
+        const current = Number(state?.current || 0);
+        const total = Number(state?.total || 0);
+        if (
+          !Number.isFinite(current) ||
+          !Number.isFinite(total) ||
+          total <= 0
+        ) {
+          return "";
+        }
+        return `${Math.max(0, current)} / ${Math.max(0, total)}`;
+      }
+
+      function hideGenerationProgressRail() {
+        const rail = document.getElementById("generationProgressRail");
+        if (!rail) return;
+        rail.classList.remove("is-visible", "is-success", "is-failed");
+        rail.classList.add("hidden");
+        rail.setAttribute("aria-hidden", "true");
+        generationProgressState = null;
+        window.__generationProgressActive = false;
+      }
+
+      function renderGenerationProgressRail(state) {
+        const rail = document.getElementById("generationProgressRail");
+        const titleEl = document.getElementById("generationProgressTitle");
+        const itemEl = document.getElementById("generationProgressItem");
+        const fillEl = document.getElementById("generationProgressFill");
+        const percentEl = document.getElementById("generationProgressPercent");
+        const detailEl = document.getElementById("generationProgressDetail");
+        const countEl = document.getElementById("generationProgressCount");
+        if (
+          !rail ||
+          !titleEl ||
+          !itemEl ||
+          !fillEl ||
+          !percentEl ||
+          !detailEl ||
+          !countEl
+        ) {
+          return;
+        }
+        const percent = clampGenerationProgressPercent(state?.percent, 0);
+        const phaseText = getGenerationProgressPhaseLabel(
+          state?.phase,
+          state?.detail,
+        );
+        const itemName = String(state?.itemName || state?.appid || "").trim();
+        const countText = formatGenerationProgressCount(state);
+
+        titleEl.textContent = getGenerationProgressTitle(state);
+        percentEl.textContent = `${percent}%`;
+        detailEl.textContent = phaseText || "";
+        fillEl.style.width = `${percent}%`;
+        rail.classList.toggle("is-success", state?.status === "success");
+        rail.classList.toggle("is-failed", state?.status === "failed");
+
+        itemEl.textContent = itemName;
+        itemEl.classList.toggle("hidden", !itemName);
+        countEl.textContent = countText;
+        countEl.classList.toggle("hidden", !countText);
+
+        rail.classList.remove("hidden");
+        rail.setAttribute("aria-hidden", "false");
+        requestAnimationFrame(() => rail.classList.add("is-visible"));
+      }
+
+      function applyGenerationProgressState(nextState, options = {}) {
+        if (generationProgressHideTimer) {
+          clearTimeout(generationProgressHideTimer);
+          generationProgressHideTimer = null;
+        }
+        generationProgressState = options.replace
+          ? { ...(nextState || {}) }
+          : {
+              ...(generationProgressState || {}),
+              ...(nextState || {}),
+            };
+        window.__generationProgressActive =
+          generationProgressState?.status === "running";
+        renderGenerationProgressRail(generationProgressState);
+        if (options.autoHide === true) {
+          const delay =
+            generationProgressState?.status === "failed" ? 2400 : 1400;
+          generationProgressHideTimer = setTimeout(() => {
+            hideGenerationProgressRail();
+          }, delay);
+        }
+      }
+
+      const GENERATION_NOTIFY_SUPPRESS_PATTERNS = [
+        /^steam-achievements:/i,
+        /^steam-schema:/i,
+        /^steam-scrape:exophase:/i,
+        /^rpcs3:exophase:/i,
+        /Requesting Steam achievements/i,
+        /Steam achievements downloaded/i,
+        /Requesting Steam schema/i,
+        /Steam schema downloaded/i,
+        /Downloading Extra Languages/i,
+        /Steam API key loaded/i,
+        /Steam API key not found/i,
+        /Achievements schema done/i,
+        /Achievements schema skipped/i,
+      ];
+
+      function shouldSuppressGenerationNotification(payload) {
+        if (window.__generationProgressActive !== true) return false;
+        const raw = String(payload?.rawMessage || "").trim();
+        const message = String(payload?.message || "").trim();
+        const haystacks = [raw, message].filter(Boolean);
+        return haystacks.some((text) =>
+          GENERATION_NOTIFY_SUPPRESS_PATTERNS.some((rx) => rx.test(text)),
+        );
+      }
 
       function showNotification(message, backgroundColor = "#4CAF50") {
         notificationQueue.push({ message, backgroundColor });
@@ -5757,7 +6154,9 @@
         return TECHNICAL_WARN_PATTERNS.some((rx) => rx.test(text));
       }
 
-      window.api.onNotify(({ message, color }) => {
+      window.api.onNotify((payload = {}) => {
+        const { message, color } = payload;
+        if (shouldSuppressGenerationNotification(payload)) return;
         if (isTechnicalWarn(message)) return;
 
         const isConfigPathWarn = SUPPRESS_MSG_PATTERNS.some((rx) =>
@@ -5771,7 +6170,62 @@
         showNotification(message, color || "#4CAF50");
       });
 
+      window.api?.on?.("generation:progress:start", (payload = {}) => {
+        applyGenerationProgressState(
+          {
+            ...payload,
+            status: "running",
+          },
+          { autoHide: false, replace: true },
+        );
+      });
+
+      window.api?.on?.("generation:progress:update", (payload = {}) => {
+        if (
+          generationProgressState?.id &&
+          payload?.id &&
+          generationProgressState.id !== payload.id
+        ) {
+          return;
+        }
+        applyGenerationProgressState(
+          {
+            ...payload,
+            status:
+              payload?.status === "success" || payload?.status === "failed"
+                ? payload.status
+                : "running",
+          },
+          { autoHide: false },
+        );
+      });
+
+      window.api?.on?.("generation:progress:end", (payload = {}) => {
+        if (
+          generationProgressState?.id &&
+          payload?.id &&
+          generationProgressState.id !== payload.id
+        ) {
+          return;
+        }
+        applyGenerationProgressState(payload, { autoHide: true });
+      });
+
       window.addEventListener("DOMContentLoaded", () => {
+        window.api
+          ?.getActiveGenerationProgress?.()
+          ?.then((payload) => {
+            if (!payload || payload.status !== "running") return;
+            applyGenerationProgressState(
+              {
+                ...payload,
+                status: "running",
+              },
+              { autoHide: false, replace: true },
+            );
+          })
+          .catch(() => {});
+
         const originalLog = console.log.bind(console);
         const originalWarn = console.warn.bind(console);
         const originalError = console.error.bind(console);
@@ -6112,7 +6566,7 @@
         const configPath = document.getElementById("configPath").value;
         const savePath = document.getElementById("savePath").value;
         const executable = document.getElementById("executablePath").value;
-        const arguments = document.getElementById("exeArgs").value;
+        const launchArguments = document.getElementById("exeArgs").value;
         const processName = document.getElementById("processName").value;
         const selectedPlatform = platformSelect?.value?.toLowerCase() || "auto";
         const steamAppId = steamAppIdInput?.value.trim() || "";
@@ -6170,7 +6624,7 @@
           config_path: configPath || null,
           save_path: savePath || null,
           executable: executable || null,
-          arguments: arguments || "",
+          arguments: launchArguments || "",
           process_name: processName || "",
         };
         if (selectedPlatform && selectedPlatform !== "auto") {
@@ -6669,6 +7123,7 @@
           await window.i18nUi.setUiLanguage(uiLanguage);
         }
         syncAppLanguageOptions();
+        await syncSteamOfficialAccountDropdown(getCachedPreferences());
         if (appLanguageSelect) appLanguageSelect.value = uiLanguage;
         renderSchemaLanguageSelection(getCachedPreferences());
         bindSchemaLanguageSelectionEvents();
@@ -6684,7 +7139,9 @@
         if (typeof window.refreshShortcutLabel === "function") {
           window.refreshShortcutLabel();
         }
-        if (typeof window.refreshOverlayControllerShortcutLabel === "function") {
+        if (
+          typeof window.refreshOverlayControllerShortcutLabel === "function"
+        ) {
           window.refreshOverlayControllerShortcutLabel();
         }
         if (
@@ -7479,7 +7936,10 @@
           orderedIndex != null ? `${orderedIndex}. ` : "- "
         }`;
         const inlineLines = cleanedInline
-          ? cleanedInline.split("\n").map((line) => line.trim()).filter(Boolean)
+          ? cleanedInline
+              .split("\n")
+              .map((line) => line.trim())
+              .filter(Boolean)
           : [];
 
         let formatted = "";
@@ -7512,10 +7972,7 @@
         appUpdateAvailablePromptVersion = version;
         try {
           const confirmed = await safeConfirm({
-            title: tUi(
-              "main.update.available.title",
-              "Update available",
-            ),
+            title: tUi("main.update.available.title", "Update available"),
             message: tUiFmt(
               "main.update.available.message",
               { version },
@@ -7527,10 +7984,7 @@
             ),
             notesTitle: releaseName,
             notes: releaseNotes,
-            okText: tUi(
-              "main.update.available.updateNow",
-              "Update now",
-            ),
+            okText: tUi("main.update.available.updateNow", "Update now"),
             cancelText: tUi("main.update.available.later", "Later"),
           });
           if (!confirmed) {
@@ -7575,10 +8029,7 @@
         appUpdateDownloadedPromptVersion = version;
         try {
           const confirmed = await safeConfirm({
-            title: tUi(
-              "main.update.downloaded.title",
-              "Update downloaded",
-            ),
+            title: tUi("main.update.downloaded.title", "Update downloaded"),
             message: tUiFmt(
               "main.update.downloaded.message",
               { version },
@@ -7588,10 +8039,7 @@
               "main.update.downloaded.detail",
               "The update will install after the application restarts.",
             ),
-            okText: tUi(
-              "main.update.downloaded.restartNow",
-              "Restart now",
-            ),
+            okText: tUi("main.update.downloaded.restartNow", "Restart now"),
             cancelText: tUi("main.update.downloaded.later", "Later"),
           });
           if (!confirmed) {
@@ -7902,11 +8350,12 @@
               deleteSaveFiles: confirmDelete.checked2 === true,
             });
             if (response?.success) {
-              localStorage.removeItem(
-                `dashboard:lastProgress:${entry.name}`,
-              );
+              localStorage.removeItem(`dashboard:lastProgress:${entry.name}`);
               localStorage.removeItem(`dashboard:lastImage:${entry.name}`);
-              if (Array.isArray(response?.warnings) && response.warnings.length) {
+              if (
+                Array.isArray(response?.warnings) &&
+                response.warnings.length
+              ) {
                 warnings.push(...response.warnings);
               }
             } else {
@@ -9007,9 +9456,74 @@
         }
       }
 
+      async function syncSteamOfficialAccountDropdown(prefs = null) {
+        const select = document.getElementById(
+          "settings-steamOfficialAccountSelect",
+        );
+        const hint = document.getElementById(
+          "settings-steamOfficialAccountHint",
+        );
+        if (!select) return;
+
+        let payload = { accounts: [], steamRoot: "", loginUsersPath: "" };
+        try {
+          payload = await window.api.listSteamOfficialAccounts();
+        } catch (err) {
+          console.warn("Failed to load Steam official accounts:", err);
+        }
+
+        const accounts = Array.isArray(payload?.accounts)
+          ? payload.accounts
+          : [];
+        const selectedSteamId = String(
+          (prefs || getCachedPreferences())?.steamOfficialSteamId || "",
+        ).trim();
+
+        select.innerHTML = "";
+        const autoOption = document.createElement("option");
+        autoOption.value = "";
+        autoOption.textContent = tUi(
+          "settings.steamOfficialAccount.auto",
+          "Auto (Last Modified)",
+        );
+        select.appendChild(autoOption);
+
+        for (const account of accounts) {
+          const option = document.createElement("option");
+          option.value = String(account?.steamid64 || "").trim();
+          option.textContent =
+            String(account?.label || "").trim() ||
+            String(account?.personaName || "").trim() ||
+            String(account?.accountName || "").trim() ||
+            option.value;
+          if (!option.value) continue;
+          select.appendChild(option);
+        }
+
+        const hasSelectedOption = Array.from(select.options).some(
+          (option) => option.value === selectedSteamId,
+        );
+        select.value = hasSelectedOption ? selectedSteamId : "";
+
+        if (hint) {
+          if (accounts.length) {
+            hint.textContent = tUi(
+              "settings.steamOfficialAccount.hint",
+              "Uses Steam loginusers.vdf when available.",
+            );
+          } else {
+            hint.textContent = tUi(
+              "settings.steamOfficialAccount.noAccounts",
+              "No Steam accounts detected. Auto (Last Modified) will be used.",
+            );
+          }
+        }
+      }
+
       async function loadPreferences() {
         const prefs = await loadPreferencesFromDisk();
         renderSteamApiKeyStatusFromPrefs(prefs);
+        await syncSteamOfficialAccountDropdown(prefs);
         applyShowBlacklistPreference(prefs?.showBlacklistedGames);
         await syncBlacklistList();
         renderBlacklistList();
@@ -9457,6 +9971,49 @@
               }
             });
           }
+
+          const steamOfficialAccountSelect = document.getElementById(
+            "settings-steamOfficialAccountSelect",
+          );
+          if (
+            steamOfficialAccountSelect &&
+            !steamOfficialAccountSelect.dataset.bound
+          ) {
+            steamOfficialAccountSelect.dataset.bound = "1";
+            steamOfficialAccountSelect.addEventListener("change", async (e) => {
+              const nextSteamId = String(e.target.value || "").trim();
+              await window.api.savePreferences({
+                steamOfficialSteamId: nextSteamId,
+              });
+              await loadPreferencesCached().catch(() => {});
+              await syncSteamOfficialAccountDropdown(getCachedPreferences());
+              const selectedName =
+                document.getElementById("configList")?.value || "";
+              const selectedMeta = selectedName
+                ? configMetaIndex.get(selectedName) || lastSelectedConfigMeta
+                : null;
+              if (
+                selectedName &&
+                String(selectedMeta?.platform || "").toLowerCase() ===
+                  "steam-official" &&
+                typeof buildMainAchievementsTable === "function"
+              ) {
+                const lang =
+                  document.getElementById("languageSelect")?.value || "english";
+                await buildMainAchievementsTable(selectedName, lang).catch(
+                  () => {},
+                );
+              }
+              if (
+                typeof window.refreshSteamOfficialDashboardAfterAccountChange ===
+                "function"
+              ) {
+                await window.refreshSteamOfficialDashboardAfterAccountChange().catch(
+                  () => {},
+                );
+              }
+            });
+          }
         } catch (e) {
           console.warn(
             tUi("log.settingsLoadFailed", "Settings cannot be loaded:"),
@@ -9656,15 +10213,12 @@
           overlayControllerBackendEl.value = String(
             prefs?.overlayControllerBackend || "auto",
           ).toLowerCase();
-          overlayControllerBackendEl.addEventListener(
-            "change",
-            async (e) => {
-              await window.api.savePreferences({
-                overlayControllerBackend: e.target.value,
-              });
-              await loadPreferencesCached().catch(() => {});
-            },
-          );
+          overlayControllerBackendEl.addEventListener("change", async (e) => {
+            await window.api.savePreferences({
+              overlayControllerBackend: e.target.value,
+            });
+            await loadPreferencesCached().catch(() => {});
+          });
         }
 
         const showDashEl = document.getElementById(
@@ -10988,14 +11542,13 @@
         RIGHT_THUMB: "R3",
       });
 
-      function normalizeOverlayControllerBinding(
-        value,
-        options = {},
-      ) {
-        const fallback =
-          Object.prototype.hasOwnProperty.call(options, "fallback")
-            ? options.fallback
-            : null;
+      function normalizeOverlayControllerBinding(value, options = {}) {
+        const fallback = Object.prototype.hasOwnProperty.call(
+          options,
+          "fallback",
+        )
+          ? options.fallback
+          : null;
         const allowedButtons = new Set(
           Array.isArray(options.allowedButtons)
             ? options.allowedButtons
@@ -11016,10 +11569,7 @@
           const normalized = String(raw || "")
             .trim()
             .toUpperCase();
-          if (
-            !allowedButtons.has(normalized) ||
-            seen.has(normalized)
-          ) {
+          if (!allowedButtons.has(normalized) || seen.has(normalized)) {
             continue;
           }
           seen.add(normalized);
@@ -11063,7 +11613,9 @@
       ) {
         return normalizeOverlayControllerBinding(value, {
           fallback,
-          allowedButtons: [...OVERLAY_CONTROLLER_CONTROL_MODE_CAPTURE_BUTTON_SET],
+          allowedButtons: [
+            ...OVERLAY_CONTROLLER_CONTROL_MODE_CAPTURE_BUTTON_SET,
+          ],
           allowSingle: true,
           maxButtons: 2,
         });
@@ -11085,7 +11637,9 @@
       const overlayControllerRuntimeState = {
         supportEnabled: false,
         toggleBinding: [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
-        controlModeBinding: [...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING],
+        controlModeBinding: [
+          ...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
+        ],
         controlModeActive: false,
         controlModeUserIndex: null,
       };
@@ -11099,8 +11653,9 @@
         }
         if (Array.isArray(source.toggleBinding)) {
           overlayControllerRuntimeState.toggleBinding =
-            normalizeOverlayControllerToggleBinding(source.toggleBinding) ||
-            [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING];
+            normalizeOverlayControllerToggleBinding(source.toggleBinding) || [
+              ...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING,
+            ];
         }
         if (Array.isArray(source.controlModeBinding)) {
           overlayControllerRuntimeState.controlModeBinding =
@@ -11119,31 +11674,30 @@
 
       function getOverlayControllerRuntimeStateSnapshot(source = null) {
         const prefs =
-          source && typeof source === "object" ? source : getCachedPreferences();
+          source && typeof source === "object"
+            ? source
+            : getCachedPreferences();
         return {
           supportEnabled:
             typeof overlayControllerRuntimeState.supportEnabled === "boolean"
               ? overlayControllerRuntimeState.supportEnabled
               : prefs?.overlayControllerSupportEnabled === true,
-          toggleBinding:
-            normalizeOverlayControllerToggleBinding(
-              overlayControllerRuntimeState.toggleBinding?.length
-                ? overlayControllerRuntimeState.toggleBinding
-                : prefs?.overlayControllerToggleBinding,
-            ) || [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
-          controlModeBinding:
-            normalizeOverlayControllerControlModeBinding(
-              overlayControllerRuntimeState.controlModeBinding?.length
-                ? overlayControllerRuntimeState.controlModeBinding
-                : prefs?.overlayControllerControlModeBinding,
-            ) || [...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING],
+          toggleBinding: normalizeOverlayControllerToggleBinding(
+            overlayControllerRuntimeState.toggleBinding?.length
+              ? overlayControllerRuntimeState.toggleBinding
+              : prefs?.overlayControllerToggleBinding,
+          ) || [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
+          controlModeBinding: normalizeOverlayControllerControlModeBinding(
+            overlayControllerRuntimeState.controlModeBinding?.length
+              ? overlayControllerRuntimeState.controlModeBinding
+              : prefs?.overlayControllerControlModeBinding,
+          ) || [...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING],
           controlModeActive:
             overlayControllerRuntimeState.controlModeActive === true,
           controlModeUserIndex:
             Number.isFinite(
               Number(overlayControllerRuntimeState.controlModeUserIndex),
-            ) &&
-            Number(overlayControllerRuntimeState.controlModeUserIndex) >= 0
+            ) && Number(overlayControllerRuntimeState.controlModeUserIndex) >= 0
               ? Number(overlayControllerRuntimeState.controlModeUserIndex)
               : null,
         };
@@ -11186,11 +11740,13 @@
       function cancelOverlayControllerPendingActionsForBinding(binding = []) {
         if (!Array.isArray(binding)) return;
         binding.forEach((buttonName) =>
-          cancelOverlayControllerPendingMainAction(buttonName)
+          cancelOverlayControllerPendingMainAction(buttonName),
         );
       }
 
-      function flushOverlayControllerPendingMainActions(now = performance.now()) {
+      function flushOverlayControllerPendingMainActions(
+        now = performance.now(),
+      ) {
         for (const [buttonName, entry] of overlayControllerPendingMainActions) {
           if (!entry || now < Number(entry.executeAt || 0)) continue;
           overlayControllerPendingMainActions.delete(buttonName);
@@ -11298,9 +11854,10 @@
         tUi("ui.shortcut.pressButtons", "Press buttons...");
 
       function updateOverlayControllerShortcutUiFromPrefs(source = null) {
-        const prefs = source && typeof source === "object"
-          ? source
-          : getCachedPreferences();
+        const prefs =
+          source && typeof source === "object"
+            ? source
+            : getCachedPreferences();
         const label = formatOverlayControllerToggleBinding(
           getOverlayControllerToggleBindingFromPrefs(prefs),
         );
@@ -11318,9 +11875,10 @@
       function updateOverlayControllerControlModeShortcutUiFromPrefs(
         source = null,
       ) {
-        const prefs = source && typeof source === "object"
-          ? source
-          : getCachedPreferences();
+        const prefs =
+          source && typeof source === "object"
+            ? source
+            : getCachedPreferences();
         if (overlayControllerControlModeShortcutLabel) {
           overlayControllerControlModeShortcutLabel.textContent = tUi(
             "shortcutsOverlayControlModeTitle",
@@ -11385,7 +11943,9 @@
         overlayControllerControlModeShortcutCandidate = [];
         overlayControllerControlModeShortcutStartedAt = 0;
         if (overlayControllerControlModeShortcutCaptureFrame) {
-          cancelAnimationFrame(overlayControllerControlModeShortcutCaptureFrame);
+          cancelAnimationFrame(
+            overlayControllerControlModeShortcutCaptureFrame,
+          );
           overlayControllerControlModeShortcutCaptureFrame = 0;
         }
         overlayControllerControlModeShortcutBtn?.classList?.remove("listening");
@@ -11397,8 +11957,8 @@
         message = null,
       ) {
         if (!buttonEl) return;
-        buttonEl.textContent = message ||
-          tUi("ui.shortcut.invalidCombo", "Invalid combo");
+        buttonEl.textContent =
+          message || tUi("ui.shortcut.invalidCombo", "Invalid combo");
         setTimeout(() => restoreFn?.().catch?.(() => {}), 1200);
       }
 
@@ -11521,10 +12081,7 @@
           cleanupOverlayControllerShortcutRecording();
           commitOverlayControllerShortcutBinding(binding).catch((err) => {
             console.error(
-              tUi(
-                "log.preferencesSaveFailed",
-                "Failed to save preferences:",
-              ),
+              tUi("log.preferencesSaveFailed", "Failed to save preferences:"),
               err,
             );
             restoreSavedOverlayControllerShortcutLabel().catch(() => {});
@@ -11610,10 +12167,7 @@
           commitOverlayControllerControlModeShortcutBinding(binding).catch(
             (err) => {
               console.error(
-                tUi(
-                  "log.preferencesSaveFailed",
-                  "Failed to save preferences:",
-                ),
+                tUi("log.preferencesSaveFailed", "Failed to save preferences:"),
                 err,
               );
               restoreSavedOverlayControllerControlModeShortcutLabel().catch(
@@ -11669,46 +12223,49 @@
       }
 
       if (overlayControllerControlModeShortcutBtn) {
-        overlayControllerControlModeShortcutBtn.addEventListener("click", () => {
-          if (
-            overlayControllerControlModeShortcutBtn.classList.contains(
-              "listening",
-            ) ||
-            overlayControllerControlModeShortcutBtn.textContent ===
-              getPressButtonsLabel()
-          ) {
-            cleanupOverlayControllerControlModeShortcutRecording();
-            restoreSavedOverlayControllerControlModeShortcutLabel().catch(
-              () => {},
-            );
-            return;
-          }
+        overlayControllerControlModeShortcutBtn.addEventListener(
+          "click",
+          () => {
+            if (
+              overlayControllerControlModeShortcutBtn.classList.contains(
+                "listening",
+              ) ||
+              overlayControllerControlModeShortcutBtn.textContent ===
+                getPressButtonsLabel()
+            ) {
+              cleanupOverlayControllerControlModeShortcutRecording();
+              restoreSavedOverlayControllerControlModeShortcutLabel().catch(
+                () => {},
+              );
+              return;
+            }
 
-          if (isListeningForShortcut) {
-            cleanupShortcutRecording();
-            restoreSavedShortcutLabel();
-          }
-          if (isListeningForInteractShortcut) {
-            cleanupInteractShortcutRecording();
-            restoreSavedInteractShortcutLabel();
-          }
-          if (isListeningForOverlayControllerShortcut) {
-            cleanupOverlayControllerShortcutRecording();
-            restoreSavedOverlayControllerShortcutLabel().catch(() => {});
-          }
+            if (isListeningForShortcut) {
+              cleanupShortcutRecording();
+              restoreSavedShortcutLabel();
+            }
+            if (isListeningForInteractShortcut) {
+              cleanupInteractShortcutRecording();
+              restoreSavedInteractShortcutLabel();
+            }
+            if (isListeningForOverlayControllerShortcut) {
+              cleanupOverlayControllerShortcutRecording();
+              restoreSavedOverlayControllerShortcutLabel().catch(() => {});
+            }
 
-          isListeningForOverlayControllerControlModeShortcut = true;
-          overlayControllerControlModeShortcutWaitingForNeutral = true;
-          overlayControllerControlModeShortcutCandidate = [];
-          overlayControllerControlModeShortcutStartedAt = 0;
-          overlayControllerControlModeShortcutBtn.textContent =
-            getPressButtonsLabel();
-          overlayControllerControlModeShortcutBtn.classList.add("listening");
-          overlayControllerControlModeShortcutCaptureFrame =
-            requestAnimationFrame(
-              pollOverlayControllerControlModeShortcutCapture,
-            );
-        });
+            isListeningForOverlayControllerControlModeShortcut = true;
+            overlayControllerControlModeShortcutWaitingForNeutral = true;
+            overlayControllerControlModeShortcutCandidate = [];
+            overlayControllerControlModeShortcutStartedAt = 0;
+            overlayControllerControlModeShortcutBtn.textContent =
+              getPressButtonsLabel();
+            overlayControllerControlModeShortcutBtn.classList.add("listening");
+            overlayControllerControlModeShortcutCaptureFrame =
+              requestAnimationFrame(
+                pollOverlayControllerControlModeShortcutCapture,
+              );
+          },
+        );
       }
 
       window.refreshOverlayControllerShortcutLabel = () => {
@@ -11724,7 +12281,9 @@
       window.refreshOverlayControllerControlModeShortcutLabel = () => {
         if (
           !overlayControllerControlModeShortcutBtn ||
-          overlayControllerControlModeShortcutBtn.classList.contains("listening")
+          overlayControllerControlModeShortcutBtn.classList.contains(
+            "listening",
+          )
         ) {
           return;
         }
@@ -12633,14 +13192,10 @@
           } catch {}
 
           try {
-            const ok = await downloadCoverFromCdnAndCache(
-              appid,
-              fetchAppId,
-              {
-                gameName: coverName,
-                platform: platform || null,
-              },
-            );
+            const ok = await downloadCoverFromCdnAndCache(appid, fetchAppId, {
+              gameName: coverName,
+              platform: platform || null,
+            });
             if (ok) {
               await refreshDashboardImageByAppId(appid, platform || null);
             }
@@ -12901,8 +13456,7 @@
           await buildDashboard();
         }
 
-        const getDashboardSelectionNames = () =>
-          Array.from(dashboardSelection);
+        const getDashboardSelectionNames = () => Array.from(dashboardSelection);
 
         const isDashboardSelected = (name) =>
           !!name && dashboardSelection.has(String(name));
@@ -12942,9 +13496,7 @@
         };
 
         const getDashboardSearchQuery = () =>
-          String(
-            document.getElementById("dashboardSearchInput")?.value || "",
-          )
+          String(document.getElementById("dashboardSearchInput")?.value || "")
             .trim()
             .toLowerCase()
             .normalize("NFD")
@@ -13103,8 +13655,7 @@
               name,
               displayName: String(card?.dataset?.display || name).trim(),
               appid: String(card?.dataset?.appid || "").trim(),
-              platform:
-                String(card?.dataset?.platform || "").trim() || null,
+              platform: String(card?.dataset?.platform || "").trim() || null,
               blacklisted: card?.dataset?.blacklisted === "1",
             };
           });
@@ -13633,9 +14184,8 @@
           const selectionHasActionableAppId = selectedEntries.some(
             (entry) => !!String(entry?.appid || "").trim(),
           );
-          const selectionRemoveMode = selectionCanRemoveFromBlacklist(
-            selectedEntries,
-          );
+          const selectionRemoveMode =
+            selectionCanRemoveFromBlacklist(selectedEntries);
           const removeMode =
             scope?.mode === "selection"
               ? selectionRemoveMode
@@ -14976,6 +15526,75 @@
           clearDashboardSchemaCache(cfgName);
         }
 
+        async function getSteamOfficialDashboardConfigNames() {
+          let configs = Array.from(configMetaIndex.values()).filter(Boolean);
+          if (!configs.length && typeof window.api?.loadConfigs === "function") {
+            try {
+              configs = normalizeConfigList(await window.api.loadConfigs());
+              if (configs.length) {
+                cacheConfigMeta(configs);
+              }
+            } catch {}
+          }
+
+          const out = new Set();
+          for (const cfg of configs) {
+            const name = String(cfg?.name || "").trim();
+            const platform = String(cfg?.platform || "")
+              .trim()
+              .toLowerCase();
+            if (name && platform === "steam-official") {
+              out.add(name);
+            }
+          }
+
+          const lastName = String(lastSelectedConfigMeta?.name || "").trim();
+          const lastPlatform = String(lastSelectedConfigMeta?.platform || "")
+            .trim()
+            .toLowerCase();
+          if (lastName && lastPlatform === "steam-official") {
+            out.add(lastName);
+          }
+
+          return Array.from(out);
+        }
+
+        function clearDashboardProgressSnapshot(cfgName) {
+          if (!cfgName) return;
+          clearDashboardSavedCache(cfgName);
+          try {
+            localStorage.removeItem(`${DASH_PROGRESS_PREFIX}${cfgName}`);
+          } catch {}
+        }
+
+        async function refreshSteamOfficialDashboardAfterAccountChange() {
+          const names = await getSteamOfficialDashboardConfigNames();
+          if (!names.length) {
+            if (!window.__dashboardOpen) {
+              window.__dashboardNeedsRebuild = true;
+            }
+            return;
+          }
+
+          names.forEach(clearDashboardProgressSnapshot);
+
+          if (!window.__dashboardOpen) {
+            window.__dashboardNeedsRebuild = true;
+            return;
+          }
+
+          if (typeof refreshDashboardProgress === "function") {
+            await refreshDashboardProgress({
+              reason: "steam-official-account-change",
+            });
+            return;
+          }
+
+          if (typeof buildDashboard === "function") {
+            await buildDashboard();
+          }
+        }
+
         let dashboardProgressRefreshPromise = null;
         let dashboardProgressRefreshRequested = false;
         async function refreshDashboardProgress(options = {}) {
@@ -15034,6 +15653,8 @@
           window.__clearDashboardSchemaCache = clearDashboardSchemaCache;
           window.__clearDashboardCachesFor = clearDashboardCachesFor;
           window.refreshDashboardProgress = refreshDashboardProgress;
+          window.refreshSteamOfficialDashboardAfterAccountChange =
+            refreshSteamOfficialDashboardAfterAccountChange;
         } catch {}
 
         function selectConfigInDropdown(name) {
@@ -15935,12 +16556,31 @@
             window.__markUiDataReady?.();
             maybeHideBootLoading();
             maybeStartBootOnboarding();
+            if (status?.bootDone) {
+              refreshSteamOfficialAccountDropdownAfterBoot().catch(() => {});
+            }
           })
           .catch(() => {});
         window.api?.on?.("boot:ui-ready", () => {
           window.__bootUiReady = true;
           maybeStartBootOnboarding();
         });
+        let steamOfficialAccountRefreshRequested = false;
+
+        async function refreshSteamOfficialAccountDropdownAfterBoot() {
+          if (steamOfficialAccountRefreshRequested) return;
+          steamOfficialAccountRefreshRequested = true;
+          try {
+            const prefs = await loadPreferencesFromDisk();
+            await syncSteamOfficialAccountDropdown(prefs);
+          } catch (err) {
+            console.warn(
+              "Failed to refresh Steam official account dropdown after boot:",
+              err,
+            );
+          }
+        }
+
         window.api?.on?.("boot:complete", () => {
           window.__bootDone = true;
           showNotification(
@@ -15950,6 +16590,7 @@
           window.__prepareDashboardForStartup?.();
           window.__markUiDataReady?.();
           maybeStartBootOnboarding();
+          refreshSteamOfficialAccountDropdownAfterBoot().catch(() => {});
         });
         window.api?.on?.("boot:onboarding:show", () => {
           maybeStartBootOnboarding();
@@ -17360,7 +18001,10 @@
             typeof window.i18nUi?.getStrings === "function"
               ? window.i18nUi.getStrings()
               : null;
-          if (strings && typeof window.i18nUi?.applyLocaleStrings === "function") {
+          if (
+            strings &&
+            typeof window.i18nUi?.applyLocaleStrings === "function"
+          ) {
             window.i18nUi.applyLocaleStrings(strings);
           }
         }

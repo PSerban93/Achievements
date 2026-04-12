@@ -28,8 +28,10 @@ const {
   parseKVBinary: parseSteamKv,
   extractUserStats,
   buildSnapshotFromAppcache,
-  pickLatestUserBin,
+  pickPreferredUserBin,
+  parseUserBinName,
 } = require("./steam-appcache");
+const { steamId64ToAccountId } = require("./steam-local-users");
 const { parsePs4TrophySetDir } = require("./shadps4-trophy");
 const { sanitizeConfigName } = require("./playtime-store");
 const {
@@ -619,7 +621,10 @@ module.exports = function makeWatchedFolders({
     let cached = null;
     if (typeof getCachedSnapshot === "function") {
       try {
-        cached = getCachedSnapshot(configName, meta?.platform || null);
+        cached = getCachedSnapshot(configName, meta?.platform || null, {
+          savePath: meta?.save_path || null,
+          appid: id,
+        });
       } catch {}
     }
     const cachedSnapshot =
@@ -1279,7 +1284,10 @@ module.exports = function makeWatchedFolders({
     if (typeof getCachedSnapshot !== "function") return false;
     let cached = null;
     try {
-      cached = getCachedSnapshot(meta?.name || appid, meta?.platform || null);
+      cached = getCachedSnapshot(meta?.name || appid, meta?.platform || null, {
+        savePath: meta?.save_path || null,
+        appid,
+      });
     } catch {}
     if (!cached || typeof cached !== "object") return false;
     const platform = meta?.platform || null;
@@ -1335,22 +1343,28 @@ module.exports = function makeWatchedFolders({
     });
   }
 
-  async function generateIdsThrottled(tasks) {
+  async function generateIdsThrottled(tasks, opts = {}) {
     if (!Array.isArray(tasks) || tasks.length === 0) {
       return new Set();
     }
     let running = 0;
     let idx = 0;
     const generated = new Set();
+    const onTaskProgress =
+      typeof opts.onTaskProgress === "function" ? opts.onTaskProgress : null;
+    const onTaskSettled =
+      typeof opts.onTaskSettled === "function" ? opts.onTaskSettled : null;
 
     return new Promise((resolve) => {
       const next = async () => {
         while (running < BOOT_GEN_CONCURRENCY && idx < tasks.length) {
+          const taskIndex = idx;
           const task = tasks[idx++];
           running++;
           (async () => {
+            let generationResult = null;
             try {
-              const generationResult = await generateOneAppId(
+              generationResult = await generateOneAppId(
                 task.appid,
                 task.appDir || null,
                 {
@@ -1368,6 +1382,9 @@ module.exports = function makeWatchedFolders({
                   __eaLogFile: task.__eaLogFile || null,
                   __eaGameName: task.__eaGameName || null,
                   __emu: task.__emu || null,
+                  onGenerationProgress: onTaskProgress
+                    ? (progress) => onTaskProgress(task, taskIndex, progress)
+                    : null,
                 },
               );
               if (generationResult?.created === true) {
@@ -1375,6 +1392,11 @@ module.exports = function makeWatchedFolders({
               }
             } catch {
             } finally {
+              try {
+                if (onTaskSettled) {
+                  onTaskSettled(task, taskIndex, generationResult);
+                }
+              } catch {}
               running--;
               setTimeout(next, BOOT_GEN_SLICE_MS);
             }
@@ -1384,6 +1406,179 @@ module.exports = function makeWatchedFolders({
       };
       next();
     });
+  }
+
+  function createGenerationBatchReporter(tasks, meta = {}) {
+    const list = Array.isArray(tasks) ? tasks : [];
+    const total = list.length;
+    const id = `generation-batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const scope = total > 1 ? "batch" : "single";
+    const states = list.map((task, index) => ({
+      index,
+      appid: String(task?.appid || ""),
+      itemName: String(task?.__eaGameName || task?.__gogName || task?.appid || "").trim(),
+      percent: 0,
+      phase: "preparing",
+      detail: "",
+      finalState: null,
+    }));
+    let lastIndex = 0;
+
+    const clampPercent = (value, fallback = 0) => {
+      const n = Number(value);
+      if (!Number.isFinite(n)) return fallback;
+      if (n <= 0) return 0;
+      if (n >= 100) return 100;
+      return Math.round(n);
+    };
+
+    const currentState = () => {
+      const active =
+        states.find((entry) => entry.percent > 0 && entry.percent < 100) ||
+        states[lastIndex] ||
+        states[0] || {
+          appid: "",
+          itemName: "",
+          phase: "preparing",
+          detail: "",
+        };
+      const completed = states.filter((entry) => entry.percent >= 100).length;
+      const current =
+        total > 0 ? Math.min(total, completed + (completed < total ? 1 : 0)) : 0;
+      const percent =
+        total > 0
+          ? Math.round(
+              states.reduce(
+                (sum, entry) => sum + clampPercent(entry.percent, 0),
+                0,
+              ) / total,
+            )
+          : 0;
+      return {
+        current,
+        total,
+        percent,
+        appid: active.appid || "",
+        itemName: active.itemName || active.appid || "",
+        phase: active.phase || "preparing",
+        detail:
+          active.detail ||
+          String(meta?.defaultDetail || "Preparing config generation"),
+      };
+    };
+
+    const emit = (channel, payload = {}) => {
+      try {
+        broadcastAll(channel, {
+          id,
+          kind: "config-generate",
+          scope,
+          ...payload,
+        });
+      } catch {}
+    };
+
+    return {
+      start() {
+        const state = currentState();
+        emit("generation:progress:start", {
+          status: "running",
+          current: state.current,
+          total: state.total,
+          percent: state.percent,
+          appid: state.appid,
+          itemName: String(meta?.rootLabel || state.itemName || ""),
+          phase: "preparing",
+          detail: String(meta?.defaultDetail || "Preparing config generation"),
+        });
+      },
+      updateTask(task, taskIndex, progress = {}) {
+        const state = states[taskIndex];
+        if (!state) return;
+        lastIndex = taskIndex;
+        state.appid = String(progress?.appid || task?.appid || state.appid || "");
+        state.itemName = String(
+          progress?.itemName ||
+            progress?.name ||
+            state.itemName ||
+            state.appid ||
+            "",
+        ).trim();
+        state.phase = String(progress?.phase || state.phase || "");
+        state.detail = String(progress?.detail || state.detail || "");
+        state.percent = clampPercent(progress?.percent, state.percent || 0);
+        const summary = currentState();
+        emit("generation:progress:update", {
+          status: "running",
+          current: summary.current,
+          total: summary.total,
+          percent: summary.percent,
+          appid: state.appid,
+          itemName: state.itemName || state.appid || "",
+          phase: state.phase || summary.phase,
+          detail: state.detail || summary.detail,
+        });
+      },
+      settleTask(task, taskIndex, result = null) {
+        const state = states[taskIndex];
+        if (!state) return;
+        lastIndex = taskIndex;
+        state.appid = String(task?.appid || state.appid || "");
+        state.itemName = String(
+          state.itemName || task?.__eaGameName || task?.__gogName || state.appid,
+        ).trim();
+        state.percent = 100;
+        if (result?.created === true) {
+          state.phase = "completed";
+          state.detail = "Config created";
+          state.finalState = "completed";
+        } else if (result?.pendingSchema === true) {
+          state.phase = "skipped";
+          state.detail = "Waiting for schema generation";
+          state.finalState = "skipped";
+        } else if (result && result.reason) {
+          state.phase = result.reason === "blacklisted" ? "skipped" : "skipped";
+          state.detail = "Config generation skipped";
+          state.finalState = "skipped";
+        } else {
+          state.phase = "failed";
+          state.detail = "Config generation failed";
+          state.finalState = "failed";
+        }
+        const summary = currentState();
+        emit("generation:progress:update", {
+          status: "running",
+          current: summary.current,
+          total: summary.total,
+          percent: summary.percent,
+          appid: state.appid,
+          itemName: state.itemName || state.appid || "",
+          phase: state.phase,
+          detail: state.detail,
+        });
+      },
+      finish(status = "success", detail = "") {
+        const summary = currentState();
+        emit("generation:progress:end", {
+          status: status === "failed" ? "failed" : "success",
+          current: summary.total,
+          total: summary.total,
+          percent: status === "failed" ? summary.percent : 100,
+          appid: summary.appid,
+          itemName:
+            String(meta?.rootLabel || summary.itemName || meta?.fallbackItemName || "")
+              .trim() || "",
+          phase: status === "failed" ? "failed" : "completed",
+          detail:
+            String(
+              detail ||
+                (status === "failed"
+                  ? "Config generation failed"
+                  : "Config generation completed"),
+            ) || "",
+        });
+      },
+    };
   }
 
   async function attachSaveWatchersBatched(
@@ -1481,6 +1676,20 @@ module.exports = function makeWatchedFolders({
     } catch {
       return {};
     }
+  }
+  function getPreferredSteamOfficialAccountId(sourcePrefs = null) {
+    const prefs =
+      sourcePrefs && typeof sourcePrefs === "object"
+        ? sourcePrefs
+        : readPrefsSafe();
+    return steamId64ToAccountId(prefs?.steamOfficialSteamId || "");
+  }
+  function pickConfiguredSteamOfficialUserBin(statsDir, appid, sourcePrefs = null) {
+    return pickPreferredUserBin(
+      statsDir,
+      appid,
+      getPreferredSteamOfficialAccountId(sourcePrefs),
+    );
   }
   const LUMAPLAY_WATCHER_PREF_KEY = "lumaPlayWatcherEnabled";
   function isLumaPlayWatcherEnabled() {
@@ -2737,11 +2946,13 @@ module.exports = function makeWatchedFolders({
         userBinPath: null,
       };
     }
-    const userMatch = base.match(/^UserGameStats_.+_(\d+)\.bin$/i);
+    const userMatch = base.match(/^UserGameStats_(\d+)_(\d+)\.bin$/i);
     if (userMatch) {
-      const appid = userMatch[1];
+      const accountId = userMatch[1];
+      const appid = userMatch[2];
       return {
         appid,
+        accountId,
         kind: "user",
         statsDir: path.dirname(filePath),
         schemaBinPath: path.join(
@@ -2843,6 +3054,19 @@ module.exports = function makeWatchedFolders({
     if (!info?.appid) return null;
     const appid = String(info.appid);
     const statsDir = info.statsDir || "";
+    const preferredAccountId = getPreferredSteamOfficialAccountId();
+    if (
+      preferredAccountId &&
+      info?.kind === "user" &&
+      String(info?.accountId || "") !== preferredAccountId
+    ) {
+      watcherLogger.info("steam-official:skip-nonselected-account", {
+        appid,
+        accountId: info?.accountId || null,
+        preferredAccountId,
+      });
+      return { skipped: true, appid };
+    }
     if (shouldSkipSteamOfficialGeneration(appid)) {
       pendingSteamOfficial.delete(appid);
       watcherLogger.info("steam-official:skip-existing", { appid });
@@ -2868,6 +3092,7 @@ module.exports = function makeWatchedFolders({
       statsDir,
       schemaBinPath,
       configsDir,
+      { preferredAccountId },
     );
     if (!result) return null;
     pendingSteamOfficial.delete(appid);
@@ -3376,18 +3601,49 @@ module.exports = function makeWatchedFolders({
     }
   }
 
-  // Snapshot cache keyed by config name + platform (no save path to keep behavior simple)
+  // Snapshot cache keyed by config name + platform (+ account for steam-official)
   const lastSnapshot = new Map();
 
-  function makeSnapshotKey(meta, appid) {
+  function resolveSteamOfficialSnapshotAccountId(meta, appid, options = {}) {
+    const platform = normalizePlatform(meta?.platform) || "steam";
+    if (platform !== "steam-official") return "";
+    const opts = options && typeof options === "object" ? options : {};
+    const parsed = parseUserBinName(opts.userBinPath || opts.filePath || "");
+    if (parsed?.accountId) return String(parsed.accountId || "").trim();
+    const preferredAccountId = getPreferredSteamOfficialAccountId(
+      opts.preferences || null,
+    );
+    if (preferredAccountId) return preferredAccountId;
+    const statsDir = String(opts.statsDir || meta?.save_path || "").trim();
+    const targetAppId = String(opts.appid || appid || meta?.appid || "").trim();
+    if (!statsDir || !targetAppId) return "";
+    const userBin = pickConfiguredSteamOfficialUserBin(
+      statsDir,
+      targetAppId,
+      opts.preferences || null,
+    );
+    const resolved = parseUserBinName(userBin || "");
+    return resolved?.accountId ? String(resolved.accountId || "").trim() : "";
+  }
+
+  function makeSnapshotKey(meta, appid, options = {}) {
     const name = sanitizeConfigName(meta?.name || "") || String(appid || "");
     const platform = normalizePlatform(meta?.platform) || "steam";
-    return [name, platform].join("::");
+    const parts = [name, platform];
+    const steamOfficialAccountId = resolveSteamOfficialSnapshotAccountId(
+      meta,
+      appid,
+      options,
+    );
+    if (steamOfficialAccountId) {
+      parts.push(`acct:${steamOfficialAccountId}`);
+    }
+    return parts.join("::");
   }
 
   function getCacheMetaKey(meta, appid, filePath) {
     if (!filePath) return "";
-    const snapKey = makeSnapshotKey(meta, appid);
+    const snapKey = makeSnapshotKey(meta, appid, { filePath });
     const normPath = normalizePrefPath(filePath);
     if (!snapKey || !normPath) return "";
     return `${snapKey}::${normPath}`;
@@ -3474,7 +3730,10 @@ module.exports = function makeWatchedFolders({
         out.add(
           path.join(meta.save_path, `UserGameStatsSchema_${meta.appid}.bin`),
         );
-        const latestUserBin = pickLatestUserBin(meta.save_path, meta.appid);
+        const latestUserBin = pickConfiguredSteamOfficialUserBin(
+          meta.save_path,
+          meta.appid,
+        );
         if (latestUserBin) out.add(latestUserBin);
       }
       return Array.from(out);
@@ -3671,6 +3930,10 @@ module.exports = function makeWatchedFolders({
                   ? getCachedSnapshot(
                       meta?.name || appid,
                       meta?.platform || null,
+                      {
+                        savePath: meta?.save_path || null,
+                        appid,
+                      },
                     )
                   : null;
               if (cached && typeof cached === "object") {
@@ -3783,7 +4046,10 @@ module.exports = function makeWatchedFolders({
         let userBin = filePath;
         const base = path.basename(userBin || "").toLowerCase();
         if (!base.startsWith("usergamestats_") || !base.endsWith(".bin")) {
-          userBin = pickLatestUserBin(statsDir, meta.appid || appid);
+          userBin = pickConfiguredSteamOfficialUserBin(
+            statsDir,
+            meta.appid || appid,
+          );
         }
         if (entries.length && userBin && fs.existsSync(userBin)) {
           const kv = parseSteamKv(fs.readFileSync(userBin));
@@ -4611,7 +4877,7 @@ module.exports = function makeWatchedFolders({
           : "";
       if (schemaBin) candidates.push(schemaBin);
       const userBin = statsDir
-        ? pickLatestUserBin(statsDir, meta.appid || id)
+        ? pickConfiguredSteamOfficialUserBin(statsDir, meta.appid || id)
         : "";
       if (userBin) candidates.unshift(userBin);
 
@@ -5135,7 +5401,7 @@ module.exports = function makeWatchedFolders({
     } else if (isSteamOfficialMeta(meta)) {
       const statsDir = meta.save_path || "";
       const userBin = statsDir
-        ? pickLatestUserBin(statsDir, meta.appid || id)
+        ? pickConfiguredSteamOfficialUserBin(statsDir, meta.appid || id)
         : "";
       if (userBin) {
         const key = path.normalize(userBin);
@@ -5636,6 +5902,10 @@ module.exports = function makeWatchedFolders({
   async function generateOneAppId(appid, appDir, opts = {}) {
     appid = String(appid);
     const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
+    const externalProgressHandler =
+      typeof opts.onGenerationProgress === "function"
+        ? opts.onGenerationProgress
+        : null;
     if (isAppIdBlacklisted(appid, desiredPlatform)) {
       return { created: false, reason: "blacklisted" };
     }
@@ -5719,12 +5989,72 @@ module.exports = function makeWatchedFolders({
         if (opts.__lumaplayUser) {
           genOptions.lumaplayUser = opts.__lumaplayUser;
         }
-        const result = await generateConfigForAppId(
-          appid,
-          configsDir,
-          genOptions,
-        );
+        const singleGenerationId = `generation-single-${appid}-${Date.now()}`;
+        const singleGenerationItem =
+          String(
+            opts.__eaGameName ||
+              opts.__gogName ||
+              genOptions.preferredName ||
+              appid,
+          ).trim() || String(appid);
+        const emitSingleGeneration = (phaseType, payload = {}) => {
+          const nextPayload = {
+            id: singleGenerationId,
+            kind: "config-generate",
+            scope: "single",
+            appid: String(payload.appid || appid),
+            itemName: String(payload.itemName || singleGenerationItem),
+            ...payload,
+          };
+          if (externalProgressHandler) {
+            try {
+              externalProgressHandler({
+                ...nextPayload,
+                event: phaseType,
+              });
+            } catch {}
+            return;
+          }
+          const channel =
+            phaseType === "start"
+              ? "generation:progress:start"
+              : phaseType === "end"
+                ? "generation:progress:end"
+                : "generation:progress:update";
+          try {
+            broadcastAll(channel, nextPayload);
+          } catch {}
+        };
+        genOptions.onGenerationProgress = (progress = {}) => {
+          emitSingleGeneration("update", progress);
+        };
+        emitSingleGeneration("start", {
+          status: "running",
+          phase: "preparing",
+          detail: "Preparing config generation",
+          percent: 0,
+        });
+        let result = null;
+        try {
+          result = await generateConfigForAppId(appid, configsDir, genOptions);
+        } catch (err) {
+          emitSingleGeneration("end", {
+            status: "failed",
+            phase: "failed",
+            detail: err?.message || "Config generation failed",
+          });
+          throw err;
+        }
         if (!result || result.skipped) {
+          emitSingleGeneration("end", {
+            status: "success",
+            phase: "skipped",
+            detail:
+              result?.pendingSchema === true
+                ? "Waiting for schema generation"
+                : "Config generation skipped",
+            percent: 100,
+          });
           watcherLogger.info("watcher:generate-skipped", {
             appid,
             platform: desiredPlatform || null,
@@ -5794,6 +6124,13 @@ module.exports = function makeWatchedFolders({
             attachSaveWatcherForAppId(appid, { suppressInitialNotify: true });
           } catch {}
         }
+        emitSingleGeneration("end", {
+          status: "success",
+          phase: "completed",
+          detail: "Config created",
+          percent: 100,
+          itemName: result?.name || singleGenerationItem,
+        });
         return { created: true, reason: "created" };
       }
       return { created: false, reason: "missing-generator" };
@@ -5872,6 +6209,15 @@ module.exports = function makeWatchedFolders({
     const blacklistState = getBlacklistState();
     const createdIds = new Set();
     const updatedIds = new Set();
+    const lumaGenerationTasks = [];
+    const lumaGenerationTaskIndex = new Map();
+
+    const buildLumaTaskKey = (row = {}) =>
+      [
+        String(row?.appid || "").trim(),
+        String(row?.user || "").trim(),
+        String(row?.keyPath || "").trim().toLowerCase(),
+      ].join("::");
 
     const markConfigAsLumaPlay = (meta, user, keyPath) => {
       if (!meta?.name) return false;
@@ -5904,6 +6250,32 @@ module.exports = function makeWatchedFolders({
 
     for (const row of discovered) {
       const appid = String(row?.appid || "").trim();
+      if (!appid || !/^[0-9a-fA-F]+$/.test(appid)) continue;
+      if (isAppIdBlacklisted(appid, "uplay", blacklistState)) continue;
+      const metas = getConfigMetas(appid);
+      const hasLumaPlay = metas.some((meta) => isLumaPlayMeta(meta));
+      if (hasLumaPlay) continue;
+      const task = {
+        appid,
+        user: String(row?.user || "").trim(),
+        keyPath: String(row?.keyPath || "").trim(),
+        __taskIndex: lumaGenerationTasks.length,
+      };
+      lumaGenerationTaskIndex.set(buildLumaTaskKey(task), task);
+      lumaGenerationTasks.push(task);
+    }
+    const lumaBatchProgress =
+      lumaGenerationTasks.length > 0
+        ? createGenerationBatchReporter(lumaGenerationTasks, {
+            rootLabel: "LumaPlay",
+            fallbackItemName: "LumaPlay",
+            defaultDetail: "Preparing config generation",
+          })
+        : null;
+    lumaBatchProgress?.start();
+
+    for (const row of discovered) {
+      const appid = String(row?.appid || "").trim();
       const user = String(row?.user || "").trim();
       const keyPath = String(row?.keyPath || "").trim();
       if (!appid || !/^[0-9a-fA-F]+$/.test(appid)) continue;
@@ -5925,12 +6297,23 @@ module.exports = function makeWatchedFolders({
         continue;
       }
 
+      const task =
+        lumaGenerationTaskIndex.get(buildLumaTaskKey(row)) || null;
+      const taskIndex = Number.isInteger(task?.__taskIndex) ? task.__taskIndex : -1;
       const generationResult = await generateOneAppId(appid, null, {
         forcePlatform: "uplay",
         __emu: "lumaplay",
         __lumaplayUser: user,
         __lumaplayKeyPath: keyPath,
+        onGenerationProgress: task
+          ? (progress) => {
+              lumaBatchProgress?.updateTask(task, taskIndex, progress);
+            }
+          : undefined,
       });
+      if (task) {
+        lumaBatchProgress?.settleTask(task, taskIndex, generationResult);
+      }
       if (generationResult?.created === true) {
         createdIds.add(appid);
         continue;
@@ -5951,6 +6334,8 @@ module.exports = function makeWatchedFolders({
         }
       }
     }
+
+    lumaBatchProgress?.finish("success", "Config generation completed");
 
     if (createdIds.size || updatedIds.size) {
       await indexExistingConfigsSync();
@@ -6043,7 +6428,10 @@ module.exports = function makeWatchedFolders({
       try {
         const cached =
           typeof getCachedSnapshot === "function"
-            ? getCachedSnapshot(meta?.name || appid, meta?.platform || null)
+            ? getCachedSnapshot(meta?.name || appid, meta?.platform || null, {
+                savePath: meta?.save_path || null,
+                appid,
+              })
             : null;
         if (cached && typeof cached === "object") {
           lastSnapshot.set(snapKey, cached);
@@ -6063,10 +6451,10 @@ module.exports = function makeWatchedFolders({
         typeof getCachedSnapshot === "function" &&
         !lastSnapshot.has(snapKey)
       ) {
-        const cached = getCachedSnapshot(
-          meta?.name || appid,
-          meta?.platform || null,
-        );
+        const cached = getCachedSnapshot(meta?.name || appid, meta?.platform || null, {
+          savePath: meta?.save_path || null,
+          appid,
+        });
         if (cached && typeof cached === "object") {
           lastSnapshot.set(snapKey, cached);
         }
@@ -6135,11 +6523,15 @@ module.exports = function makeWatchedFolders({
                 try {
                   const cached =
                     typeof getCachedSnapshot === "function"
-                      ? getCachedSnapshot(
-                          meta?.name || appid,
-                          meta?.platform || null,
-                        )
-                      : null;
+                  ? getCachedSnapshot(
+                      meta?.name || appid,
+                      meta?.platform || null,
+                      {
+                        savePath: meta?.save_path || null,
+                        appid,
+                      },
+                    )
+                  : null;
                   if (cached && typeof cached === "object") {
                     lastSnapshot.set(snapKey, cached);
                   }
@@ -6196,7 +6588,10 @@ module.exports = function makeWatchedFolders({
             let userBin = fp;
             const base = path.basename(userBin || "").toLowerCase();
             if (!base.startsWith("usergamestats_") || !base.endsWith(".bin")) {
-              userBin = pickLatestUserBin(statsDir, meta.appid || appid);
+              userBin = pickConfiguredSteamOfficialUserBin(
+                statsDir,
+                meta.appid || appid,
+              );
             }
             if (entries.length && userBin && fs.existsSync(userBin)) {
               const kv = parseSteamKv(fs.readFileSync(userBin));
@@ -6331,10 +6726,10 @@ module.exports = function makeWatchedFolders({
 
     if (!seeded && typeof getCachedSnapshot === "function") {
       const snapKey = makeSnapshotKey(meta, appid);
-      const cached = getCachedSnapshot(
-        meta?.name || appid,
-        meta?.platform || null,
-      );
+      const cached = getCachedSnapshot(meta?.name || appid, meta?.platform || null, {
+        savePath: meta?.save_path || null,
+        appid,
+      });
       if (cached && typeof cached === "object") {
         lastSnapshot.set(snapKey, cached);
       }
@@ -6353,6 +6748,7 @@ module.exports = function makeWatchedFolders({
         .map((value) => String(value || "").trim())
         .filter(Boolean),
     );
+    let rootBatchProgress = null;
     try {
       if (!rootPath || !fs.existsSync(rootPath)) return;
       const base = path.basename(rootPath);
@@ -6381,21 +6777,61 @@ module.exports = function makeWatchedFolders({
         );
         if (gpdFiles.length) {
           const schemaRoot = path.join(configsDir, "schema");
-          const handleGpd = async (gpdPath) => {
-            const appid = path.basename(gpdPath, path.extname(gpdPath));
+          const xeniaTasks = gpdFiles.map((gpdPath, taskIndex) => ({
+            gpdPath,
+            appid: path.basename(gpdPath, path.extname(gpdPath)),
+            __taskIndex: taskIndex,
+          }));
+          const xeniaBatchProgress = createGenerationBatchReporter(xeniaTasks, {
+            rootLabel: path.basename(rootPath || scanBase || "") || "",
+            fallbackItemName: "Xenia",
+            defaultDetail: "Parsing Xenia achievements",
+          });
+          xeniaBatchProgress.start();
+          const handleGpd = async (task, taskIndex) => {
+            const resolvedTaskIndex = Number.isInteger(taskIndex)
+              ? taskIndex
+              : Number.isInteger(task?.__taskIndex)
+                ? task.__taskIndex
+                : -1;
+            const gpdPath = task?.gpdPath || "";
+            const appid =
+              String(task?.appid || path.basename(gpdPath, path.extname(gpdPath)))
+                .trim();
             if (
               !appid ||
               isAppIdBlacklisted(appid, "xenia", blacklistState) ||
               xeniaAppIds.has(appid)
             ) {
+              xeniaBatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "skipped",
+                detail: "Config generation skipped",
+                percent: 100,
+              });
               return;
             }
             try {
+              xeniaBatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "generatingSchema",
+                detail: "Parsing Xenia achievements",
+                percent: 15,
+              });
               const result = generateConfigFromGpd(gpdPath, configsDir, {
                 schemaRoot,
                 bootMode,
               });
               if (!result || result.skipped) {
+                xeniaBatchProgress.updateTask(task, resolvedTaskIndex, {
+                  appid,
+                  itemName: result?.name || appid,
+                  phase: "skipped",
+                  detail: "Config generation skipped",
+                  percent: 100,
+                });
                 return;
               }
               if (
@@ -6418,19 +6854,42 @@ module.exports = function makeWatchedFolders({
               }
               xeniaAppIds.add(String(result.appid));
               knownAppIds.add(String(result.appid));
+              const xeniaChanged =
+                result?.created === true ||
+                result?.schemaUpdated === true ||
+                result?.configUpdated === true;
+              xeniaBatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid: String(result.appid || appid),
+                itemName: result?.name || result?.displayName || appid,
+                phase: xeniaChanged ? "completed" : "skipped",
+                detail:
+                  result?.created === true
+                    ? "Config created"
+                    : xeniaChanged
+                      ? "Config updated"
+                      : "Config generation skipped",
+                percent: 100,
+              });
             } catch (err) {
+              xeniaBatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "failed",
+                detail: err?.message || "Config generation failed",
+                percent: 100,
+              });
               notifyWarn(`Xenia GPD parse failed "${gpdPath}": ${err.message}`);
             }
           };
           if (bootMode) {
             await runWithConcurrency(
-              gpdFiles,
+              xeniaTasks,
               BOOT_SCAN_CONCURRENCY,
               handleGpd,
             );
           } else {
-            for (const gpdPath of gpdFiles) {
-              await handleGpd(gpdPath);
+            for (let taskIndex = 0; taskIndex < xeniaTasks.length; taskIndex += 1) {
+              await handleGpd(xeniaTasks[taskIndex], taskIndex);
             }
           }
           if (xeniaAppIds.size) {
@@ -6450,6 +6909,7 @@ module.exports = function makeWatchedFolders({
             broadcastAll("configs:changed");
             broadcastAll("refresh-achievements-table");
           }
+          xeniaBatchProgress.finish("success", "Config generation completed");
           // GPD roots are handled by Xenia flow only (avoid auto-config conflicts).
           return;
         }
@@ -6463,16 +6923,47 @@ module.exports = function makeWatchedFolders({
           const schemaRoot = path.join(configsDir, "schema");
           const rpcs3AppIds = new Set();
           let rpcs3Changed = false;
-          const handleTrophyDir = async (trophyDir) => {
-            const appid = path.basename(trophyDir);
+          const rpcs3Tasks = trophyDirs.map((trophyDir, taskIndex) => ({
+            trophyDir,
+            appid: path.basename(trophyDir),
+            __taskIndex: taskIndex,
+          }));
+          const rpcs3BatchProgress = createGenerationBatchReporter(rpcs3Tasks, {
+            rootLabel: path.basename(rootPath || scanBase || "") || "",
+            fallbackItemName: "RPCS3",
+            defaultDetail: "Parsing RPCS3 trophies",
+          });
+          rpcs3BatchProgress.start();
+          const handleTrophyDir = async (task, taskIndex) => {
+            const resolvedTaskIndex = Number.isInteger(taskIndex)
+              ? taskIndex
+              : Number.isInteger(task?.__taskIndex)
+                ? task.__taskIndex
+                : -1;
+            const trophyDir = task?.trophyDir || "";
+            const appid = String(task?.appid || path.basename(trophyDir)).trim();
             if (
               !appid ||
               isAppIdBlacklisted(appid, "rpcs3", blacklistState) ||
               rpcs3AppIds.has(appid)
             ) {
+              rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "skipped",
+                detail: "Config generation skipped",
+                percent: 100,
+              });
               return;
             }
             try {
+              rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "generatingSchema",
+                detail: "Parsing RPCS3 trophies",
+                percent: 15,
+              });
               const result = await generateConfigFromTrophyDir(
                 trophyDir,
                 configsDir,
@@ -6482,9 +6973,20 @@ module.exports = function makeWatchedFolders({
                 },
               );
               if (!result || result.skipped) {
+                rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
+                  appid,
+                  itemName: result?.name || appid,
+                  phase: "skipped",
+                  detail: "Config generation skipped",
+                  percent: 100,
+                });
                 return;
               }
-              if (result.created || result.schemaUpdated) rpcs3Changed = true;
+              const rpcs3ResultChanged =
+                result?.created === true ||
+                result?.schemaUpdated === true ||
+                result?.configUpdated === true;
+              if (rpcs3ResultChanged) rpcs3Changed = true;
               if (
                 (result.created || result.schemaUpdated) &&
                 bootMode &&
@@ -6505,7 +7007,26 @@ module.exports = function makeWatchedFolders({
               }
               rpcs3AppIds.add(String(result.appid));
               knownAppIds.add(String(result.appid));
+              rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid: String(result.appid || appid),
+                itemName: result?.name || result?.displayName || appid,
+                phase: rpcs3ResultChanged ? "completed" : "skipped",
+                detail:
+                  result?.created === true
+                    ? "Config created"
+                    : rpcs3ResultChanged
+                      ? "Config updated"
+                      : "Config generation skipped",
+                percent: 100,
+              });
             } catch (err) {
+              rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "failed",
+                detail: err?.message || "Config generation failed",
+                percent: 100,
+              });
               notifyWarn(
                 `RPCS3 trophy parse failed "${trophyDir}": ${err.message}`,
               );
@@ -6513,13 +7034,13 @@ module.exports = function makeWatchedFolders({
           };
           if (bootMode) {
             await runWithConcurrency(
-              trophyDirs,
+              rpcs3Tasks,
               BOOT_SCAN_CONCURRENCY,
               handleTrophyDir,
             );
           } else {
-            for (const trophyDir of trophyDirs) {
-              await handleTrophyDir(trophyDir);
+            for (let taskIndex = 0; taskIndex < rpcs3Tasks.length; taskIndex += 1) {
+              await handleTrophyDir(rpcs3Tasks[taskIndex], taskIndex);
             }
           }
           if (rpcs3AppIds.size) {
@@ -6541,6 +7062,7 @@ module.exports = function makeWatchedFolders({
               broadcastAll("refresh-achievements-table");
             }
           }
+          rpcs3BatchProgress.finish("success", "Config generation completed");
           // Trophy roots are handled by RPCS3 flow only (avoid auto-config conflicts).
           return;
         }
@@ -6554,16 +7076,48 @@ module.exports = function makeWatchedFolders({
           const schemaRoot = path.join(configsDir, "schema");
           const ps4AppIds = new Set();
           let ps4Changed = false;
-          const handlePs4Dir = async (trophyDir) => {
-            const appid = path.basename(path.dirname(trophyDir));
+          const ps4Tasks = ps4Dirs.map((trophyDir, taskIndex) => ({
+            trophyDir,
+            appid: path.basename(path.dirname(trophyDir)),
+            __taskIndex: taskIndex,
+          }));
+          const ps4BatchProgress = createGenerationBatchReporter(ps4Tasks, {
+            rootLabel: path.basename(rootPath || scanBase || "") || "",
+            fallbackItemName: "PS4",
+            defaultDetail: "Parsing PS4 trophies",
+          });
+          ps4BatchProgress.start();
+          const handlePs4Dir = async (task, taskIndex) => {
+            const resolvedTaskIndex = Number.isInteger(taskIndex)
+              ? taskIndex
+              : Number.isInteger(task?.__taskIndex)
+                ? task.__taskIndex
+                : -1;
+            const trophyDir = task?.trophyDir || "";
+            const appid =
+              String(task?.appid || path.basename(path.dirname(trophyDir))).trim();
             if (
               !appid ||
               isAppIdBlacklisted(appid, "shadps4", blacklistState) ||
               ps4AppIds.has(appid)
             ) {
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "skipped",
+                detail: "Config generation skipped",
+                percent: 100,
+              });
               return;
             }
             try {
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "generatingSchema",
+                detail: "Parsing PS4 trophies",
+                percent: 15,
+              });
               const result = await generateConfigFromPs4Dir(
                 trophyDir,
                 configsDir,
@@ -6571,8 +7125,21 @@ module.exports = function makeWatchedFolders({
                   schemaRoot,
                 },
               );
-              if (!result || result.skipped) return;
-              if (result.created || result.schemaUpdated) ps4Changed = true;
+              if (!result || result.skipped) {
+                ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                  appid,
+                  itemName: result?.name || appid,
+                  phase: "skipped",
+                  detail: "Config generation skipped",
+                  percent: 100,
+                });
+                return;
+              }
+              const ps4ResultChanged =
+                result?.created === true ||
+                result?.schemaUpdated === true ||
+                result?.configUpdated === true;
+              if (ps4ResultChanged) ps4Changed = true;
               if (
                 (result.created || result.schemaUpdated) &&
                 bootMode &&
@@ -6593,7 +7160,26 @@ module.exports = function makeWatchedFolders({
               }
               ps4AppIds.add(String(result.appid));
               knownAppIds.add(String(result.appid));
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid: String(result.appid || appid),
+                itemName: result?.name || result?.displayName || appid,
+                phase: ps4ResultChanged ? "completed" : "skipped",
+                detail:
+                  result?.created === true
+                    ? "Config created"
+                    : ps4ResultChanged
+                      ? "Config updated"
+                      : "Config generation skipped",
+                percent: 100,
+              });
             } catch (err) {
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: appid,
+                phase: "failed",
+                detail: err?.message || "Config generation failed",
+                percent: 100,
+              });
               notifyWarn(
                 `PS4 trophy parse failed "${trophyDir}": ${err.message}`,
               );
@@ -6601,13 +7187,13 @@ module.exports = function makeWatchedFolders({
           };
           if (bootMode) {
             await runWithConcurrency(
-              ps4Dirs,
+              ps4Tasks,
               BOOT_SCAN_CONCURRENCY,
               handlePs4Dir,
             );
           } else {
-            for (const trophyDir of ps4Dirs) {
-              await handlePs4Dir(trophyDir);
+            for (let taskIndex = 0; taskIndex < ps4Tasks.length; taskIndex += 1) {
+              await handlePs4Dir(ps4Tasks[taskIndex], taskIndex);
             }
           }
           if (ps4AppIds.size) {
@@ -6629,6 +7215,7 @@ module.exports = function makeWatchedFolders({
               broadcastAll("refresh-achievements-table");
             }
           }
+          ps4BatchProgress.finish("success", "Config generation completed");
           return;
         }
 
@@ -6696,6 +7283,9 @@ module.exports = function makeWatchedFolders({
                 steamScanBase,
                 schemaBinPath,
                 configsDir,
+                {
+                  preferredAccountId: getPreferredSteamOfficialAccountId(),
+                },
               );
               if (!result || result.skipped) return;
               const resultAppId = String(result.appid);
@@ -7213,13 +7803,31 @@ module.exports = function makeWatchedFolders({
       if (typeof generateConfigForAppId === "function") {
         let generatedIds = new Set();
         const createdGenerationTasks = [];
+        const batchProgress =
+          generationTasks.length > 0
+            ? createGenerationBatchReporter(generationTasks, {
+                rootLabel: path.basename(rootPath || "") || "",
+                fallbackItemName: path.basename(rootPath || "") || "",
+                defaultDetail: "Preparing config generation",
+              })
+            : null;
+        rootBatchProgress = batchProgress;
         pauseDashboardPoll(true);
+        batchProgress?.start();
 
         if (bootMode) {
-          generatedIds = await generateIdsThrottled(generationTasks);
+          generatedIds = await generateIdsThrottled(generationTasks, {
+            onTaskProgress: (task, taskIndex, progress) => {
+              batchProgress?.updateTask(task, taskIndex, progress);
+            },
+            onTaskSettled: (task, taskIndex, result) => {
+              batchProgress?.settleTask(task, taskIndex, result);
+            },
+          });
         } else {
           generatedIds = new Set();
-          for (const task of generationTasks) {
+          for (let taskIndex = 0; taskIndex < generationTasks.length; taskIndex += 1) {
+            const task = generationTasks[taskIndex];
             const generationResult = await generateOneAppId(
               task.appid,
               task.appDir || null,
@@ -7238,8 +7846,12 @@ module.exports = function makeWatchedFolders({
                   __eaLogFile: task.__eaLogFile || null,
                   __eaGameName: task.__eaGameName || null,
                   __emu: task.__emu || null,
+                  onGenerationProgress: (progress) => {
+                    batchProgress?.updateTask(task, taskIndex, progress);
+                  },
                 },
               );
+            batchProgress?.settleTask(task, taskIndex, generationResult);
             if (generationResult?.created === true) {
               generatedIds.add(String(task.appid));
               createdGenerationTasks.push(task);
@@ -7359,6 +7971,8 @@ module.exports = function makeWatchedFolders({
           broadcastAll("configs:changed");
           broadcastAll("refresh-achievements-table");
         }
+        batchProgress?.finish("success", "Config generation completed");
+        rootBatchProgress = null;
         clearPendingForTasks(generationTasks);
         pauseDashboardPoll(false);
       } else {
@@ -7382,6 +7996,10 @@ module.exports = function makeWatchedFolders({
         }
       }
     } catch (e) {
+      rootBatchProgress?.finish(
+        "failed",
+        e?.message || "Config generation failed",
+      );
       notifyWarn(`Scan failed for "${rootPath}": ${e.message}`);
     }
   }
@@ -7478,6 +8096,15 @@ module.exports = function makeWatchedFolders({
           return;
         }
         const steamInfo = parseSteamOfficialBinInfo(filePath);
+        const preferredSteamOfficialAccountId =
+          getPreferredSteamOfficialAccountId();
+        if (
+          steamInfo?.kind === "user" &&
+          preferredSteamOfficialAccountId &&
+          String(steamInfo.accountId || "") !== preferredSteamOfficialAccountId
+        ) {
+          return;
+        }
         const isSteamSchemaBin = !!steamInfo && steamInfo.kind === "schema";
         const isSteamUserBin = !!steamInfo && steamInfo.kind === "user";
         const base = path.basename(filePath).toLowerCase();
@@ -7711,6 +8338,15 @@ module.exports = function makeWatchedFolders({
           return;
         }
         const steamInfo = parseSteamOfficialBinInfo(filePath);
+        const preferredSteamOfficialAccountId =
+          getPreferredSteamOfficialAccountId();
+        if (
+          steamInfo?.kind === "user" &&
+          preferredSteamOfficialAccountId &&
+          String(steamInfo.accountId || "") !== preferredSteamOfficialAccountId
+        ) {
+          return;
+        }
         const isSteamSchemaBin = !!steamInfo && steamInfo.kind === "schema";
         const isSteamUserBin = !!steamInfo && steamInfo.kind === "user";
         const base = path.basename(filePath).toLowerCase();

@@ -242,6 +242,7 @@ function normalizeBase(str) {
   return String(str || "")
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
+    .replace(/[’‘`]/g, "'")
     .replace(/[™©®]/g, "")
     .replace(/[^a-z0-9&'():/+\- ]/gi, " ")
     .toLowerCase()
@@ -278,7 +279,15 @@ function normalizeLoose(str) {
 }
 
 function normalizeTokenWord(word) {
-  let w = word.replace(/^'+/, "").replace(/'+$/, "");
+  let w = String(word || "")
+    .replace(/[’‘`]/g, "'")
+    .replace(/^'+/, "")
+    .replace(/'+$/, "");
+  if (w.endsWith("'s") && w.length > 2) {
+    w = w.slice(0, -2);
+  } else if (w.endsWith("s'") && w.length > 2) {
+    w = w.slice(0, -1);
+  }
   if (w.endsWith("ies") && w.length > 4) {
     w = w.slice(0, -3) + "y";
   } else if (w.endsWith("ves") && w.length > 4) {
@@ -421,10 +430,10 @@ function hasRequiredBaseOverlap(app, baseTokens) {
     if (!hasAllNumbers) return false;
   }
   const overlap = tokenOverlapCount(baseTokens, app.tokens);
-  if (baseTokens.length <= 2) {
+  if (baseTokens.length <= 4) {
     return overlap === baseTokens.length;
   }
-  const minRequired = Math.min(2, baseTokens.length);
+  const minRequired = Math.max(3, baseTokens.length - 1);
   return overlap >= minRequired;
 }
 
@@ -438,23 +447,85 @@ function filterPreferred(list) {
   return sanitized.length ? sanitized : list;
 }
 
-function chooseBestCandidate(list, requiredTokens, baseTokens, variantLength) {
-  const pool = filterPreferred(list);
-  let best = null;
-  let bestScore = -Infinity;
-  for (const app of pool) {
-    if (!containsAllDistinctiveTokens(app, requiredTokens)) continue;
-    if (!hasRequiredBaseOverlap(app, baseTokens)) continue;
-    const overlap = tokenOverlapCount(baseTokens, app.tokens);
-    const negativePenalty = hasNegativeKeywords(app) ? 1 : 0;
-    const lengthDiff = Math.abs(app.name.length - variantLength);
-    const score = overlap * 1000 - negativePenalty * 100 - lengthDiff;
-    if (score > bestScore || (score === bestScore && app.appid < best.appid)) {
-      best = app;
-      bestScore = score;
-    }
+function pushIndexedCandidate(map, key, app) {
+  if (!key) return;
+  if (!map.has(key)) map.set(key, []);
+  map.get(key).push(app);
+}
+
+function collectUniqueApps(list) {
+  const seen = new Set();
+  const out = [];
+  for (const app of Array.isArray(list) ? list : []) {
+    const key = String(app?.appid || "");
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(app);
   }
-  return best;
+  return out;
+}
+
+function scoreCandidateForVariant(
+  app,
+  {
+    variantTokens,
+    requiredTokens,
+    baseTokens,
+    variantLength,
+    sourceBonus = 0,
+    requireLooseScore = false,
+  }
+) {
+  if (!app) return null;
+  if (!containsAllDistinctiveTokens(app, requiredTokens)) return null;
+  if (!hasRequiredBaseOverlap(app, baseTokens)) return null;
+
+  const baseOverlap = tokenOverlapCount(baseTokens, app.tokens);
+  const requiredOverlap = tokenOverlapCount(requiredTokens, app.tokens);
+  const looseScore = scoreTokens(variantTokens, app.tokens);
+  if (requireLooseScore && looseScore < MIN_TOKEN_SCORE) return null;
+
+  const negativePenalty = hasNegativeKeywords(app) ? 1 : 0;
+  const lengthDiff = Math.abs(app.name.length - variantLength);
+  const specificityBonus = baseTokens.length
+    ? Math.round((requiredTokens.length / baseTokens.length) * 250)
+    : 0;
+  const score =
+    sourceBonus +
+    requiredOverlap * 1600 +
+    baseOverlap * 1000 +
+    looseScore * 250 +
+    specificityBonus -
+    negativePenalty * 500 -
+    lengthDiff;
+
+  return {
+    app,
+    score,
+  };
+}
+
+function updateBestCandidate(bestByAppId, scored) {
+  if (!scored?.app) return;
+  const key = String(scored.app.appid || "");
+  if (!key) return;
+  const existing = bestByAppId.get(key);
+  if (
+    !existing ||
+    scored.score > existing.score ||
+    (scored.score === existing.score &&
+      Number(scored.app.appid) < Number(existing.app.appid))
+  ) {
+    bestByAppId.set(key, scored);
+  }
+}
+
+function scoreCandidateList(bestByAppId, list, context) {
+  const unique = collectUniqueApps(filterPreferred(list));
+  for (const app of unique) {
+    const scored = scoreCandidateForVariant(app, context);
+    if (scored) updateBestCandidate(bestByAppId, scored);
+  }
 }
 
 function tryMatchVariant(variant, indexes, baseTokens) {
@@ -465,88 +536,105 @@ function tryMatchVariant(variant, indexes, baseTokens) {
   const requiredTokens = buildDistinctiveTokens(variant);
   const signature = tokenSignature(tokens);
   const variantLength = variant.length;
+  const bestByAppId = new Map();
 
-  const accept = (app) =>
-    app &&
-    containsAllDistinctiveTokens(app, requiredTokens) &&
-    hasRequiredBaseOverlap(app, baseTokens);
+  const scoreContext = {
+    variantTokens: tokens,
+    requiredTokens,
+    baseTokens,
+    variantLength,
+  };
 
   if (norm && byExact.has(norm)) {
-    const app = byExact.get(norm);
-    if (accept(app)) return app;
+    scoreCandidateList(bestByAppId, byExact.get(norm), {
+      ...scoreContext,
+      sourceBonus: 5000,
+    });
   }
 
   if (loose && byLoose.has(loose)) {
-    const app = byLoose.get(loose);
-    if (accept(app)) return app;
+    scoreCandidateList(bestByAppId, byLoose.get(loose), {
+      ...scoreContext,
+      sourceBonus: 4200,
+    });
   }
 
   if (signature && bySignature.has(signature)) {
-    const app = bySignature.get(signature);
-    if (accept(app)) return app;
+    scoreCandidateList(bestByAppId, bySignature.get(signature), {
+      ...scoreContext,
+      sourceBonus: 3600,
+    });
   }
 
-  const normMatches = steamApps.filter(
-    (app) => norm && app.normalized.startsWith(norm)
-  );
-  const bestNorm = chooseBestCandidate(
-    normMatches,
-    requiredTokens,
-    baseTokens,
-    variantLength
-  );
-  if (bestNorm) return bestNorm;
+  const normMatches = norm
+    ? steamApps.filter((app) => app.normalized.startsWith(norm))
+    : [];
+  scoreCandidateList(bestByAppId, normMatches, {
+    ...scoreContext,
+    sourceBonus: 2400,
+  });
 
-  const looseMatches = steamApps.filter(
-    (app) => loose && app.loose.startsWith(loose)
-  );
-  const bestLoose = chooseBestCandidate(
-    looseMatches,
-    requiredTokens,
-    baseTokens,
-    variantLength
-  );
-  if (bestLoose) return bestLoose;
+  const looseMatches = loose
+    ? steamApps.filter((app) => app.loose.startsWith(loose))
+    : [];
+  scoreCandidateList(bestByAppId, looseMatches, {
+    ...scoreContext,
+    sourceBonus: 1800,
+  });
 
-  if (baseTokens.length < 2) {
-    return null;
-  }
-
-  const candidates = filterPreferred(
-    collectTokenCandidates(tokens, tokenIndex)
-  );
-  let best = null;
-  let bestScore = -Infinity;
-
-  for (const app of candidates) {
-    if (!accept(app)) continue;
-    const baseOverlap = tokenOverlapCount(baseTokens, app.tokens);
-    const looseScore = scoreTokens(tokens, app.tokens);
-    if (looseScore < MIN_TOKEN_SCORE) continue;
-    const negativePenalty = hasNegativeKeywords(app) ? 1 : 0;
-    const lengthDiff = Math.abs(app.name.length - variantLength);
-    const score =
-      baseOverlap * 1000 +
-      looseScore * 100 -
-      negativePenalty * 100 -
-      lengthDiff;
-    if (score > bestScore || (score === bestScore && app.appid < best.appid)) {
-      best = app;
-      bestScore = score;
+  if (baseTokens.length >= 2) {
+    const tokenCandidates = collectTokenCandidates(tokens, tokenIndex);
+    const unique = collectUniqueApps(filterPreferred(tokenCandidates));
+    for (const app of unique) {
+      const scored = scoreCandidateForVariant(app, {
+        ...scoreContext,
+        sourceBonus: 0,
+        requireLooseScore: true,
+      });
+      if (scored) updateBestCandidate(bestByAppId, scored);
     }
   }
 
-  return best;
+  let best = null;
+  for (const scored of bestByAppId.values()) {
+    if (
+      !best ||
+      scored.score > best.score ||
+      (scored.score === best.score &&
+        Number(scored.app.appid) < Number(best.app.appid))
+    ) {
+      best = scored;
+    }
+  }
+  return best?.app || null;
 }
 
 function findBestSteamForUplay(uplayName, indexes) {
   const baseTokens = buildDistinctiveTokens(uplayName);
   const variants = generateVariants(uplayName);
+  let best = null;
   for (const variant of variants) {
     const match = tryMatchVariant(variant, indexes, baseTokens);
-    if (match) return match;
+    if (!match) continue;
+    const tokens = tokenizeImportant(variant);
+    const requiredTokens = buildDistinctiveTokens(variant);
+    const scored = scoreCandidateForVariant(match, {
+      variantTokens: tokens,
+      requiredTokens,
+      baseTokens,
+      variantLength: variant.length,
+    });
+    if (!scored) continue;
+    if (
+      !best ||
+      scored.score > best.score ||
+      (scored.score === best.score &&
+        Number(scored.app.appid) < Number(best.app.appid))
+    ) {
+      best = scored;
+    }
   }
-  return null;
+  return best?.app || null;
 }
 
 function tokenSignature(tokens) {
@@ -647,11 +735,9 @@ function buildSteamIndexes(steamApps) {
   const tokenIndex = new Map();
 
   for (const app of enriched) {
-    if (!byExact.has(app.normalized)) byExact.set(app.normalized, app);
-    if (!byLoose.has(app.loose)) byLoose.set(app.loose, app);
-    if (app.signature && !bySignature.has(app.signature)) {
-      bySignature.set(app.signature, app);
-    }
+    pushIndexedCandidate(byExact, app.normalized, app);
+    pushIndexedCandidate(byLoose, app.loose, app);
+    pushIndexedCandidate(bySignature, app.signature, app);
 
     for (const token of new Set(app.tokens)) {
       if (!tokenIndex.has(token)) tokenIndex.set(token, []);

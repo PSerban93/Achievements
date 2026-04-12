@@ -282,6 +282,7 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
   fs.mkdirSync(schemaDir, { recursive: true });
   const schemaPath = path.join(schemaDir, "achievements.json");
   let schemaReady = false;
+  let schemaUpdated = false;
   let added = 0;
   let currentEntries = [];
   if (fs.existsSync(schemaPath)) {
@@ -294,10 +295,12 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
   }
   if (schemaReady) {
     const res = updateSchemaFromPs4(schemaDir, parsed);
+    schemaUpdated = !!res.updated;
     added = res.added || 0;
     currentEntries = res.entries || [];
   } else {
     currentEntries = writeSchemaAssets(schemaDir, parsed);
+    schemaUpdated = true;
     added = currentEntries.length;
   }
 
@@ -327,7 +330,8 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     if (!payload.process_name && existing.data?.process_name) {
       merged.process_name = existing.data.process_name;
     }
-    if (hasConfigChanges(existing.data, merged)) {
+    const configUpdated = hasConfigChanges(existing.data, merged);
+    if (configUpdated) {
       fs.writeFileSync(existing.filePath, JSON.stringify(merged, null, 2));
       autoConfigLogger.info("ps4:config:updated", {
         appid: baseAppId,
@@ -340,6 +344,8 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
       ...merged,
       configPath: existing.filePath,
       created,
+      configUpdated,
+      schemaUpdated,
       snapshot,
     };
   }
@@ -351,7 +357,14 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     filePath: configPath,
     schemaDir,
   });
-  return { ...payload, configPath, created, snapshot };
+  return {
+    ...payload,
+    configPath,
+    created,
+    configUpdated: true,
+    schemaUpdated,
+    snapshot,
+  };
 }
 
 module.exports = {

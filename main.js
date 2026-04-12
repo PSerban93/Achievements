@@ -34,6 +34,7 @@ const {
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const crypto = require("crypto");
 const ini = require("ini");
 const chokidar = require("chokidar");
 const CRC32 = require("crc-32");
@@ -58,8 +59,13 @@ const {
   parseKVBinary: parseSteamKv,
   extractUserStats,
   buildSnapshotFromAppcache,
-  pickLatestUserBin,
+  pickPreferredUserBin,
+  parseUserBinName,
 } = require("./utils/steam-appcache");
+const {
+  listSteamLoginUsers,
+  steamId64ToAccountId,
+} = require("./utils/steam-local-users");
 const {
   clearLumaPlayReadCache,
   readLumaPlayAchievementsSnapshot,
@@ -566,6 +572,135 @@ function getSchemaLanguagesFromPreferences(prefs = null) {
   return [...SCHEMA_LANGUAGE_VALUES];
 }
 
+function normalizeSteamOfficialSteamId(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw.toLowerCase() === "auto") return "";
+  return /^\d{17,20}$/.test(raw) ? raw : "";
+}
+
+function collectSteamOfficialHintPaths() {
+  const hints = [];
+  try {
+    if (!configsDir || !fs.existsSync(configsDir)) return hints;
+    const entries = fs.readdirSync(configsDir);
+    for (const entry of entries) {
+      if (!entry.toLowerCase().endsWith(".json")) continue;
+      const full = path.join(configsDir, entry);
+      try {
+        const data = JSON.parse(fs.readFileSync(full, "utf8"));
+        if (normalizePlatform(data?.platform) !== "steam-official") continue;
+        if (typeof data?.save_path === "string" && data.save_path.trim()) {
+          hints.push(data.save_path.trim());
+        }
+      } catch {}
+    }
+  } catch {}
+  return hints;
+}
+
+function getSteamOfficialAccountCatalog(options = {}) {
+  const hintPaths = [
+    ...collectSteamOfficialHintPaths(),
+    ...(Array.isArray(options?.hintPaths) ? options.hintPaths : []),
+  ].filter(Boolean);
+  return listSteamLoginUsers({ hintPaths });
+}
+
+function getPreferredSteamOfficialAccountId(preferences = cachedPreferences) {
+  return steamId64ToAccountId(
+    normalizeSteamOfficialSteamId(preferences?.steamOfficialSteamId),
+  );
+}
+
+function pickConfiguredSteamOfficialUserBin(
+  statsDir,
+  appid,
+  preferences = cachedPreferences,
+) {
+  return pickPreferredUserBin(
+    statsDir,
+    appid,
+    getPreferredSteamOfficialAccountId(preferences),
+  );
+}
+
+function normalizeAchievementCacheOptions(options) {
+  if (!options) return {};
+  if (typeof options === "string") {
+    return { savePath: String(options || "").trim() };
+  }
+  return options && typeof options === "object" ? { ...options } : {};
+}
+
+function readConfigForAchievementCache(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return null;
+  const cfgPath = path.join(configsDir, `${safeName}.json`);
+  if (!fs.existsSync(cfgPath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function resolveSteamOfficialCacheAccountId(
+  configName,
+  platform = "steam",
+  options = null,
+) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  if (normalizedPlatform !== "steam-official") return "";
+  const resolved = normalizeAchievementCacheOptions(options);
+  const explicitAccountId = String(resolved.accountId || "").trim();
+  if (explicitAccountId) return explicitAccountId;
+
+  const parsedBin =
+    parseUserBinName(resolved.userBinPath || resolved.filePath || "") || null;
+  if (parsedBin?.accountId) {
+    return String(parsedBin.accountId || "").trim();
+  }
+
+  let appid = String(resolved.appid || "").trim();
+  let savePath = String(
+    resolved.savePath || resolved.statsDir || resolved.save_path || "",
+  ).trim();
+
+  const explicitSteamId = normalizeSteamOfficialSteamId(
+    resolved.steamOfficialSteamId,
+  );
+  if (!appid || !savePath || !explicitSteamId) {
+    const cfg = readConfigForAchievementCache(configName);
+    if (cfg && typeof cfg === "object") {
+      if (!appid) appid = String(cfg.appid || "").trim();
+      if (!savePath) savePath = String(cfg.save_path || "").trim();
+    }
+  }
+
+  const preferredSteamId =
+    explicitSteamId ||
+    normalizeSteamOfficialSteamId(
+      resolved?.preferences?.steamOfficialSteamId ||
+        cachedPreferences?.steamOfficialSteamId,
+    );
+  const preferredAccountId = steamId64ToAccountId(preferredSteamId);
+  if (preferredAccountId) return preferredAccountId;
+
+  if (savePath && appid) {
+    const userBin = pickConfiguredSteamOfficialUserBin(
+      savePath,
+      appid,
+      resolved?.preferences || cachedPreferences,
+    );
+    const resolvedBin = parseUserBinName(userBin || "");
+    if (resolvedBin?.accountId) {
+      return String(resolvedBin.accountId || "").trim();
+    }
+  }
+
+  return "";
+}
+
 const DEFAULT_PREFERENCES = {
   startInTray: false,
   screenshotFolder: getDefaultScreenshotFolder(),
@@ -611,6 +746,7 @@ const DEFAULT_PREFERENCES = {
   ignoreLeadingArticlesSort: true,
   schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
+  steamOfficialSteamId: "",
 };
 
 const UI_LOCALE_DIR = path.join(__dirname, "assets", "locales");
@@ -1330,6 +1466,143 @@ function resolveTropusrPathForConfig(config) {
 
 const ACHGEN_BUFFER_MAX = 300;
 const achgenBuffer = [];
+const generationProgressJobs = new Map();
+let generationProgressSequence = 0;
+
+function clampGenerationPercent(value, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  if (n <= 0) return 0;
+  if (n >= 100) return 100;
+  return Math.round(n);
+}
+
+function normalizeGenerationProgressState(payload = {}, fallback = {}) {
+  const current =
+    Number.isFinite(Number(payload.current)) && Number(payload.current) >= 0
+      ? Number(payload.current)
+      : Number.isFinite(Number(fallback.current)) && Number(fallback.current) >= 0
+        ? Number(fallback.current)
+        : 0;
+  const total =
+    Number.isFinite(Number(payload.total)) && Number(payload.total) >= 0
+      ? Number(payload.total)
+      : Number.isFinite(Number(fallback.total)) && Number(fallback.total) >= 0
+        ? Number(fallback.total)
+        : 0;
+  return {
+    id: String(payload.id || fallback.id || ""),
+    kind: String(payload.kind || fallback.kind || "config-generate"),
+    scope: String(payload.scope || fallback.scope || "single"),
+    status: String(payload.status || fallback.status || "running"),
+    title: String(payload.title || fallback.title || ""),
+    itemName: String(payload.itemName || fallback.itemName || ""),
+    appid: String(payload.appid || fallback.appid || ""),
+    phase: String(payload.phase || fallback.phase || ""),
+    detail: String(payload.detail || fallback.detail || ""),
+    current,
+    total,
+    percent: clampGenerationPercent(
+      payload.percent,
+      clampGenerationPercent(fallback.percent, 0),
+    ),
+  };
+}
+
+function broadcastGenerationProgress(channel, payload) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      if (!win.isDestroyed()) {
+        win.webContents.send(channel, payload);
+      }
+    } catch {}
+  }
+}
+
+function hasActiveGenerationProgress() {
+  return generationProgressJobs.size > 0;
+}
+
+function getLatestActiveGenerationProgress() {
+  const values = Array.from(generationProgressJobs.values());
+  return values.length ? values[values.length - 1] : null;
+}
+
+function createGenerationProgressJob(seed = {}) {
+  const id = seed.id || `generation-${Date.now()}-${++generationProgressSequence}`;
+  const initial = normalizeGenerationProgressState(
+    { ...seed, id, status: "running" },
+    { id },
+  );
+  generationProgressJobs.set(id, initial);
+  broadcastGenerationProgress("generation:progress:start", initial);
+  return {
+    id,
+    update(patch = {}) {
+      const current = generationProgressJobs.get(id);
+      if (!current) return null;
+      const next = normalizeGenerationProgressState(
+        {
+          ...current,
+          ...patch,
+          id,
+          status:
+            patch.status === "success" || patch.status === "failed"
+              ? patch.status
+              : "running",
+        },
+        current,
+      );
+      generationProgressJobs.set(id, next);
+      broadcastGenerationProgress("generation:progress:update", next);
+      return next;
+    },
+    succeed(patch = {}) {
+      const current =
+        generationProgressJobs.get(id) ||
+        normalizeGenerationProgressState({ ...seed, id }, { id });
+      const next = normalizeGenerationProgressState(
+        {
+          ...current,
+          ...patch,
+          id,
+          status: "success",
+          percent:
+            patch.percent === undefined
+              ? 100
+              : clampGenerationPercent(patch.percent, 100),
+        },
+        current,
+      );
+      generationProgressJobs.delete(id);
+      broadcastGenerationProgress("generation:progress:end", next);
+      return next;
+    },
+    fail(patch = {}) {
+      const current =
+        generationProgressJobs.get(id) ||
+        normalizeGenerationProgressState({ ...seed, id }, { id });
+      const fallbackPercent =
+        current.percent > 0 ? current.percent : clampGenerationPercent(seed.percent, 0);
+      const next = normalizeGenerationProgressState(
+        {
+          ...current,
+          ...patch,
+          id,
+          status: "failed",
+          percent:
+            patch.percent === undefined
+              ? fallbackPercent
+              : clampGenerationPercent(patch.percent, fallbackPercent),
+        },
+        current,
+      );
+      generationProgressJobs.delete(id);
+      broadcastGenerationProgress("generation:progress:end", next);
+      return next;
+    },
+  };
+}
 
 function mapAchgenUiMessage(message) {
   const raw = String(message || "").trim();
@@ -1528,14 +1801,16 @@ function pushAchgen(level, message) {
 
     const color =
       level === "error" ? "#f44336" : level === "warn" ? "#FFC107" : "#2196f3";
-    const suppressNotify =
-      msg.startsWith("steam-achievements:request") ||
-      msg.startsWith("steam-achievements:success");
+    const suppressNotify = hasActiveGenerationProgress();
     if (!suppressNotify) {
       for (const win of BrowserWindow.getAllWindows()) {
         try {
           if (!win.isDestroyed())
-            win.webContents.send("notify", { message: msg, color });
+            win.webContents.send("notify", {
+              message: msg,
+              color,
+              rawMessage: rawMsg,
+            });
         } catch {}
       }
     }
@@ -3830,6 +4105,13 @@ function applyPreferenceSideEffects(
       scheduleAutoSelectProcessPollerAfterBoot();
     }
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "steamOfficialSteamId")) {
+    refreshSelectedSteamOfficialMonitoring().catch((err) => {
+      appLogger.warn("steam-official:preferences-refresh-failed", {
+        error: err?.message || String(err),
+      });
+    });
+  }
   if (options.removeSteamKey === true) {
     removeSteamApiKeyFiles();
   } else if (Object.prototype.hasOwnProperty.call(patch, "steamApiKey")) {
@@ -3863,6 +4145,14 @@ function updatePreferences(patch = {}) {
       removeSteamKey = true;
       delete incoming.steamApiKey;
     }
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(incoming, "steamOfficialSteamId")
+  ) {
+    incoming.steamOfficialSteamId = normalizeSteamOfficialSteamId(
+      incoming.steamOfficialSteamId,
+    );
   }
 
   if (Object.prototype.hasOwnProperty.call(incoming, "overlayControllerBackend")) {
@@ -4120,7 +4410,29 @@ async function runAchievementsGenerator(
     };
 
     cp.on("message", (msg) => {
-      if (!msg || msg.type !== "achgen:log") return;
+      if (!msg) return;
+      if (msg.type === "achgen:progress") {
+        try {
+          if (typeof opts.onProgress === "function") {
+            opts.onProgress({
+              appid: String(msg.appid || appid),
+              phase: String(msg.phase || ""),
+              detail: String(msg.detail || ""),
+              current:
+                Number.isFinite(Number(msg.current)) && Number(msg.current) >= 0
+                  ? Number(msg.current)
+                  : 0,
+              total:
+                Number.isFinite(Number(msg.total)) && Number(msg.total) >= 0
+                  ? Number(msg.total)
+                  : 0,
+              percent: clampGenerationPercent(msg.percent, 0),
+            });
+          }
+        } catch {}
+        return;
+      }
+      if (msg.type !== "achgen:log") return;
       const line = `${msg.message || ""}`;
       const lvl = (msg.level || "info").toLowerCase();
       pushAchgen(lvl, line);
@@ -4134,6 +4446,29 @@ async function runAchievementsGenerator(
 
 async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   const appidStr = String(appid || "");
+  const onGenerationProgress =
+    typeof options.onGenerationProgress === "function"
+      ? options.onGenerationProgress
+      : null;
+  const emitGenerationProgress = (progress = {}) => {
+    if (!onGenerationProgress) return;
+    try {
+      onGenerationProgress({
+        appid: String(progress.appid || appidStr || appid || ""),
+        phase: String(progress.phase || ""),
+        detail: String(progress.detail || ""),
+        current:
+          Number.isFinite(Number(progress.current)) && Number(progress.current) >= 0
+            ? Number(progress.current)
+            : 0,
+        total:
+          Number.isFinite(Number(progress.total)) && Number(progress.total) >= 0
+            ? Number(progress.total)
+            : 0,
+        percent: clampGenerationPercent(progress.percent, 0),
+      });
+    } catch {}
+  };
   if (!platform && /[a-f]/i.test(appidStr)) {
     platform = "epic";
   }
@@ -4187,6 +4522,11 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   }
 
   if (normalizedPlatform === "gog-official") {
+    emitGenerationProgress({
+      phase: "generatingSchema",
+      detail: "Generating schema",
+      percent: 20,
+    });
     try {
       const result = await ensureGogOfficialSchema(appid, destDir, {
         gameplayDbPath:
@@ -4197,6 +4537,11 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
         userId: options?.gog_user_id || options?.gogUserId,
       });
       if (result?.dir && fs.existsSync(achJson)) {
+        emitGenerationProgress({
+          phase: "finalizing",
+          detail: "Finalizing",
+          percent: 96,
+        });
         ipcLogger.info("schema:ensure-generated-local", {
           appid,
           platform: normalizedPlatform,
@@ -4216,6 +4561,11 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   }
 
   if (normalizedPlatform === "ubisoft-official") {
+    emitGenerationProgress({
+      phase: "generatingSchema",
+      detail: "Generating schema",
+      percent: 20,
+    });
     try {
       const result = await ensureUbisoftOfficialSchema(appid, destDir, {
         archivePath:
@@ -4226,6 +4576,11 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
           options?.steamAppId || resolveUbisoftSteamAppId(appid) || "",
       });
       if (result?.dir && fs.existsSync(achJson)) {
+        emitGenerationProgress({
+          phase: "finalizing",
+          detail: "Finalizing",
+          percent: 96,
+        });
         ipcLogger.info("schema:ensure-generated-local", {
           appid,
           platform: normalizedPlatform,
@@ -4245,6 +4600,11 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   }
 
   if (normalizedPlatform === "ea-official") {
+    emitGenerationProgress({
+      phase: "generatingSchema",
+      detail: "Generating schema",
+      percent: 20,
+    });
     try {
       const result = await ensureEaOfficialSchema(appid, destDir, {
         logFilePath:
@@ -4254,6 +4614,11 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
         savePath: options?.save_path || options?.savePath,
       });
       if (result?.dir && fs.existsSync(achJson)) {
+        emitGenerationProgress({
+          phase: "finalizing",
+          detail: "Finalizing",
+          percent: 96,
+        });
         ipcLogger.info("schema:ensure-generated-local", {
           appid,
           platform: normalizedPlatform,
@@ -4307,11 +4672,27 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   }
 
   try {
+    emitGenerationProgress({
+      phase: "generatingSchema",
+      detail: "Starting schema generation",
+      percent: 12,
+    });
     await runAchievementsGenerator(appid, schemaBase, app.getPath("userData"), {
       platform: normalizedPlatform,
       langs: getSchemaLanguagesFromPreferences(),
+      onProgress: (progress) => {
+        emitGenerationProgress({
+          ...progress,
+          percent: 18 + Math.round(clampGenerationPercent(progress?.percent, 0) * 0.72),
+        });
+      },
     });
     if (fs.existsSync(achJson)) {
+      emitGenerationProgress({
+        phase: "finalizing",
+        detail: "Finalizing",
+        percent: 96,
+      });
       ipcLogger.info("schema:ensure-generated", {
         appid,
         platform: normalizedPlatform,
@@ -4402,6 +4783,9 @@ ipcMain.handle("load-preferences", () => {
   ) {
     delete cachedPreferences.steamApiKey;
   }
+  cachedPreferences.steamOfficialSteamId = normalizeSteamOfficialSteamId(
+    cachedPreferences.steamOfficialSteamId,
+  );
   const safePrefs = { ...cachedPreferences };
   if (safePrefs.steamApiKey) {
     safePrefs.steamApiKeyMasked = maskSteamApiKey(safePrefs.steamApiKey);
@@ -4410,6 +4794,33 @@ ipcMain.handle("load-preferences", () => {
     safePrefs.steamApiKeyMasked = "";
   }
   return safePrefs;
+});
+
+ipcMain.handle("steam-official:list-accounts", () => {
+  const catalog = getSteamOfficialAccountCatalog();
+  appLogger.info("steam-official:list-accounts", {
+    steamRoot: catalog?.steamRoot || "",
+    loginUsersPath: catalog?.loginUsersPath || "",
+    accountCount: Array.isArray(catalog?.accounts) ? catalog.accounts.length : 0,
+  });
+  return {
+    steamRoot: catalog?.steamRoot || "",
+    loginUsersPath: catalog?.loginUsersPath || "",
+    accounts: Array.isArray(catalog?.accounts)
+      ? catalog.accounts.map((account) => ({
+          steamid64: account.steamid64,
+          accountId: account.accountId,
+          accountName: account.accountName,
+          personaName: account.personaName,
+          mostRecent: account.mostRecent === true,
+          label:
+            account.label ||
+            account.personaName ||
+            account.accountName ||
+            account.steamid64,
+        }))
+      : [],
+  };
 });
 
 ipcMain.handle("blacklist:check", async (_event, appid) => {
@@ -4641,8 +5052,8 @@ function isLumaPlayConfigName(configName) {
   }
 }
 
-function readCacheSilent(configName, platform = "steam") {
-  const cachePath = getCachePath(configName, platform);
+function readCacheSilent(configName, platform = "steam", options = null) {
+  const cachePath = getCachePath(configName, platform, options);
   if (!fs.existsSync(cachePath)) return null;
   try {
     return JSON.parse(fs.readFileSync(cachePath, "utf8"));
@@ -4906,11 +5317,20 @@ ipcMain.handle("saveConfig", async (event, config) => {
 
     // 5) Generate Achievements Schema
     if (needBackground) {
-      const startTxt = tUi(
-        "main.log.schemaGenerateStart",
-        { appid: payload.appid },
-        `↪ Generate achievements schema for ${payload.appid}...`,
-      );
+      const progressJob = createGenerationProgressJob({
+        kind: "config-generate",
+        scope: "single",
+        status: "running",
+        itemName: String(
+          payload.displayName || payload.name || payload.appid || "",
+        ).trim(),
+        appid: String(payload.appid || ""),
+        phase: "preparing",
+        detail: "Preparing config generation",
+        current: 0,
+        total: 0,
+        percent: 5,
+      });
 
       const reply = {
         success: true,
@@ -4925,7 +5345,32 @@ ipcMain.handle("saveConfig", async (event, config) => {
           const res = await ensureSchemaForApp(
             payload.appid,
             payload.platform,
-            payload,
+            {
+              ...payload,
+              onGenerationProgress: (progress) => {
+                progressJob.update({
+                  itemName:
+                    progress?.itemName ||
+                    payload.displayName ||
+                    payload.name ||
+                    payload.appid,
+                  appid: progress?.appid || payload.appid,
+                  phase: progress?.phase || "generatingSchema",
+                  detail: progress?.detail || "",
+                  current:
+                    Number.isFinite(Number(progress?.current)) &&
+                    Number(progress.current) >= 0
+                      ? Number(progress.current)
+                      : 0,
+                  total:
+                    Number.isFinite(Number(progress?.total)) &&
+                    Number(progress.total) >= 0
+                      ? Number(progress.total)
+                      : 0,
+                  percent: clampGenerationPercent(progress?.percent, 5),
+                });
+              },
+            },
           );
           if (res?.dir) {
             try {
@@ -4942,6 +5387,11 @@ ipcMain.handle("saveConfig", async (event, config) => {
               );
             }
 
+            progressJob.update({
+              phase: "finalizing",
+              detail: "Refreshing config",
+              percent: 96,
+            });
             // 2) Schema Done (set new config path)
             emitSchemaReady(
               {
@@ -4952,12 +5402,25 @@ ipcMain.handle("saveConfig", async (event, config) => {
               wc,
             );
             notifyConfigsChanged();
+            progressJob.succeed({
+              phase: "completed",
+              detail: "Config created",
+              percent: 100,
+            });
           } else {
+            progressJob.fail({
+              phase: "failed",
+              detail: "Achievements schema file was not generated",
+            });
           }
         } catch (e) {
           console.warn(
             `Generate schema failed for ${payload.appid}: ${e.message}`,
           );
+          progressJob.fail({
+            phase: "failed",
+            detail: e?.message || "Schema generation failed",
+          });
           notifyError(
             tUi("main.notify.schema.generateFailed", { error: e.message }),
           );
@@ -4967,9 +5430,6 @@ ipcMain.handle("saveConfig", async (event, config) => {
           });
         }
       })();
-      setTimeout(() => {
-        console.log(`${startTxt}`);
-      }, 15);
       ipcLogger.info("saveConfig:success", {
         name: payload.name,
         appid: payload.appid,
@@ -5724,12 +6184,23 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
         )) || {};
       const userBin =
         statsDir && config.appid
-          ? pickLatestUserBin(statsDir, config.appid)
+          ? pickConfiguredSteamOfficialUserBin(
+              statsDir,
+              config.appid,
+              cachedPreferences,
+            )
           : null;
+      const hasPinnedSteamOfficialAccount = !!normalizeSteamOfficialSteamId(
+        cachedPreferences?.steamOfficialSteamId,
+      );
 
       // If we don't have schema entries yet, just surface cached so UI isn't empty.
       if (!entries.length) {
-        return { achievements: cached, save_path: statsDir };
+        return {
+          achievements:
+            hasPinnedSteamOfficialAccount && !userBin ? {} : cached,
+          save_path: statsDir,
+        };
       }
 
       if (userBin && fs.existsSync(userBin)) {
@@ -5767,7 +6238,7 @@ ipcMain.handle("load-saved-achievements", async (_event, configName) => {
       }
       // Fallback to cache if parsing failed or no user bin yet
       return {
-        achievements: cached,
+        achievements: hasPinnedSteamOfficialAccount ? {} : cached,
         save_path: statsDir,
       };
     }
@@ -6295,6 +6766,7 @@ ipcMain.handle("blacklist:reset", async () => {
 });
 
 ipcMain.handle("schema:regenerate", async (event, payload) => {
+  let progressJob = null;
   try {
     const rawName = payload?.name || payload?.configName || "";
     const safeName = sanitizeConfigName(rawName);
@@ -6413,6 +6885,19 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
       return { success: false, message, blacklisted: true };
     }
 
+    progressJob = createGenerationProgressJob({
+      kind: "schema-regenerate",
+      scope: "single",
+      status: "running",
+      itemName: safeName,
+      appid,
+      phase: "preparing",
+      detail: "Preparing schema regeneration",
+      current: 0,
+      total: 0,
+      percent: 5,
+    });
+
     const destDir = resolveSchemaDirForPlatform(appid, platform);
     config.appid = appid;
     config.platform = platform;
@@ -6425,13 +6910,27 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
         name: safeName,
         error: err?.message || String(err),
       });
+      progressJob?.fail({
+        phase: "failed",
+        detail: err?.message || "Failed to update config",
+      });
       return {
         success: false,
         message: tUi("main.message.configUpdateFailed"),
       };
     }
 
+    progressJob.update({
+      phase: "writingConfig",
+      detail: "Updating config",
+      percent: 12,
+    });
     notifyConfigsChanged();
+    progressJob.update({
+      phase: "generatingSchema",
+      detail: "Starting schema generation",
+      percent: 18,
+    });
 
     try {
       await runAchievementsGenerator(
@@ -6441,6 +6940,24 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
         {
           platform,
           langs: getSchemaLanguagesFromPreferences(),
+          onProgress: (progress) => {
+            const childPercent = clampGenerationPercent(progress?.percent, 0);
+            progressJob?.update({
+              phase: progress?.phase || "generatingSchema",
+              detail: progress?.detail || "",
+              current:
+                Number.isFinite(Number(progress?.current)) &&
+                Number(progress.current) >= 0
+                  ? Number(progress.current)
+                  : 0,
+              total:
+                Number.isFinite(Number(progress?.total)) &&
+                Number(progress.total) >= 0
+                  ? Number(progress.total)
+                  : 0,
+              percent: 18 + Math.round(childPercent * 0.72),
+            });
+          },
         },
       );
     } catch (err) {
@@ -6448,6 +6965,10 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
         appid,
         name: safeName,
         error: err?.message || String(err),
+      });
+      progressJob?.fail({
+        phase: "failed",
+        detail: err?.message || "Schema generation failed",
       });
       return {
         success: false,
@@ -6460,6 +6981,11 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
 
     const achJson = path.join(destDir, "achievements.json");
     if (fs.existsSync(achJson)) {
+      progressJob?.update({
+        phase: "finalizing",
+        detail: "Refreshing achievements",
+        percent: 96,
+      });
       emitSchemaReady({
         name: safeName,
         appid,
@@ -6475,6 +7001,11 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
           uiLanguage: selectedUiLanguage,
         });
       }
+      progressJob?.succeed({
+        phase: "completed",
+        detail: "Schema regenerated",
+        percent: 100,
+      });
       return {
         success: true,
         message: tUi("main.message.schemaRegenerateSuccess"),
@@ -6482,6 +7013,10 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
       };
     }
 
+    progressJob?.fail({
+      phase: "failed",
+      detail: "Achievements schema file was not generated",
+    });
     return {
       success: false,
       message: tUi("main.message.schemaMissing"),
@@ -6490,6 +7025,10 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
   } catch (error) {
     ipcLogger.error("schema:regenerate-error", {
       error: error?.message || String(error),
+    });
+    progressJob?.fail({
+      phase: "failed",
+      detail: error?.message || "Schema regeneration failed",
     });
     return {
       success: false,
@@ -7864,15 +8403,54 @@ if (!fs.existsSync(cacheDir)) {
   fs.mkdirSync(cacheDir, { recursive: true });
 }
 
-function makeCacheKey(configName, platform = "steam") {
+function makeCacheKey(configName, platform = "steam", options = null) {
   const safeName = sanitizeConfigName(configName || "") || "unknown";
   const safePlatform = normalizePlatform(platform) || "steam";
-  return [safeName, safePlatform].join("_");
+  const parts = [safeName, safePlatform];
+  const steamOfficialAccountId = resolveSteamOfficialCacheAccountId(
+    configName,
+    safePlatform,
+    options,
+  );
+  if (steamOfficialAccountId) {
+    parts.push(`acct_${steamOfficialAccountId}`);
+  }
+  return parts.join("_");
 }
 
-function getCachePath(configName, platform = "steam") {
-  const key = makeCacheKey(configName, platform).replace(/[:\\/]+/g, "_");
+function getCachePath(configName, platform = "steam", options = null) {
+  const key = makeCacheKey(configName, platform, options).replace(
+    /[:\\/]+/g,
+    "_",
+  );
   return path.join(cacheDir, `${key}_achievements_cache.json`);
+}
+
+function listScopedSteamOfficialCachePaths(configName, platform = "steam") {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  if (normalizedPlatform !== "steam-official") {
+    const exactPath = getCachePath(configName, normalizedPlatform);
+    return exactPath ? [exactPath] : [];
+  }
+  const safeName = sanitizeConfigName(configName || "") || "unknown";
+  const baseKey = [safeName, normalizedPlatform].join("_").replace(
+    /[:\\/]+/g,
+    "_",
+  );
+  if (!cacheDir || !fs.existsSync(cacheDir)) return [];
+  const escapedBaseKey = baseKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rx = new RegExp(
+    `^${escapedBaseKey}(?:_acct_\\d+)?_achievements_cache\\.json$`,
+    "i",
+  );
+  try {
+    return fs
+      .readdirSync(cacheDir)
+      .filter((entry) => rx.test(String(entry || "")))
+      .map((entry) => path.join(cacheDir, entry));
+  } catch {
+    return [];
+  }
 }
 
 const achCacheMetaPath = (() => {
@@ -8248,8 +8826,26 @@ async function readCacheJson(pathToRead) {
   });
 }
 
-async function loadPreviousAchievements(configName, platform = "steam") {
-  const cachePath = getCachePath(configName, platform);
+async function loadPreviousAchievements(
+  configName,
+  platform = "steam",
+  options = null,
+) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  const resolvedOptions = normalizeAchievementCacheOptions(options);
+  const scopedAccountId = resolveSteamOfficialCacheAccountId(
+    configName,
+    normalizedPlatform,
+    resolvedOptions,
+  );
+  const effectiveOptions = scopedAccountId
+    ? { ...resolvedOptions, accountId: scopedAccountId }
+    : resolvedOptions;
+  const cachePath = getCachePath(
+    configName,
+    normalizedPlatform,
+    effectiveOptions,
+  );
   if (fs.existsSync(cachePath)) {
     try {
       const data = await readCacheJson(cachePath);
@@ -8261,17 +8857,19 @@ async function loadPreviousAchievements(configName, platform = "steam") {
     }
   }
   // fallback legacy cache (name-only) for compatibility
-  const legacyPath = path.join(
-    cacheDir,
-    `${configName}_achievements_cache.json`,
-  );
-  if (fs.existsSync(legacyPath)) {
-    try {
-      const data = await readCacheJson(legacyPath);
-      bumpCacheBatchStat("hits");
-      return data;
-    } catch (e) {
-      bumpCacheBatchStat("errors");
+  if (!(normalizedPlatform === "steam-official" && scopedAccountId)) {
+    const legacyPath = path.join(
+      cacheDir,
+      `${configName}_achievements_cache.json`,
+    );
+    if (fs.existsSync(legacyPath)) {
+      try {
+        const data = await readCacheJson(legacyPath);
+        bumpCacheBatchStat("hits");
+        return data;
+      } catch (e) {
+        bumpCacheBatchStat("errors");
+      }
     }
   }
 
@@ -8279,7 +8877,6 @@ async function loadPreviousAchievements(configName, platform = "steam") {
   // different key (e.g. config.displayName/config.name), while the UI uses the config filename.
   // On a miss, probe aliases from the config JSON and write-through to the canonical path.
   try {
-    const normalizedPlatform = normalizePlatform(platform) || "steam";
     const safeName = sanitizeConfigName(configName || "");
     const configPath = safeName
       ? path.join(configsDir, `${safeName}.json`)
@@ -8294,7 +8891,11 @@ async function loadPreviousAchievements(configName, platform = "steam") {
         candidates.push(cfg.displayName.trim());
       }
       for (const altName of candidates) {
-        const altPath = getCachePath(altName, normalizedPlatform);
+        const altPath = getCachePath(
+          altName,
+          normalizedPlatform,
+          effectiveOptions,
+        );
         if (!altPath || altPath === cachePath) continue;
         if (!fs.existsSync(altPath)) continue;
         try {
@@ -8317,12 +8918,35 @@ async function loadPreviousAchievements(configName, platform = "steam") {
   return {};
 }
 
-function savePreviousAchievements(configName, data, platform = "steam") {
-  const cachePath = getCachePath(configName, platform);
+function savePreviousAchievements(
+  configName,
+  data,
+  platform = "steam",
+  options = null,
+) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  const resolvedOptions = normalizeAchievementCacheOptions(options);
+  const scopedAccountId = resolveSteamOfficialCacheAccountId(
+    configName,
+    normalizedPlatform,
+    resolvedOptions,
+  );
+  const effectiveOptions = scopedAccountId
+    ? { ...resolvedOptions, accountId: scopedAccountId }
+    : resolvedOptions;
+  const cachePath = getCachePath(
+    configName,
+    normalizedPlatform,
+    effectiveOptions,
+  );
   try {
     let effectiveData = data;
     if (isRpcs3ConfigName(configName) || isLumaPlayConfigName(configName)) {
-      const cached = readCacheSilent(configName, platform);
+      const cached = readCacheSilent(
+        configName,
+        normalizedPlatform,
+        effectiveOptions,
+      );
       if (cached && typeof cached === "object") {
         effectiveData = mergeEarnedTimeFromCached(data, cached);
       }
@@ -8366,6 +8990,10 @@ function savePreviousAchievements(configName, data, platform = "steam") {
     persistenceLogger.info("save-achievement-cache", {
       config: configName,
       path: cachePath,
+      steamOfficialAccountId:
+        normalizedPlatform === "steam-official"
+          ? effectiveOptions.accountId || null
+          : null,
       count: data ? Object.keys(data).length : 0,
     });
   } catch (e) {
@@ -8381,9 +9009,14 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function seedCacheFromSnapshot(configName, snapshot, platform = "steam") {
+function seedCacheFromSnapshot(
+  configName,
+  snapshot,
+  platform = "steam",
+  options = null,
+) {
   if (!configName || !snapshot) return;
-  savePreviousAchievements(configName, snapshot, platform);
+  savePreviousAchievements(configName, snapshot, platform, options);
   markCacheSeedKeyFromName(configName);
 }
 
@@ -8654,7 +9287,11 @@ async function monitorAchievementsFile(filePath) {
         let userBin = filePath;
         const base = path.basename(userBin || "").toLowerCase();
         if (!base.startsWith("usergamestats_") || !base.endsWith(".bin")) {
-          userBin = pickLatestUserBin(statsDir, configMeta?.appid);
+          userBin = pickConfiguredSteamOfficialUserBin(
+            statsDir,
+            configMeta?.appid,
+            cachedPreferences,
+          );
         }
         if (entries.length && userBin && fs.existsSync(userBin)) {
           const kv = parseSteamKv(fs.readFileSync(userBin));
@@ -9209,6 +9846,66 @@ function clearPendingMissingAchievementFile(configName) {
   }
 }
 
+async function refreshSelectedSteamOfficialMonitoring() {
+  if (
+    normalizePlatform(selectedPlatform) !== "steam-official" ||
+    !isNonEmptyString(selectedConfig)
+  ) {
+    return;
+  }
+
+  const safeName = sanitizeConfigName(selectedConfig);
+  if (!safeName) return;
+  const cfgFile = path.join(configsDir, `${safeName}.json`);
+  let config = null;
+  try {
+    config = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
+  } catch {
+    return;
+  }
+
+  const appid = String(config?.appid || "");
+  const statsDir = config?.save_path || "";
+  const userBin =
+    statsDir && appid
+      ? pickConfiguredSteamOfficialUserBin(statsDir, appid, cachedPreferences)
+      : null;
+
+  achievementsFilePath = userBin || null;
+  if (!userBin || !fs.existsSync(userBin)) {
+    await monitorAchievementsFile(null);
+    achievementsFilePath = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("achievements-missing", {
+        configName: selectedConfig,
+        reason: "no-usergamestats",
+      });
+      mainWindow.webContents.send("refresh-achievements-table", selectedConfig);
+    }
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", {
+        language: selectedLanguage,
+        uiLanguage: selectedUiLanguage,
+      });
+    }
+    return;
+  }
+
+  clearPendingMissingAchievementFile(selectedConfig);
+  await monitorAchievementsFile(userBin);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("refresh-achievements-table", selectedConfig);
+  }
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+    overlayWindow.webContents.send("set-language", {
+      language: selectedLanguage,
+      uiLanguage: selectedUiLanguage,
+    });
+  }
+}
+
 async function clearActiveConfigSelection(options = {}) {
   const reason =
     typeof options?.reason === "string" && options.reason
@@ -9480,7 +10177,13 @@ ipcMain.on(
       currentAppId = appid || null;
       const statsDir = config.save_path || "";
       const userBin =
-        statsDir && appid ? pickLatestUserBin(statsDir, appid) : null;
+        statsDir && appid
+          ? pickConfiguredSteamOfficialUserBin(
+              statsDir,
+              appid,
+              cachedPreferences,
+            )
+          : null;
       achievementsFilePath = userBin || null;
       if (!userBin || !fs.existsSync(userBin)) {
         monitorAchievementsFile(null);
@@ -10006,6 +10709,7 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
 });
 
 ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
+  let progressJob = null;
   try {
     const safeOld = sanitizeConfigName(oldName);
     const safeNew = sanitizeConfigName(newConfig.name);
@@ -10081,6 +10785,46 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     payload.platform = nextPlatform;
     const oldCachePath = getCachePath(safeOld, prevPlatform || "steam");
     const newCachePath = getCachePath(safeNew, nextPlatform);
+    const oldScopedCachePaths = listScopedSteamOfficialCachePaths(
+      safeOld,
+      prevPlatform || "steam",
+    );
+    const ensureRenameProgressJob = () => {
+      if (progressJob) return progressJob;
+      progressJob = createGenerationProgressJob({
+        kind: "config-generate",
+        scope: "single",
+        status: "running",
+        itemName: String(
+          payload.displayName || payload.name || payload.appid || "",
+        ).trim(),
+        appid: String(payload.appid || ""),
+        phase: "preparing",
+        detail: "Preparing config generation",
+        current: 0,
+        total: 0,
+        percent: 5,
+      });
+      return progressJob;
+    };
+    const updateRenameSchemaProgress = (progress = {}) => {
+      ensureRenameProgressJob().update({
+        itemName:
+          progress?.itemName || payload.displayName || payload.name || payload.appid,
+        appid: progress?.appid || payload.appid,
+        phase: progress?.phase || "generatingSchema",
+        detail: progress?.detail || "",
+        current:
+          Number.isFinite(Number(progress?.current)) && Number(progress.current) >= 0
+            ? Number(progress.current)
+            : 0,
+        total:
+          Number.isFinite(Number(progress?.total)) && Number(progress.total) >= 0
+            ? Number(progress.total)
+            : 0,
+        percent: clampGenerationPercent(progress?.percent, 5),
+      });
+    };
 
     // missing config_path, generate and set path
     if (
@@ -10090,12 +10834,24 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
       try {
         global.mainWindow = BrowserWindow.fromWebContents(event.sender);
       } catch {}
-      const res = await ensureSchemaForApp(
-        payload.appid,
-        payload.platform,
-        payload,
-      );
-      if (res && res.dir) payload.config_path = res.dir;
+      try {
+        updateRenameSchemaProgress({
+          phase: "generatingSchema",
+          detail: "Starting schema generation",
+          percent: 12,
+        });
+        const res = await ensureSchemaForApp(payload.appid, payload.platform, {
+          ...payload,
+          onGenerationProgress: updateRenameSchemaProgress,
+        });
+        if (res && res.dir) payload.config_path = res.dir;
+      } catch (err) {
+        progressJob?.fail({
+          phase: "failed",
+          detail: err?.message || "Schema generation failed",
+        });
+        throw err;
+      }
     }
     try {
       const selForSave = isNonEmptyString(payload.save_path)
@@ -10121,6 +10877,30 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     if (fs.existsSync(oldCachePath)) {
       fs.renameSync(oldCachePath, newCachePath);
     }
+    if (
+      normalizePlatform(prevPlatform) === "steam-official" &&
+      normalizePlatform(nextPlatform) === "steam-official"
+    ) {
+      const oldPrefix = `${sanitizeConfigName(safeOld || "")}_steam-official`;
+      const newPrefix = `${sanitizeConfigName(safeNew || "")}_steam-official`;
+      for (const scopedOldPath of oldScopedCachePaths) {
+        if (!scopedOldPath || !fs.existsSync(scopedOldPath)) continue;
+        const baseName = path.basename(scopedOldPath);
+        if (
+          baseName === path.basename(oldCachePath) ||
+          !baseName.startsWith(oldPrefix)
+        ) {
+          continue;
+        }
+        const scopedNewPath = path.join(
+          cacheDir,
+          `${newPrefix}${baseName.slice(oldPrefix.length)}`,
+        );
+        try {
+          fs.renameSync(scopedOldPath, scopedNewPath);
+        } catch {}
+      }
+    }
 
     const managesSchemaPath = isManagedSchemaPath(prevConfig?.config_path);
     if (
@@ -10136,11 +10916,15 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
         to: nextPlatform,
       });
       try {
-        const res = await ensureSchemaForApp(
-          payload.appid,
-          nextPlatform,
-          payload,
-        );
+        updateRenameSchemaProgress({
+          phase: "generatingSchema",
+          detail: "Starting schema generation",
+          percent: 12,
+        });
+        const res = await ensureSchemaForApp(payload.appid, nextPlatform, {
+          ...payload,
+          onGenerationProgress: updateRenameSchemaProgress,
+        });
         if (res?.dir) {
           const current = JSON.parse(fs.readFileSync(newConfigPath, "utf8"));
           if (current.config_path !== res.dir) {
@@ -10148,12 +10932,29 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
             fs.writeFileSync(newConfigPath, JSON.stringify(current, null, 2));
           }
         }
+        progressJob?.succeed({
+          phase: "completed",
+          detail: "Config updated",
+          percent: 100,
+        });
       } catch (err) {
+        progressJob?.fail({
+          phase: "failed",
+          detail: err?.message || "Schema generation failed",
+        });
         ipcLogger.warn("renameConfig:schema-sync-failed", {
           appid: payload.appid,
           error: err?.message || String(err),
         });
       }
+    }
+
+    if (progressJob && generationProgressJobs.has(progressJob.id)) {
+      progressJob.succeed({
+        phase: "completed",
+        detail: "Config updated",
+        percent: 100,
+      });
     }
 
     pendingMissingAchievementFiles.delete(safeOld);
@@ -10165,6 +10966,10 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
       message: tUi("main.message.configRenameSuccess", { name: oldName }),
     };
   } catch (error) {
+    progressJob?.fail({
+      phase: "failed",
+      detail: error?.message || "Config update failed",
+    });
     return { success: false, message: tUi("main.message.configRenameFailed") };
   }
 });
@@ -13337,21 +14142,101 @@ const runtimeUplaySteamMapPath = path.join(
   "uplay-steam.json",
 );
 const runtimeSteamDbPath = path.join(app.getPath("userData"), "steamdb.json");
+const runtimeSeededJsonStatePath = path.join(
+  app.getPath("userData"),
+  ".seeded-json-state.json",
+);
 
-function ensureRuntimeSteamDb() {
+function computeFileContentVersion(filePath, prefix) {
+  const tag = String(prefix || "file").trim() || "file";
   try {
-    if (fs.existsSync(runtimeSteamDbPath)) return;
-    fs.mkdirSync(path.dirname(runtimeSteamDbPath), { recursive: true });
-    if (fs.existsSync(defaultSteamDbPath)) {
-      fs.copyFileSync(defaultSteamDbPath, runtimeSteamDbPath);
-    } else {
-      fs.writeFileSync(runtimeSteamDbPath, "[]", "utf8");
-    }
+    if (!filePath || !fs.existsSync(filePath)) return `${tag}-missing`;
+    const hash = crypto.createHash("sha256");
+    hash.update(`${tag}\0`, "utf8");
+    hash.update(fs.readFileSync(filePath));
+    hash.update("\0", "utf8");
+    return `${tag}-${hash.digest("hex").slice(0, 16)}`;
   } catch (err) {
-    ipcLogger.warn("steamdb:init-failed", {
+    ipcLogger.warn("seeded-json:version-failed", {
+      filePath: filePath || null,
+      error: err?.message || String(err),
+    });
+    return `${tag}-error`;
+  }
+}
+
+function readSeededJsonState() {
+  try {
+    if (!fs.existsSync(runtimeSeededJsonStatePath)) return {};
+    const raw = fs.readFileSync(runtimeSeededJsonStatePath, "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSeededJsonState(nextState) {
+  try {
+    fs.mkdirSync(path.dirname(runtimeSeededJsonStatePath), { recursive: true });
+    fs.writeFileSync(
+      runtimeSeededJsonStatePath,
+      JSON.stringify(nextState || {}, null, 2),
+      "utf8",
+    );
+  } catch (err) {
+    ipcLogger.warn("seeded-json:state-write-failed", {
       error: err?.message || String(err),
     });
   }
+}
+
+function syncSeededRuntimeJson({
+  key,
+  assetPath,
+  runtimePath,
+  emptyValue = "[]",
+}) {
+  const state = readSeededJsonState();
+  const assetVersion = computeFileContentVersion(assetPath, key);
+  const appliedVersion = String(state?.[key] || "").trim();
+  const runtimeExists = !!(runtimePath && fs.existsSync(runtimePath));
+  const shouldSync = !runtimeExists || assetVersion !== appliedVersion;
+
+  if (!shouldSync) return;
+
+  try {
+    fs.mkdirSync(path.dirname(runtimePath), { recursive: true });
+    if (assetPath && fs.existsSync(assetPath)) {
+      fs.copyFileSync(assetPath, runtimePath);
+    } else {
+      fs.writeFileSync(runtimePath, emptyValue, "utf8");
+    }
+    state[key] = assetVersion;
+    writeSeededJsonState(state);
+    ipcLogger.info("seeded-json:runtime-synced", {
+      key,
+      runtimePath,
+      version: assetVersion,
+    });
+  } catch (err) {
+    ipcLogger.warn("seeded-json:sync-failed", {
+      key,
+      runtimePath,
+      error: err?.message || String(err),
+    });
+  }
+}
+
+function ensureRuntimeSteamDb() {
+  syncSeededRuntimeJson({
+    key: "steamdb",
+    assetPath: defaultSteamDbPath,
+    runtimePath: runtimeSteamDbPath,
+    emptyValue: "[]",
+  });
 }
 
 function getRuntimeUplayMappingEnv() {
@@ -13362,19 +14247,12 @@ function getRuntimeUplayMappingEnv() {
 }
 
 function ensureRuntimeUplayMap() {
-  try {
-    if (fs.existsSync(runtimeUplaySteamMapPath)) return;
-    fs.mkdirSync(path.dirname(runtimeUplaySteamMapPath), { recursive: true });
-    if (fs.existsSync(defaultUplaySteamMapPath)) {
-      fs.copyFileSync(defaultUplaySteamMapPath, runtimeUplaySteamMapPath);
-    } else {
-      fs.writeFileSync(runtimeUplaySteamMapPath, "[]", "utf8");
-    }
-  } catch (err) {
-    ipcLogger.warn("uplay-mapping:init-failed", {
-      error: err?.message || String(err),
-    });
-  }
+  syncSeededRuntimeJson({
+    key: "uplay-steam",
+    assetPath: defaultUplaySteamMapPath,
+    runtimePath: runtimeUplaySteamMapPath,
+    emptyValue: "[]",
+  });
 }
 function loadRuntimeUplayMap() {
   try {
@@ -13725,6 +14603,16 @@ ipcMain.handle("get-display-workarea", () => {
 ipcMain.handle("generate-auto-configs", async (event, folderPath) => {
   const outputDir = configsDir;
   global.mainWindow = BrowserWindow.fromWebContents(event.sender);
+  const progressJob = createGenerationProgressJob({
+    kind: "config-generate",
+    scope: "batch",
+    status: "running",
+    phase: "preparing",
+    detail: "Preparing config generation",
+    percent: 0,
+    current: 0,
+    total: 0,
+  });
   try {
     ensureSteamApiKeyFileFromPrefs();
     const result = await generateGameConfigs(folderPath, outputDir, {
@@ -13737,13 +14625,45 @@ ipcMain.handle("generate-auto-configs", async (event, folderPath) => {
           );
         }
       },
+      onGenerationProgress: (progress) => {
+        progressJob.update({
+          itemName: progress?.itemName || progress?.name || "",
+          appid: progress?.appid || "",
+          phase: progress?.phase || "",
+          detail: progress?.detail || "",
+          current:
+            Number.isFinite(Number(progress?.current)) &&
+            Number(progress.current) >= 0
+              ? Number(progress.current)
+              : 0,
+          total:
+            Number.isFinite(Number(progress?.total)) && Number(progress.total) >= 0
+              ? Number(progress.total)
+              : 0,
+          percent: clampGenerationPercent(progress?.percent, 0),
+        });
+      },
     });
     if (!result || result.processed === 0) {
+      progressJob.fail({
+        phase: "failed",
+        detail: tUi("main.message.autoConfigsNoAppId"),
+        current: 0,
+        total: 0,
+        percent: 0,
+      });
       return {
         success: false,
         message: tUi("main.message.autoConfigsNoAppId"),
       };
     }
+    progressJob.succeed({
+      phase: "completed",
+      detail: "Config generation completed",
+      current: result.processed,
+      total: result.processed,
+      percent: 100,
+    });
     return {
       success: true,
       message: tUi("main.message.autoConfigsSuccess"),
@@ -13756,8 +14676,16 @@ ipcMain.handle("generate-auto-configs", async (event, folderPath) => {
         `Error generating configs: ${error.message || String(error)}`,
       ),
     );
+    progressJob.fail({
+      phase: "failed",
+      detail: error?.message || "Config generation failed",
+    });
     return { success: false, message: error.message };
   }
+});
+
+ipcMain.handle("generation:progress:get-active", async () => {
+  return getLatestActiveGenerationProgress();
 });
 
 const {
@@ -14371,7 +15299,7 @@ watchedFoldersApi = makeWatchedFolders({
   generateConfigForAppId,
   notifyWarn: (m) => console.warn(m),
   requestDashboardRefresh,
-  onSeedCache: ({ appid, configName, snapshot, platform }) => {
+  onSeedCache: ({ appid, configName, snapshot, platform, savePath }) => {
     try {
       let plat = normalizePlatform(platform) || "steam";
       if (!platform) {
@@ -14385,7 +15313,10 @@ watchedFoldersApi = makeWatchedFolders({
           }
         } catch {}
       }
-      seedCacheFromSnapshot(configName, snapshot, plat);
+      seedCacheFromSnapshot(configName, snapshot, plat, {
+        appid,
+        savePath: savePath || null,
+      });
     } catch (e) {
       console.warn(
         tUi(
@@ -14396,11 +15327,12 @@ watchedFoldersApi = makeWatchedFolders({
       );
     }
   },
-  getCachedSnapshot: (configName, platform = "steam") => {
+  getCachedSnapshot: (configName, platform = "steam", options = null) => {
     try {
       const cachePath = getCachePath(
         configName,
         normalizePlatform(platform) || "steam",
+        options,
       );
       if (fs.existsSync(cachePath)) {
         const raw = fs.readFileSync(cachePath, "utf8");

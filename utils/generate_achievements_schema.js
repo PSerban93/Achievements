@@ -187,6 +187,20 @@ function emitLaunchMetadata(data = {}) {
   } catch {}
 }
 
+function emitProgress(data = {}) {
+  if (!HAS_IPC) return;
+  try {
+    const percent = Number(data.percent);
+    process.send({
+      type: "achgen:progress",
+      ...data,
+      percent: Number.isFinite(percent)
+        ? Math.max(0, Math.min(100, Math.round(percent)))
+        : 0,
+    });
+  } catch {}
+}
+
 function reloadUplayMappingFromDisk() {
   try {
     const refreshed = loadUplayMappingFile(uplaySteamMapPath);
@@ -1999,6 +2013,12 @@ async function buildAchievementsFromScrape(
   meta = {},
   sharedSession = null,
 ) {
+  emitProgress({
+    appid,
+    phase: "fetchSteamDb",
+    detail: "Fetching SteamDB / SteamHunters",
+    percent: 24,
+  });
   let scraped = [];
   let scrapedTitle = "";
   const session = sharedSession;
@@ -2106,6 +2126,12 @@ async function buildAchievementsFromScrape(
   const title = (meta && meta.title) || scrapedTitle || "";
   const slugCandidates = title ? buildExophaseSlugVariants(title) : [];
   if (slugCandidates.length && platform && results.length) {
+    emitProgress({
+      appid,
+      phase: "fetchExtraLanguages",
+      detail: "Fetching extra languages",
+      percent: 64,
+    });
     const primarySlug = slugCandidates[0];
     emit("info", "steam-scrape:exophase:start", {
       appid,
@@ -2146,6 +2172,12 @@ async function buildAchievementsFromScrape(
         });
       }
       await enrichScrapedWithExophase(results, exoData, imgDir, appid);
+      emitProgress({
+        appid,
+        phase: "fetchExtraLanguages",
+        detail: "Extra languages merged",
+        percent: 78,
+      });
     } else if (lastError) {
       warn("steam-scrape:exophase:failed", {
         appid,
@@ -2193,6 +2225,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
   let steamLaunchMetadata = null;
   let steamLaunchMetadataSent = false;
   let steamSession = null;
+  emitProgress({
+    appid: folderId,
+    phase: "preparing",
+    detail: "Preparing schema generation",
+    percent: 4,
+  });
   const ensureSteamSession = async () => {
     if (!steamSession) {
       steamSession = await createSteamScrapeSession();
@@ -2210,6 +2248,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
       return processGogApp(folderId, outBaseDir);
     }
     if (wantsEpic) {
+      emitProgress({
+        appid: folderId,
+        phase: "fetchEpic",
+        detail: "Fetching Epic achievements",
+        percent: 18,
+      });
       const langsToFetch = [...EPIC_LANGS];
       if (HAS_CUSTOM_LANG_SELECTION) {
         const supportedSet = new Set(Object.keys(EPIC_LOCALE_MAP));
@@ -2324,10 +2368,19 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
       // ===== API-ONLY =====
       // 1) langs
       const langsToFetch = uniqueLangsWithEnglish(STEAM_LANGS);
+      emitProgress({
+        appid: folderId,
+        phase: "fetchSteamApi",
+        detail: "Fetching Steam achievements",
+        current: 0,
+        total: langsToFetch.length,
+        percent: 12,
+      });
 
       // 2) fetch achievements -> fallback schema
       const perLangByApi = {};
-      for (const lang of langsToFetch) {
+      for (let index = 0; index < langsToFetch.length; index += 1) {
+        const lang = langsToFetch[index];
         let map = null;
         try {
           map = await fetchAchievementsLang(appid, apiKey, lang);
@@ -2348,6 +2401,14 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
         if (STEAM_API_GAP_MS > 0) {
           await sleep(STEAM_API_GAP_MS);
         }
+        emitProgress({
+          appid: folderId,
+          phase: "fetchSteamApi",
+          detail: "Fetching Steam achievements",
+          current: index + 1,
+          total: langsToFetch.length,
+          percent: 12 + Math.round(((index + 1) / langsToFetch.length) * 56),
+        });
       }
 
       // 3) take EN
@@ -2424,6 +2485,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
         });
       }
       if (achievements.length === 0) {
+        emitProgress({
+          appid: folderId,
+          phase: "fetchSteamDb",
+          detail: "Falling back to SteamDB / SteamHunters",
+          percent: 72,
+        });
         const scrapeResult = await buildAchievementsFromScrape(
           appid,
           imgDir,
@@ -2442,6 +2509,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
       }
     } else {
       // ===== STEAMDB-ONLY =====
+      emitProgress({
+        appid: folderId,
+        phase: "fetchSteamDb",
+        detail: "Fetching SteamDB / SteamHunters",
+        percent: 18,
+      });
       const scrapeResult = await buildAchievementsFromScrape(
         appid,
         imgDir,
@@ -2477,6 +2550,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
 
   // 3) write JSON file
   await fs.mkdir(outDir, { recursive: true });
+  emitProgress({
+    appid: folderId,
+    phase: "writingSchema",
+    detail: "Writing achievements schema",
+    percent: 88,
+  });
   const finalAchievements = achievements.map((ach) => ({
     ...ach,
     name: normalizeAchievementName(ach.name, strip),
@@ -2505,12 +2584,24 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
       epicRarityByApi,
     );
   }
+  emitProgress({
+    appid: folderId,
+    phase: "finalizing",
+    detail: "Finalizing schema",
+    percent: 96,
+  });
 
   if (count === 0) {
     emit(
       "info",
       `⏭ [${folderId}] Achievements schema skipped. No Achievements found!`,
     );
+    emitProgress({
+      appid: folderId,
+      phase: "completed",
+      detail: "No achievements found",
+      percent: 100,
+    });
   } else {
     if (
       !steamLaunchMetadataSent &&
@@ -2525,6 +2616,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir) {
       steamLaunchMetadataSent = true;
     }
     emit("info", `✅ [${folderId}] Achievements schema done.`);
+    emitProgress({
+      appid: folderId,
+      phase: "completed",
+      detail: "Achievements schema generated",
+      percent: 100,
+    });
 
     // RPCS3: attempt Exophase multilanguage (trophies)
     if (meta.platform === "rpcs3") {

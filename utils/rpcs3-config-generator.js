@@ -555,14 +555,15 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
             langMap: EXOPHASE_LANG_MAP,
             logger: schemaLogger,
           });
-          const mergeRes = await enrichSchemaFromExophase(
-            schemaDir,
-            parsed,
-            exoData
-          );
-          merged = mergeRes?.updated || mergeRes?.matched > 0;
-          usedSlug = candidate;
-          break;
+      const mergeRes = await enrichSchemaFromExophase(
+        schemaDir,
+        parsed,
+        exoData
+      );
+      merged = mergeRes?.updated || mergeRes?.matched > 0;
+      if (merged) schemaChanged = true;
+      usedSlug = candidate;
+      break;
         } catch (err) {
           lastError = err;
           schemaLogger.warn("rpcs3:exophase:retry", {
@@ -625,7 +626,8 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
     if (!payload.process_name && existing.data?.process_name) {
       merged.process_name = existing.data.process_name;
     }
-    if (hasConfigChanges(existing.data, merged)) {
+    const configUpdated = hasConfigChanges(existing.data, merged);
+    if (configUpdated) {
       fs.writeFileSync(existing.filePath, JSON.stringify(merged, null, 2));
       autoConfigLogger.info("rpcs3:config:updated", {
         appid,
@@ -638,6 +640,8 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
       ...merged,
       configPath: existing.filePath,
       created,
+      configUpdated,
+      schemaUpdated: schemaChanged,
       snapshot,
     };
   }
@@ -649,7 +653,14 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
     filePath: configPath,
     schemaDir,
   });
-  return { ...payload, configPath, created, snapshot };
+  return {
+    ...payload,
+    configPath,
+    created,
+    configUpdated: true,
+    schemaUpdated: schemaChanged,
+    snapshot,
+  };
 }
 
 module.exports = { generateConfigFromTrophyDir, updateSchemaFromTrophy };

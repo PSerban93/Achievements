@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld("api", {
   saveConfig: (config) => ipcRenderer.invoke("saveConfig", config),
   regenerateSchema: (payload) =>
     ipcRenderer.invoke("schema:regenerate", payload),
+  getActiveGenerationProgress: () =>
+    ipcRenderer.invoke("generation:progress:get-active"),
   loadConfigs: () => ipcRenderer.invoke("loadConfigs"),
   loadDashboardSummary: () => ipcRenderer.invoke("dashboard:summary"),
   selectFolder: () => ipcRenderer.invoke("selectFolder"),
@@ -117,6 +119,8 @@ contextBridge.exposeInMainWorld("api", {
   savePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   updatePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   loadPreferences: () => ipcRenderer.invoke("load-preferences"),
+  listSteamOfficialAccounts: () =>
+    ipcRenderer.invoke("steam-official:list-accounts"),
   getSounds: () => ipcRenderer.invoke("get-sound-files"),
   getSoundFullPath: (fileName) =>
     ipcRenderer.invoke("get-sound-path", fileName),
@@ -300,6 +304,7 @@ contextBridge.exposeInMainWorld("electron", {
         "preferences:update",
         "save-preferences",
         "load-preferences",
+        "steam-official:list-accounts",
         "get-sound-files",
         "get-sound-path",
         "resolve-icon-url",

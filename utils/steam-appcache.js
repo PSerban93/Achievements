@@ -285,24 +285,57 @@ function extractGameName(rootObj) {
   return hit;
 }
 
-function pickLatestUserBin(statsDir, appid) {
-  const files = fs
-    .readdirSync(statsDir)
-    .filter((f) =>
-      f.toLowerCase().startsWith("usergamestats_") &&
-      f.toLowerCase().endsWith(`_${String(appid).toLowerCase()}.bin`)
-    );
-  if (!files.length) return null;
-  let best = files[0];
-  let bestM = fs.statSync(path.join(statsDir, best)).mtimeMs;
-  for (const f of files.slice(1)) {
-    const m = fs.statSync(path.join(statsDir, f)).mtimeMs;
-    if (m > bestM) {
-      best = f;
-      bestM = m;
-    }
+function parseUserBinName(filePath) {
+  const base = path.basename(String(filePath || ""));
+  const match = base.match(/^UserGameStats_(\d+)_(\d+)\.bin$/i);
+  if (!match) return null;
+  return {
+    accountId: String(match[1] || ""),
+    appid: String(match[2] || ""),
+    fileName: base,
+  };
+}
+
+function listUserBins(statsDir, appid) {
+  try {
+    const targetAppId = String(appid || "").trim().toLowerCase();
+    if (!statsDir || !targetAppId || !fs.existsSync(statsDir)) return [];
+    return fs
+      .readdirSync(statsDir)
+      .map((fileName) => {
+        const parsed = parseUserBinName(fileName);
+        if (!parsed) return null;
+        if (parsed.appid.toLowerCase() !== targetAppId) return null;
+        const fullPath = path.join(statsDir, fileName);
+        let mtimeMs = 0;
+        try {
+          mtimeMs = fs.statSync(fullPath).mtimeMs;
+        } catch {}
+        return {
+          ...parsed,
+          path: fullPath,
+          mtimeMs,
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  } catch {
+    return [];
   }
-  return path.join(statsDir, best);
+}
+
+function pickLatestUserBin(statsDir, appid) {
+  const entries = listUserBins(statsDir, appid);
+  return entries.length ? entries[0].path : null;
+}
+
+function pickPreferredUserBin(statsDir, appid, preferredAccountId = "") {
+  const entries = listUserBins(statsDir, appid);
+  if (!entries.length) return null;
+  const preferred = String(preferredAccountId || "").trim();
+  if (!preferred) return entries[0].path;
+  const exact = entries.find((entry) => entry.accountId === preferred);
+  return exact ? exact.path : null;
 }
 
 module.exports = {
@@ -311,6 +344,9 @@ module.exports = {
   extractUserStats,
   buildSnapshotFromAppcache,
   normalizeSteamIconUrl,
+  listUserBins,
+  parseUserBinName,
+  pickPreferredUserBin,
   pickLatestUserBin,
   extractGameName,
 };

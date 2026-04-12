@@ -701,13 +701,16 @@ function generateConfigFromGpd(gpdPath, configsDir, options = {}) {
       schemaReady = false;
     }
   }
+  let schemaUpdated = false;
   if (schemaReady) {
-    updateSchemaFromGpd(schemaDir, parsed, {
+    const schemaResult = updateSchemaFromGpd(schemaDir, parsed, {
       bootMode: options.bootMode === true,
     });
+    schemaUpdated = !!schemaResult?.updated;
   } else {
     writeSchemaAssets(schemaDir, parsed);
     queueExophaseEnrich(schemaDir, parsed, { platform: "xenia" });
+    schemaUpdated = true;
   }
 
   const payload = {
@@ -736,7 +739,8 @@ function generateConfigFromGpd(gpdPath, configsDir, options = {}) {
     if (!payload.process_name && existing.data?.process_name) {
       merged.process_name = existing.data.process_name;
     }
-    if (hasConfigChanges(existing.data, merged)) {
+    const configUpdated = hasConfigChanges(existing.data, merged);
+    if (configUpdated) {
       fs.writeFileSync(existing.filePath, JSON.stringify(merged, null, 2));
       autoConfigLogger.info("xenia:config:updated", {
         appid,
@@ -749,6 +753,8 @@ function generateConfigFromGpd(gpdPath, configsDir, options = {}) {
       ...merged,
       configPath: existing.filePath,
       created,
+      configUpdated,
+      schemaUpdated,
       snapshot,
     };
   }
@@ -760,7 +766,14 @@ function generateConfigFromGpd(gpdPath, configsDir, options = {}) {
     filePath: configPath,
     schemaDir,
   });
-  return { ...payload, configPath, created, snapshot };
+  return {
+    ...payload,
+    configPath,
+    created,
+    configUpdated: true,
+    schemaUpdated,
+    snapshot,
+  };
 }
 
 module.exports = { generateConfigFromGpd, updateSchemaFromGpd };
