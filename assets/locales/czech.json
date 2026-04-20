@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Sledovaný účet Steam",
   "settings.steamOfficialAccount.auto": "Automaticky (naposledy změněno)",
   "settings.steamOfficialAccount.hint": "Použije Steam loginusers.vdf, když je k dispozici.",
-  "settings.steamOfficialAccount.noAccounts": "Nebyly zjištěny žádné účty Steam. Bude použito Automaticky (naposledy změněno)."
+  "settings.steamOfficialAccount.noAccounts": "Nebyly zjištěny žádné účty Steam. Bude použito Automaticky (naposledy změněno).",
+  "main.update.progress.title": "Stahování aktualizace",
+  "main.update.progress.preparing": "Příprava stahování",
+  "main.update.progress.downloading": "Stahování aktualizace...",
+  "main.update.progress.completed": "Aktualizace stažena",
+  "main.update.progress.failed": "Stažení aktualizace se nezdařilo",
+  "main.update.progress.failedWithError": "Stažení aktualizace se nezdařilo: {error}",
+  "label.settings-disableUpdateCheckbox": "Zakázat aktualizace"
 }

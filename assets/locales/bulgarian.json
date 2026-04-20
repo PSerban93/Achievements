@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Проследяван Steam акаунт",
   "settings.steamOfficialAccount.auto": "Автоматично (последно променен)",
   "settings.steamOfficialAccount.hint": "Използва Steam loginusers.vdf, когато е наличен.",
-  "settings.steamOfficialAccount.noAccounts": "Не са открити Steam акаунти. Ще се използва Автоматично (последно променен)."
+  "settings.steamOfficialAccount.noAccounts": "Не са открити Steam акаунти. Ще се използва Автоматично (последно променен).",
+  "main.update.progress.title": "Изтегляне на обновяване",
+  "main.update.progress.preparing": "Подготовка на изтеглянето",
+  "main.update.progress.downloading": "Изтегляне на обновяване...",
+  "main.update.progress.completed": "Обновяването е изтеглено",
+  "main.update.progress.failed": "Изтеглянето на обновяването е неуспешно",
+  "main.update.progress.failedWithError": "Изтеглянето на обновяването е неуспешно: {error}",
+  "label.settings-disableUpdateCheckbox": "Изключване на обновяването"
 }

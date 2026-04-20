@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Παρακολουθούμενος λογαριασμός Steam",
   "settings.steamOfficialAccount.auto": "Αυτόματο (τελευταία τροποποίηση)",
   "settings.steamOfficialAccount.hint": "Χρησιμοποιεί το Steam loginusers.vdf όταν είναι διαθέσιμο.",
-  "settings.steamOfficialAccount.noAccounts": "Δεν εντοπίστηκαν λογαριασμοί Steam. Θα χρησιμοποιηθεί το Αυτόματο (τελευταία τροποποίηση)."
+  "settings.steamOfficialAccount.noAccounts": "Δεν εντοπίστηκαν λογαριασμοί Steam. Θα χρησιμοποιηθεί το Αυτόματο (τελευταία τροποποίηση).",
+  "main.update.progress.title": "Λήψη ενημέρωσης",
+  "main.update.progress.preparing": "Προετοιμασία λήψης",
+  "main.update.progress.downloading": "Λήψη ενημέρωσης...",
+  "main.update.progress.completed": "Η ενημέρωση λήφθηκε",
+  "main.update.progress.failed": "Η λήψη της ενημέρωσης απέτυχε",
+  "main.update.progress.failedWithError": "Η λήψη της ενημέρωσης απέτυχε: {error}",
+  "label.settings-disableUpdateCheckbox": "Απενεργοποίηση ενημερώσεων"
 }

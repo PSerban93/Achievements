@@ -115,6 +115,7 @@
   "label.settings-disablePlatinumCheckbox": "Dezactiveaza notificarea de platina",
   "label.settings-disablePlaytimeCheckbox": "Dezactiveaza notificarea de timp de joc",
   "label.settings-disableProgressCheckbox": "Dezactiveaza notificarea globala de progres",
+  "label.settings-disableUpdateCheckbox": "Dezactiveaza update-ul",
   "label.settings-disableScreenshotCheckbox": "Dezactiveaza captura de ecran",
   "label.settings-durationSlider": "Durata realizarii:",
   "label.settings-platinumPositionDropdown": "Pozitia realizarii de platina:",
@@ -716,5 +717,11 @@
   "label.settings-steamOfficialAccountSelect": "Cont Steam urmărit",
   "settings.steamOfficialAccount.auto": "Automat (ultimul modificat)",
   "settings.steamOfficialAccount.hint": "Folosește Steam loginusers.vdf când este disponibil.",
-  "settings.steamOfficialAccount.noAccounts": "Nu au fost detectate conturi Steam. Se va folosi Automat (ultimul modificat)."
+  "settings.steamOfficialAccount.noAccounts": "Nu au fost detectate conturi Steam. Se va folosi Automat (ultimul modificat).",
+  "main.update.progress.title": "Se descarca actualizarea",
+  "main.update.progress.preparing": "Se pregateste descarcarea",
+  "main.update.progress.downloading": "Se descarca actualizarea...",
+  "main.update.progress.completed": "Actualizare descarcata",
+  "main.update.progress.failed": "Descarcarea actualizarii a esuat",
+  "main.update.progress.failedWithError": "Descarcarea actualizarii a esuat: {error}"
 }

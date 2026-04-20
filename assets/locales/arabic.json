@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "حساب Steam المتعقَّب",
   "settings.steamOfficialAccount.auto": "تلقائي (آخر تعديل)",
   "settings.steamOfficialAccount.hint": "يستخدم Steam loginusers.vdf عند توفره.",
-  "settings.steamOfficialAccount.noAccounts": "لم يتم اكتشاف أي حسابات Steam. سيتم استخدام تلقائي (آخر تعديل)."
+  "settings.steamOfficialAccount.noAccounts": "لم يتم اكتشاف أي حسابات Steam. سيتم استخدام تلقائي (آخر تعديل).",
+  "main.update.progress.title": "جارٍ تنزيل التحديث",
+  "main.update.progress.preparing": "جارٍ تحضير التنزيل",
+  "main.update.progress.downloading": "جارٍ تنزيل التحديث...",
+  "main.update.progress.completed": "تم تنزيل التحديث",
+  "main.update.progress.failed": "فشل تنزيل التحديث",
+  "main.update.progress.failedWithError": "فشل تنزيل التحديث: {error}",
+  "label.settings-disableUpdateCheckbox": "تعطيل التحديثات"
 }

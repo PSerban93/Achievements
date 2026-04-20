@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Śledzone konto Steam",
   "settings.steamOfficialAccount.auto": "Automatycznie (ostatnio zmodyfikowane)",
   "settings.steamOfficialAccount.hint": "Używa Steam loginusers.vdf, gdy jest dostępny.",
-  "settings.steamOfficialAccount.noAccounts": "Nie wykryto kont Steam. Zostanie użyte Automatycznie (ostatnio zmodyfikowane)."
+  "settings.steamOfficialAccount.noAccounts": "Nie wykryto kont Steam. Zostanie użyte Automatycznie (ostatnio zmodyfikowane).",
+  "main.update.progress.title": "Pobieranie aktualizacji",
+  "main.update.progress.preparing": "Przygotowywanie pobierania",
+  "main.update.progress.downloading": "Pobieranie aktualizacji...",
+  "main.update.progress.completed": "Aktualizacja pobrana",
+  "main.update.progress.failed": "Pobieranie aktualizacji nie powiodło się",
+  "main.update.progress.failedWithError": "Pobieranie aktualizacji nie powiodło się: {error}",
+  "label.settings-disableUpdateCheckbox": "Wyłącz aktualizacje"
 }

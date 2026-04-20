@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "추적할 Steam 계정",
   "settings.steamOfficialAccount.auto": "자동 (마지막 수정)",
   "settings.steamOfficialAccount.hint": "사용 가능한 경우 Steam loginusers.vdf를 사용합니다.",
-  "settings.steamOfficialAccount.noAccounts": "감지된 Steam 계정이 없습니다. 자동 (마지막 수정)이 사용됩니다."
+  "settings.steamOfficialAccount.noAccounts": "감지된 Steam 계정이 없습니다. 자동 (마지막 수정)이 사용됩니다.",
+  "main.update.progress.title": "업데이트 다운로드 중",
+  "main.update.progress.preparing": "다운로드 준비 중",
+  "main.update.progress.downloading": "업데이트 다운로드 중...",
+  "main.update.progress.completed": "업데이트 다운로드 완료",
+  "main.update.progress.failed": "업데이트 다운로드 실패",
+  "main.update.progress.failedWithError": "업데이트 다운로드 실패: {error}",
+  "label.settings-disableUpdateCheckbox": "업데이트 비활성화"
 }

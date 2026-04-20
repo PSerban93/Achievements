@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Отслеживаемый аккаунт Steam",
   "settings.steamOfficialAccount.auto": "Авто (последнее изменение)",
   "settings.steamOfficialAccount.hint": "Использует Steam loginusers.vdf, если он доступен.",
-  "settings.steamOfficialAccount.noAccounts": "Аккаунты Steam не обнаружены. Будет использоваться Авто (последнее изменение)."
+  "settings.steamOfficialAccount.noAccounts": "Аккаунты Steam не обнаружены. Будет использоваться Авто (последнее изменение).",
+  "main.update.progress.title": "Загрузка обновления",
+  "main.update.progress.preparing": "Подготовка загрузки",
+  "main.update.progress.downloading": "Загрузка обновления...",
+  "main.update.progress.completed": "Обновление загружено",
+  "main.update.progress.failed": "Не удалось загрузить обновление",
+  "main.update.progress.failedWithError": "Не удалось загрузить обновление: {error}",
+  "label.settings-disableUpdateCheckbox": "Отключить обновления"
 }

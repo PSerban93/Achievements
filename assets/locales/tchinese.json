@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "追蹤的 Steam 帳戶",
   "settings.steamOfficialAccount.auto": "自動（最後修改）",
   "settings.steamOfficialAccount.hint": "可用時使用 Steam loginusers.vdf。",
-  "settings.steamOfficialAccount.noAccounts": "未偵測到 Steam 帳戶。將使用自動（最後修改）。"
+  "settings.steamOfficialAccount.noAccounts": "未偵測到 Steam 帳戶。將使用自動（最後修改）。",
+  "main.update.progress.title": "正在下載更新",
+  "main.update.progress.preparing": "正在準備下載",
+  "main.update.progress.downloading": "正在下載更新...",
+  "main.update.progress.completed": "更新已下載",
+  "main.update.progress.failed": "更新下載失敗",
+  "main.update.progress.failedWithError": "更新下載失敗：{error}",
+  "label.settings-disableUpdateCheckbox": "停用更新"
 }

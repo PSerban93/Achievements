@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Conta Steam monitorizada",
   "settings.steamOfficialAccount.auto": "Automático (última modificação)",
   "settings.steamOfficialAccount.hint": "Usa o Steam loginusers.vdf quando disponível.",
-  "settings.steamOfficialAccount.noAccounts": "Nenhuma conta Steam detectada. Automático (última modificação) será usado."
+  "settings.steamOfficialAccount.noAccounts": "Nenhuma conta Steam detectada. Automático (última modificação) será usado.",
+  "main.update.progress.title": "A transferir atualização",
+  "main.update.progress.preparing": "A preparar transferência",
+  "main.update.progress.downloading": "A transferir atualização...",
+  "main.update.progress.completed": "Atualização transferida",
+  "main.update.progress.failed": "Falha ao transferir a atualização",
+  "main.update.progress.failedWithError": "Falha ao transferir a atualização: {error}",
+  "label.settings-disableUpdateCheckbox": "Desativar atualizações"
 }

@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Tài khoản Steam đang theo dõi",
   "settings.steamOfficialAccount.auto": "Tự động (sửa đổi gần nhất)",
   "settings.steamOfficialAccount.hint": "Sử dụng Steam loginusers.vdf khi có sẵn.",
-  "settings.steamOfficialAccount.noAccounts": "Không phát hiện tài khoản Steam nào. Sẽ dùng Tự động (sửa đổi gần nhất)."
+  "settings.steamOfficialAccount.noAccounts": "Không phát hiện tài khoản Steam nào. Sẽ dùng Tự động (sửa đổi gần nhất).",
+  "main.update.progress.title": "Đang tải bản cập nhật",
+  "main.update.progress.preparing": "Đang chuẩn bị tải xuống",
+  "main.update.progress.downloading": "Đang tải bản cập nhật...",
+  "main.update.progress.completed": "Đã tải xong bản cập nhật",
+  "main.update.progress.failed": "Tải bản cập nhật thất bại",
+  "main.update.progress.failedWithError": "Tải bản cập nhật thất bại: {error}",
+  "label.settings-disableUpdateCheckbox": "Tắt cập nhật"
 }

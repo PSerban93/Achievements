@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Gevolgd Steam-account",
   "settings.steamOfficialAccount.auto": "Automatisch (laatst gewijzigd)",
   "settings.steamOfficialAccount.hint": "Gebruikt Steam loginusers.vdf indien beschikbaar.",
-  "settings.steamOfficialAccount.noAccounts": "Geen Steam-accounts gedetecteerd. Automatisch (laatst gewijzigd) wordt gebruikt."
+  "settings.steamOfficialAccount.noAccounts": "Geen Steam-accounts gedetecteerd. Automatisch (laatst gewijzigd) wordt gebruikt.",
+  "main.update.progress.title": "Update downloaden",
+  "main.update.progress.preparing": "Download voorbereiden",
+  "main.update.progress.downloading": "Update downloaden...",
+  "main.update.progress.completed": "Update gedownload",
+  "main.update.progress.failed": "Downloaden van update mislukt",
+  "main.update.progress.failedWithError": "Downloaden van update mislukt: {error}",
+  "label.settings-disableUpdateCheckbox": "Updates uitschakelen"
 }

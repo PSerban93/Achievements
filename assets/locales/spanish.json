@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Cuenta de Steam monitorizada",
   "settings.steamOfficialAccount.auto": "Automático (última modificación)",
   "settings.steamOfficialAccount.hint": "Usa Steam loginusers.vdf cuando está disponible.",
-  "settings.steamOfficialAccount.noAccounts": "No se detectaron cuentas de Steam. Se usará Automático (última modificación)."
+  "settings.steamOfficialAccount.noAccounts": "No se detectaron cuentas de Steam. Se usará Automático (última modificación).",
+  "main.update.progress.title": "Descargando actualización",
+  "main.update.progress.preparing": "Preparando descarga",
+  "main.update.progress.downloading": "Descargando actualización...",
+  "main.update.progress.completed": "Actualización descargada",
+  "main.update.progress.failed": "La descarga de la actualización falló",
+  "main.update.progress.failedWithError": "La descarga de la actualización falló: {error}",
+  "label.settings-disableUpdateCheckbox": "Desactivar actualizaciones"
 }

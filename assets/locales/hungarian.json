@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Figyelt Steam-fiók",
   "settings.steamOfficialAccount.auto": "Automatikus (utoljára módosítva)",
   "settings.steamOfficialAccount.hint": "A Steam loginusers.vdf fájlt használja, ha elérhető.",
-  "settings.steamOfficialAccount.noAccounts": "Nem találhatók Steam-fiókok. Az Automatikus (utoljára módosítva) lesz használva."
+  "settings.steamOfficialAccount.noAccounts": "Nem találhatók Steam-fiókok. Az Automatikus (utoljára módosítva) lesz használva.",
+  "main.update.progress.title": "Frissítés letöltése",
+  "main.update.progress.preparing": "Letöltés előkészítése",
+  "main.update.progress.downloading": "Frissítés letöltése...",
+  "main.update.progress.completed": "Frissítés letöltve",
+  "main.update.progress.failed": "A frissítés letöltése sikertelen",
+  "main.update.progress.failedWithError": "A frissítés letöltése sikertelen: {error}",
+  "label.settings-disableUpdateCheckbox": "Frissítések letiltása"
 }

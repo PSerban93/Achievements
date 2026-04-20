@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "İzlenen Steam hesabı",
   "settings.steamOfficialAccount.auto": "Otomatik (son değiştirilme)",
   "settings.steamOfficialAccount.hint": "Uygun olduğunda Steam loginusers.vdf dosyasını kullanır.",
-  "settings.steamOfficialAccount.noAccounts": "Steam hesabı algılanmadı. Otomatik (son değiştirilme) kullanılacak."
+  "settings.steamOfficialAccount.noAccounts": "Steam hesabı algılanmadı. Otomatik (son değiştirilme) kullanılacak.",
+  "main.update.progress.title": "Güncelleme indiriliyor",
+  "main.update.progress.preparing": "İndirme hazırlanıyor",
+  "main.update.progress.downloading": "Güncelleme indiriliyor...",
+  "main.update.progress.completed": "Güncelleme indirildi",
+  "main.update.progress.failed": "Güncelleme indirilemedi",
+  "main.update.progress.failedWithError": "Güncelleme indirilemedi: {error}",
+  "label.settings-disableUpdateCheckbox": "Güncellemeleri devre dışı bırak"
 }

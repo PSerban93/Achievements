@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Overvåket Steam-konto",
   "settings.steamOfficialAccount.auto": "Automatisk (sist endret)",
   "settings.steamOfficialAccount.hint": "Bruker Steam loginusers.vdf når den er tilgjengelig.",
-  "settings.steamOfficialAccount.noAccounts": "Ingen Steam-kontoer oppdaget. Automatisk (sist endret) vil bli brukt."
+  "settings.steamOfficialAccount.noAccounts": "Ingen Steam-kontoer oppdaget. Automatisk (sist endret) vil bli brukt.",
+  "main.update.progress.title": "Laster ned oppdatering",
+  "main.update.progress.preparing": "Forbereder nedlasting",
+  "main.update.progress.downloading": "Laster ned oppdatering...",
+  "main.update.progress.completed": "Oppdatering lastet ned",
+  "main.update.progress.failed": "Nedlasting av oppdatering mislyktes",
+  "main.update.progress.failedWithError": "Nedlasting av oppdatering mislyktes: {error}",
+  "label.settings-disableUpdateCheckbox": "Deaktiver oppdateringer"
 }

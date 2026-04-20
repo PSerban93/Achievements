@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Відстежуваний акаунт Steam",
   "settings.steamOfficialAccount.auto": "Авто (остання зміна)",
   "settings.steamOfficialAccount.hint": "Використовує Steam loginusers.vdf, якщо він доступний.",
-  "settings.steamOfficialAccount.noAccounts": "Акаунтів Steam не виявлено. Буде використано Авто (остання зміна)."
+  "settings.steamOfficialAccount.noAccounts": "Акаунтів Steam не виявлено. Буде використано Авто (остання зміна).",
+  "main.update.progress.title": "Завантаження оновлення",
+  "main.update.progress.preparing": "Підготовка завантаження",
+  "main.update.progress.downloading": "Завантаження оновлення...",
+  "main.update.progress.completed": "Оновлення завантажено",
+  "main.update.progress.failed": "Не вдалося завантажити оновлення",
+  "main.update.progress.failedWithError": "Не вдалося завантажити оновлення: {error}",
+  "label.settings-disableUpdateCheckbox": "Вимкнути оновлення"
 }

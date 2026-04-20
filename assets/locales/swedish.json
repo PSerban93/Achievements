@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Spårat Steam-konto",
   "settings.steamOfficialAccount.auto": "Auto (senast ändrad)",
   "settings.steamOfficialAccount.hint": "Använder Steam loginusers.vdf när den är tillgänglig.",
-  "settings.steamOfficialAccount.noAccounts": "Inga Steam-konton hittades. Auto (senast ändrad) kommer att användas."
+  "settings.steamOfficialAccount.noAccounts": "Inga Steam-konton hittades. Auto (senast ändrad) kommer att användas.",
+  "main.update.progress.title": "Laddar ner uppdatering",
+  "main.update.progress.preparing": "Förbereder nedladdning",
+  "main.update.progress.downloading": "Laddar ner uppdatering...",
+  "main.update.progress.completed": "Uppdatering nedladdad",
+  "main.update.progress.failed": "Nedladdning av uppdatering misslyckades",
+  "main.update.progress.failedWithError": "Nedladdning av uppdatering misslyckades: {error}",
+  "label.settings-disableUpdateCheckbox": "Inaktivera uppdateringar"
 }

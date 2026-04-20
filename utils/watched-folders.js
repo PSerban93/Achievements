@@ -1413,6 +1413,7 @@ module.exports = function makeWatchedFolders({
     const total = list.length;
     const id = `generation-batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const scope = total > 1 ? "batch" : "single";
+    const deferStartUntilVisible = meta?.deferStartUntilVisible === true;
     const states = list.map((task, index) => ({
       index,
       appid: String(task?.appid || ""),
@@ -1478,16 +1479,46 @@ module.exports = function makeWatchedFolders({
       } catch {}
     };
 
+    let started = false;
+
+    const emitStart = (state = currentState(), overrides = {}) => {
+      if (started) return;
+      started = true;
+      emit("generation:progress:start", {
+        status: "running",
+        current: state.current,
+        total: state.total,
+        percent: state.percent,
+        appid: state.appid,
+        itemName: String(meta?.rootLabel || state.itemName || ""),
+        phase: String(overrides.phase || state.phase || "preparing"),
+        detail:
+          String(
+            overrides.detail ||
+              state.detail ||
+              meta?.defaultDetail ||
+              "Preparing config generation",
+          ) || "",
+      });
+    };
+
+    const shouldRevealProgress = (progress = {}, state = null) => {
+      if (!deferStartUntilVisible) return true;
+      const phase = String(progress?.phase || state?.phase || "").toLowerCase();
+      const status = String(progress?.status || "").toLowerCase();
+      const detail = String(progress?.detail || state?.detail || "").toLowerCase();
+      if (status === "failed" || phase === "failed") return true;
+      if (detail === "config created" || detail === "config updated") return true;
+      if (detail === "waiting for schema generation") return true;
+      if (phase === "skipped" || detail === "config generation skipped") return false;
+      return false;
+    };
+
     return {
       start() {
+        if (deferStartUntilVisible) return;
         const state = currentState();
-        emit("generation:progress:start", {
-          status: "running",
-          current: state.current,
-          total: state.total,
-          percent: state.percent,
-          appid: state.appid,
-          itemName: String(meta?.rootLabel || state.itemName || ""),
+        emitStart(state, {
           phase: "preparing",
           detail: String(meta?.defaultDetail || "Preparing config generation"),
         });
@@ -1508,6 +1539,10 @@ module.exports = function makeWatchedFolders({
         state.detail = String(progress?.detail || state.detail || "");
         state.percent = clampPercent(progress?.percent, state.percent || 0);
         const summary = currentState();
+        if (!started) {
+          if (!shouldRevealProgress(progress, state)) return;
+          emitStart(summary);
+        }
         emit("generation:progress:update", {
           status: "running",
           current: summary.current,
@@ -1546,6 +1581,10 @@ module.exports = function makeWatchedFolders({
           state.finalState = "failed";
         }
         const summary = currentState();
+        if (!started) {
+          if (!shouldRevealProgress(state, state)) return;
+          emitStart(summary);
+        }
         emit("generation:progress:update", {
           status: "running",
           current: summary.current,
@@ -1558,6 +1597,16 @@ module.exports = function makeWatchedFolders({
         });
       },
       finish(status = "success", detail = "") {
+        if (!started) {
+          if (status === "failed") {
+            emitStart(currentState(), {
+              phase: "failed",
+              detail: String(detail || "Config generation failed"),
+            });
+          } else {
+            return;
+          }
+        }
         const summary = currentState();
         emit("generation:progress:end", {
           status: status === "failed" ? "failed" : "success",
@@ -6786,6 +6835,7 @@ module.exports = function makeWatchedFolders({
             rootLabel: path.basename(rootPath || scanBase || "") || "",
             fallbackItemName: "Xenia",
             defaultDetail: "Parsing Xenia achievements",
+            deferStartUntilVisible: bootMode === true,
           });
           xeniaBatchProgress.start();
           const handleGpd = async (task, taskIndex) => {
@@ -6932,6 +6982,7 @@ module.exports = function makeWatchedFolders({
             rootLabel: path.basename(rootPath || scanBase || "") || "",
             fallbackItemName: "RPCS3",
             defaultDetail: "Parsing RPCS3 trophies",
+            deferStartUntilVisible: bootMode === true,
           });
           rpcs3BatchProgress.start();
           const handleTrophyDir = async (task, taskIndex) => {
@@ -7085,6 +7136,7 @@ module.exports = function makeWatchedFolders({
             rootLabel: path.basename(rootPath || scanBase || "") || "",
             fallbackItemName: "PS4",
             defaultDetail: "Parsing PS4 trophies",
+            deferStartUntilVisible: bootMode === true,
           });
           ps4BatchProgress.start();
           const handlePs4Dir = async (task, taskIndex) => {

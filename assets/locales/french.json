@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Compte Steam suivi",
   "settings.steamOfficialAccount.auto": "Auto (dernière modification)",
   "settings.steamOfficialAccount.hint": "Utilise Steam loginusers.vdf lorsqu'il est disponible.",
-  "settings.steamOfficialAccount.noAccounts": "Aucun compte Steam détecté. Auto (dernière modification) sera utilisé."
+  "settings.steamOfficialAccount.noAccounts": "Aucun compte Steam détecté. Auto (dernière modification) sera utilisé.",
+  "main.update.progress.title": "Téléchargement de la mise à jour",
+  "main.update.progress.preparing": "Préparation du téléchargement",
+  "main.update.progress.downloading": "Téléchargement de la mise à jour...",
+  "main.update.progress.completed": "Mise à jour téléchargée",
+  "main.update.progress.failed": "Échec du téléchargement de la mise à jour",
+  "main.update.progress.failedWithError": "Échec du téléchargement de la mise à jour : {error}",
+  "label.settings-disableUpdateCheckbox": "Désactiver les mises à jour"
 }

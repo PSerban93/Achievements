@@ -646,6 +646,12 @@
                     >Show Dashboard</label
                   >
                 </div>
+                <div class="checkbox-control">
+                  <input type="checkbox" id="settings-disableUpdateCheckbox" />
+                  <label for="settings-disableUpdateCheckbox"
+                    >Disable Update</label
+                  >
+                </div>
               </div>
               <div class="settings-section" style="margin-bottom: 5px">
                 <h4 id="settings-screenshotsTitle">Achievements Screenshots</h4>
@@ -5356,23 +5362,7 @@
           const body = document.getElementById("achievementsTableBody");
           if (body) body.innerHTML = "";
           setAchievementsHeaderVisible(false);
-          const achStats = document.getElementById("achStats");
-          if (achStats) achStats.style.display = "none";
-          const playtimeLabel = document.getElementById("achStatsPlaytime");
-          const lastPlayedLabel = document.getElementById("achStatsLastPlayed");
-          if (playtimeLabel)
-            playtimeLabel.textContent = tUiFmt(
-              "achStatsPlaytimeFmt",
-              { value: "0m" },
-              "Playtime: 0m",
-            );
-          if (lastPlayedLabel) {
-            lastPlayedLabel.textContent = tUiFmt(
-              "achStatsLastPlayedFmt",
-              { value: "N/A" },
-              "Last Played: N/A",
-            );
-          }
+          await showEmptyAchievementStats(selectedConfig);
           return;
         }
         const savedAchievementsObj =
@@ -5850,6 +5840,9 @@
       }
 
       function getGenerationProgressTitle(state) {
+        if (state?.kind === "app-update") {
+          return tUi("main.update.progress.title", "Downloading Update");
+        }
         if (state?.kind === "schema-regenerate") {
           return tUi(
             "main.generation.progress.regenerateSchema",
@@ -6095,6 +6088,18 @@
       ];
 
       const TECHNICAL_WARN_PATTERNS = [
+        /^\[[^\]]+\]\s+\[(?:DEBUG|INFO|WARN|ERROR)\]\s+/i,
+        /\b(?:boot-cache|load-achievement-cache|initial-notify|refresh-config-state|seed|watcher|watch|save-path):/i,
+        /\b(?:overlay|create-overlay|createOverlayWindow|overlay-window|setOverlayPresented|overlay-position):/i,
+        /\b(?:controller|process-poller):/i,
+        /\bsteam-local-users:resolveSteamRoot-not-found\b/i,
+        /\blistSteamLoginUsers-(?:no-root|no-loginusers|read-failed|success)\b/i,
+        /\bachgen:(?:spawn|stdout|stderr|process-(?:error|exit)|launch-metadata|child-log|schema-exists|attempt-failed|schema-failed)\b/i,
+        /\b(?:uplay-mapping|seeded-json|platform-migrate):/i,
+        /\bsteamdb:launch-metadata:/i,
+        /\bsteam-appcache:/i,
+        /\bsteam-official:(?:list-accounts|librarycache:|preferences-refresh-failed|pending-schema|skip-existing|skip-nonselected-account)\b/i,
+        /\bauto-select:index-(?:build-failed|built)\b/i,
         /\bDeprecationWarning\b/i,
         /\[DEP\d{4}\]/i,
         /--trace-deprecation/i,
@@ -6138,6 +6143,7 @@
         /Staging percentage is NaN/i,
         /Failed to compare current OS version/i,
         /Current OS version .* is less than the minimum OS version required/i,
+        /\bapp-update:(?:checking|available|not-available|download-start|download-progress|downloaded|error|prompt|prompt-failed|check-failed|install-now|skip|cache-pruned|cache-prune-failed)\b/i,
       ];
 
       const _shownWarns = new Set();
@@ -8567,24 +8573,7 @@
           if (!Array.isArray(achievementsDataObj.achievements)) {
             setAchievementsHeaderVisible(false);
             if (achievementsDataObj.achievements == null) {
-              const achStats = document.getElementById("achStats");
-              if (achStats) achStats.style.display = "none";
-              const playtimeLabel = document.getElementById("achStatsPlaytime");
-              const lastPlayedLabel =
-                document.getElementById("achStatsLastPlayed");
-              if (playtimeLabel)
-                playtimeLabel.textContent = tUiFmt(
-                  "achStatsPlaytimeFmt",
-                  { value: "0m" },
-                  "Playtime: 0m",
-                );
-              if (lastPlayedLabel) {
-                lastPlayedLabel.textContent = tUiFmt(
-                  "achStatsLastPlayedFmt",
-                  { value: "N/A" },
-                  "Last Played: N/A",
-                );
-              }
+              await showEmptyAchievementStats(selectedConfig);
               return;
             }
             console.warn(
@@ -9019,41 +9008,9 @@
       }
 
       (function () {
-        const seen = new Set();
-
-        window.api.onAchievementsMissing((payload) => {
-          if (window.__dashboardOpen) return;
-
-          const data =
-            payload && typeof payload === "object"
-              ? payload
-              : { configName: String(payload || ""), reason: "" };
-
-          const { configName, reason } = data || {};
-
-          const selected = document.getElementById("configList")?.value || "";
-          if (!selected || selected !== configName) return;
-
-          const key = `${reason}|${configName}`;
-          if (seen.has(key)) return;
-          seen.add(key);
-          setTimeout(() => seen.delete(key), 4000);
-
-          let msg = "";
-          switch (reason) {
-            case "no-config-path":
-              msg = `⚠️ Config path is missing for "${configName}". Generate of Select steam_settings in order to see the achievements.`;
-              break;
-            case "no-file":
-              msg = `⚠️ Achievements missing for "${configName}" (achievements.json not found config path).`;
-              break;
-            case "no-save-path":
-              msg = `⚠️ Save path is missing for "${configName}". Achievements will not be tracked.`;
-              break;
-            default:
-              msg = `⚠️ Achievements missing for "${configName}".`;
-          }
-          showNotification(msg, "#FFC107");
+        window.api.onAchievementsMissing(() => {
+          // Missing schema is represented directly in the details pane
+          // via an empty table and 0 / 0 stats, so avoid extra UI noise here.
         });
       })();
 
@@ -9629,6 +9586,10 @@
             "settings-disablePlaytimeCheckbox",
           );
           if (cb) cb.checked = prefs.disablePlaytime;
+        }
+        {
+          const cb = document.getElementById("settings-disableUpdateCheckbox");
+          if (cb) cb.checked = prefs?.disableUpdate === true;
         }
         {
           const cb = document.getElementById(
@@ -10247,6 +10208,19 @@
           });
         }
 
+        const disableUpdateEl = document.getElementById(
+          "settings-disableUpdateCheckbox",
+        );
+        if (disableUpdateEl) {
+          disableUpdateEl.checked = !!prefs.disableUpdate;
+          disableUpdateEl.addEventListener("change", async (e) => {
+            await window.api.savePreferences({
+              disableUpdate: e.target.checked,
+            });
+            await loadPreferencesCached().catch(() => {});
+          });
+        }
+
         if (prefs.showDashboardOnStart) {
           window.__prepareDashboardForStartup?.();
         }
@@ -10352,6 +10326,31 @@
           document.getElementById("achStats").style.display = "block";
         }
       }
+
+      async function showEmptyAchievementStats(configName = "") {
+        updateAchievementStats([]);
+        if (configName) {
+          await updatePlaytimeLabel(configName);
+          return;
+        }
+        const playtimeLabel = document.getElementById("achStatsPlaytime");
+        const lastPlayedLabel = document.getElementById("achStatsLastPlayed");
+        if (playtimeLabel) {
+          playtimeLabel.textContent = tUiFmt(
+            "achStatsPlaytimeFmt",
+            { value: "0m" },
+            "Playtime: 0m",
+          );
+        }
+        if (lastPlayedLabel) {
+          lastPlayedLabel.textContent = tUiFmt(
+            "achStatsLastPlayedFmt",
+            { value: "N/A" },
+            "Last Played: N/A",
+          );
+        }
+      }
+
       let __watcherAutoSelect = null;
       window.api.on("auto-select-config", async (configName) => {
         const configList = document.getElementById("configList");
@@ -11423,6 +11422,7 @@
           showDashboardOnStart: checkbox(
             "settings-showDashboardOnStartCheckbox",
           ),
+          disableUpdate: checkbox("settings-disableUpdateCheckbox"),
           disableHardwareAcceleration: checkbox(
             "settings-disableHardwareAccelerationCheckbox",
           ),

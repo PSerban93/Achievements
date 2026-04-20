@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Überwachtes Steam-Konto",
   "settings.steamOfficialAccount.auto": "Automatisch (zuletzt geändert)",
   "settings.steamOfficialAccount.hint": "Verwendet Steam loginusers.vdf, wenn verfügbar.",
-  "settings.steamOfficialAccount.noAccounts": "Keine Steam-Konten erkannt. Automatisch (zuletzt geändert) wird verwendet."
+  "settings.steamOfficialAccount.noAccounts": "Keine Steam-Konten erkannt. Automatisch (zuletzt geändert) wird verwendet.",
+  "main.update.progress.title": "Update wird heruntergeladen",
+  "main.update.progress.preparing": "Download wird vorbereitet",
+  "main.update.progress.downloading": "Update wird heruntergeladen...",
+  "main.update.progress.completed": "Update heruntergeladen",
+  "main.update.progress.failed": "Update-Download fehlgeschlagen",
+  "main.update.progress.failedWithError": "Update-Download fehlgeschlagen: {error}",
+  "label.settings-disableUpdateCheckbox": "Updates deaktivieren"
 }

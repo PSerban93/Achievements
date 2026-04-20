@@ -722,6 +722,7 @@ const DEFAULT_PREFERENCES = {
   showDashboardOnStart: false,
   startMaximized: false,
   disableHardwareAcceleration: true,
+  disableUpdate: false,
   disablePlaytime: false,
   platinumSound: "mute",
   platinumPreset: "default",
@@ -868,6 +869,13 @@ let appUpdateCheckStarted = false;
 let appUpdatePromptActive = false;
 let appUpdateDownloadRequested = false;
 let appUpdateDownloadInFlight = false;
+let appUpdateKnownVersion = "";
+let appUpdateProgressJob = null;
+let appUpdateCheckTimer = null;
+let appUpdateCheckRequested = false;
+const APP_UPDATE_INSTALL_COMPLETE_ARG = "--updated";
+const APP_UPDATE_PENDING_INFO_FILE = "update-info.json";
+const APP_UPDATE_PENDING_BLOCKMAP_FILE = "current.blockmap";
 let selectedSound = "mute";
 let selectedPreset = "default";
 let selectedPosition = "center-bottom";
@@ -1904,6 +1912,43 @@ function getUpdateDialogParentWindow() {
   return null;
 }
 
+function shouldDisableAppUpdateChecks(prefs = cachedPreferences) {
+  return prefs?.disableUpdate === true;
+}
+
+function clearScheduledStartupAppUpdateCheck() {
+  if (!appUpdateCheckTimer) return;
+  clearTimeout(appUpdateCheckTimer);
+  appUpdateCheckTimer = null;
+}
+
+function scheduleStartupAppUpdateCheck(prefs = cachedPreferences) {
+  if (!appUpdateCheckStarted) return;
+  if (!app.isPackaged) return;
+  const appUpdateConfigPath = getAppUpdateConfigPath();
+  if (!fs.existsSync(appUpdateConfigPath)) return;
+  if (shouldDisableAppUpdateChecks(prefs)) {
+    clearScheduledStartupAppUpdateCheck();
+    return;
+  }
+  if (appUpdateCheckRequested || appUpdateCheckTimer) return;
+  appUpdateCheckTimer = setTimeout(() => {
+    appUpdateCheckTimer = null;
+    if (shouldDisableAppUpdateChecks(cachedPreferences)) {
+      updateLogger.info("app-update:skip", {
+        reason: "disabled-by-preference",
+      });
+      return;
+    }
+    appUpdateCheckRequested = true;
+    autoUpdater.checkForUpdates().catch((err) => {
+      updateLogger.error("app-update:check-failed", {
+        error: err?.message || String(err),
+      });
+    });
+  }, STARTUP_APP_UPDATE_CHECK_DELAY_MS);
+}
+
 function ensureMainWindowVisibleForUpdatePrompt() {
   showMainWindowRespectingPrefs();
   if (!mainWindow || mainWindow.isDestroyed()) return null;
@@ -1925,6 +1970,244 @@ function ensureMainWindowVisibleForUpdatePrompt() {
 
 function getAppUpdateConfigPath() {
   return path.join(process.resourcesPath, "app-update.yml");
+}
+
+function stripSurroundingQuotes(value) {
+  const normalized = String(value || "").trim();
+  if (
+    normalized.length >= 2 &&
+    ((normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'")))
+  ) {
+    return normalized.slice(1, -1).trim();
+  }
+  return normalized;
+}
+
+function getAppUpdateCacheDirName() {
+  if (!app.isPackaged) return "";
+  const configPath = getAppUpdateConfigPath();
+  if (!configPath || !fs.existsSync(configPath)) return "";
+  try {
+    const raw = fs.readFileSync(configPath, "utf8");
+    const match = raw.match(/^\s*updaterCacheDirName\s*:\s*(.+?)\s*$/m);
+    return stripSurroundingQuotes(match?.[1] || "");
+  } catch (err) {
+    updateLogger.warn("app-update:cache-prune-failed", {
+      trigger: "resolve-cache-dir-name",
+      error: err?.message || String(err),
+    });
+    return "";
+  }
+}
+
+function getAppUpdatePendingDir() {
+  const cacheDirName = getAppUpdateCacheDirName();
+  if (!cacheDirName) return "";
+  const baseCacheDir =
+    process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local");
+  return path.join(baseCacheDir, cacheDirName, "pending");
+}
+
+function extractAppUpdateVersionFromFileName(fileName) {
+  const normalized = path.basename(String(fileName || "").trim());
+  if (!normalized) return "";
+  const setupMatch = normalized.match(/-Setup-(.+)\.exe$/i);
+  if (setupMatch?.[1]) {
+    return stripSurroundingQuotes(setupMatch[1]);
+  }
+  const genericMatch = normalized.match(
+    /([0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z.-]+)?)\.exe$/i,
+  );
+  return genericMatch?.[1] ? stripSurroundingQuotes(genericMatch[1]) : "";
+}
+
+function parseLooseAppVersion(version) {
+  const normalized = String(version || "").trim();
+  const match = normalized.match(/^(\d+(?:\.\d+){0,3})(?:-([0-9A-Za-z.-]+))?$/);
+  if (!match) return null;
+  return {
+    raw: normalized,
+    core: match[1].split(".").map((part) => Number(part) || 0),
+    suffix: String(match[2] || "").trim().toLowerCase(),
+  };
+}
+
+function classifyLooseAppVersionSuffix(suffix) {
+  const normalized = String(suffix || "").trim().toLowerCase();
+  if (!normalized) {
+    return { recognized: true, rank: 0, value: "" };
+  }
+  if (/^(?:alpha|a|pre|preview)(?:[.-]?\d+)?$/.test(normalized)) {
+    return { recognized: true, rank: -30, value: normalized };
+  }
+  if (/^(?:beta|b)(?:[.-]?\d+)?$/.test(normalized)) {
+    return { recognized: true, rank: -20, value: normalized };
+  }
+  if (/^rc(?:[.-]?\d+)?$/.test(normalized)) {
+    return { recognized: true, rank: -10, value: normalized };
+  }
+  if (/^(?:hf|hotfix|patch)(?:[.-]?\d+)?$/.test(normalized)) {
+    return { recognized: true, rank: 10, value: normalized };
+  }
+  return { recognized: false, rank: 0, value: normalized };
+}
+
+function compareLooseAppVersions(leftVersion, rightVersion) {
+  const left = parseLooseAppVersion(leftVersion);
+  const right = parseLooseAppVersion(rightVersion);
+  if (!left || !right) return null;
+  const maxLength = Math.max(left.core.length, right.core.length);
+  for (let i = 0; i < maxLength; i += 1) {
+    const leftPart = left.core[i] || 0;
+    const rightPart = right.core[i] || 0;
+    if (leftPart === rightPart) continue;
+    return leftPart > rightPart ? 1 : -1;
+  }
+  if (left.raw.toLowerCase() === right.raw.toLowerCase()) {
+    return 0;
+  }
+  const leftSuffix = classifyLooseAppVersionSuffix(left.suffix);
+  const rightSuffix = classifyLooseAppVersionSuffix(right.suffix);
+  if (!(leftSuffix.recognized && rightSuffix.recognized)) {
+    return null;
+  }
+  if (leftSuffix.rank !== rightSuffix.rank) {
+    return leftSuffix.rank > rightSuffix.rank ? 1 : -1;
+  }
+  if (leftSuffix.value === rightSuffix.value) {
+    return 0;
+  }
+  const suffixCompare = leftSuffix.value.localeCompare(rightSuffix.value, undefined, {
+    numeric: true,
+    sensitivity: "base",
+  });
+  if (suffixCompare === 0) return 0;
+  return suffixCompare > 0 ? 1 : -1;
+}
+
+function wasAppUpdatedOnCurrentLaunch(argv = process.argv) {
+  return Array.isArray(argv)
+    ? argv.some(
+        (arg) =>
+          String(arg || "").trim().toLowerCase() ===
+          APP_UPDATE_INSTALL_COMPLETE_ARG,
+      )
+    : false;
+}
+
+async function clearAppUpdatePendingDir(pendingDir, meta = {}) {
+  await fs.promises.rm(pendingDir, { recursive: true, force: true });
+  await fs.promises.mkdir(pendingDir, { recursive: true });
+  updateLogger.info("app-update:cache-pruned", {
+    scope: "pending",
+    ...meta,
+  });
+}
+
+async function pruneAppUpdatePendingCache(options = {}) {
+  if (!app.isPackaged) return;
+  const trigger = String(options?.trigger || "startup").trim() || "startup";
+  const pendingDir = getAppUpdatePendingDir();
+  if (!pendingDir || !fs.existsSync(pendingDir)) return;
+  try {
+    const entries = await fs.promises.readdir(pendingDir, {
+      withFileTypes: true,
+    });
+    if (!entries.length) return;
+
+    if (wasAppUpdatedOnCurrentLaunch()) {
+      await clearAppUpdatePendingDir(pendingDir, {
+        trigger,
+        cleanup: "post-install",
+        entryCount: entries.length,
+      });
+      return;
+    }
+
+    const updateInfoPath = path.join(pendingDir, APP_UPDATE_PENDING_INFO_FILE);
+    if (!fs.existsSync(updateInfoPath)) {
+      await clearAppUpdatePendingDir(pendingDir, {
+        trigger,
+        cleanup: "missing-update-info",
+        entryCount: entries.length,
+      });
+      return;
+    }
+
+    let pendingInfo = null;
+    try {
+      pendingInfo = JSON.parse(await fs.promises.readFile(updateInfoPath, "utf8"));
+    } catch (err) {
+      await clearAppUpdatePendingDir(pendingDir, {
+        trigger,
+        cleanup: "invalid-update-info",
+        error: err?.message || String(err),
+      });
+      return;
+    }
+
+    const pendingFileName = path.basename(
+      String(pendingInfo?.fileName || "").trim(),
+    );
+    if (!pendingFileName) {
+      await clearAppUpdatePendingDir(pendingDir, {
+        trigger,
+        cleanup: "missing-file-name",
+      });
+      return;
+    }
+
+    const pendingFilePath = path.join(pendingDir, pendingFileName);
+    if (!fs.existsSync(pendingFilePath)) {
+      await clearAppUpdatePendingDir(pendingDir, {
+        trigger,
+        cleanup: "missing-update-file",
+        fileName: pendingFileName,
+      });
+      return;
+    }
+
+    const currentVersion = String(app.getVersion() || "").trim();
+    const pendingVersion = extractAppUpdateVersionFromFileName(pendingFileName);
+    const versionCompare = compareLooseAppVersions(currentVersion, pendingVersion);
+    if (versionCompare !== null && versionCompare >= 0) {
+      await clearAppUpdatePendingDir(pendingDir, {
+        trigger,
+        cleanup: "stale-or-installed",
+        currentVersion,
+        pendingVersion: pendingVersion || null,
+      });
+      return;
+    }
+
+    const keepNames = new Set([
+      APP_UPDATE_PENDING_INFO_FILE,
+      APP_UPDATE_PENDING_BLOCKMAP_FILE,
+      pendingFileName,
+    ]);
+    const removed = [];
+    for (const entry of entries) {
+      if (keepNames.has(entry.name)) continue;
+      const targetPath = path.join(pendingDir, entry.name);
+      await fs.promises.rm(targetPath, { recursive: true, force: true });
+      removed.push(entry.name);
+    }
+    if (removed.length) {
+      updateLogger.info("app-update:cache-pruned", {
+        scope: "pending",
+        trigger,
+        cleanup: "removed-extra-files",
+        keptFile: pendingFileName,
+        removed,
+      });
+    }
+  } catch (err) {
+    updateLogger.warn("app-update:cache-prune-failed", {
+      trigger,
+      error: err?.message || String(err),
+    });
+  }
 }
 
 function getUpdateVersionLabel(info = null) {
@@ -1954,6 +2237,139 @@ function normalizeUpdateReleaseNotes(info = null) {
       .join("\n\n");
   }
   return "";
+}
+
+function formatAppUpdateBytes(value) {
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes) || bytes <= 0) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let current = bytes;
+  let unitIndex = 0;
+  while (current >= 1024 && unitIndex < units.length - 1) {
+    current /= 1024;
+    unitIndex += 1;
+  }
+  const precision = current >= 100 || unitIndex === 0 ? 0 : current >= 10 ? 1 : 2;
+  return `${current.toFixed(precision)} ${units[unitIndex]}`;
+}
+
+function formatAppUpdateSpeed(bytesPerSecond) {
+  const text = formatAppUpdateBytes(bytesPerSecond);
+  return text ? `${text}/s` : "";
+}
+
+function getAppUpdateProgressTitle() {
+  return tUi("main.update.progress.title", {}, "Downloading Update");
+}
+
+function getAppUpdateProgressVersionLabel(version = appUpdateKnownVersion) {
+  const normalized = String(version || "").trim();
+  if (!normalized || normalized === "new") return "";
+  return normalized;
+}
+
+function getAppUpdatePreparingDetail() {
+  return tUi("main.update.progress.preparing", {}, "Preparing download");
+}
+
+function getAppUpdateDownloadedDetail() {
+  return tUi("main.update.progress.completed", {}, "Update downloaded");
+}
+
+function getAppUpdateFailedDetail(errorMessage = "") {
+  const normalized = String(errorMessage || "").trim();
+  if (!normalized) {
+    return tUi("main.update.progress.failed", {}, "Update download failed");
+  }
+  return tUi(
+    "main.update.progress.failedWithError",
+    { error: normalized },
+    `Update download failed: ${normalized}`,
+  );
+}
+
+function buildAppUpdateProgressDetail(progress = {}) {
+  const transferred = formatAppUpdateBytes(progress?.transferred);
+  const total = formatAppUpdateBytes(progress?.total);
+  const speed = formatAppUpdateSpeed(progress?.bytesPerSecond);
+  if (transferred && total && speed) {
+    return `${transferred} / ${total} (${speed})`;
+  }
+  if (transferred && total) {
+    return `${transferred} / ${total}`;
+  }
+  if (speed) {
+    return speed;
+  }
+  return tUi("main.update.progress.downloading", {}, "Downloading update...");
+}
+
+function ensureAppUpdateProgressJob(options = {}) {
+  const versionLabel = getAppUpdateProgressVersionLabel(options.version);
+  if (appUpdateProgressJob) return appUpdateProgressJob;
+  appUpdateProgressJob = createGenerationProgressJob({
+    kind: "app-update",
+    scope: "single",
+    status: "running",
+    title: getAppUpdateProgressTitle(),
+    itemName: versionLabel,
+    phase: options.phase || "preparing",
+    detail: options.detail || getAppUpdatePreparingDetail(),
+    current: 0,
+    total: 0,
+    percent: clampGenerationPercent(options.percent, 0),
+  });
+  return appUpdateProgressJob;
+}
+
+function updateAppUpdateProgress(progress = {}, options = {}) {
+  const job = ensureAppUpdateProgressJob({
+    version: options.version,
+    phase: "downloading",
+    detail: buildAppUpdateProgressDetail(progress),
+    percent: Number(progress?.percent || 0),
+  });
+  job?.update?.({
+    kind: "app-update",
+    scope: "single",
+    title: getAppUpdateProgressTitle(),
+    itemName: getAppUpdateProgressVersionLabel(options.version),
+    phase: "downloading",
+    detail: buildAppUpdateProgressDetail(progress),
+    current: 0,
+    total: 0,
+    percent: clampGenerationPercent(progress?.percent, 0),
+  });
+}
+
+function finishAppUpdateProgress(status, options = {}) {
+  if (!appUpdateProgressJob) return;
+  const versionLabel = getAppUpdateProgressVersionLabel(options.version);
+  const patch = {
+    kind: "app-update",
+    scope: "single",
+    title: getAppUpdateProgressTitle(),
+    itemName: versionLabel,
+    phase: status === "success" ? "completed" : "failed",
+    detail:
+      status === "success"
+        ? options.detail || getAppUpdateDownloadedDetail()
+        : options.detail || getAppUpdateFailedDetail(options.error),
+    current: 0,
+    total: 0,
+  };
+  if (status === "success") {
+    patch.percent = 100;
+  } else if (options.percent !== undefined) {
+    patch.percent = clampGenerationPercent(options.percent, 0);
+  }
+  const job = appUpdateProgressJob;
+  appUpdateProgressJob = null;
+  if (status === "success") {
+    job.succeed(patch);
+    return;
+  }
+  job.fail(patch);
 }
 
 function emitAppUpdateEvent(channel, payload = {}) {
@@ -2006,7 +2422,13 @@ function initializeStartupAppUpdater() {
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = isPrereleaseAppVersion();
   autoUpdater.on("error", async (err) => {
+    appUpdateDownloadRequested = false;
+    appUpdateDownloadInFlight = false;
     updateLogger.error("app-update:error", {
+      error: err?.message || String(err),
+    });
+    finishAppUpdateProgress("failed", {
+      version: appUpdateKnownVersion,
       error: err?.message || String(err),
     });
   });
@@ -2016,21 +2438,24 @@ function initializeStartupAppUpdater() {
     });
   });
   autoUpdater.on("update-available", (info) => {
+    appUpdateKnownVersion = getUpdateVersionLabel(info);
     updateLogger.info("app-update:available", {
       version: info?.version || null,
     });
     emitAppUpdateEvent("app-update:available", {
-      version: getUpdateVersionLabel(info),
+      version: appUpdateKnownVersion,
       releaseName: normalizeUpdateReleaseName(info),
       releaseNotes: normalizeUpdateReleaseNotes(info),
     });
   });
   autoUpdater.on("update-not-available", (info) => {
+    appUpdateKnownVersion = "";
     updateLogger.info("app-update:not-available", {
       version: info?.version || null,
     });
   });
   autoUpdater.on("download-progress", (progress) => {
+    updateAppUpdateProgress(progress, { version: appUpdateKnownVersion });
     updateLogger.debug?.("app-update:download-progress", {
       percent: Number(progress?.percent || 0),
       bytesPerSecond: Number(progress?.bytesPerSecond || 0),
@@ -2039,29 +2464,48 @@ function initializeStartupAppUpdater() {
   autoUpdater.on("update-downloaded", (info) => {
     appUpdateDownloadRequested = false;
     appUpdateDownloadInFlight = false;
+    appUpdateKnownVersion = getUpdateVersionLabel(info) || appUpdateKnownVersion;
     updateLogger.info("app-update:downloaded", {
       version: info?.version || null,
     });
+    finishAppUpdateProgress("success", {
+      version: appUpdateKnownVersion,
+      detail: getAppUpdateDownloadedDetail(),
+    });
     emitAppUpdateEvent("app-update:downloaded", {
-      version: getUpdateVersionLabel(info),
+      version: appUpdateKnownVersion,
+    });
+    void pruneAppUpdatePendingCache({
+      trigger: "update-downloaded",
     });
   });
-  setTimeout(() => {
-    autoUpdater.checkForUpdates().catch((err) => {
-      updateLogger.error("app-update:check-failed", {
-        error: err?.message || String(err),
-      });
+  if (shouldDisableAppUpdateChecks(cachedPreferences)) {
+    updateLogger.info("app-update:skip", {
+      reason: "disabled-by-preference",
     });
-  }, STARTUP_APP_UPDATE_CHECK_DELAY_MS);
+    return;
+  }
+  scheduleStartupAppUpdateCheck(cachedPreferences);
 }
 
 ipcMain.handle("app:update-download", async () => {
   if (appUpdateDownloadInFlight) {
+    ensureAppUpdateProgressJob({
+      version: appUpdateKnownVersion,
+      phase: "downloading",
+      detail: tUi("main.update.progress.downloading", {}, "Downloading update..."),
+    });
     return { success: true, state: "downloading" };
   }
   appUpdateDownloadRequested = true;
   appUpdateDownloadInFlight = true;
   try {
+    ensureAppUpdateProgressJob({
+      version: appUpdateKnownVersion,
+      phase: "preparing",
+      detail: getAppUpdatePreparingDetail(),
+      percent: 0,
+    });
     updateLogger.info("app-update:download-start", {});
     await autoUpdater.downloadUpdate();
     return { success: true, state: "started" };
@@ -2069,6 +2513,10 @@ ipcMain.handle("app:update-download", async () => {
     appUpdateDownloadRequested = false;
     appUpdateDownloadInFlight = false;
     updateLogger.error("app-update:download-failed", {
+      error: err?.message || String(err),
+    });
+    finishAppUpdateProgress("failed", {
+      version: appUpdateKnownVersion,
       error: err?.message || String(err),
     });
     return {
@@ -3740,6 +4188,18 @@ const originalConsole = {
 };
 
 const UI_CONSOLE_SUPPRESS_PATTERNS = [
+  /^\[[^\]]+\]\s+\[(?:DEBUG|INFO|WARN|ERROR)\]\s+/i,
+  /\b(?:boot-cache|load-achievement-cache|initial-notify|refresh-config-state|seed|watcher|watch|save-path):/i,
+  /\b(?:overlay|create-overlay|createOverlayWindow|overlay-window|setOverlayPresented|overlay-position):/i,
+  /\b(?:controller|process-poller):/i,
+  /\bsteam-local-users:resolveSteamRoot-not-found\b/i,
+  /\blistSteamLoginUsers-(?:no-root|no-loginusers|read-failed|success)\b/i,
+  /\bachgen:(?:spawn|stdout|stderr|process-(?:error|exit)|launch-metadata|child-log|schema-exists|attempt-failed|schema-failed)\b/i,
+  /\b(?:uplay-mapping|seeded-json|platform-migrate):/i,
+  /\bsteamdb:launch-metadata:/i,
+  /\bsteam-appcache:/i,
+  /\bsteam-official:(?:list-accounts|librarycache:|preferences-refresh-failed|pending-schema|skip-existing|skip-nonselected-account)\b/i,
+  /\bauto-select:index-(?:build-failed|built)\b/i,
   /\bDeprecationWarning\b/i,
   /\[DEP\d{4}\]/i,
   /--trace-deprecation/i,
@@ -3783,6 +4243,7 @@ const UI_CONSOLE_SUPPRESS_PATTERNS = [
   /Staging percentage is NaN/i,
   /Failed to compare current OS version/i,
   /Current OS version .* is less than the minimum OS version required/i,
+  /\bapp-update:(?:checking|available|not-available|download-start|download-progress|downloaded|error|prompt|prompt-failed|check-failed|install-now|skip|cache-pruned|cache-prune-failed)\b/i,
 ];
 
 function shouldSuppressConsoleMessageInUI(msg) {
@@ -4003,6 +4464,13 @@ function applyPreferenceSideEffects(
   }
   if ("closeToTray" in patch) {
     global.closeToTray = !!prefsSnapshot.closeToTray;
+  }
+  if ("disableUpdate" in patch) {
+    if (shouldDisableAppUpdateChecks(prefsSnapshot)) {
+      clearScheduledStartupAppUpdateCheck();
+    } else {
+      scheduleStartupAppUpdateCheck(prefsSnapshot);
+    }
   }
   if ("preset" in patch) {
     selectedPreset = prefsSnapshot.preset || "default";
@@ -12863,6 +13331,7 @@ app.whenReady().then(async () => {
   migrateDefaultPresetsIfNeeded();
   copyFolderOnce(defaultPresetsFolder, userPresetsFolder);
   copyProgressTemplateToUserPresetsOnce();
+  void pruneAppUpdatePendingCache({ trigger: "startup" });
 
   createMainWindow();
   syncOverlayControllerSupportState("app-ready", cachedPreferences);

@@ -116,6 +116,7 @@
   "label.settings-disablePlatinumCheckbox": "Disable Platinum Notification",
   "label.settings-disablePlaytimeCheckbox": "Disable Playtime Notification",
   "label.settings-disableProgressCheckbox": "Disable Global Progress Notification",
+  "label.settings-disableUpdateCheckbox": "Disable Update",
   "label.settings-disableScreenshotCheckbox": "Disable Screenshot",
   "label.settings-durationSlider": "Achievement Duration:",
   "label.settings-platinumPositionDropdown": "Platinum Achievement Position:",
@@ -717,5 +718,11 @@
   "label.settings-steamOfficialAccountSelect": "Tracked Steam account",
   "settings.steamOfficialAccount.auto": "Auto (Last Modified)",
   "settings.steamOfficialAccount.hint": "Uses Steam loginusers.vdf when available.",
-  "settings.steamOfficialAccount.noAccounts": "No Steam accounts detected. Auto (Last Modified) will be used."
+  "settings.steamOfficialAccount.noAccounts": "No Steam accounts detected. Auto (Last Modified) will be used.",
+  "main.update.progress.title": "Downloading Update",
+  "main.update.progress.preparing": "Preparing download",
+  "main.update.progress.downloading": "Downloading update...",
+  "main.update.progress.completed": "Update downloaded",
+  "main.update.progress.failed": "Update download failed",
+  "main.update.progress.failedWithError": "Update download failed: {error}"
 }

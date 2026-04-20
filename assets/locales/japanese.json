@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "追跡するSteamアカウント",
   "settings.steamOfficialAccount.auto": "自動（最終更新）",
   "settings.steamOfficialAccount.hint": "利用可能な場合はSteam loginusers.vdfを使用します。",
-  "settings.steamOfficialAccount.noAccounts": "Steamアカウントが検出されませんでした。自動（最終更新）が使用されます。"
+  "settings.steamOfficialAccount.noAccounts": "Steamアカウントが検出されませんでした。自動（最終更新）が使用されます。",
+  "main.update.progress.title": "アップデートをダウンロード中",
+  "main.update.progress.preparing": "ダウンロードを準備中",
+  "main.update.progress.downloading": "アップデートをダウンロード中...",
+  "main.update.progress.completed": "アップデートをダウンロードしました",
+  "main.update.progress.failed": "アップデートのダウンロードに失敗しました",
+  "main.update.progress.failedWithError": "アップデートのダウンロードに失敗しました: {error}",
+  "label.settings-disableUpdateCheckbox": "アップデートを無効化"
 }

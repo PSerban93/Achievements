@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Seurattu Steam-tili",
   "settings.steamOfficialAccount.auto": "Automaattinen (viimeksi muokattu)",
   "settings.steamOfficialAccount.hint": "Käyttää Steam loginusers.vdf:ää, kun se on saatavilla.",
-  "settings.steamOfficialAccount.noAccounts": "Steam-tilejä ei havaittu. Käytetään asetusta Automaattinen (viimeksi muokattu)."
+  "settings.steamOfficialAccount.noAccounts": "Steam-tilejä ei havaittu. Käytetään asetusta Automaattinen (viimeksi muokattu).",
+  "main.update.progress.title": "Ladataan päivitystä",
+  "main.update.progress.preparing": "Valmistellaan latausta",
+  "main.update.progress.downloading": "Ladataan päivitystä...",
+  "main.update.progress.completed": "Päivitys ladattu",
+  "main.update.progress.failed": "Päivityksen lataus epäonnistui",
+  "main.update.progress.failedWithError": "Päivityksen lataus epäonnistui: {error}",
+  "label.settings-disableUpdateCheckbox": "Poista päivitys käytöstä"
 }

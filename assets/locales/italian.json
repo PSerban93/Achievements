@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Account Steam monitorato",
   "settings.steamOfficialAccount.auto": "Automatico (ultima modifica)",
   "settings.steamOfficialAccount.hint": "Usa Steam loginusers.vdf quando disponibile.",
-  "settings.steamOfficialAccount.noAccounts": "Nessun account Steam rilevato. Verrà usato Automatico (ultima modifica)."
+  "settings.steamOfficialAccount.noAccounts": "Nessun account Steam rilevato. Verrà usato Automatico (ultima modifica).",
+  "main.update.progress.title": "Download aggiornamento",
+  "main.update.progress.preparing": "Preparazione download",
+  "main.update.progress.downloading": "Download aggiornamento...",
+  "main.update.progress.completed": "Aggiornamento scaricato",
+  "main.update.progress.failed": "Download aggiornamento non riuscito",
+  "main.update.progress.failedWithError": "Download aggiornamento non riuscito: {error}",
+  "label.settings-disableUpdateCheckbox": "Disattiva aggiornamenti"
 }

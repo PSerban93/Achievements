@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Akun Steam yang dilacak",
   "settings.steamOfficialAccount.auto": "Otomatis (terakhir diubah)",
   "settings.steamOfficialAccount.hint": "Menggunakan Steam loginusers.vdf bila tersedia.",
-  "settings.steamOfficialAccount.noAccounts": "Tidak ada akun Steam yang terdeteksi. Otomatis (terakhir diubah) akan digunakan."
+  "settings.steamOfficialAccount.noAccounts": "Tidak ada akun Steam yang terdeteksi. Otomatis (terakhir diubah) akan digunakan.",
+  "main.update.progress.title": "Mengunduh pembaruan",
+  "main.update.progress.preparing": "Menyiapkan unduhan",
+  "main.update.progress.downloading": "Mengunduh pembaruan...",
+  "main.update.progress.completed": "Pembaruan diunduh",
+  "main.update.progress.failed": "Unduhan pembaruan gagal",
+  "main.update.progress.failedWithError": "Unduhan pembaruan gagal: {error}",
+  "label.settings-disableUpdateCheckbox": "Nonaktifkan pembaruan"
 }

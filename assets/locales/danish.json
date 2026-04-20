@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "Overvåget Steam-konto",
   "settings.steamOfficialAccount.auto": "Automatisk (senest ændret)",
   "settings.steamOfficialAccount.hint": "Bruger Steam loginusers.vdf, når den er tilgængelig.",
-  "settings.steamOfficialAccount.noAccounts": "Ingen Steam-konti fundet. Automatisk (senest ændret) vil blive brugt."
+  "settings.steamOfficialAccount.noAccounts": "Ingen Steam-konti fundet. Automatisk (senest ændret) vil blive brugt.",
+  "main.update.progress.title": "Downloader opdatering",
+  "main.update.progress.preparing": "Forbereder download",
+  "main.update.progress.downloading": "Downloader opdatering...",
+  "main.update.progress.completed": "Opdatering downloadet",
+  "main.update.progress.failed": "Download af opdatering mislykkedes",
+  "main.update.progress.failedWithError": "Download af opdatering mislykkedes: {error}",
+  "label.settings-disableUpdateCheckbox": "Deaktiver opdateringer"
 }

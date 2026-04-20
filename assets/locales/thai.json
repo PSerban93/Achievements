@@ -716,5 +716,12 @@
   "label.settings-steamOfficialAccountSelect": "บัญชี Steam ที่ติดตาม",
   "settings.steamOfficialAccount.auto": "อัตโนมัติ (แก้ไขล่าสุด)",
   "settings.steamOfficialAccount.hint": "ใช้ Steam loginusers.vdf เมื่อพร้อมใช้งาน",
-  "settings.steamOfficialAccount.noAccounts": "ไม่พบบัญชี Steam ระบบจะใช้ อัตโนมัติ (แก้ไขล่าสุด)"
+  "settings.steamOfficialAccount.noAccounts": "ไม่พบบัญชี Steam ระบบจะใช้ อัตโนมัติ (แก้ไขล่าสุด)",
+  "main.update.progress.title": "กำลังดาวน์โหลดการอัปเดต",
+  "main.update.progress.preparing": "กำลังเตรียมการดาวน์โหลด",
+  "main.update.progress.downloading": "กำลังดาวน์โหลดการอัปเดต...",
+  "main.update.progress.completed": "ดาวน์โหลดการอัปเดตแล้ว",
+  "main.update.progress.failed": "ดาวน์โหลดการอัปเดตไม่สำเร็จ",
+  "main.update.progress.failedWithError": "ดาวน์โหลดการอัปเดตไม่สำเร็จ: {error}",
+  "label.settings-disableUpdateCheckbox": "ปิดใช้งานการอัปเดต"
 }
