@@ -678,6 +678,39 @@
         return hiddenFallback;
       }
 
+      function getEffectiveAchievementProgress(saved) {
+        const isEarned = saved?.earned === true || saved?.earned === 1;
+        const rawProgress = Number(saved?.progress);
+        const rawMax = Number(saved?.max_progress);
+        const hasProgress = Number.isFinite(rawProgress);
+        const hasMax = Number.isFinite(rawMax) && rawMax > 0;
+
+        if (!hasProgress || !hasMax) {
+          return {
+            show: false,
+            progress: null,
+            max: hasMax ? rawMax : null,
+            percent: null,
+          };
+        }
+
+        if (isEarned) {
+          return {
+            show: true,
+            progress: rawMax,
+            max: rawMax,
+            percent: 100,
+          };
+        }
+
+        return {
+          show: true,
+          progress: rawProgress,
+          max: rawMax,
+          percent: Math.min(100, Math.round((rawProgress / rawMax) * 100)),
+        };
+      }
+
       function normalizeEarnedTime(raw) {
         const t = Number(raw);
         if (!Number.isFinite(t) || t <= 0) return 0;
@@ -1092,6 +1125,7 @@
             const isUnlocked = !!saved?.earned;
             const rel = isUnlocked ? icon : iconGray;
             const showHidden = prefs?.showHiddenDescription === true;
+            const effectiveProgress = getEffectiveAchievementProgress(saved);
             const descText =
               isHidden && !isUnlocked && !showHidden
                 ? tUi("overlay.hiddenFallback", "Hidden")
@@ -1111,20 +1145,12 @@
               )}</div>`;
             }
 
-            if (
-              Number.isFinite(saved?.progress) &&
-              Number.isFinite(saved?.max_progress) &&
-              saved.max_progress > 0
-            ) {
-              const progressPercentage = Math.min(
-                100,
-                Math.round((saved.progress / saved.max_progress) * 100),
-              );
+            if (effectiveProgress.show) {
               progressHTML = `
                     <div class="achievement-progress">
-                    ${tUi("overlay.progressLabel", "Progress")}: ${saved.progress} / ${saved.max_progress}
+                    ${tUi("overlay.progressLabel", "Progress")}: ${effectiveProgress.progress} / ${effectiveProgress.max}
                     <div class="progress-bar" style="margin-top: 4px; height: 4px;">
-                        <div class="progress-fill" style="width: ${progressPercentage}%;"></div>
+                        <div class="progress-fill" style="width: ${effectiveProgress.percent}%;"></div>
                     </div>
                     </div>`;
             }

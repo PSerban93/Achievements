@@ -9060,12 +9060,16 @@ module.exports = function makeWatchedFolders({
 
       stopFolderWatcher(target);
 
-      // Remove only the target while preserving blocked/ignored entries.
+      // Remove the target completely, including any hidden ignored state.
       const currentRaw = getUserWatchedFoldersRaw();
       const next = currentRaw.filter(
         (entry) => normalizePrefPath(entry) !== target,
       );
       saveWatchedFolders(next);
+      const blocked = getBlockedFoldersSet();
+      if (blocked.delete(target)) {
+        saveBlockedFolders([...blocked]);
+      }
 
       watcherLogger.info("folders:remove", { folder: target });
       return {

@@ -4244,6 +4244,37 @@ const UI_CONSOLE_SUPPRESS_PATTERNS = [
   /Failed to compare current OS version/i,
   /Current OS version .* is less than the minimum OS version required/i,
   /\bapp-update:(?:checking|available|not-available|download-start|download-progress|downloaded|error|prompt|prompt-failed|check-failed|install-now|skip|cache-pruned|cache-prune-failed)\b/i,
+  /\bupdater\b.*\bcache\b/i,
+  /\bcache\b.*\b(?:updater|update|installer|pending|blockmap)\b/i,
+  /\bblockmap\b/i,
+  /\bsha512\b/i,
+  /\bfileInfo\b/i,
+  /\bdownloaded\s+file\b/i,
+  /\bfull:\s*\d+/i,
+  /\bdifferential:\s*\d+/i,
+  /\bupdat(?:e|er)\b.*\b(?:size|bytes?|download|downloaded|pending|package)\b/i,
+];
+
+const APP_UPDATE_NOTIFICATION_SUPPRESS_PATTERNS = [
+  /\bapp-update:/i,
+  /\belectron-updater\b/i,
+  /\bbuilder-util-runtime\b/i,
+  /\bGitHubProvider\b/i,
+  /\bNsisUpdater\b/i,
+  /\bAppUpdater\b/i,
+  /\bupdater\b.*\bcache\b/i,
+  /\bcache\b.*\b(?:updater|update|installer|pending|blockmap)\b/i,
+  /\bblockmap\b/i,
+  /\bsha512\b/i,
+  /\bfileInfo\b/i,
+  /\bChecking for update\b/i,
+  /\bDownloading update\b/i,
+  /\bDownloading\b.*\b(?:update|installer|package|block)\b/i,
+  /\bdownloaded\s+file\b/i,
+  /\bCannot download differentially\b/i,
+  /\bStaging percentage\b/i,
+  /\blatest\.yml\b/i,
+  /releases\/download\//i,
 ];
 
 function shouldSuppressConsoleMessageInUI(msg) {
@@ -4254,7 +4285,10 @@ function shouldSuppressConsoleMessageInUI(msg) {
   ) {
     return true;
   }
-  return UI_CONSOLE_SUPPRESS_PATTERNS.some((rx) => rx.test(msg));
+  return (
+    UI_CONSOLE_SUPPRESS_PATTERNS.some((rx) => rx.test(msg)) ||
+    APP_UPDATE_NOTIFICATION_SUPPRESS_PATTERNS.some((rx) => rx.test(msg))
+  );
 }
 
 function sendConsoleMessageToUI(message, color) {

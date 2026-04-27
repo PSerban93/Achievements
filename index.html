@@ -5572,6 +5572,7 @@
               typeof window.i18nUi.getString === "function" &&
               window.i18nUi.getString("overlay.hiddenFallback", "Hidden")) ||
             "Hidden";
+          const effectiveProgress = getEffectiveAchievementProgress(saved);
           const statusHTML = saved?.earned
             ? `<span class="unlocked">${statusUnlocked}</span>`
             : `<span class="locked">${statusLocked}</span>`;
@@ -5579,24 +5580,6 @@
           const earnedTimeText = saved?.earned_time
             ? `<br>${tsToLocal(saved.earned_time)}`
             : "";
-          let progressText = "";
-          if (
-            Number.isFinite(saved?.progress) &&
-            Number.isFinite(saved?.max_progress) &&
-            saved.max_progress > 0
-          ) {
-            const pct = Math.min(
-              100,
-              Math.round((saved.progress / saved.max_progress) * 100),
-            );
-            progressText = `
-                    <div class="achievement-progress">
-                    ${progressLabel}: ${saved.progress} / ${saved.max_progress}
-                    <div class="progress-bar">
-                        <div class="progress-fill" style="width:${pct}%"></div>
-                    </div>
-                    </div>`;
-          }
 
           const row = document.createElement("tr");
           const rarityPercentValue = resolveRarityPercent(achievement);
@@ -5662,23 +5645,15 @@
           tdText.appendChild(descWrap);
 
           // progress
-          if (
-            Number.isFinite(saved?.progress) &&
-            Number.isFinite(saved?.max_progress) &&
-            saved.max_progress > 0
-          ) {
-            const pct = Math.min(
-              100,
-              Math.round((saved.progress / saved.max_progress) * 100),
-            );
+          if (effectiveProgress.show) {
             const progWrap = document.createElement("div");
             progWrap.className = "achievement-progress";
-            progWrap.textContent = `${progressLabel}: ${saved.progress} / ${saved.max_progress}`;
+            progWrap.textContent = `${progressLabel}: ${effectiveProgress.progress} / ${effectiveProgress.max}`;
             const bar = document.createElement("div");
             bar.className = "progress-bar";
             const fill = document.createElement("div");
             fill.className = "progress-fill";
-            fill.style.width = `${pct}%`;
+            fill.style.width = `${effectiveProgress.percent}%`;
             bar.appendChild(fill);
             progWrap.appendChild(bar);
             tdText.appendChild(progWrap);
@@ -6144,6 +6119,36 @@
         /Failed to compare current OS version/i,
         /Current OS version .* is less than the minimum OS version required/i,
         /\bapp-update:(?:checking|available|not-available|download-start|download-progress|downloaded|error|prompt|prompt-failed|check-failed|install-now|skip|cache-pruned|cache-prune-failed)\b/i,
+        /\bupdater\b.*\bcache\b/i,
+        /\bcache\b.*\b(?:updater|update|installer|pending|blockmap)\b/i,
+        /\bblockmap\b/i,
+        /\bsha512\b/i,
+        /\bfileInfo\b/i,
+        /\bdownloaded\s+file\b/i,
+        /\bfull:\s*\d+/i,
+        /\bdifferential:\s*\d+/i,
+        /\bupdat(?:e|er)\b.*\b(?:size|bytes?|download|downloaded|pending|package)\b/i,
+      ];
+
+      const APP_UPDATE_NOTIFY_SUPPRESS_PATTERNS = [
+        /\bapp-update:/i,
+        /\belectron-updater\b/i,
+        /\bbuilder-util-runtime\b/i,
+        /\bGitHubProvider\b/i,
+        /\bNsisUpdater\b/i,
+        /\bAppUpdater\b/i,
+        /\bChecking for update\b/i,
+        /\bDownloading update\b/i,
+        /\bDownloading\b.*\b(?:update|installer|package|block)\b/i,
+        /\bupdater\b.*\bcache\b/i,
+        /\bcache\b.*\b(?:updater|update|installer|pending|blockmap)\b/i,
+        /\bblockmap\b/i,
+        /\bsha512\b/i,
+        /\bfileInfo\b/i,
+        /\bdownloaded\s+file\b/i,
+        /\bStaging percentage\b/i,
+        /\blatest\.yml\b/i,
+        /releases\/download\//i,
       ];
 
       const _shownWarns = new Set();
@@ -6160,9 +6165,26 @@
         return TECHNICAL_WARN_PATTERNS.some((rx) => rx.test(text));
       }
 
+      function shouldSuppressAppUpdateNotification(payload = {}) {
+        if (
+          generationProgressState?.kind !== "app-update" ||
+          generationProgressState?.status !== "running"
+        ) {
+          return false;
+        }
+        const raw = String(payload?.rawMessage || "").trim();
+        const message = String(payload?.message || "").trim();
+        const haystacks = [raw, message].filter(Boolean);
+        if (!haystacks.length) return false;
+        return haystacks.some((text) =>
+          APP_UPDATE_NOTIFY_SUPPRESS_PATTERNS.some((rx) => rx.test(text)),
+        );
+      }
+
       window.api.onNotify((payload = {}) => {
         const { message, color } = payload;
         if (shouldSuppressGenerationNotification(payload)) return;
+        if (shouldSuppressAppUpdateNotification(payload)) return;
         if (isTechnicalWarn(message)) return;
 
         const isConfigPathWarn = SUPPRESS_MSG_PATTERNS.some((rx) =>
@@ -8434,6 +8456,39 @@
           );
         }
         return "Hidden";
+      }
+
+      function getEffectiveAchievementProgress(saved) {
+        const isEarned = saved?.earned === true || saved?.earned === 1;
+        const rawProgress = Number(saved?.progress);
+        const rawMax = Number(saved?.max_progress);
+        const hasProgress = Number.isFinite(rawProgress);
+        const hasMax = Number.isFinite(rawMax) && rawMax > 0;
+
+        if (!hasProgress || !hasMax) {
+          return {
+            show: false,
+            progress: null,
+            max: hasMax ? rawMax : null,
+            percent: null,
+          };
+        }
+
+        if (isEarned) {
+          return {
+            show: true,
+            progress: rawMax,
+            max: rawMax,
+            percent: 100,
+          };
+        }
+
+        return {
+          show: true,
+          progress: rawProgress,
+          max: rawMax,
+          percent: Math.min(100, Math.round((rawProgress / rawMax) * 100)),
+        };
       }
 
       window.addEventListener("DOMContentLoaded", async () => {
