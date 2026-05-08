@@ -22,6 +22,7 @@ const {
   generateConfigFromPs4Dir,
   updateSchemaFromPs4,
   buildSnapshotFromPs4,
+  buildSnapshotFromPs4ProgressFile,
 } = require("./shadps4-config-generator");
 const { generateConfigFromAppcacheBin } = require("./steam-appcache-generator");
 const {
@@ -102,6 +103,9 @@ function splitPathLower(inputPath) {
     .toLowerCase()
     .split(path.sep)
     .filter(Boolean);
+}
+function isShadPs4RuntimePath(inputPath) {
+  return splitPathLower(inputPath).includes("shadps4");
 }
 function matchesPathSuffix(pathParts, suffixParts) {
   if (!Array.isArray(pathParts) || !Array.isArray(suffixParts)) return false;
@@ -383,6 +387,7 @@ module.exports = function makeWatchedFolders({
   const existingConfigIds = new Set();
   const activeRoots = new Set();
   const configIndex = new Map(); // appid -> Array<meta>
+  const ps4NpCommIndex = new Map(); // npcommid -> Array<meta>
   const configPlatformPresence = new Map(); // appid -> Set(platform)
   const configSavePathIndex = new Map(); // appid -> Set(path)
   const pendingSavePathIndex = new Map(); // appid -> Set(path)
@@ -506,6 +511,15 @@ module.exports = function makeWatchedFolders({
 
   function getConfigMetas(appid) {
     const list = configIndex.get(String(appid));
+    return Array.isArray(list) ? list : [];
+  }
+
+  function getPs4ConfigMetasByNpCommId(npcommid) {
+    const key = String(npcommid || "")
+      .trim()
+      .toLowerCase();
+    if (!key) return [];
+    const list = ps4NpCommIndex.get(key);
     return Array.isArray(list) ? list : [];
   }
 
@@ -1285,7 +1299,9 @@ module.exports = function makeWatchedFolders({
     let cached = null;
     try {
       cached = getCachedSnapshot(meta?.name || appid, meta?.platform || null, {
-        savePath: meta?.save_path || null,
+        savePath: options?.savePath || meta?.save_path || null,
+        filePath: options?.filePath || "",
+        shadps4UserId: options?.shadps4UserId || "",
         appid,
       });
     } catch {}
@@ -3076,14 +3092,214 @@ module.exports = function makeWatchedFolders({
 
   function resolvePs4TrophyDirForMeta(meta) {
     if (!meta) return "";
+    const npcommid = String(meta.shadps4_npcommid || "").trim();
+    if (npcommid) {
+      const modernRoot = resolveShadPs4RootForMeta(meta);
+      const modernSchema = modernRoot
+        ? path.join(modernRoot, "trophy", npcommid)
+        : "";
+      if (modernSchema && fs.existsSync(modernSchema)) return modernSchema;
+    }
+    const schemaPath =
+      typeof meta.shadps4_schema_path === "string"
+        ? meta.shadps4_schema_path
+        : "";
+    if (schemaPath && fs.existsSync(schemaPath)) return schemaPath;
     const direct =
       typeof meta.trophy_path === "string"
         ? meta.trophy_path
         : typeof meta.save_path === "string"
           ? meta.save_path
           : "";
+    if (direct) {
+      try {
+        const stat = fs.statSync(direct);
+        if (stat.isFile()) return schemaPath || "";
+      } catch {}
+    }
     if (direct && fs.existsSync(direct)) return direct;
     return direct || "";
+  }
+
+  function resolveShadPs4RootForMeta(meta) {
+    const candidates = [
+      meta?.shadps4_schema_path,
+      meta?.trophy_path,
+      meta?.shadps4_progress_path,
+      meta?.save_path,
+      meta?.config_path,
+    ].filter(Boolean);
+    const envRoot =
+      process.env.APPDATA && path.join(process.env.APPDATA, "shadPS4");
+    if (envRoot) candidates.push(envRoot);
+
+    for (const candidate of candidates) {
+      const raw = String(candidate || "");
+      if (!raw) continue;
+      const parts = raw.split(/[\\/]+/);
+      for (let i = parts.length - 1; i >= 0; i--) {
+        if (parts[i]?.toLowerCase() !== "shadps4") continue;
+        const root = parts.slice(0, i + 1).join(path.sep);
+        if (root && fs.existsSync(root)) return root;
+      }
+      if (path.basename(raw).toLowerCase() === "user" && fs.existsSync(raw)) {
+        return raw;
+      }
+    }
+    return "";
+  }
+
+  function getPs4NpCommIdFromProgressPath(filePath) {
+    const base = path.basename(String(filePath || ""));
+    const match = base.match(/^(NP[A-Z0-9_]+)\.xml$/i);
+    return match ? match[1] : "";
+  }
+
+  function isPs4ProgressXmlPath(filePath) {
+    const npcommid = getPs4NpCommIdFromProgressPath(filePath);
+    if (!npcommid) return false;
+    const parts = String(filePath || "").split(/[\\/]+/);
+    const len = parts.length;
+    return (
+      len >= 4 &&
+      parts[len - 2]?.toLowerCase() === "trophy" &&
+      Boolean(parts[len - 3]) &&
+      parts[len - 4]?.toLowerCase() === "home"
+    );
+  }
+
+  function getPs4UserIdFromProgressPath(filePath) {
+    if (!isPs4ProgressXmlPath(filePath)) return "";
+    const parts = String(filePath || "").split(/[\\/]+/);
+    return String(parts[parts.length - 3] || "").trim();
+  }
+
+  function getPs4ProgressFileMtimeMs(progressPath) {
+    try {
+      return fs.statSync(progressPath).mtimeMs || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  function collectPs4ProgressFiles(root, npcommid, preferredUser = "") {
+    const normalizedNpCommId = String(npcommid || "").trim();
+    if (!root || !normalizedNpCommId) return [];
+    const homeDir = path.join(root, "home");
+    const seen = new Set();
+    const out = [];
+    const addCandidate = (userId, progressPath) => {
+      if (!userId || !progressPath || !fs.existsSync(progressPath)) return;
+      const key = path.normalize(progressPath).toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push({
+        userId: String(userId),
+        progressPath,
+        mtimeMs: getPs4ProgressFileMtimeMs(progressPath),
+        preferred: Boolean(
+          preferredUser && String(userId) === String(preferredUser),
+        ),
+      });
+    };
+    if (preferredUser) {
+      addCandidate(
+        preferredUser,
+        path.join(homeDir, preferredUser, "trophy", `${normalizedNpCommId}.xml`),
+      );
+    }
+    try {
+      for (const ent of fs.readdirSync(homeDir, { withFileTypes: true })) {
+        if (!ent.isDirectory() || !ent.name) continue;
+        addCandidate(
+          ent.name,
+          path.join(homeDir, ent.name, "trophy", `${normalizedNpCommId}.xml`),
+        );
+      }
+    } catch {}
+    out.sort((a, b) => {
+      if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+      if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+      return String(a.userId).localeCompare(String(b.userId), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+    return out;
+  }
+
+  function selectPs4ProgressFile(root, npcommid, preferredUser = "", direct = "") {
+    const candidates = collectPs4ProgressFiles(root, npcommid, preferredUser);
+    if (direct && fs.existsSync(direct)) {
+      const directUser = getPs4UserIdFromProgressPath(direct) || preferredUser;
+      const directKey = path.normalize(direct).toLowerCase();
+      if (
+        !candidates.some(
+          (candidate) =>
+            path.normalize(candidate.progressPath).toLowerCase() === directKey,
+        )
+      ) {
+        candidates.push({
+          userId: directUser,
+          progressPath: direct,
+          mtimeMs: getPs4ProgressFileMtimeMs(direct),
+          preferred: Boolean(
+            preferredUser && String(directUser) === String(preferredUser),
+          ),
+        });
+      }
+      candidates.sort((a, b) => {
+        if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+        if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+        return String(a.userId).localeCompare(String(b.userId), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      });
+    }
+    return candidates[0] || null;
+  }
+
+  function resolvePs4ProgressPathForMeta(meta) {
+    if (!meta) return "";
+    const direct =
+      typeof meta.shadps4_progress_path === "string" &&
+      meta.shadps4_progress_path
+        ? meta.shadps4_progress_path
+        : typeof meta.save_path === "string" && meta.save_path
+          ? meta.save_path
+          : "";
+    const npcommid = String(meta.shadps4_npcommid || "").trim();
+    const schemaDir = resolvePs4TrophyDirForMeta(meta);
+    if (!npcommid) {
+      if (direct) {
+        try {
+          const stat = fs.statSync(direct);
+          if (stat.isFile()) return direct;
+        } catch {}
+      }
+      return "";
+    }
+    const root =
+      resolveShadPs4RootForMeta(meta) ||
+      (schemaDir ? path.dirname(path.dirname(schemaDir)) : "");
+    if (!root) {
+      if (direct) {
+        try {
+          const stat = fs.statSync(direct);
+          if (stat.isFile()) return direct;
+        } catch {}
+      }
+      return "";
+    }
+    const preferredUser = String(meta.shadps4_user_id || "").trim();
+    const selected = selectPs4ProgressFile(
+      root,
+      npcommid,
+      preferredUser,
+      direct,
+    );
+    return selected?.progressPath || "";
   }
 
   function resolveTropusrPathForMeta(meta) {
@@ -3261,6 +3477,197 @@ module.exports = function makeWatchedFolders({
       }
     }
     await walk(root, 0);
+    return results;
+  }
+
+  function getLegacyPs4AppIdFromTrophyDir(trophyDir) {
+    const parts = String(trophyDir || "").split(/[\\/]+/);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (/^CUSA\d+$/i.test(parts[i] || "")) return parts[i];
+    }
+    return "";
+  }
+
+  function readPs4NpCommIdFromTrophyDir(trophyDir) {
+    const xmlDir = path.join(trophyDir || "", "Xml");
+    const candidates = [
+      path.join(xmlDir, "TROP.XML"),
+      path.join(xmlDir, "TROP_01.XML"),
+      path.join(xmlDir, "TROPCONF.XML"),
+    ];
+    for (const candidate of candidates) {
+      const npcommid = readSimpleXmlTag(candidate, "npcommid");
+      if (npcommid) return npcommid;
+    }
+    return "";
+  }
+
+  function readPs4TitleFromSchemaDir(schemaDir) {
+    const xmlPath = path.join(schemaDir || "", "Xml", "TROP.XML");
+    if (!xmlPath || !fs.existsSync(xmlPath)) return { title: "", npcommid: "" };
+    try {
+      const parsed = parsePs4TrophySetDir(schemaDir);
+      return {
+        title: parsed?.title || "",
+        npcommid: parsed?.npcommid || path.basename(schemaDir || ""),
+      };
+    } catch {
+      return { title: "", npcommid: path.basename(schemaDir || "") };
+    }
+  }
+
+  function buildShadPs4LogNpCommMap(root) {
+    const map = new Map();
+    const logPath = path.join(root || "", "log", "shad_log.txt");
+    if (!logPath || !fs.existsSync(logPath)) return map;
+    let raw = "";
+    try {
+      raw = fs.readFileSync(logPath, "utf8");
+    } catch {
+      return map;
+    }
+    let current = null;
+    for (const line of raw.split(/\r?\n/)) {
+      const gameMatch = line.match(/Game id:\s*(CUSA\d+)\s+Title:\s*(.+)$/i);
+      if (gameMatch) {
+        current = {
+          appid: gameMatch[1],
+          title: String(gameMatch[2] || "").trim(),
+        };
+        continue;
+      }
+      const npMatch = line.match(/Successfully extracted .* for (NP[A-Z0-9_]+)/i);
+      if (npMatch && current) {
+        map.set(npMatch[1].toLowerCase(), { ...current, npcommid: npMatch[1] });
+      }
+    }
+    return map;
+  }
+
+  function normalizeShadPs4TitleKey(value) {
+    return String(value || "")
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[®™©]/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  }
+
+  function buildShadPs4LogTitleMap(root) {
+    const map = new Map();
+    const logPath = path.join(root || "", "log", "shad_log.txt");
+    if (!logPath || !fs.existsSync(logPath)) return map;
+    let raw = "";
+    try {
+      raw = fs.readFileSync(logPath, "utf8");
+    } catch {
+      return map;
+    }
+    for (const line of raw.split(/\r?\n/)) {
+      const gameMatch = line.match(/Game id:\s*(CUSA\d+)\s+Title:\s*(.+)$/i);
+      if (!gameMatch) continue;
+      const title = String(gameMatch[2] || "").trim();
+      const key = normalizeShadPs4TitleKey(title);
+      if (!key) continue;
+      map.set(key, {
+        appid: gameMatch[1],
+        title,
+      });
+    }
+    return map;
+  }
+
+  function readSimpleXmlTag(filePath, tagName) {
+    if (!filePath || !fs.existsSync(filePath)) return "";
+    try {
+      const raw = fs.readFileSync(filePath, "utf8");
+      const match = raw.match(
+        new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "i"),
+      );
+      return match ? String(match[1] || "").trim() : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function buildShadPs4LegacyNpCommMap(root) {
+    const map = new Map();
+    const gameData = path.join(root || "", "game_data");
+    if (!gameData || !fs.existsSync(gameData)) return map;
+    let games = [];
+    try {
+      games = fs.readdirSync(gameData, { withFileTypes: true });
+    } catch {
+      return map;
+    }
+    for (const game of games) {
+      if (!game.isDirectory() || !/^CUSA\d+$/i.test(game.name)) continue;
+      const trophyFiles = path.join(gameData, game.name, "TrophyFiles");
+      let trophyDirs = [];
+      try {
+        trophyDirs = fs
+          .readdirSync(trophyFiles, { withFileTypes: true })
+          .filter((ent) => ent.isDirectory())
+          .map((ent) => path.join(trophyFiles, ent.name));
+      } catch {
+        trophyDirs = [];
+      }
+      for (const trophyDir of trophyDirs) {
+        const xmlDir = path.join(trophyDir, "Xml");
+        const candidates = [
+          path.join(xmlDir, "TROP.XML"),
+          path.join(xmlDir, "TROPCONF.XML"),
+        ];
+        const xmlPath = candidates.find((candidate) => fs.existsSync(candidate));
+        if (!xmlPath) continue;
+        const npcommid = readSimpleXmlTag(xmlPath, "npcommid");
+        if (!npcommid) continue;
+        map.set(npcommid.toLowerCase(), {
+          appid: game.name,
+          title: readSimpleXmlTag(xmlPath, "title-name"),
+          npcommid,
+        });
+      }
+    }
+    return map;
+  }
+
+  async function discoverModernPs4TrophySetsUnder(root, yieldIfNeeded) {
+    const results = [];
+    const schemaRoot = path.join(root || "", "trophy");
+    if (!schemaRoot || !fs.existsSync(schemaRoot)) return results;
+    const legacyMap = buildShadPs4LegacyNpCommMap(root);
+    const logMap = buildShadPs4LogNpCommMap(root);
+    const logTitleMap = buildShadPs4LogTitleMap(root);
+    let entries = [];
+    try {
+      entries = await fsp.readdir(schemaRoot, { withFileTypes: true });
+    } catch {
+      return results;
+    }
+    for (const ent of entries) {
+      if (!ent.isDirectory() || !/^NP[A-Z0-9_]+$/i.test(ent.name)) continue;
+      const npcommid = ent.name;
+      const schemaDir = path.join(schemaRoot, ent.name);
+      const xmlPath = path.join(schemaDir, "Xml", "TROP.XML");
+      if (!fs.existsSync(xmlPath)) continue;
+      const schemaInfo = readPs4TitleFromSchemaDir(schemaDir);
+      const mapped =
+        logMap.get(npcommid.toLowerCase()) ||
+        legacyMap.get(npcommid.toLowerCase()) ||
+        logTitleMap.get(normalizeShadPs4TitleKey(schemaInfo.title)) ||
+        null;
+      const progressFiles = collectPs4ProgressFiles(root, npcommid);
+      results.push({
+        npcommid,
+        appid: mapped?.appid || npcommid,
+        title: schemaInfo.title || mapped?.title || npcommid,
+        schemaDir,
+        progressFiles,
+      });
+      if (yieldIfNeeded) await yieldIfNeeded();
+    }
     return results;
   }
 
@@ -3448,6 +3855,7 @@ module.exports = function makeWatchedFolders({
     const commitIndex = (next) => {
       existingConfigIds.clear();
       configIndex.clear();
+      ps4NpCommIndex.clear();
       configPlatformPresence.clear();
       configSavePathIndex.clear();
       tenokeIds.clear();
@@ -3457,6 +3865,9 @@ module.exports = function makeWatchedFolders({
       for (const id of next.existingConfigIds) existingConfigIds.add(id);
       for (const [appid, metas] of next.configIndex.entries()) {
         configIndex.set(appid, metas);
+      }
+      for (const [npcommid, metas] of next.ps4NpCommIndex.entries()) {
+        ps4NpCommIndex.set(npcommid, metas);
       }
       for (const [appid, set] of next.configPlatformPresence.entries()) {
         configPlatformPresence.set(appid, set);
@@ -3494,6 +3905,26 @@ module.exports = function makeWatchedFolders({
         emu: normalizeEmuValue(data?.emu),
         save_path: data?.save_path || null,
         config_path: data?.config_path || null,
+        trophy_path:
+          typeof data?.trophy_path === "string" ? data.trophy_path : "",
+        shadps4_npcommid:
+          typeof data?.shadps4_npcommid === "string"
+            ? data.shadps4_npcommid
+            : typeof data?.npcommid === "string"
+              ? data.npcommid
+              : "",
+        shadps4_schema_path:
+          typeof data?.shadps4_schema_path === "string"
+            ? data.shadps4_schema_path
+            : "",
+        shadps4_progress_path:
+          typeof data?.shadps4_progress_path === "string"
+            ? data.shadps4_progress_path
+            : "",
+        shadps4_user_id:
+          typeof data?.shadps4_user_id === "string"
+            ? data.shadps4_user_id
+            : "",
         lumaplay_user:
           typeof data?.lumaplay_user === "string"
             ? data.lumaplay_user
@@ -3549,6 +3980,13 @@ module.exports = function makeWatchedFolders({
       }
       if (!next.configIndex.has(appid)) next.configIndex.set(appid, []);
       next.configIndex.get(appid).push(meta);
+      if (platform === "shadps4" && meta.shadps4_npcommid) {
+        const npKey = String(meta.shadps4_npcommid).trim().toLowerCase();
+        if (!next.ps4NpCommIndex.has(npKey)) {
+          next.ps4NpCommIndex.set(npKey, []);
+        }
+        next.ps4NpCommIndex.get(npKey).push(meta);
+      }
 
       const key = String(appid);
       if (!next.configPlatformPresence.has(key)) {
@@ -3575,6 +4013,7 @@ module.exports = function makeWatchedFolders({
       const next = {
         existingConfigIds: new Set(),
         configIndex: new Map(),
+        ps4NpCommIndex: new Map(),
         configPlatformPresence: new Map(),
         configSavePathIndex: new Map(),
         tenokeIds: new Set(),
@@ -3609,6 +4048,7 @@ module.exports = function makeWatchedFolders({
       const next = {
         existingConfigIds: new Set(),
         configIndex: new Map(),
+        ps4NpCommIndex: new Map(),
         configPlatformPresence: new Map(),
         configSavePathIndex: new Map(),
         tenokeIds: new Set(),
@@ -3686,6 +4126,19 @@ module.exports = function makeWatchedFolders({
     );
     if (steamOfficialAccountId) {
       parts.push(`acct:${steamOfficialAccountId}`);
+    }
+    if (platform === "shadps4") {
+      const shadPs4UserId =
+        getPs4UserIdFromProgressPath(options?.filePath || "") ||
+        getPs4UserIdFromProgressPath(options?.savePath || "") ||
+        getPs4UserIdFromProgressPath(options?.progressPath || "") ||
+        String(
+          options?.shadps4UserId ||
+            options?.shadps4_user_id ||
+            meta?.shadps4_user_id ||
+            "",
+        ).trim();
+      if (shadPs4UserId) parts.push(`user:${shadPs4UserId}`);
     }
     return parts.join("::");
   }
@@ -3826,6 +4279,21 @@ module.exports = function makeWatchedFolders({
 
     if (isPs4Meta(meta)) {
       const trophyDir = resolvePs4TrophyDirForMeta(meta);
+      const progressPath = resolvePs4ProgressPathForMeta(meta);
+      const root = resolveShadPs4RootForMeta(meta);
+      const npcommid = String(meta?.shadps4_npcommid || "").trim();
+      if (root && npcommid) {
+        for (const entry of collectPs4ProgressFiles(
+          root,
+          npcommid,
+          String(meta?.shadps4_user_id || "").trim(),
+        )) {
+          if (entry?.progressPath) out.add(entry.progressPath);
+        }
+      }
+      if (progressPath) {
+        out.add(progressPath);
+      }
       if (trophyDir) {
         out.add(path.join(trophyDir, "Xml", "TROP.XML"));
       }
@@ -3901,6 +4369,7 @@ module.exports = function makeWatchedFolders({
     const isXenia = isXeniaMeta(meta);
     const isRpcs3 = isRpcs3Meta(meta);
     const isPs4 = isPs4Meta(meta);
+    const isPs4ProgressXml = isPs4 && isPs4ProgressXmlPath(filePath);
     const isSteamOfficial = isSteamOfficialMeta(meta);
     const isGogOfficial = isGogOfficialMeta(meta);
     const isUbisoftOfficial = isUbisoftOfficialMeta(meta);
@@ -3912,7 +4381,7 @@ module.exports = function makeWatchedFolders({
     } else if (isRpcs3) {
       if (base !== "tropusr.dat") return;
     } else if (isPs4) {
-      if (base !== "trop.xml") return;
+      if (base !== "trop.xml" && !isPs4ProgressXml) return;
     } else if (isGogOfficial) {
       if (base !== GAMEPLAY_DB_NAME) return;
     } else if (isUbisoftOfficial) {
@@ -3955,8 +4424,9 @@ module.exports = function makeWatchedFolders({
     const cfgPath = path.join(configsDir, `${meta.name}.json`);
     await waitForFileExists(cfgPath);
 
-    const snapKey = makeSnapshotKey(meta, appid);
+    const snapKey = makeSnapshotKey(meta, appid, { filePath });
     const metaKey = isLumaPlay ? "" : getCacheMetaKey(meta, appid, filePath);
+    let effectiveSnapshotSavePath = meta?.save_path || null;
     let fileStat = null;
     if (!isLumaPlay && bootMode && !forceEmptyPrev) {
       loadCacheMetaOnce();
@@ -3980,7 +4450,9 @@ module.exports = function makeWatchedFolders({
                       meta?.name || appid,
                       meta?.platform || null,
                       {
-                        savePath: meta?.save_path || null,
+                        savePath: filePath || meta?.save_path || null,
+                        filePath,
+                        shadps4UserId: getPs4UserIdFromProgressPath(filePath),
                         appid,
                       },
                     )
@@ -4113,12 +4585,20 @@ module.exports = function makeWatchedFolders({
         cur = prev;
       }
     } else if (isPs4) {
+      const progressPath =
+        (isPs4ProgressXml ? filePath : "") ||
+        resolvePs4ProgressPathForMeta(meta);
+      effectiveSnapshotSavePath = progressPath || meta?.save_path || null;
       const trophyDir =
         resolvePs4TrophyDirForMeta(meta) || path.dirname(filePath);
       try {
-        const parsedPs4 = parsePs4TrophySetDir(trophyDir);
-        parsedPs4.appid = String(meta?.appid || appid || "");
-        cur = buildSnapshotFromPs4(parsedPs4, prev);
+        if (progressPath && fs.existsSync(progressPath)) {
+          cur = buildSnapshotFromPs4ProgressFile(progressPath, prev);
+        } else {
+          const parsedPs4 = parsePs4TrophySetDir(trophyDir);
+          parsedPs4.appid = String(meta?.appid || appid || "");
+          cur = buildSnapshotFromPs4(parsedPs4, prev);
+        }
       } catch {
         parseOk = false;
         cur = prev;
@@ -4201,7 +4681,7 @@ module.exports = function makeWatchedFolders({
             appid: String(appid),
             configName: meta.name,
             platform: meta?.platform || null,
-            savePath: meta?.save_path || null,
+            savePath: effectiveSnapshotSavePath,
             snapshot: cur,
           });
         } catch {}
@@ -4289,7 +4769,7 @@ module.exports = function makeWatchedFolders({
           appid: String(appid),
           configName: meta.name,
           platform: meta?.platform || null,
-          savePath: meta?.save_path || null,
+          savePath: effectiveSnapshotSavePath,
           snapshot: cur,
         });
       } catch {}
@@ -4437,7 +4917,7 @@ module.exports = function makeWatchedFolders({
           appid: String(appid),
           configName: meta.name,
           platform: meta?.platform || null,
-          savePath: meta?.save_path || null,
+          savePath: effectiveSnapshotSavePath,
           snapshot: cur,
         });
       } catch {}
@@ -5273,6 +5753,36 @@ module.exports = function makeWatchedFolders({
             }
             resolvedPath = expectedSpoolFileRaw;
           }
+        } else if (isPs4Meta(meta)) {
+          const normFile = path.normalize(filePath).toLowerCase();
+          const progressPath = resolvePs4ProgressPathForMeta(meta);
+          const trophyDir = resolvePs4TrophyDirForMeta(meta);
+          const expectedProgress = progressPath
+            ? path.normalize(progressPath).toLowerCase()
+            : "";
+          const expectedSchemaRaw = trophyDir
+            ? path.join(trophyDir, "Xml", "TROP.XML")
+            : "";
+          const expectedSchema = expectedSchemaRaw
+            ? path.normalize(expectedSchemaRaw).toLowerCase()
+            : "";
+          if (expectedProgress && normFile === expectedProgress) {
+            resolvedPath = progressPath;
+          } else if (expectedSchema && normFile === expectedSchema) {
+            resolvedPath = expectedSchemaRaw;
+          } else if (isPs4ProgressXmlPath(filePath)) {
+            const npcommid = getPs4NpCommIdFromProgressPath(filePath);
+            if (
+              !npcommid ||
+              String(meta?.shadps4_npcommid || "").toLowerCase() !==
+                npcommid.toLowerCase()
+            ) {
+              return;
+            }
+            resolvedPath = filePath;
+          } else {
+            return;
+          }
         } else {
           const parts = filePath.split(path.sep).map((p) => p.toLowerCase());
           const detected = [...parts]
@@ -5475,6 +5985,14 @@ module.exports = function makeWatchedFolders({
       }
     } else if (isPs4Meta(meta)) {
       const trophyDir = resolvePs4TrophyDirForMeta(meta);
+      const progressPath = resolvePs4ProgressPathForMeta(meta);
+      if (progressPath) {
+        const key = path.normalize(progressPath);
+        if (!seenCandidates.has(key)) {
+          seenCandidates.add(key);
+          candidates.unshift(progressPath);
+        }
+      }
       const xmlMain = trophyDir ? path.join(trophyDir, "Xml", "TROP.XML") : "";
       for (const p of [xmlMain, trophyDir]) {
         if (!p) continue;
@@ -6511,10 +7029,27 @@ module.exports = function makeWatchedFolders({
       return;
     }
 
-    for (const fp of candidates) {
+    const orderedCandidates = isPs4Meta(meta)
+      ? [
+          ...candidates.filter((fp) => isPs4ProgressXmlPath(fp)),
+          ...candidates.filter((fp) => !isPs4ProgressXmlPath(fp)),
+        ]
+      : candidates;
+    const hasPs4ProgressCandidate =
+      isPs4Meta(meta) &&
+      orderedCandidates.some((fp) => isPs4ProgressXmlPath(fp));
+
+    for (const fp of orderedCandidates) {
       if (!fp || !fs.existsSync(fp)) continue;
       try {
-        const snapKey = makeSnapshotKey(meta, appid);
+        const cacheSavePathForFp =
+          isPs4Meta(meta) && isPs4ProgressXmlPath(fp)
+            ? fp
+            : meta?.save_path || null;
+        const snapKey = makeSnapshotKey(meta, appid, {
+          filePath: fp,
+          savePath: cacheSavePathForFp,
+        });
         let snapshot = null;
         let metaPath = fp;
         if (isPs4Meta(meta)) {
@@ -6553,6 +7088,17 @@ module.exports = function makeWatchedFolders({
           if (!fs.existsSync(targetLog)) continue;
           metaPath = targetLog;
         }
+        if (
+          isPs4Meta(meta) &&
+          hasPs4ProgressCandidate &&
+          !isPs4ProgressXmlPath(fp)
+        ) {
+          const stat = readFileStatSyncSafe(metaPath);
+          if (stat) {
+            updateCacheMetaEntry(getCacheMetaKey(meta, appid, metaPath), stat);
+          }
+          continue;
+        }
         if (bootLikeSeed) {
           loadCacheMetaOnce();
           const metaKey = getCacheMetaKey(meta, appid, metaPath);
@@ -6576,7 +7122,7 @@ module.exports = function makeWatchedFolders({
                       meta?.name || appid,
                       meta?.platform || null,
                       {
-                        savePath: meta?.save_path || null,
+                        savePath: cacheSavePathForFp,
                         appid,
                       },
                     )
@@ -6681,6 +7227,8 @@ module.exports = function makeWatchedFolders({
             const stat = fs.statSync(fp);
             if (stat.isDirectory()) {
               trophyDir = fp;
+            } else if (isPs4ProgressXmlPath(fp)) {
+              trophyDir = resolvePs4TrophyDirForMeta(meta);
             } else {
               // TROP.XML lives under <trophyDir>/Xml
               trophyDir = path.dirname(path.dirname(fp));
@@ -6690,12 +7238,19 @@ module.exports = function makeWatchedFolders({
           }
           if (trophyDir) {
             try {
-              const parsed = parsePs4TrophySetDir(trophyDir);
-              parsed.appid = String(meta?.appid || parsed.appid || "");
-              snapshot = buildSnapshotFromPs4(
-                parsed,
-                lastSnapshot.get(snapKey) || {},
-              );
+              if (isPs4ProgressXmlPath(fp)) {
+                snapshot = buildSnapshotFromPs4ProgressFile(
+                  fp,
+                  lastSnapshot.get(snapKey) || {},
+                );
+              } else {
+                const parsed = parsePs4TrophySetDir(trophyDir);
+                parsed.appid = String(meta?.appid || parsed.appid || "");
+                snapshot = buildSnapshotFromPs4(
+                  parsed,
+                  lastSnapshot.get(snapKey) || {},
+                );
+              }
             } catch (err) {
               watcherLogger.warn("ps4:seed:parse-failed", {
                 appid,
@@ -6730,14 +7285,14 @@ module.exports = function makeWatchedFolders({
               meta,
               appid,
               snapshot,
-              { bootLike: bootLikeSeed },
+              { bootLike: bootLikeSeed, savePath: cacheSavePathForFp },
             );
             if (!skipBootSeed) {
               onSeedCache({
                 appid,
                 configName,
                 platform: meta?.platform || null,
-                savePath: meta?.save_path || null,
+                savePath: cacheSavePathForFp,
                 snapshot,
               });
             } else {
@@ -6806,6 +7361,7 @@ module.exports = function makeWatchedFolders({
       const blacklistState = getBlacklistState();
       const yieldIfNeeded = createTimeSlicer(BOOT_SCAN_SLICE_MS);
       const strictRootProfile = getStrictRootProfile(scanBase);
+      const isShadPs4ScanRoot = isShadPs4RuntimePath(scanBase);
       const attachSeedOptions = rescanInProgress.value
         ? { deferInitialSeed: true }
         : {};
@@ -7118,6 +7674,197 @@ module.exports = function makeWatchedFolders({
           return;
         }
 
+        const modernPs4ProcessedAppIds = new Set();
+        const modernPs4ProcessedNpCommIds = new Set();
+        const modernPs4Sets = await discoverModernPs4TrophySetsUnder(
+          scanBase,
+          yieldIfNeeded,
+        );
+        if (modernPs4Sets.length) {
+          const schemaRoot = path.join(configsDir, "schema");
+          const ps4AppIds = new Set();
+          let ps4Changed = false;
+          const ps4Tasks = modernPs4Sets.map((entry, taskIndex) => ({
+            ...entry,
+            __taskIndex: taskIndex,
+          }));
+          const ps4BatchProgress = createGenerationBatchReporter(ps4Tasks, {
+            rootLabel: path.basename(rootPath || scanBase || "") || "",
+            fallbackItemName: "PS4",
+            defaultDetail: "Parsing shadPS4 trophies",
+            deferStartUntilVisible: bootMode === true,
+          });
+          ps4BatchProgress.start();
+          const handleModernPs4Set = async (task, taskIndex) => {
+            const resolvedTaskIndex = Number.isInteger(taskIndex)
+              ? taskIndex
+              : Number.isInteger(task?.__taskIndex)
+                ? task.__taskIndex
+                : -1;
+            const npcommid = String(task?.npcommid || "").trim();
+            const appid = String(task?.appid || npcommid).trim();
+            const progress =
+              Array.isArray(task?.progressFiles) && task.progressFiles.length
+                ? task.progressFiles[0]
+                : null;
+            if (
+              !npcommid ||
+              !appid ||
+              isAppIdBlacklisted(appid, "shadps4", blacklistState) ||
+              ps4AppIds.has(appid)
+            ) {
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: task?.title || appid || npcommid,
+                phase: "skipped",
+                detail: "Config generation skipped",
+                percent: 100,
+              });
+              return;
+            }
+            try {
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: task?.title || appid,
+                phase: "generatingSchema",
+                detail: "Parsing shadPS4 trophies",
+                percent: 15,
+              });
+              const result = await generateConfigFromPs4Dir(
+                task.schemaDir,
+                configsDir,
+                {
+                  schemaRoot,
+                  appid,
+                  npcommid,
+                  progressPath: progress?.progressPath || "",
+                  userId: progress?.userId || "",
+                },
+              );
+              if (!result || result.skipped) {
+                ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                  appid,
+                  itemName: task?.title || appid,
+                  phase: "skipped",
+                  detail: "Config generation skipped",
+                  percent: 100,
+                });
+                return;
+              }
+              const ps4ResultChanged =
+                result?.created === true ||
+                result?.schemaUpdated === true ||
+                result?.configUpdated === true;
+              if (ps4ResultChanged) ps4Changed = true;
+              if (
+                bootMode &&
+                typeof onSeedCache === "function"
+              ) {
+                const progressFiles = Array.isArray(task?.progressFiles)
+                  ? task.progressFiles
+                  : [];
+                const seededProgressPaths = new Set();
+                for (const progressFile of progressFiles) {
+                  const progressPath = progressFile?.progressPath || "";
+                  if (!progressPath || !fs.existsSync(progressPath)) continue;
+                  const key = path.normalize(progressPath).toLowerCase();
+                  if (seededProgressPaths.has(key)) continue;
+                  seededProgressPaths.add(key);
+                  try {
+                    const snapshot = buildSnapshotFromPs4ProgressFile(
+                      progressPath,
+                      {},
+                    );
+                    if (snapshot && Object.keys(snapshot).length) {
+                      onSeedCache({
+                        appid: String(result.appid),
+                        configName: result.name || String(result.appid),
+                        platform: result.platform || null,
+                        savePath: progressPath,
+                        snapshot,
+                      });
+                    }
+                  } catch {}
+                }
+                if (!seededProgressPaths.size) {
+                  const snapshot = result.snapshot;
+                  if (snapshot && Object.keys(snapshot).length) {
+                    try {
+                      onSeedCache({
+                        appid: String(result.appid),
+                        configName: result.name || String(result.appid),
+                        platform: result.platform || null,
+                        savePath: result.save_path || null,
+                        snapshot,
+                      });
+                    } catch {}
+                  }
+                }
+              }
+              ps4AppIds.add(String(result.appid));
+              modernPs4ProcessedAppIds.add(String(result.appid));
+              if (npcommid) {
+                modernPs4ProcessedNpCommIds.add(npcommid.toLowerCase());
+              }
+              knownAppIds.add(String(result.appid));
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid: String(result.appid || appid),
+                itemName: result?.name || result?.displayName || task?.title || appid,
+                phase: ps4ResultChanged ? "completed" : "skipped",
+                detail:
+                  result?.created === true
+                    ? "Config created"
+                    : ps4ResultChanged
+                      ? "Config updated"
+                      : "Config generation skipped",
+                percent: 100,
+              });
+            } catch (err) {
+              ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
+                appid,
+                itemName: task?.title || appid || npcommid,
+                phase: "failed",
+                detail: err?.message || "Config generation failed",
+                percent: 100,
+              });
+              notifyWarn(
+                `PS4 trophy parse failed "${task?.schemaDir || npcommid}": ${err.message}`,
+              );
+            }
+          };
+          if (bootMode) {
+            await runWithConcurrency(
+              ps4Tasks,
+              BOOT_SCAN_CONCURRENCY,
+              handleModernPs4Set,
+            );
+          } else {
+            for (let taskIndex = 0; taskIndex < ps4Tasks.length; taskIndex += 1) {
+              await handleModernPs4Set(ps4Tasks[taskIndex], taskIndex);
+            }
+          }
+          if (ps4AppIds.size) {
+            await indexExistingConfigsSync();
+            if (bootMode) {
+              await attachSaveWatchersBatched(ps4AppIds, {
+                suppressInitialNotify,
+                ...attachSeedOptions,
+              });
+            } else {
+              await attachSaveWatchersBatched(ps4AppIds, {
+                suppressInitialNotify,
+                batchDelayMs: BOOT_ATTACH_DELAY_MS,
+                ...attachSeedOptions,
+              });
+            }
+            if (ps4Changed) {
+              broadcastAll("configs:changed");
+              broadcastAll("refresh-achievements-table");
+            }
+          }
+          ps4BatchProgress.finish("success", "Config generation completed");
+        }
+
         const ps4Dirs = await discoverPs4TrophyDirsUnder(
           scanBase,
           6,
@@ -7129,7 +7876,10 @@ module.exports = function makeWatchedFolders({
           let ps4Changed = false;
           const ps4Tasks = ps4Dirs.map((trophyDir, taskIndex) => ({
             trophyDir,
-            appid: path.basename(path.dirname(trophyDir)),
+            appid:
+              getLegacyPs4AppIdFromTrophyDir(trophyDir) ||
+              path.basename(path.dirname(path.dirname(trophyDir))),
+            npcommid: readPs4NpCommIdFromTrophyDir(trophyDir),
             __taskIndex: taskIndex,
           }));
           const ps4BatchProgress = createGenerationBatchReporter(ps4Tasks, {
@@ -7147,11 +7897,19 @@ module.exports = function makeWatchedFolders({
                 : -1;
             const trophyDir = task?.trophyDir || "";
             const appid =
-              String(task?.appid || path.basename(path.dirname(trophyDir))).trim();
+              String(
+                task?.appid ||
+                  getLegacyPs4AppIdFromTrophyDir(trophyDir) ||
+                  path.basename(path.dirname(path.dirname(trophyDir))),
+              ).trim();
+            const npcommid = String(task?.npcommid || "").trim();
             if (
               !appid ||
               isAppIdBlacklisted(appid, "shadps4", blacklistState) ||
-              ps4AppIds.has(appid)
+              ps4AppIds.has(appid) ||
+              modernPs4ProcessedAppIds.has(appid) ||
+              (npcommid &&
+                modernPs4ProcessedNpCommIds.has(npcommid.toLowerCase()))
             ) {
               ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
@@ -7175,6 +7933,8 @@ module.exports = function makeWatchedFolders({
                 configsDir,
                 {
                   schemaRoot,
+                  appid,
+                  npcommid,
                 },
               );
               if (!result || result.skipped) {
@@ -7268,6 +8028,12 @@ module.exports = function makeWatchedFolders({
             }
           }
           ps4BatchProgress.finish("success", "Config generation completed");
+          return;
+        }
+
+        if (isShadPs4ScanRoot) {
+          // shadPS4 roots contain numeric user folders under home/<userId>.
+          // Do not let the generic Steam/GOG numeric fallback treat them as app IDs.
           return;
         }
 
@@ -8117,6 +8883,162 @@ module.exports = function makeWatchedFolders({
       return alternatePlatform;
     };
 
+    const handleModernPs4FileEvent = async (filePath) => {
+      const base = path.basename(filePath || "").toLowerCase();
+      const parts = String(filePath || "").split(/[\\/]+/);
+      let npcommid = "";
+      let schemaDir = "";
+      let progressPath = "";
+      let userId = "";
+
+      if (isPs4ProgressXmlPath(filePath)) {
+        npcommid = getPs4NpCommIdFromProgressPath(filePath);
+        progressPath = filePath;
+        userId = getPs4UserIdFromProgressPath(filePath) || "";
+        schemaDir = path.join(root, "trophy", npcommid);
+      } else if (base === "trop.xml") {
+        const xmlDir = path.basename(path.dirname(filePath) || "").toLowerCase();
+        const candidateSchemaDir = path.dirname(path.dirname(filePath));
+        const candidateNpCommId = path.basename(candidateSchemaDir || "");
+        const candidateRoot = path.dirname(path.dirname(candidateSchemaDir));
+        if (
+          xmlDir === "xml" &&
+          /^NP[A-Z0-9_]+$/i.test(candidateNpCommId) &&
+          path.basename(candidateRoot || "").toLowerCase() === "shadps4"
+        ) {
+          npcommid = candidateNpCommId;
+          schemaDir = candidateSchemaDir;
+        } else if (
+          xmlDir === "xml" &&
+          /^NP[A-Z0-9_]+$/i.test(candidateNpCommId) &&
+          path.basename(path.dirname(candidateSchemaDir) || "").toLowerCase() ===
+            "trophy"
+        ) {
+          npcommid = candidateNpCommId;
+          schemaDir = candidateSchemaDir;
+        }
+      }
+
+      if (!npcommid || !schemaDir || !fs.existsSync(schemaDir)) return false;
+      const blacklistState = getBlacklistState();
+      const mapped =
+        buildShadPs4LogNpCommMap(root).get(npcommid.toLowerCase()) ||
+        buildShadPs4LegacyNpCommMap(root).get(npcommid.toLowerCase()) ||
+        buildShadPs4LogTitleMap(root).get(
+          normalizeShadPs4TitleKey(readPs4TitleFromSchemaDir(schemaDir).title),
+        );
+      const appid = String(mapped?.appid || npcommid).trim();
+      if (!appid || isAppIdBlacklisted(appid, "shadps4", blacklistState)) {
+        return true;
+      }
+      if (!progressPath) {
+        const discovered = await discoverModernPs4TrophySetsUnder(root);
+        const match = discovered.find(
+          (entry) =>
+            String(entry?.npcommid || "").toLowerCase() ===
+            npcommid.toLowerCase(),
+        );
+        const progress =
+          Array.isArray(match?.progressFiles) && match.progressFiles.length
+            ? match.progressFiles[0]
+            : null;
+        progressPath = progress?.progressPath || "";
+        userId = progress?.userId || "";
+      }
+
+      try {
+        const result = await generateConfigFromPs4Dir(schemaDir, configsDir, {
+          schemaRoot: path.join(configsDir, "schema"),
+          appid,
+          npcommid,
+          progressPath,
+          userId,
+        });
+        if (!result || result.skipped) return true;
+        await indexExistingConfigsSync();
+        let meta = pickMetaForPath(result.appid, progressPath || filePath);
+        if (!meta) {
+          const metas = getPs4ConfigMetasByNpCommId(npcommid);
+          meta = metas.length ? metas[0] : null;
+        }
+        if (meta) {
+          attachSaveWatcherForAppId(String(meta.appid), {
+            suppressInitialNotify: false,
+          });
+          if (result.created || result.schemaUpdated || result.configUpdated) {
+            broadcastAll("configs:changed");
+            broadcastAll("refresh-achievements-table");
+          }
+          if (progressPath && path.normalize(progressPath) === path.normalize(filePath)) {
+            const progressSnapKey = makeSnapshotKey(meta, String(meta.appid), {
+              filePath: progressPath,
+              savePath: progressPath,
+            });
+            const cachedForUser =
+              typeof getCachedSnapshot === "function"
+                ? getCachedSnapshot(meta?.name || result.appid, meta?.platform || null, {
+                    appid: String(result.appid || meta.appid || ""),
+                    savePath: progressPath,
+                    filePath: progressPath,
+                    shadps4UserId: userId,
+                  })
+                : null;
+            if (
+              !lastSnapshot.has(progressSnapKey) &&
+              (!cachedForUser ||
+                typeof cachedForUser !== "object" ||
+                Array.isArray(cachedForUser))
+            ) {
+              try {
+                const snapshot = buildSnapshotFromPs4ProgressFile(progressPath, {});
+                lastSnapshot.set(progressSnapKey, snapshot);
+                if (typeof onSeedCache === "function") {
+                  onSeedCache({
+                    appid: String(result.appid || meta.appid || ""),
+                    configName: meta.name || result.name || String(result.appid),
+                    platform: meta?.platform || "shadps4",
+                    savePath: progressPath,
+                    snapshot,
+                  });
+                }
+                broadcastAll("achievements:file-updated", {
+                  appid: String(meta.appid),
+                  configName: meta?.name || null,
+                });
+                return true;
+              } catch {}
+            } else if (
+              !lastSnapshot.has(progressSnapKey) &&
+              cachedForUser &&
+              typeof cachedForUser === "object" &&
+              !Array.isArray(cachedForUser)
+            ) {
+              lastSnapshot.set(progressSnapKey, cachedForUser);
+            }
+            const evalResult = await evaluateFile(String(meta.appid), meta, filePath, {
+              initial: false,
+            });
+            if (evalResult) {
+              broadcastAll("achievements:file-updated", {
+                appid: String(meta.appid),
+                configName: meta?.name || null,
+              });
+              if (
+                !bootMode &&
+                !justUnblocked.has(String(meta.appid)) &&
+                !suppressAutoSelect.has(String(meta.appid))
+              ) {
+                setTimeout(() => enqueueAutoSelect(meta), 0);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        notifyWarn(`PS4 trophy parse failed "${schemaDir}": ${err.message}`);
+      }
+      return true;
+    };
+
     if (initialScan && !rescanInProgress.value) {
       // optional: schedule();
     }
@@ -8145,6 +9067,12 @@ module.exports = function makeWatchedFolders({
           return;
         }
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
+          return;
+        }
+        if (await handleModernPs4FileEvent(filePath)) {
+          return;
+        }
+        if (isShadPs4RuntimePath(root) || isShadPs4RuntimePath(filePath)) {
           return;
         }
         const steamInfo = parseSteamOfficialBinInfo(filePath);
@@ -8389,6 +9317,12 @@ module.exports = function makeWatchedFolders({
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
+        if (await handleModernPs4FileEvent(filePath)) {
+          return;
+        }
+        if (isShadPs4RuntimePath(root) || isShadPs4RuntimePath(filePath)) {
+          return;
+        }
         const steamInfo = parseSteamOfficialBinInfo(filePath);
         const preferredSteamOfficialAccountId =
           getPreferredSteamOfficialAccountId();
@@ -8630,6 +9564,10 @@ module.exports = function makeWatchedFolders({
           return;
         }
         if (handleGogOfficialRootDirEvent(root, dir, schedule)) {
+          return;
+        }
+        if (isShadPs4RuntimePath(root) || isShadPs4RuntimePath(dir)) {
+          schedule();
           return;
         }
 

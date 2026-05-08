@@ -5,6 +5,7 @@ const {
   parsePs4TrophySetDir,
   buildSchemaFromPs4,
   buildSnapshotFromPs4,
+  buildSnapshotFromPs4ProgressFile,
   PS4_LANG_MAP,
 } = require("./shadps4-trophy");
 
@@ -19,6 +20,10 @@ const PS4_CONFIG_FIELDS = [
   "config_path",
   "save_path",
   "trophy_path",
+  "shadps4_npcommid",
+  "shadps4_schema_path",
+  "shadps4_progress_path",
+  "shadps4_user_id",
   "executable",
   "arguments",
   "process_name",
@@ -216,7 +221,7 @@ function updateSchemaFromPs4(schemaDir, parsed) {
   return { updated, added, entries };
 }
 
-function findExistingPs4Config(configsDir, appid) {
+function findExistingPs4Config(configsDir, appid, npcommid = "") {
   if (!fs.existsSync(configsDir)) return null;
   const files = fs
     .readdirSync(configsDir)
@@ -225,9 +230,14 @@ function findExistingPs4Config(configsDir, appid) {
     const full = path.join(configsDir, file);
     try {
       const data = JSON.parse(fs.readFileSync(full, "utf8"));
+      const sameNpCommId =
+        npcommid &&
+        String(data?.shadps4_npcommid || data?.npcommid || "")
+          .trim()
+          .toLowerCase() === String(npcommid).trim().toLowerCase();
       if (
-        String(data?.appid || "").trim() === String(appid) &&
-        String(data?.platform || "").toLowerCase() === "shadps4"
+        String(data?.platform || "").toLowerCase() === "shadps4" &&
+        (String(data?.appid || "").trim() === String(appid) || sameNpCommId)
       ) {
         return { filePath: full, data };
       }
@@ -236,7 +246,17 @@ function findExistingPs4Config(configsDir, appid) {
   return null;
 }
 
+function getPs4CusaFromPath(inputPath) {
+  const parts = String(inputPath || "").split(/[\\/]+/);
+  for (let i = parts.length - 1; i >= 0; i--) {
+    if (/^CUSA\d+$/i.test(parts[i] || "")) return parts[i];
+  }
+  return "";
+}
+
 async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
+  const originalTrophyDir = trophyDir;
+  const cusaFromOriginalPath = getPs4CusaFromPath(originalTrophyDir);
   const appidFromDir = path.basename(
     path.dirname(path.dirname(trophyDir)) || trophyDir
   );
@@ -252,12 +272,53 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     throw err;
   }
 
+  const npcommid =
+    String(options.npcommid || parsed?.npcommid || path.basename(trophyDir) || "")
+      .trim();
+  if (npcommid) {
+    try {
+      const parts = String(trophyDir || "").split(/[\\/]+/);
+      for (let i = parts.length - 1; i >= 0; i--) {
+        if (String(parts[i] || "").toLowerCase() !== "shadps4") continue;
+        const root = parts.slice(0, i + 1).join(path.sep);
+        const modernTrophyDir = path.join(root, "trophy", npcommid);
+        const modernXml = path.join(modernTrophyDir, "Xml", "TROP.XML");
+        if (
+          modernTrophyDir &&
+          path.normalize(modernTrophyDir) !== path.normalize(trophyDir) &&
+          fs.existsSync(modernXml)
+        ) {
+          trophyDir = modernTrophyDir;
+          parsed = parsePs4TrophySetDir(trophyDir);
+        }
+        break;
+      }
+    } catch {}
+  }
+  const appidOverride = String(
+    options.appid ||
+      options.appidOverride ||
+      options.cusa ||
+      cusaFromOriginalPath ||
+      "",
+  ).trim();
+  const parsedAppId =
+    parsed?.appid && /^CUSA\d+$/i.test(String(parsed.appid))
+      ? String(parsed.appid)
+      : "";
   const baseAppId =
-    parsed?.appid || path.basename(path.dirname(path.dirname(trophyDir)));
+    appidOverride ||
+    parsedAppId ||
+    (npcommid && /^NP[A-Z0-9_]+$/i.test(npcommid) ? npcommid : "") ||
+    path.basename(path.dirname(path.dirname(trophyDir)));
   parsed.appid = baseAppId;
   const title = parsed.title || baseAppId;
   const trophyCount = parsed.trophies?.length || 0;
-  const snapshot = buildSnapshotFromPs4(parsed);
+  const progressPath = String(options.progressPath || "").trim();
+  const snapshot =
+    progressPath && fs.existsSync(progressPath)
+      ? buildSnapshotFromPs4ProgressFile(progressPath)
+      : buildSnapshotFromPs4(parsed);
   const schemaRoot = options.schemaRoot || path.join(configsDir, "schema");
   const schemaDir = path.join(schemaRoot, "shadps4", String(baseAppId));
 
@@ -270,7 +331,7 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     };
   }
 
-  const existing = findExistingPs4Config(configsDir, baseAppId);
+  const existing = findExistingPs4Config(configsDir, baseAppId, npcommid);
   const existingName = existing
     ? path.basename(existing.filePath, ".json")
     : "";
@@ -310,8 +371,12 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     appid: String(baseAppId),
     platform: "shadps4",
     config_path: schemaDir,
-    save_path: trophyDir,
+    save_path: progressPath || trophyDir,
     trophy_path: trophyDir,
+    shadps4_npcommid: npcommid,
+    shadps4_schema_path: trophyDir,
+    shadps4_progress_path: progressPath,
+    shadps4_user_id: String(options.userId || ""),
     executable: "",
     arguments: "",
     process_name: "",
@@ -371,4 +436,5 @@ module.exports = {
   generateConfigFromPs4Dir,
   updateSchemaFromPs4,
   buildSnapshotFromPs4,
+  buildSnapshotFromPs4ProgressFile,
 };

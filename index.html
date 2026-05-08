@@ -951,6 +951,52 @@
                     Uses Steam loginusers.vdf when available.
                   </div>
                 </div>
+                <div class="settings-section" style="margin-bottom: 5px">
+                  <h4
+                    id="settings-epicOfficialAccountTitle"
+                    data-i18n="settings.epicOfficialAccount.title"
+                  >
+                    Epic Official Account
+                  </h4>
+                  <div
+                    id="settings-epicOfficialAccountStatus"
+                    class="hint"
+                    style="margin-top: 6px"
+                  >
+                    Not connected.
+                  </div>
+                  <div class="settings-control" style="gap: 8px">
+                    <button
+                      type="button"
+                      id="settings-epicOfficialConnectBtn"
+                      data-i18n="settings.epicOfficialAccount.connect"
+                    >
+                      Connect
+                    </button>
+                    <button
+                      type="button"
+                      id="settings-epicOfficialDisconnectBtn"
+                      data-i18n="settings.epicOfficialAccount.disconnect"
+                    >
+                      Disconnect
+                    </button>
+                    <button
+                      type="button"
+                      id="settings-epicOfficialImportLibraryBtn"
+                      data-i18n="settings.epicOfficialAccount.importLibrary"
+                    >
+                      Import Library
+                    </button>
+                  </div>
+                  <div
+                    id="settings-epicOfficialAccountHint"
+                    data-i18n="settings.epicOfficialAccount.hint"
+                    class="hint"
+                    style="margin-top: 6px; margin-bottom: 30px"
+                  >
+                    Uses Epic login for Epic (Official) configs.
+                  </div>
+                </div>
                 <div class="settings-section">
                   <h4 id="settings-blacklistTitle">Blacklist</h4>
                   <div class="checkbox-control">
@@ -2588,6 +2634,33 @@
 
               <div class="settings-section">
                 <details class="platform-guide-item">
+                  <summary id="platformGuideEpicOfficialSummary">
+                    Epic Official
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideEpicOfficialItem1">
+                      Login and import flow: connect an Epic account in Settings
+                      to import owned games as `epic-official` configs.
+                    </li>
+                    <li id="platformGuideEpicOfficialItem2">
+                      Local detection uses Epic manifest files to resolve
+                      install location, executable path and process name when
+                      available.
+                    </li>
+                    <li id="platformGuideEpicOfficialItem3">
+                      No manual creation from the platform dropdown: configs are
+                      auto-generated.
+                    </li>
+                    <li id="platformGuideEpicOfficialItem4">
+                      Polling runs for the detected running Epic game, or for
+                      an Epic Official config explicitly selected by the user.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
                   <summary id="platformGuideSteamOfficialSummary">
                     Steam (Official)
                   </summary>
@@ -2828,8 +2901,8 @@
                     </li>
                     <li id="platformGuideRescanItem2">
                       For Xenia, RPCS3, shadPS4, Steam Official, Ubisoft Connect
-                      (Official) and GOG Galaxy (Official), schema regenerate is
-                      blocked by design.
+                      (Official), EA Desktop (Official) and GOG Galaxy
+                      (Official), schema regenerate is blocked by design.
                     </li>
                     <li id="platformGuideRescanItem3">
                       For those platforms/emulators, use Folders → Rescan to
@@ -2934,8 +3007,9 @@
                     </li>
                     <li id="platformGuideLogsItem5">
                       Steam Official handling: steam-official:*. Ubisoft Connect
-                      handling: ubisoft-official:*. GOG Galaxy handling:
-                      gog-official:*.
+                      handling: ubisoft-official:*. EA Desktop handling:
+                      ea-official:*. Epic Official handling: epic-official:*.
+                      GOG Galaxy handling: gog-official:*.
                     </li>
                   </ul>
                 </details>
@@ -3264,6 +3338,9 @@
                             EA (Official)
                           </option>
                           <option value="epic">Epic</option>
+                          <option value="epic-official" disabled>
+                            Epic (Official)
+                          </option>
                           <option value="gog">GOG</option>
                           <option value="gog-official" disabled>
                             GOG (Official)
@@ -4200,7 +4277,7 @@
           let out = String(name || "").trim();
           if (!out) return "";
           const rx =
-            /\s*\((?:steam|steam[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
+            /\s*\((?:steam|steam[-\s]?official|epic[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
           while (rx.test(out)) out = out.replace(rx, "").trim();
           return out;
         }
@@ -4441,6 +4518,177 @@
           } catch {}
           return null;
         }
+        let epicCoverProductMap = null;
+        async function loadEpicProductMapForCover() {
+          if (epicCoverProductMap && typeof epicCoverProductMap === "object") {
+            return epicCoverProductMap;
+          }
+          try {
+            const res = await fetch(
+              "https://store-content.ak.epicgames.com/api/content/productmapping/",
+              { cache: "no-store" },
+            );
+            if (res.ok) {
+              const data = await res.json();
+              if (data && typeof data === "object") {
+                epicCoverProductMap = data;
+                return epicCoverProductMap;
+              }
+            }
+          } catch {}
+          epicCoverProductMap = {};
+          return epicCoverProductMap;
+        }
+        async function resolveEpicCoverConfig(targetAppId, options = {}) {
+          const explicitName = String(options?.configName || "").trim();
+          if (explicitName && window.api?.getConfigByName) {
+            try {
+              const cfg = await window.api.getConfigByName(explicitName);
+              if (cfg && !cfg.__failed) return cfg;
+            } catch {}
+          }
+          try {
+            const selectedConfig = document.getElementById("configList")?.value;
+            if (selectedConfig && window.api?.getConfigByName) {
+              const cfg = await window.api.getConfigByName(selectedConfig);
+              const cfgAppId = String(cfg?.appid || cfg?.appId || "").trim();
+              if (
+                cfg &&
+                !cfg.__failed &&
+                cfgAppId &&
+                cfgAppId === String(targetAppId || "").trim()
+              ) {
+                return cfg;
+              }
+            }
+          } catch {}
+          if (window.api?.getConfigByAppId) {
+            try {
+              const cfg = await window.api.getConfigByAppId(
+                String(targetAppId),
+              );
+              if (cfg && !cfg.__failed) return cfg;
+            } catch {}
+          }
+          return null;
+        }
+        function extractEpicStoreHero(data) {
+          return (
+            data?.hero ||
+            (Array.isArray(data?.pages)
+              ? data.pages
+                  .map((page) => page?.data?.hero || page?.hero)
+                  .find(
+                    (hero) =>
+                      hero &&
+                      (hero.portraitBackgroundImageUrl ||
+                        hero.backgroundImageUrl ||
+                        hero.title),
+                  )
+              : null) ||
+            null
+          );
+        }
+        function buildEpicStoreSlugCandidates(targetAppId, config = null) {
+          const candidates = [
+            config?.epic_store_slug,
+            config?.epicStoreSlug,
+            targetAppId,
+            config?.appid,
+            config?.appId,
+            config?.epic_product_id,
+            config?.epicProductId,
+            config?.epic_app_name,
+            config?.epicAppName,
+            config?.appName,
+            config?.epic_catalog_item_id,
+            config?.epicCatalogItemId,
+            config?.catalogItemId,
+            config?.epic_namespace,
+            config?.epicNamespace,
+            config?.namespace,
+          ];
+          return candidates
+            .map((value) => String(value || "").trim())
+            .filter(
+              (value, index, array) => value && array.indexOf(value) === index,
+            );
+        }
+        async function resolveEpicStoreSlugForCover(
+          targetAppId,
+          platformHint,
+          options = {},
+        ) {
+          const config = await resolveEpicCoverConfig(targetAppId, options);
+          const explicitSlug = String(
+            config?.epic_store_slug || config?.epicStoreSlug || "",
+          ).trim();
+          if (explicitSlug) return { slug: explicitSlug, config };
+          const map = await loadEpicProductMapForCover();
+          for (const candidate of buildEpicStoreSlugCandidates(
+            targetAppId,
+            config,
+          )) {
+            const slug =
+              map?.[candidate] || map?.[candidate.toLowerCase()] || null;
+            if (slug) return { slug, config };
+          }
+          return { slug: "", config };
+        }
+        async function fetchEpicStoreProductForCover(
+          targetAppId,
+          platformHint,
+          options = {},
+        ) {
+          const { slug, config } = await resolveEpicStoreSlugForCover(
+            targetAppId,
+            platformHint,
+            options,
+          );
+          if (!slug) return { slug: "", config, data: null };
+          try {
+            const res = await fetch(
+              `https://store-content.ak.epicgames.com/api/en-US/content/products/${encodeURIComponent(slug)}`,
+              { cache: "no-store" },
+            );
+            if (!res.ok) return { slug, config, data: null };
+            const data = await res.json();
+            return { slug, config, data };
+          } catch {
+            return { slug, config, data: null };
+          }
+        }
+        async function downloadFromEpicStoreContent(
+          targetAppId,
+          platformHint,
+          options = {},
+        ) {
+          const platform = normalizeCoverPlatform(platformHint);
+          if (platform !== "epic" && platform !== "epic-official") {
+            return false;
+          }
+          const fetchAppId = String(options?.fetchAppId || "").trim();
+          if (
+            fetchAppId &&
+            fetchAppId !== String(targetAppId || "").trim() &&
+            /^\d+$/.test(fetchAppId)
+          ) {
+            return false;
+          }
+          const { slug, data } = await fetchEpicStoreProductForCover(
+            targetAppId,
+            platformHint,
+            options,
+          );
+          if (!slug || !data) return false;
+          const hero = extractEpicStoreHero(data);
+          const coverUrl = String(
+            hero?.portraitBackgroundImageUrl || hero?.backgroundImageUrl || "",
+          ).trim();
+          if (!coverUrl) return false;
+          await downloadAndSave(targetAppId, coverUrl, platformHint);
+          return true;
+        }
 
         const inFlightCovers = new Map();
         async function downloadFromCdnAndCache(
@@ -4494,6 +4742,36 @@
               steamGridSize,
             });
             if (fallbackOnly) {
+              if (
+                normalizedPlatform === "epic" ||
+                normalizedPlatform === "epic-official"
+              ) {
+                try {
+                  const ok = await downloadFromEpicStoreContent(
+                    targetAppId,
+                    platform,
+                    {
+                      configName: options?.configName || null,
+                      fetchAppId,
+                    },
+                  );
+                  if (ok) {
+                    logCover("info", "epic-store:hit", {
+                      targetAppId,
+                      fetchAppId,
+                      platform,
+                    });
+                    return true;
+                  }
+                } catch (err) {
+                  logCover("warn", "epic-store:fail", {
+                    targetAppId,
+                    fetchAppId,
+                    platform,
+                    error: err?.message || String(err),
+                  });
+                }
+              }
               if (fallbackName) {
                 const ok = await downloadFromSteamGrid(
                   targetAppId,
@@ -4681,7 +4959,12 @@
             const ok = await downloadFromCdnAndCache(
               String(appid),
               fetchAppId,
-              { gameName: coverNameHint, platform },
+              {
+                gameName: coverNameHint,
+                platform,
+                configName:
+                  document.getElementById("configList")?.value || null,
+              },
             );
             if (!ok) return;
 
@@ -5365,10 +5648,21 @@
           await showEmptyAchievementStats(selectedConfig);
           return;
         }
-        const savedAchievementsObj =
-          await window.api.loadSavedAchievements(selectedConfig);
-        if (isSelectionStale()) return;
         const currentConfig = await window.api.getConfigByName(selectedConfig);
+        if (isSelectionStale()) return;
+        const cacheOnlyEpicOfficial =
+          String(currentConfig?.platform || "")
+            .trim()
+            .toLowerCase() === "epic-official" &&
+          !!currentConfig?.appid &&
+          isAppIdInBlacklist(
+            String(currentConfig.appid),
+            currentConfig?.platform || null,
+          );
+        const savedAchievementsObj = await window.api.loadSavedAchievements(
+          selectedConfig,
+          cacheOnlyEpicOfficial ? { cacheOnly: true } : {},
+        );
         if (isSelectionStale()) return;
         if (!skipPlatinumCheck) {
           await maybeRequestPlatinum(
@@ -5719,13 +6013,22 @@
             const name =
               configName || document.getElementById("configList")?.value;
             if (name) {
-              const card = document.querySelector(
-                `.dash-card[data-name="${CSS.escape(name)}"]`,
-              );
-              if (card) {
+              if (typeof window.refreshDashboardCardProgress === "function") {
                 try {
-                  await window.updateCardProgressUI(card, name);
+                  await window.refreshDashboardCardProgress(name, {
+                    reason: "refresh-achievements-table",
+                  });
                 } catch {}
+              } else {
+                window.__clearDashboardSavedCache?.(name);
+                const card = document.querySelector(
+                  `.dash-card[data-name="${CSS.escape(name)}"]`,
+                );
+                if (card) {
+                  try {
+                    await window.updateCardProgressUI(card, name);
+                  } catch {}
+                }
               }
             }
           }
@@ -6074,6 +6377,7 @@
         /\bsteamdb:launch-metadata:/i,
         /\bsteam-appcache:/i,
         /\bsteam-official:(?:list-accounts|librarycache:|preferences-refresh-failed|pending-schema|skip-existing|skip-nonselected-account)\b/i,
+        /\bepic-official:/i,
         /\bauto-select:index-(?:build-failed|built)\b/i,
         /\bDeprecationWarning\b/i,
         /\[DEP\d{4}\]/i,
@@ -6513,6 +6817,7 @@
               "ubisoft-official",
               "ea-official",
               "epic",
+              "epic-official",
               "gog",
               "gog-official",
               "xenia",
@@ -8419,8 +8724,6 @@
 
       positionDropdown.addEventListener("change", updateMainConfig);
 
-      configList.addEventListener("change", updateMainConfig);
-
       if (muteProgressCheckbox) {
         muteProgressCheckbox.addEventListener("change", async () => {
           const key = await resolveProgressMuteKey();
@@ -8493,6 +8796,8 @@
 
       window.addEventListener("DOMContentLoaded", async () => {
         try {
+          const prefs = await loadPreferencesFromDisk();
+          applyShowBlacklistPreference(prefs?.showBlacklistedGames);
           await syncBlacklistList();
           const configsRaw = await window.api.loadConfigs();
           const configs = normalizeConfigList(configsRaw);
@@ -8562,11 +8867,12 @@
           updateBlacklistButtonState(cachedMeta || null);
           updateMainPlayButtonState(cachedMeta);
 
-          if (selectedConfig && !blocked) {
+          if (selectedConfig) {
             window.api.updateConfig({
               configName: selectedConfig,
               preset: presetDropdown.value,
               position: positionDropdown.value,
+              allowBlacklistedSelection: !!blocked,
             });
           }
           const achievementsDataObj = await window.api.loadAchievementData(
@@ -8576,11 +8882,18 @@
             },
           );
           if (isStaleSelection()) return;
-          const savedAchievementsObj =
-            await window.api.loadSavedAchievements(selectedConfig);
-          if (isStaleSelection()) return;
           const currentConfig =
             await window.api.getConfigByName(selectedConfig);
+          if (isStaleSelection()) return;
+          const cacheOnlyEpicOfficial =
+            blocked &&
+            String(currentConfig?.platform || "")
+              .trim()
+              .toLowerCase() === "epic-official";
+          const savedAchievementsObj = await window.api.loadSavedAchievements(
+            selectedConfig,
+            cacheOnlyEpicOfficial ? { cacheOnly: true } : {},
+          );
           if (isStaleSelection()) return;
           const platinumResult = await maybeRequestPlatinum(
             currentConfig,
@@ -9532,10 +9845,78 @@
         }
       }
 
+      let __epicStatusSyncActive = false;
+
+      async function syncEpicOfficialAccountStatus() {
+        if (__epicStatusSyncActive) return null;
+        __epicStatusSyncActive = true;
+        let status = { connected: false, configured: false };
+        try {
+          const statusEl = document.getElementById(
+            "settings-epicOfficialAccountStatus",
+          );
+          const connectBtn = document.getElementById(
+            "settings-epicOfficialConnectBtn",
+          );
+          const disconnectBtn = document.getElementById(
+            "settings-epicOfficialDisconnectBtn",
+          );
+          const importLibraryBtn = document.getElementById(
+            "settings-epicOfficialImportLibraryBtn",
+          );
+          if (!statusEl || !window.api?.getEpicOfficialStatus) return null;
+
+          status = await window.api.getEpicOfficialStatus();
+
+          if (status.connected) {
+            const label =
+              String(status.displayName || "").trim() ||
+              String(status.accountId || "").trim();
+            statusEl.textContent = tUiFmt(
+              "settings.epicOfficialAccount.connected",
+              { account: label },
+              `Connected: ${label}`,
+            );
+          } else if (status.configured === false) {
+            statusEl.textContent = tUi(
+              "settings.epicOfficialAccount.notConfigured",
+              "Epic OAuth client is not configured.",
+            );
+          } else {
+            statusEl.textContent = tUi(
+              "settings.epicOfficialAccount.notConnected",
+              "Not connected.",
+            );
+          }
+
+          if (connectBtn) {
+            connectBtn.disabled =
+              status.connected || status.configured === false;
+          }
+          if (disconnectBtn) {
+            disconnectBtn.disabled = !status.connected;
+          }
+          if (importLibraryBtn) {
+            importLibraryBtn.disabled = !status.connected;
+          }
+          return status;
+        } catch (err) {
+          status = {
+            connected: false,
+            configured: false,
+            error: err?.message || String(err),
+          };
+          return status;
+        } finally {
+          __epicStatusSyncActive = false;
+        }
+      }
+
       async function loadPreferences() {
         const prefs = await loadPreferencesFromDisk();
         renderSteamApiKeyStatusFromPrefs(prefs);
         await syncSteamOfficialAccountDropdown(prefs);
+        await syncEpicOfficialAccountStatus();
         applyShowBlacklistPreference(prefs?.showBlacklistedGames);
         await syncBlacklistList();
         renderBlacklistList();
@@ -10024,10 +10405,147 @@
                 typeof window.refreshSteamOfficialDashboardAfterAccountChange ===
                 "function"
               ) {
-                await window.refreshSteamOfficialDashboardAfterAccountChange().catch(
-                  () => {},
+                await window
+                  .refreshSteamOfficialDashboardAfterAccountChange()
+                  .catch(() => {});
+              }
+            });
+          }
+
+          const epicOfficialConnectBtn = document.getElementById(
+            "settings-epicOfficialConnectBtn",
+          );
+          if (epicOfficialConnectBtn && !epicOfficialConnectBtn.dataset.bound) {
+            epicOfficialConnectBtn.dataset.bound = "1";
+            epicOfficialConnectBtn.addEventListener("click", async () => {
+              const statusEl = document.getElementById(
+                "settings-epicOfficialAccountStatus",
+              );
+              if (statusEl) {
+                statusEl.textContent = tUi(
+                  "settings.epicOfficialAccount.connecting",
+                  "Connecting...",
                 );
               }
+              const result = await window.api.connectEpicOfficial();
+              if (!result?.success) {
+                showNotification(
+                  result?.error ||
+                    tUi(
+                      "settings.epicOfficialAccount.connectFailed",
+                      "Epic connection failed.",
+                    ),
+                  "#f44336",
+                );
+              } else if (window.api?.importEpicOfficialLibrary) {
+                try {
+                  const importResult =
+                    await window.api.importEpicOfficialLibrary();
+                  if (importResult?.success) {
+                    showNotification(
+                      importResult?.message ||
+                        tUi(
+                          "settings.epicOfficialAccount.importSuccess",
+                          "Epic library imported.",
+                        ),
+                      "#4CAF50",
+                    );
+                    if (typeof reloadConfigsDropdown === "function") {
+                      await reloadConfigsDropdown(true).catch(() => {});
+                    }
+                  } else {
+                    showNotification(
+                      importResult?.message ||
+                        tUi(
+                          "settings.epicOfficialAccount.importFailedAfterConnect",
+                          "Epic connected, but library import failed. Retry with Import Epic Library.",
+                        ),
+                      "#FFC107",
+                    );
+                  }
+                } catch (err) {
+                  showNotification(
+                    err?.message ||
+                      tUi(
+                        "settings.epicOfficialAccount.importFailedAfterConnect",
+                        "Epic connected, but library import failed. Retry with Import Epic Library.",
+                      ),
+                    "#FFC107",
+                  );
+                }
+              }
+              await syncEpicOfficialAccountStatus();
+            });
+          }
+
+          const epicOfficialDisconnectBtn = document.getElementById(
+            "settings-epicOfficialDisconnectBtn",
+          );
+          if (
+            epicOfficialDisconnectBtn &&
+            !epicOfficialDisconnectBtn.dataset.bound
+          ) {
+            epicOfficialDisconnectBtn.dataset.bound = "1";
+            epicOfficialDisconnectBtn.addEventListener("click", async () => {
+              const result = await window.api.disconnectEpicOfficial();
+              if (!result?.success) {
+                showNotification(
+                  result?.error ||
+                    tUi(
+                      "settings.epicOfficialAccount.disconnectFailed",
+                      "Epic disconnect failed.",
+                    ),
+                  "#f44336",
+                );
+              }
+              await syncEpicOfficialAccountStatus();
+            });
+          }
+
+          const epicOfficialImportLibraryBtn = document.getElementById(
+            "settings-epicOfficialImportLibraryBtn",
+          );
+          if (
+            epicOfficialImportLibraryBtn &&
+            !epicOfficialImportLibraryBtn.dataset.bound
+          ) {
+            epicOfficialImportLibraryBtn.dataset.bound = "1";
+            epicOfficialImportLibraryBtn.addEventListener("click", async () => {
+              epicOfficialImportLibraryBtn.disabled = true;
+              try {
+                const result = await window.api.importEpicOfficialLibrary();
+                showNotification(
+                  result?.message ||
+                    (result?.success
+                      ? tUi(
+                          "settings.epicOfficialAccount.importSuccess",
+                          "Epic library imported.",
+                        )
+                      : tUi(
+                          "settings.epicOfficialAccount.importFailed",
+                          "Epic library import failed.",
+                        )),
+                  result?.success ? "#4CAF50" : "#f44336",
+                );
+                if (result?.success) {
+                  if (typeof reloadConfigsDropdown === "function") {
+                    await reloadConfigsDropdown(true).catch(() => {});
+                  }
+                  if (typeof window.refreshFoldersList === "function") {
+                    window.refreshFoldersList();
+                  }
+                }
+              } catch (err) {
+                showNotification(
+                  err?.message ||
+                    tUi(
+                      "settings.epicOfficialAccount.importFailed",
+                      "Epic library import failed.",
+                    ),
+                  "#f44336",
+                );
+              }
+              await syncEpicOfficialAccountStatus();
             });
           }
         } catch (e) {
@@ -10048,6 +10566,7 @@
         await loadPreferencesCached();
         const prefs = getCachedPreferences();
         renderSteamApiKeyStatusFromPrefs(prefs);
+        await syncEpicOfficialAccountStatus();
         renderSchemaLanguageSelection(prefs);
         bindSchemaLanguageSelectionEvents();
         const startMaxEl = document.getElementById(
@@ -13250,6 +13769,7 @@
             const ok = await downloadCoverFromCdnAndCache(appid, fetchAppId, {
               gameName: coverName,
               platform: platform || null,
+              configName: task?.name || null,
             });
             if (ok) {
               await refreshDashboardImageByAppId(appid, platform || null);
@@ -13842,6 +14362,65 @@
 
         let __dashNav = { index: 0, cols: 1 };
         let __gpLoopId = null;
+        let __dashboardUserScrollSeq = 0;
+        let __dashboardLastUserScrollAt = 0;
+        let __dashboardDeferredSortTimer = null;
+        let __dashboardDeferredBuildTimer = null;
+
+        function markDashboardUserScroll() {
+          if (!window.__dashboardOpen) return;
+          __dashboardUserScrollSeq += 1;
+          __dashboardLastUserScrollAt = performance.now();
+        }
+
+        function isDashboardUserScrolling(ms = 450) {
+          return (
+            window.__dashboardOpen &&
+            performance.now() - __dashboardLastUserScrollAt < ms
+          );
+        }
+
+        function scheduleDashboardDeferredBuild(reason = "deferred") {
+          if (__dashboardDeferredBuildTimer) {
+            clearTimeout(__dashboardDeferredBuildTimer);
+          }
+          __dashboardDeferredBuildTimer = setTimeout(() => {
+            __dashboardDeferredBuildTimer = null;
+            if (!window.__dashboardOpen) {
+              window.__dashboardNeedsRebuild = true;
+              return;
+            }
+            if (isDashboardUserScrolling(650)) {
+              scheduleDashboardDeferredBuild(reason);
+              return;
+            }
+            buildDashboard().catch(() => {});
+          }, 700);
+        }
+
+        function shouldDeferDashboardBuildForScroll() {
+          return (
+            window.__dashboardOpen &&
+            gridEl?.children?.length > 0 &&
+            isDashboardUserScrolling(650)
+          );
+        }
+
+        window.__markDashboardUserScroll = markDashboardUserScroll;
+
+        (function installDashboardScrollActivityMarkers() {
+          const body = document.getElementById("dashboardBody");
+          if (!body || body.__dashboardScrollActivityInstalled) return;
+          body.__dashboardScrollActivityInstalled = true;
+          body.addEventListener("wheel", markDashboardUserScroll, {
+            passive: true,
+            capture: true,
+          });
+          body.addEventListener("touchmove", markDashboardUserScroll, {
+            passive: true,
+            capture: true,
+          });
+        })();
 
         function getDashCards(onlyVisible = true) {
           const all = Array.from(gridEl.querySelectorAll(".dash-card"));
@@ -13934,6 +14513,104 @@
         }
         window.focusFirstVisibleDashCard = focusFirstVisibleDashCard;
 
+        function captureDashboardScrollAnchor() {
+          if (!window.__dashboardOpen) return null;
+          const body = document.getElementById("dashboardBody");
+          const grid = document.getElementById("dashboardGrid");
+          if (!body || !grid || !grid.children.length) return null;
+          const bodyRect = body.getBoundingClientRect();
+          const cards = Array.from(grid.querySelectorAll(".dash-card"))
+            .filter(
+              (card) =>
+                card.offsetParent !== null &&
+                getComputedStyle(card).display !== "none",
+            )
+            .map((card) => ({ card, rect: card.getBoundingClientRect() }))
+            .filter(
+              ({ rect }) =>
+                rect.bottom > bodyRect.top + 1 &&
+                rect.top < bodyRect.bottom - 1,
+            )
+            .sort((a, b) =>
+              a.rect.top !== b.rect.top
+                ? a.rect.top - b.rect.top
+                : a.rect.left - b.rect.left,
+            );
+          const anchor = cards[0] || null;
+          return {
+            name: anchor?.card?.dataset?.name || "",
+            offset: anchor ? anchor.rect.top - bodyRect.top : 0,
+            scrollTop: body.scrollTop,
+            userScrollSeq: __dashboardUserScrollSeq,
+          };
+        }
+
+        let __dashboardScrollRestoreSeq = 0;
+        function restoreDashboardScrollAnchor(anchor) {
+          if (!anchor || !window.__dashboardOpen) return;
+          if (anchor.userScrollSeq !== __dashboardUserScrollSeq) return;
+          const restoreSeq = ++__dashboardScrollRestoreSeq;
+          const apply = (expectedScrollTop = null) => {
+            const body = document.getElementById("dashboardBody");
+            const grid = document.getElementById("dashboardGrid");
+            if (!body || !grid) return null;
+            if (anchor.userScrollSeq !== __dashboardUserScrollSeq) return null;
+            if (
+              expectedScrollTop !== null &&
+              Math.abs(body.scrollTop - expectedScrollTop) > 2
+            ) {
+              return null;
+            }
+            const name = String(anchor.name || "").trim();
+            const card = name
+              ? grid.querySelector(`.dash-card[data-name="${CSS.escape(name)}"]`)
+              : null;
+            let targetScrollTop = Number(anchor.scrollTop || 0);
+            if (
+              card &&
+              card.offsetParent !== null &&
+              getComputedStyle(card).display !== "none"
+            ) {
+              const bodyRect = body.getBoundingClientRect();
+              const rect = card.getBoundingClientRect();
+              targetScrollTop =
+                body.scrollTop + rect.top - bodyRect.top - (anchor.offset || 0);
+            }
+            body.scrollTop = Math.max(0, targetScrollTop);
+            return body.scrollTop;
+          };
+          const appliedScrollTop = apply();
+          if (appliedScrollTop === null) return;
+          requestAnimationFrame(() => {
+            if (restoreSeq !== __dashboardScrollRestoreSeq) return;
+            apply(appliedScrollTop);
+          });
+        }
+
+        function requestDashboardSortAndFilter(options = {}) {
+          const reason = String(options?.reason || "").trim();
+          const deferWhileScrolling = options?.deferWhileScrolling !== false;
+          if (
+            deferWhileScrolling &&
+            window.__dashboardOpen &&
+            isDashboardUserScrolling()
+          ) {
+            if (__dashboardDeferredSortTimer) {
+              clearTimeout(__dashboardDeferredSortTimer);
+            }
+            __dashboardDeferredSortTimer = setTimeout(() => {
+              __dashboardDeferredSortTimer = null;
+              if (!window.__dashboardOpen) return;
+              applyDashboardSortAndFilter({
+                preserveScroll: true,
+                reason: reason || "deferred-scroll-sort",
+              });
+            }, 520);
+            return;
+          }
+          applyDashboardSortAndFilter(options);
+        }
+
         async function openDashboard() {
           if (isSettingsOpen()) {
             return;
@@ -13981,6 +14658,14 @@
           closeDashboardContextMenu();
           clearDashboardSearch();
           stopDashboardPoll();
+          if (__dashboardDeferredSortTimer) {
+            clearTimeout(__dashboardDeferredSortTimer);
+            __dashboardDeferredSortTimer = null;
+          }
+          if (__dashboardDeferredBuildTimer) {
+            clearTimeout(__dashboardDeferredBuildTimer);
+            __dashboardDeferredBuildTimer = null;
+          }
           setBackgroundInert(false);
           removeBgScrollBlockers();
         }
@@ -14527,6 +15212,8 @@
               return "EA Official";
             case "epic":
               return "Epic";
+            case "epic-official":
+              return "Epic Official";
             case "gog":
               return "GOG";
             case "gog-official":
@@ -14769,6 +15456,11 @@
         async function buildDashboard() {
           __dashboardBuildRequested = true;
           if (__dashboardBuildPromise) return __dashboardBuildPromise;
+          if (shouldDeferDashboardBuildForScroll()) {
+            window.__dashboardNeedsRebuild = true;
+            scheduleDashboardDeferredBuild("scroll-active");
+            return;
+          }
           __dashboardBuildPromise = (async () => {
             while (__dashboardBuildRequested) {
               __dashboardBuildRequested = false;
@@ -14784,6 +15476,9 @@
         async function buildDashboardOnce() {
           if (!gridEl || !window.api) return;
           try {
+            const scrollAnchor = captureDashboardScrollAnchor();
+            // Do not override the current blacklist visibility state from cache here.
+            // The checkbox and blacklist state are already managed elsewhere.
             await syncBlacklistList();
 
             // load configs and enrich with basic metadata
@@ -14955,6 +15650,7 @@
             applyDashboardSortAndFilter();
             reconcileDashboardSelection();
             updateDashboardSelectionUI();
+            restoreDashboardScrollAnchor(scrollAnchor);
 
             (async () => {
               await waitForDetailJobsSeedReady(20000);
@@ -15098,7 +15794,9 @@
               if (ready.length) {
                 updateDashboardCounts(items, ready);
                 scheduleIdle(() => updateDashboardCounts(items, ready));
-                applyDashboardSortAndFilter();
+                requestDashboardSortAndFilter({
+                  reason: "dashboard-detail-ready",
+                });
                 updateDashboardSelectionUI();
               }
               signalDashboardReady();
@@ -15111,7 +15809,7 @@
               const names = cards.map((c) => c.dataset.name).filter(Boolean);
 
               const chunkButtons = bootChunkMode && cards.length > 30;
-              const processCard = (card, idx) => {
+              const processCard = async (card, idx) => {
                 const cfgName = names[idx];
                 const meta = cardMeta.get(cfgName);
                 const data = meta?.data || {};
@@ -15123,20 +15821,30 @@
                   isAppIdInBlacklist(appidValue, data.platform || null);
                 if (card.querySelector(".dash-play")) return;
 
+                const exeExists = exe
+                  ? await window.api.checkExecutableExists(exe)
+                  : false;
+
                 const btn = document.createElement("button");
                 btn.className = "dash-play";
                 btn.setAttribute("aria-label", tUi("dashboard.play", "Play"));
+                btn.setAttribute("tabindex", "-1");
                 btn.title = cardBlacklisted
                   ? tUi(
                       "play.blockedBlacklisted",
                       "Blocked while this game is blacklisted",
                     )
-                  : exe
+                  : exeExists
                     ? tUi("dashboard.play", "Play")
-                    : tUi("dashboard.noExecutable", "No executable set");
+                    : exe
+                      ? tUi(
+                          "dashboard.executableNotFound",
+                          "Executable not found",
+                        )
+                      : tUi("dashboard.noExecutable", "No executable set");
                 btn.innerHTML = faWithFallback("fas fa-play", "▶");
 
-                if (!exe || cardBlacklisted) {
+                if (!exeExists || cardBlacklisted) {
                   btn.classList.add("is-disabled");
                   btn.setAttribute("aria-disabled", "true");
                   btn.setAttribute("tabindex", "-1");
@@ -15261,14 +15969,18 @@
               };
 
               if (!chunkButtons) {
-                cards.forEach(processCard);
+                for (let i = 0; i < cards.length; i++) {
+                  await processCard(cards[i], i);
+                }
               } else {
                 const chunkSize = 20;
                 for (let i = 0; i < cards.length; i += chunkSize) {
+                  const promises = [];
                   const max = Math.min(i + chunkSize, cards.length);
                   for (let j = i; j < max; j += 1) {
-                    processCard(cards[j], j);
+                    promises.push(processCard(cards[j], j));
                   }
+                  await Promise.all(promises);
                   await new Promise(requestAnimationFrame);
                 }
               }
@@ -15486,7 +16198,15 @@
           if (dashboardSavedCache.has(cfgName)) {
             return dashboardSavedCache.get(cfgName);
           }
-          const saved = await window.api.loadSavedAchievements(cfgName);
+          const cfg = await getConfigCached(cfgName);
+          const useCacheOnly =
+            String(cfg?.platform || "")
+              .trim()
+              .toLowerCase() === "epic-official";
+          const saved = await window.api.loadSavedAchievements(
+            cfgName,
+            useCacheOnly ? { cacheOnly: true } : {},
+          );
           const savedMap = saved?.achievements || {};
           dashboardSavedCache.set(cfgName, savedMap);
           return savedMap;
@@ -15558,14 +16278,42 @@
             typeof getMultiSortState === "function"
               ? getMultiSortState()
               : null;
-          if (st && (st.progress !== "off" || st.updated !== "off")) {
-            applyDashboardSortAndFilter();
+          if (
+            !options?.skipSort &&
+            st &&
+            (st.progress !== "off" || st.updated !== "off")
+          ) {
+            requestDashboardSortAndFilter({
+              reason: options?.reason || "card-progress-update",
+            });
           }
         }
 
         try {
           window.updateCardProgressUI = updateCardProgressUI;
         } catch {}
+
+        async function refreshDashboardCardProgress(cfgName, options = {}) {
+          const safeName = String(cfgName || "").trim();
+          if (!safeName) return false;
+          clearDashboardSavedCache(safeName);
+          if (options?.clearSchema === true) {
+            clearDashboardSchemaCache(safeName);
+          }
+          if (!window.__dashboardOpen) {
+            window.__dashboardNeedsRebuild = true;
+            return false;
+          }
+          const card = document.querySelector(
+            `.dash-card[data-name="${CSS.escape(safeName)}"]`,
+          );
+          if (!card) {
+            window.__dashboardNeedsRebuild = true;
+            return false;
+          }
+          await updateCardProgressUI(card, safeName);
+          return true;
+        }
 
         function clearDashboardSavedCache(cfgName) {
           if (!cfgName) return;
@@ -15583,7 +16331,10 @@
 
         async function getSteamOfficialDashboardConfigNames() {
           let configs = Array.from(configMetaIndex.values()).filter(Boolean);
-          if (!configs.length && typeof window.api?.loadConfigs === "function") {
+          if (
+            !configs.length &&
+            typeof window.api?.loadConfigs === "function"
+          ) {
             try {
               configs = normalizeConfigList(await window.api.loadConfigs());
               if (configs.length) {
@@ -15684,7 +16435,10 @@
                 if (!cfgName) continue;
                 try {
                   const progress = await computeCardProgress(cfgName);
-                  await updateCardProgressUI(card, cfgName, { progress });
+                  await updateCardProgressUI(card, cfgName, {
+                    progress,
+                    skipSort: true,
+                  });
                   anyChange = true;
                 } catch {}
                 processed += 1;
@@ -15694,7 +16448,9 @@
               }
               if (anyChange) {
                 try {
-                  applyDashboardSortAndFilter();
+                  requestDashboardSortAndFilter({
+                    reason: options?.reason || "dashboard-progress-refresh",
+                  });
                 } catch {}
               }
             }
@@ -15707,6 +16463,7 @@
           window.__clearDashboardSavedCache = clearDashboardSavedCache;
           window.__clearDashboardSchemaCache = clearDashboardSchemaCache;
           window.__clearDashboardCachesFor = clearDashboardCachesFor;
+          window.refreshDashboardCardProgress = refreshDashboardCardProgress;
           window.refreshDashboardProgress = refreshDashboardProgress;
           window.refreshSteamOfficialDashboardAfterAccountChange =
             refreshSteamOfficialDashboardAfterAccountChange;
@@ -15726,7 +16483,7 @@
           }
           return false;
         }
-        function openCardFromDashboard(card) {
+        async function openCardFromDashboard(card) {
           if (!card) return;
           const safeName = card.getAttribute("data-name");
 
@@ -15758,9 +16515,23 @@
                   return false;
                 };
 
-          const ok = selectInDropdown(safeName);
+          let ok = selectInDropdown(safeName);
+          if (!ok && typeof reloadConfigsDropdown === "function") {
+            await reloadConfigsDropdown(true);
+            ok = selectInDropdown(safeName);
+          }
           if (!ok && window.api?.updateConfig) {
-            window.api.updateConfig({ configName: safeName });
+            const cfg = await getConfigCached(safeName);
+            const blocked =
+              !!cfg?.appid &&
+              isAppIdInBlacklist(String(cfg.appid), cfg?.platform || null);
+            window.api.updateConfig({
+              configName: safeName,
+              allowBlacklistedSelection: blocked,
+            });
+            const lang =
+              document.getElementById("languageSelect")?.value || "english";
+            await buildMainAchievementsTable(safeName, lang).catch(() => {});
           }
 
           const input = document.getElementById("dashboardSearchInput");
@@ -15797,15 +16568,7 @@
             card.focus({ preventScroll: true });
             return;
           }
-          openCardFromDashboard(card);
-
-          const safeName = card.getAttribute("data-name");
-          setActiveCard(safeName);
-
-          const ok = selectConfigInDropdown(safeName);
-          if (!ok && window.api?.updateConfig) {
-            window.api.updateConfig({ configName: safeName });
-          }
+          void openCardFromDashboard(card);
           const input = document.getElementById("dashboardSearchInput");
           if (input && typeof input.resetSearch === "function") {
             input.resetSearch();
@@ -15938,9 +16701,13 @@
           return `${body}, ${article}`;
         }
 
-        function applyDashboardSortAndFilter() {
+        function applyDashboardSortAndFilter(options = {}) {
           const grid = document.getElementById("dashboardGrid");
           if (!grid) return;
+          const scrollAnchor =
+            options?.preserveScroll === true
+              ? captureDashboardScrollAnchor()
+              : null;
           const dashboardBody = document.getElementById("dashboardBody");
           const searchInput = document.getElementById("dashboardSearchInput");
           const activeElement = document.activeElement;
@@ -16085,6 +16852,7 @@
             window.focusFirstVisibleDashCard?.();
           }
           updateDashboardSelectionUI();
+          restoreDashboardScrollAnchor(scrollAnchor);
         }
 
         window.applyDashboardSortAndFilter = applyDashboardSortAndFilter;
@@ -16826,6 +17594,48 @@
             });
           }
         });
+        window.api?.on?.("epic-official:background-ready", () => {
+          dashboardSavedCache.clear();
+          const selectedName =
+            document.getElementById("configList")?.value || "";
+          (async () => {
+            if (
+              selectedName &&
+              typeof window.api?.getConfigByName === "function"
+            ) {
+              try {
+                const selectedMeta =
+                  await window.api.getConfigByName(selectedName);
+                if (
+                  String(selectedMeta?.platform || "").toLowerCase() ===
+                    "epic-official" &&
+                  typeof buildMainAchievementsTable === "function"
+                ) {
+                  await buildMainAchievementsTable(
+                    selectedName,
+                    selectedLanguage || "english",
+                  );
+                }
+              } catch {}
+            }
+            if (!window.__dashboardOpen) {
+              window.__dashboardNeedsRebuild = true;
+              return;
+            }
+            if (
+              window.__dashboardReady === true &&
+              typeof refreshDashboardProgress === "function"
+            ) {
+              scheduleIdle(() => {
+                refreshDashboardProgress({
+                  reason: "epic-official-background-ready",
+                }).catch(() => {});
+              });
+              return;
+            }
+            window.__dashboardNeedsRebuild = true;
+          })().catch(() => {});
+        });
         window.api?.on?.("dashboard:poll-pause", (state) => {
           if (state) {
             pauseDashboardPoll();
@@ -16848,10 +17658,12 @@
         window.api?.on?.("achievements:file-updated", (payload) => {
           const cfg = payload?.configName;
           if (cfg) {
-            dashboardSavedCache.delete(cfg);
+            clearDashboardSavedCache(cfg);
           }
         });
         window.api?.on?.("configs:changed", () => {
+          dashboardConfigCache.clear();
+          dashboardCoverEnsureState.clear();
           dashboardSchemaCache.clear();
           dashboardSavedCache.clear();
         });
@@ -17454,20 +18266,13 @@
           localStorage.setItem(K, String(unlocked));
           if (
             window.__dashboardOpen &&
-            typeof window.updateCardProgressUI === "function"
+            typeof window.refreshDashboardCardProgress === "function"
           ) {
-            const card = document.querySelector(
-              `.dash-card[data-name="${CSS.escape(cfg)}"]`,
-            );
-            if (card) {
-              try {
-                await window.updateCardProgressUI(card, cfg);
-              } catch {}
-            } else if (typeof buildDashboard === "function") {
-              try {
-                await buildDashboard();
-              } catch {}
-            }
+            try {
+              await window.refreshDashboardCardProgress(cfg, {
+                reason: "achievements-file-updated",
+              });
+            } catch {}
           }
         } catch (e) {
           console.warn(
@@ -17697,6 +18502,7 @@
             target.scrollTop += delta;
           }
           markScrollSource("kb");
+          window.__markDashboardUserScroll?.();
           if (overlay === "dashboard") {
             window.focusFirstVisibleDashCard?.();
           }
@@ -17736,6 +18542,7 @@
 
         function rightStickScroll(dy, dx) {
           markScrollSource("rs");
+          window.__markDashboardUserScroll?.();
 
           const overlay =
             (typeof getActiveOverlaySafe === "function" &&
@@ -18273,7 +19080,7 @@
           const active =
             document.querySelector(".dash-card.active") ||
             document.querySelector(".dash-card");
-          if (active) openCardFromDashboard(active); // A/Cross open CONFIG
+          if (active) void openCardFromDashboard(active); // A/Cross open CONFIG
         }
         function dashArrow(key) {
           if (typeof window.dashboardArrow === "function") {

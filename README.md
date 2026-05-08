@@ -7,7 +7,7 @@ A desktop application built with Electron that monitors running games and displa
 - 📈 Progress updates
 - 🖼️ Game image overlays
 - 📊 Real-time achievement dashboard
-- Steam/Uplay/GOG/Epic schema support (auto-detected where possible)
+- Steam/Uplay/GOG/Epic emulators and official schema support (auto-detected where possible)
 
 **Platform:** Windows (uses Task Scheduler + Windows paths).
 
@@ -76,6 +76,19 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
 | `tray-menu.html/js/css`                 | Tray menu UI and logic                               |
 | `playtime-totals.json`                  | Runtime-generated totals (`%APPDATA%/Achievements/`) |
 | `preferences.json`                      | Runtime settings (`%APPDATA%/Achievements/`)         |
+| `LICENSE`                               | Project license file                                 |
+| `package.json`                          | Node.js dependencies and scripts                     |
+| `README.md`                             | This documentation                                   |
+| `style.css`                             | Global styling for all UI components                 |
+| `assets/`                               | Static assets:                                       |
+| `assets/steamdb.json`                   | Steam database cache                                 |
+| `assets/uplay-steam.json`               | Uplay to Steam mapping                               |
+| `assets/locales/`                       | UI translations                                      |
+| `assets/vendor/fontawesome/`            | Font Awesome icons                                   |
+| `build/`                                | Build scripts and manifests                          |
+| `fonts/`                                | Font files and licenses                              |
+| `presets/`                              | `Default Presets` and `Users Presets` themes         |
+| `sounds/`                               | Notification sound assets                            |
 | `utils/`                                | Helper modules and utilities:                        |
 | `utils/auto-config-generator.js`        | Auto-generates game configs from save directories    |
 | `utils/generate_achievements_schema.js` | Scrapes achievement data from Steam API/Web          |
@@ -85,11 +98,49 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
 | `utils/xenia-*`                         | Xenia parsing + schema generation                    |
 | `utils/rpcs3-*`                         | RPCS3 parsing + schema generation                    |
 | `utils/shadps4-*`                       | PS4 trophy parsing + schema generation               |
-| `utils/paths.js`, etc.                  | Other utility modules                                |
-| `presets/`                              | `Default Presets` and `Users Presets` themes         |
-| `sounds/`                               | Notification sound assets                            |
-| `style.css`                             | Global styling for all UI components                 |
-| `assets/locales/`                       | UI translations                                      |
+| `utils/achievement-data.js`             | Achievement data processing                          |
+| `utils/achievement-rarity.js`           | Achievement rarity calculations                      |
+| `utils/config-platform-migrator.js`     | Config migration between platforms                   |
+| `utils/content-version.js`              | Content versioning utilities                         |
+| `utils/controller-input-manager.js`     | Controller input handling                            |
+| `utils/ea-desktop-local.js`             | EA Desktop local integration                         |
+| `utils/epic-api.js`                     | Epic Games API integration                           |
+| `utils/epic-auth.js`                    | Epic authentication                                  |
+| `utils/epic-local-installations.js`     | Epic local installations detection                   |
+| `utils/epic-official.js`                | Epic official achievements                           |
+| `utils/fileCopy.js`                     | File copying utilities                               |
+| `utils/game-cover.js`                   | Game cover image handling                            |
+| `utils/gog-auth.js`                     | GOG authentication                                   |
+| `utils/gog-galaxy-local.js`             | GOG Galaxy local integration                         |
+| `utils/i18n-ui.js`                      | UI internationalization                              |
+| `utils/local-game-name-cache.js`        | Local game name caching                              |
+| `utils/logger.js`                       | Logging utilities                                    |
+| `utils/lumaplay-registry.js`            | LumaPlay registry handling                           |
+| `utils/match-uplay-steam.js`            | Uplay to Steam matching                              |
+| `utils/overlay-controller-service.js`   | Overlay controller service                           |
+| `utils/overlay-shortcut-manager.js`     | Overlay shortcut management                          |
+| `utils/parseStatsBin.js`                | Stats binary parsing                                 |
+| `utils/paths.js`                        | Path utilities                                       |
+| `utils/playtime-store.js`               | Playtime data storage                                |
+| `utils/process-event-watcher.js`        | Process event watching                               |
+| `utils/process-name-utils.js`           | Process name utilities                               |
+| `utils/process-poller.js`               | Process polling                                      |
+| `utils/pslist-wrapper.mjs`              | PS list wrapper                                      |
+| `utils/raw-hid-controller-hub.js`       | Raw HID controller hub                               |
+| `utils/raw-hid-controller-worker.js`    | Raw HID controller worker                            |
+| `utils/raw-hid-profiles.js`             | Raw HID profiles                                     |
+| `utils/rpcs3-config-generator.js`       | RPCS3 config generation                              |
+| `utils/rpcs3-trophy.js`                 | RPCS3 trophy handling                                |
+| `utils/shadps4-config-generator.js`     | ShadPS4 config generation                            |
+| `utils/shadps4-trophy.js`               | ShadPS4 trophy handling                              |
+| `utils/startup-task.js`                 | Startup task management                              |
+| `utils/steam-appcache-generator.js`     | Steam appcache generation                            |
+| `utils/steam-appcache.js`               | Steam appcache handling                              |
+| `utils/steam-local-users.js`            | Steam local users                                    |
+| `utils/steamdb-launch-metadata.js`      | SteamDB launch metadata                              |
+| `utils/ubisoft-connect-local.js`        | Ubisoft Connect local integration                    |
+| `utils/xenia-config-generator.js`       | Xenia config generation                              |
+| `utils/xenia-gpd.js`                    | Xenia GPD handling                                   |
 
 ## 🛠️ Installation
 
@@ -188,7 +239,7 @@ Creates a standalone `.exe` installer in the `dist/` folder.
 **Config JSON fields (reference):**
 
 - `appid` (string) – game id
-- `platform` (string) – steam/uplay/gog/gog-official/epic/xenia/rpcs3/shadps4/steam-official/ubisoft-official
+- `platform` (string) – steam/uplay/gog/gog-official/epic/epic-official/xenia/rpcs3/shadps4/steam-official/ubisoft-official/ea-official
 - `config_path` (string) – folder containing `achievements.json` and `img/`
 - `save_path` (string) – location of save/achievement progress
 - `process_name` (string) – executable name for process tracking
@@ -244,15 +295,25 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 
 #### ShadPS4 Support
 
-1. Use **Watched Folders** add the 'C:\Users\YourName\AppData\Roaming\shadPS4\game_data' folder which is created after the ShadPS4 is configured.
-2. Start and play the game.
+1. Use **Watched Folders** and add the ShadPS4 root folder: `%APPDATA%\shadPS4`.
+2. Start and play the game so ShadPS4 creates the trophy schema and user progress files.
 3. The app will:
-   - read the file ShadPS4 created,
-   - fetch game name, schema and images.
-   - generate configs automatically.
-   - when new achievement is unlocked display the notifications.
+   - read the schema from `%APPDATA%\shadPS4\trophy\<NPWR>\Xml`,
+   - copy trophy icons from `%APPDATA%\shadPS4\trophy\<NPWR>\Icons`,
+   - read unlock progress from `%APPDATA%\shadPS4\home\<userId>\trophy\<NPWR>.xml`,
+   - map NPWR trophy IDs to CUSA game IDs when local ShadPS4 logs or legacy data provide the mapping,
+   - generate configs automatically,
+   - keep separate achievement cache files per ShadPS4 user,
+   - detect user switches by monitoring all local user progress XML files for the selected game,
+   - display notifications when new achievements are unlocked.
 
-#### Steam Official Support
+**Important notes:**
+
+- Modern ShadPS4 storage is based on `%APPDATA%\shadPS4\trophy\<NPWR>` for schema/icons and `%APPDATA%\shadPS4\home\<userId>\trophy\<NPWR>.xml` for progress.
+- Legacy ShadPS4 storage under `%APPDATA%\shadPS4\game_data\<CUSA>\TrophyFiles\trophy00` is still supported, but the modern trophy/progress layout is preferred when both exist.
+- If multiple ShadPS4 users exist, caches are scoped per user so switching users does not overwrite another user's achievement state.
+
+#### Steam Launcher Support
 
 1. Use **Watched Folders** add the 'C:\Program Files (x86)\Steam\appcache\stats' folder.
 2. Start and play the game via Steam.
@@ -262,7 +323,21 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
    - generate configs automatically.
    - when new achievement is unlocked display the notifications.
 
-#### GOG Galaxy Support
+#### Epic Games Launcher Support
+
+1. Connect an Epic account in **Settings** and use **Import Library** to pull owned games.
+2. The app imports owned titles with achievements as `epic-official` configs automatically.
+3. Local detection uses Epic manifest files to resolve install location, executable path and process name when the game is installed.
+4. Polling runs only for the detected running Epic game, or for an Epic Official config explicitly selected by the user.
+5. The dashboard reads the local achievement cache; it does not run a full Epic sync just to render the grid.
+
+**Important notes:**
+
+- `epic-official` configs are auto-generated and are not meant to be created manually from the platform dropdown.
+- The import flow relies on Epic login and local encrypted token storage.
+- Store images are resolved through Epic product metadata first, then fall back to SteamGridDB only when Epic metadata cannot provide a usable image.
+
+#### GOG Galaxy Launcher Support
 
 1. Install and sign in to **GOG Galaxy**.
 2. Use **Watched Folders** add the `%LOCALAPPDATA%\GOG.com\Galaxy\Applications` folder.
@@ -281,7 +356,7 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - If a game only has `Storage\...` data and no `Gameplay\<userId>\gameplay.db` yet, the app will detect the install path but will wait before creating the config.
 - After creation, the config `save_path` points to the concrete `Gameplay\<userId>` folder, while runtime progress is read from `gameplay.db`.
 
-#### Ubisoft Connect Support
+#### Ubisoft Connect Launcher Support
 
 1. Install and sign in to **Ubisoft Connect**.
 2. Use **Watched Folders** add the `%LOCALAPPDATA%\Ubisoft Game Launcher\spool` folder manually.
@@ -300,7 +375,7 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - The config is created only after both the `.spool` file and the local achievements archive are available, so the schema can be generated first.
 - After creation, the config `save_path` points to the concrete `spool\<userId>` folder, while runtime progress is read from `<productId>.spool`.
 
-#### EA Desktop Support
+#### EA Desktop Launcher Support
 
 1. Install and sign in to **EA Desktop**.
 2. Use **Watched Folders** add the `%LOCALAPPDATA%\Electronic Arts\EA Desktop\Logs` folder manually.
@@ -354,9 +429,11 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 ### Runtime Data Locations
 
 - `%APPDATA%/Achievements/configs` – configs
-- `%APPDATA%/Achievements/schema` – generated schemas + images
+- `%APPDATA%/Achievements/configs/schema` – generated achievement schemas + local achievement images
 - `%APPDATA%/Achievements/images` – cached covers
 - `%APPDATA%/Achievements/ach_cache` – cached achievements
+- `%APPDATA%/Achievements/ach_cache_meta.json` – cache metadata used to avoid unnecessary cache rewrites
+- `%APPDATA%/Achievements/logs` – application logs
 - `%APPDATA%/Achievements/playtime-totals.json` – playtime totals
 
 ### Keyboard & Controller Navigation

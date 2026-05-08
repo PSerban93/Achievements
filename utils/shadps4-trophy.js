@@ -201,10 +201,44 @@ function buildSnapshotFromPs4(parsed, prev = {}) {
   return snapshot;
 }
 
+function buildSnapshotFromPs4ProgressFile(progressXmlPath, prev = {}) {
+  const snapshot = { ...prev };
+  if (!progressXmlPath || !fs.existsSync(progressXmlPath)) return snapshot;
+  const $ = parseXmlFile(progressXmlPath);
+  $("trophy").each((_, el) => {
+    const id = $(el).attr("id");
+    if (id === undefined) return;
+    const unlocked =
+      (($(el).attr("unlockstate") || "").toLowerCase() === "true") ||
+      (($(el).attr("unlocked") || "").toLowerCase() === "yes");
+    const tsRaw = $(el).attr("timestamp");
+    const ts = tsRaw ? Number(tsRaw) : null;
+    const key = String(id);
+    const prevEntry = snapshot[key] || {};
+    if (unlocked) {
+      snapshot[key] = {
+        ...prevEntry,
+        earned: true,
+        earned_time: ts || prevEntry.earned_time || null,
+      };
+    } else if (!snapshot[key]) {
+      snapshot[key] = { earned: false, earned_time: 0 };
+    }
+  });
+  for (const [key, entry] of Object.entries(snapshot)) {
+    if (!entry || typeof entry !== "object") continue;
+    if (entry.earned_time == null) {
+      snapshot[key] = { ...entry, earned_time: 0 };
+    }
+  }
+  return snapshot;
+}
+
 module.exports = {
   parsePs4TrophySetDir,
   buildSchemaFromPs4,
   buildSnapshotFromPs4,
+  buildSnapshotFromPs4ProgressFile,
   PS4_LANG_MAP,
   mapLangFromFilename,
   ttypeToLabel,

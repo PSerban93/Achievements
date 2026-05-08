@@ -8,6 +8,7 @@ const VALID_PLATFORMS = new Set([
   "ubisoft-official",
   "ea-official",
   "epic",
+  "epic-official",
   "gog",
   "gog-official",
   "xenia",
@@ -27,16 +28,26 @@ function sanitizeAppId(value) {
   return /^[0-9a-fA-F]+$/.test(raw) ? raw : "";
 }
 
+function sanitizeEpicOfficialAppId(value) {
+  const raw = String(value || "").trim();
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(raw) ? raw : "";
+}
+
 function sanitizeAppIdForPlatform(value, platform) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   const normalized = normalizePlatform(platform);
+  if (normalized === "epic-official") {
+    return sanitizeEpicOfficialAppId(raw);
+  }
   if (normalized === "rpcs3") {
     // Trophy set ids like NPWR12345_00
     return /^NP[A-Z0-9_]+$/i.test(raw) ? raw : "";
   }
   if (normalized === "shadps4") {
-    return /^CUSA[0-9]+$/i.test(raw) ? raw : "";
+    return /^CUSA[0-9]+$/i.test(raw) || /^NP[A-Z0-9_]+$/i.test(raw)
+      ? raw
+      : "";
   }
   if (normalized === "xenia") {
     if (/^0x[0-9a-f]+$/i.test(raw)) return raw.slice(2);
@@ -46,14 +57,72 @@ function sanitizeAppIdForPlatform(value, platform) {
   return sanitizeAppId(raw);
 }
 
+function inferOfficialPlatformFromMarkers(config = {}) {
+  const configPath = String(config?.config_path || "").trim().toLowerCase();
+  const schemaNeedle = `${path.sep}schema${path.sep}`;
+  if (configPath.includes(`${schemaNeedle}steam-official${path.sep}`)) {
+    return "steam-official";
+  }
+  if (configPath.includes(`${schemaNeedle}gog-official${path.sep}`)) {
+    return "gog-official";
+  }
+  if (configPath.includes(`${schemaNeedle}ubisoft-official${path.sep}`)) {
+    return "ubisoft-official";
+  }
+  if (configPath.includes(`${schemaNeedle}ea-official${path.sep}`)) {
+    return "ea-official";
+  }
+  if (configPath.includes(`${schemaNeedle}epic-official${path.sep}`)) {
+    return "epic-official";
+  }
+
+  const hasEpicOfficialProductMarker = Boolean(
+    config?.epic_product_id || config?.epicProductId,
+  );
+  const hasEpicOfficialNamespaceMarker = Boolean(
+    config?.epic_namespace || config?.epicNamespace,
+  );
+  const hasEpicOfficialAccountMarker = Boolean(
+    config?.epic_account_id || config?.epicAccountId,
+  );
+  const hasEpicOfficialCatalogMarker = Boolean(
+    config?.epic_catalog_item_id || config?.epicCatalogItemId,
+  );
+  const hasEpicOfficialAppMarker = Boolean(
+    config?.epic_app_name || config?.epicAppName,
+  );
+  const hasEpicOfficialIdentityMarker =
+    hasEpicOfficialProductMarker || hasEpicOfficialNamespaceMarker;
+  if (
+    (hasEpicOfficialAccountMarker && hasEpicOfficialIdentityMarker) ||
+    (hasEpicOfficialIdentityMarker &&
+      (hasEpicOfficialCatalogMarker || hasEpicOfficialAppMarker))
+  ) {
+    return "epic-official";
+  }
+  if (config?.gog_gameplay_db || config?.gog_client_id || config?.gog_user_id) {
+    return "gog-official";
+  }
+  if (config?.ubisoft_spool_file) {
+    return "ubisoft-official";
+  }
+  if (config?.ea_log_file) {
+    return "ea-official";
+  }
+  return "";
+}
+
 function inferPlatformAndSteamId({ config, mapping }) {
   const currentPlatform = normalizePlatform(config.platform);
+  const markerPlatform = inferOfficialPlatformFromMarkers(config);
+  const rawAppId = config.appid || config.appId || config.steamAppId;
   const appid =
+    sanitizeAppIdForPlatform(rawAppId, currentPlatform) ||
     sanitizeAppId(config.appid) ||
     sanitizeAppId(config.appId) ||
     sanitizeAppId(config.steamAppId);
   let steamAppId = sanitizeAppId(config.steamAppId);
-  let platform = currentPlatform;
+  let platform = markerPlatform || currentPlatform;
 
   const mappedSteamId =
     mapping && mapping.steam_appid ? sanitizeAppId(mapping.steam_appid) : "";
@@ -84,6 +153,7 @@ function inferPlatformAndSteamId({ config, mapping }) {
     }
   } else if (
     platform === "epic" ||
+    platform === "epic-official" ||
     platform === "gog" ||
     platform === "gog-official"
   ) {
@@ -135,6 +205,7 @@ function migrateConfigPlatforms({
     ).trim();
     const normalizedPlatform = normalizePlatform(data.platform);
     const appid =
+      sanitizeAppIdForPlatform(rawAppId, normalizedPlatform) ||
       sanitizeAppId(rawAppId) ||
       (normalizedPlatform === "rpcs3" ? rawAppId : "");
     const mapping = appid ? mappingByUplayId.get(appid) : null;
@@ -174,6 +245,7 @@ function migrateConfigPlatforms({
 
     const finalPlatform = normalizePlatform(data.platform) || "steam";
     const indexAppId =
+      sanitizeAppIdForPlatform(rawAppId, finalPlatform) ||
       sanitizeAppId(rawAppId) ||
       (finalPlatform === "rpcs3" ? rawAppId : "") ||
       (finalPlatform === "shadps4" ? rawAppId : "");
@@ -236,12 +308,20 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
       !platforms?.has("uplay") &&
       !platforms?.has("gog") &&
       !platforms?.has("epic");
+    const prefersEpicOfficial =
+      platforms?.has("epic-official") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog") &&
+      !platforms?.has("epic");
     const targetPlatform = prefersUplay
       ? "uplay"
       : prefersGogOfficial
         ? "gog-official"
       : prefersEaOfficial
         ? "ea-official"
+      : prefersEpicOfficial
+        ? "epic-official"
       : prefersGog
         ? "gog"
         : "steam";
@@ -277,12 +357,13 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
       } catch {
         continue;
       }
+      const platform = normalizePlatform(data?.platform) || "steam";
       const appid =
+        sanitizeAppIdForPlatform(data?.appid, platform) ||
         sanitizeAppId(data?.appid) ||
         sanitizeAppId(data?.appId) ||
         sanitizeAppId(data?.steamAppId);
       if (!appid) continue;
-      const platform = normalizePlatform(data?.platform) || "steam";
     const storagePlatform =
       platform === "uplay"
         ? "uplay"
@@ -294,6 +375,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
             ? "gog"
             : platform === "epic"
               ? "epic"
+              : platform === "epic-official"
+                ? "epic-official"
               : platform === "gog-official"
                 ? "gog-official"
               : platform === "xenia"
@@ -341,6 +424,7 @@ module.exports = {
   normalizePlatform,
   sanitizeAppId,
   sanitizeAppIdForPlatform,
+  inferOfficialPlatformFromMarkers,
   inferPlatformAndSteamId,
   migrateSchemaStorage,
 };

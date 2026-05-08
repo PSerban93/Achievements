@@ -41,9 +41,13 @@ contextBridge.exposeInMainWorld("api", {
       return { achievements: null, error: String(e?.message || e) };
     }
   },
-  loadSavedAchievements: async (configName) => {
+  loadSavedAchievements: async (configName, options = {}) => {
     try {
-      return await ipcRenderer.invoke("load-saved-achievements", configName);
+      return await ipcRenderer.invoke(
+        "load-saved-achievements",
+        configName,
+        options,
+      );
     } catch (e) {
       return { achievements: {}, error: String(e?.message || e) };
     }
@@ -121,6 +125,11 @@ contextBridge.exposeInMainWorld("api", {
   loadPreferences: () => ipcRenderer.invoke("load-preferences"),
   listSteamOfficialAccounts: () =>
     ipcRenderer.invoke("steam-official:list-accounts"),
+  getEpicOfficialStatus: () => ipcRenderer.invoke("epic-official:status"),
+  connectEpicOfficial: () => ipcRenderer.invoke("epic-official:connect"),
+  disconnectEpicOfficial: () => ipcRenderer.invoke("epic-official:disconnect"),
+  importEpicOfficialLibrary: () =>
+    ipcRenderer.invoke("epic-official:import-library"),
   getSounds: () => ipcRenderer.invoke("get-sound-files"),
   getSoundFullPath: (fileName) =>
     ipcRenderer.invoke("get-sound-path", fileName),
@@ -129,8 +138,7 @@ contextBridge.exposeInMainWorld("api", {
   onProgressUpdate: (callback) =>
     ipcRenderer.on("show-progress", (event, data) => callback(data)),
   closeNotificationWindow: () => ipcRenderer.send("close-notification-window"),
-  notificationRenderReady: () =>
-    ipcRenderer.send("notification-render-ready"),
+  notificationRenderReady: () => ipcRenderer.send("notification-render-ready"),
   parseStatsBin: (filePath) => ipcRenderer.invoke("parse-stats-bin", filePath),
   selectFile: () => ipcRenderer.invoke("select-file"),
   getConfigByName: async (name) => {
@@ -161,6 +169,8 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.send("overlay:visibility-ack", payload),
   checkLocalGameImage: (appid, platform) =>
     ipcRenderer.invoke("checkLocalGameImage", appid, platform),
+  checkExecutableExists: (exePath) =>
+    ipcRenderer.invoke("checkExecutableExists", exePath),
   saveGameImage: (appid, buffer, platform) =>
     ipcRenderer.invoke("saveGameImage", appid, buffer, platform),
   onImageUpdate: (callback) =>
@@ -305,6 +315,10 @@ contextBridge.exposeInMainWorld("electron", {
         "save-preferences",
         "load-preferences",
         "steam-official:list-accounts",
+        "epic-official:status",
+        "epic-official:connect",
+        "epic-official:disconnect",
+        "epic-official:import-library",
         "get-sound-files",
         "get-sound-path",
         "resolve-icon-url",
@@ -313,6 +327,7 @@ contextBridge.exposeInMainWorld("electron", {
         "selectExecutable",
         "launchExecutable",
         "checkLocalGameImage",
+        "checkExecutableExists",
         "saveGameImage",
         "generate-auto-configs",
         "blacklist:list",

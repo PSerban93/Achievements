@@ -361,8 +361,12 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
         "ea-official",
         "steam",
         "epic",
+        "epic-official",
         "gog",
         "gog-official",
+        "xenia",
+        "rpcs3",
+        "shadps4",
       ].forEach((plat) =>
         candidates.add(path.join(base, plat, appid, "achievements.json"))
       );

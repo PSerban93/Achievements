@@ -2,6 +2,7 @@ const {
   app,
   BrowserWindow,
   ipcMain,
+  session,
   dialog,
   screen,
   globalShortcut,
@@ -103,6 +104,17 @@ const {
 } = require("./utils/overlay-controller-service");
 const { autoUpdater } = require("electron-updater");
 const getConfigInflight = new Map();
+const epicOfficialLoadSyncInflight = new Map();
+const epicOfficialRecentLoadSync = new Map();
+const epicOfficialPassiveLoadSync = new Map();
+const epicOfficialSilentSeedState = new Map();
+const epicOfficialCacheOnlyLogState = new Map();
+const epicOfficialRecentUnlockNotificationState = new Map();
+const EPIC_OFFICIAL_LOAD_SYNC_DEDUPE_MS = 2000;
+const EPIC_OFFICIAL_PASSIVE_SYNC_TTL_MS = 10 * 60 * 1000;
+const EPIC_OFFICIAL_SILENT_SEED_TTL_MS = 6 * 60 * 60 * 1000;
+const EPIC_OFFICIAL_CACHE_ONLY_LOG_TTL_MS = 60 * 1000;
+const EPIC_OFFICIAL_UNLOCK_NOTIFY_DEDUPE_MS = 30000;
 const { createLogger } = require("./utils/logger");
 const {
   getProcessExecutableNames,
@@ -126,6 +138,7 @@ const execLogger = createLogger("execution");
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
 const updateLogger = createLogger("updates");
+const epicOfficialLogger = createLogger("epic-official");
 const controllerLogger = createLogger("controller", {
   level: process.env.CONTROLLER_LOG_LEVEL || "info",
 });
@@ -143,6 +156,156 @@ const PRESET_FOLDER_DEFAULT = "Default Presets";
 const PRESET_FOLDER_USERS = "Users Presets";
 const PRESET_FOLDER_DEFAULT_LEGACY = "Scalable";
 const PRESET_FOLDER_USERS_LEGACY = "Non-scalable";
+
+function buildEpicOfficialLoadSyncKey(configName, accountId, productId) {
+  return [
+    sanitizeConfigName(configName || ""),
+    normalizeEpicAccountId(accountId) || "",
+    String(productId || "").trim(),
+  ].join("::");
+}
+
+function buildEpicOfficialPassiveSyncResult(config, achievements) {
+  return {
+    achievements: achievements || {},
+    save_path: config?.save_path || "",
+  };
+}
+
+function countEpicOfficialEarnedAchievements(snapshot = {}) {
+  let count = 0;
+  for (const entry of Object.values(snapshot || {})) {
+    if (entry && typeof entry === "object" && entry.earned === true) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function getEpicOfficialSilentSeedKey(configName, accountId, productId) {
+  return buildEpicOfficialLoadSyncKey(configName, accountId, productId);
+}
+
+function getEpicOfficialSilentSeedEntry(configName, accountId, productId) {
+  const key = getEpicOfficialSilentSeedKey(configName, accountId, productId);
+  if (!key) return null;
+  const entry = epicOfficialSilentSeedState.get(key) || null;
+  if (!entry) return null;
+  if (
+    entry.timestamp &&
+    Date.now() - entry.timestamp > EPIC_OFFICIAL_SILENT_SEED_TTL_MS
+  ) {
+    epicOfficialSilentSeedState.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function clearEpicOfficialSilentSeed(
+  configName,
+  accountId,
+  productId,
+  reason = "cleared",
+  meta = {},
+) {
+  const key = getEpicOfficialSilentSeedKey(configName, accountId, productId);
+  if (!key) return;
+  const existing = epicOfficialSilentSeedState.get(key);
+  if (!existing) return;
+  epicOfficialSilentSeedState.delete(key);
+  epicOfficialLogger.info("epic-official:silent-seed:cleared", {
+    configName: sanitizeConfigName(configName || "") || null,
+    accountId: normalizeEpicAccountId(accountId) || null,
+    productId: String(productId || "").trim() || null,
+    expectedUnlocked: Number(existing.expectedUnlocked || 0) || 0,
+    reason,
+    ...meta,
+  });
+}
+
+function markEpicOfficialSilentSeed(
+  configName,
+  accountId,
+  productId,
+  options = {},
+) {
+  const normalizedConfig = sanitizeConfigName(configName || "");
+  const normalizedAccountId = normalizeEpicAccountId(accountId) || "";
+  const normalizedProductId = String(productId || "").trim();
+  const expectedUnlocked = Math.max(
+    0,
+    Number(options?.expectedUnlocked || 0) || 0,
+  );
+  if (!normalizedConfig || !normalizedAccountId || !normalizedProductId) return;
+  if (expectedUnlocked <= 0) return;
+  const key = getEpicOfficialSilentSeedKey(
+    normalizedConfig,
+    normalizedAccountId,
+    normalizedProductId,
+  );
+  epicOfficialSilentSeedState.set(key, {
+    timestamp: Date.now(),
+    expectedUnlocked,
+    reason: String(options?.reason || "").trim() || "seed",
+  });
+  epicOfficialLogger.info("epic-official:silent-seed:marked", {
+    configName: normalizedConfig,
+    accountId: normalizedAccountId,
+    productId: normalizedProductId,
+    expectedUnlocked,
+    reason: String(options?.reason || "").trim() || "seed",
+  });
+}
+
+function shouldSuppressEpicOfficialUnlocksFromSilentSeed(
+  configName,
+  accountId,
+  productId,
+  snapshot = {},
+  delta = { unlockedKeys: [] },
+) {
+  const entry = getEpicOfficialSilentSeedEntry(
+    configName,
+    accountId,
+    productId,
+  );
+  if (!entry) return false;
+  const earnedCount = countEpicOfficialEarnedAchievements(snapshot);
+  const expectedUnlocked = Math.max(
+    0,
+    Number(entry.expectedUnlocked || 0) || 0,
+  );
+  if (!Array.isArray(delta?.unlockedKeys) || !delta.unlockedKeys.length) {
+    if (earnedCount >= expectedUnlocked) {
+      clearEpicOfficialSilentSeed(
+        configName,
+        accountId,
+        productId,
+        "reconciled-no-delta",
+        { earnedCount, expectedUnlocked },
+      );
+    }
+    return false;
+  }
+  epicOfficialLogger.info("epic-official:silent-seed:suppress", {
+    configName: sanitizeConfigName(configName || "") || null,
+    accountId: normalizeEpicAccountId(accountId) || null,
+    productId: String(productId || "").trim() || null,
+    unlockedCount: delta.unlockedKeys.length,
+    earnedCount,
+    expectedUnlocked,
+  });
+  if (earnedCount >= expectedUnlocked) {
+    clearEpicOfficialSilentSeed(
+      configName,
+      accountId,
+      productId,
+      "reconciled-after-suppress",
+      { earnedCount, expectedUnlocked },
+    );
+  }
+  return true;
+}
 
 function getPresetsMigrationVersion() {
   if (cachedPresetsMigrationVersion) return cachedPresetsMigrationVersion;
@@ -701,6 +864,105 @@ function resolveSteamOfficialCacheAccountId(
   return "";
 }
 
+function resolveEpicOfficialCacheAccountId(
+  configName,
+  platform = "steam",
+  options = null,
+) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  if (normalizedPlatform !== "epic-official") return "";
+  const resolved = normalizeAchievementCacheOptions(options);
+  const explicitAccountId = normalizeEpicAccountId(
+    resolved.accountId || resolved.epicAccountId || resolved.epic_account_id,
+  );
+  if (explicitAccountId) return explicitAccountId;
+  const cfg = readConfigForAchievementCache(configName);
+  return (
+    normalizeEpicAccountId(cachedPreferences?.epicOfficialAccountId) ||
+    normalizeEpicAccountId(cfg?.epic_account_id)
+  );
+}
+
+function resolvePreferredEpicOfficialAccountId(
+  config = {},
+  token = null,
+  options = null,
+) {
+  const explicitAccountId = normalizeEpicAccountId(
+    options?.accountId || options?.epicAccountId || options?.epic_account_id,
+  );
+  if (explicitAccountId) return explicitAccountId;
+  return (
+    normalizeEpicAccountId(cachedPreferences?.epicOfficialAccountId) ||
+    normalizeEpicAccountId(token?.account_id) ||
+    normalizeEpicAccountId(config?.epic_account_id)
+  );
+}
+
+function resolveScopedAchievementCacheAccountId(
+  configName,
+  platform = "steam",
+  options = null,
+) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  if (normalizedPlatform === "steam-official") {
+    return resolveSteamOfficialCacheAccountId(
+      configName,
+      normalizedPlatform,
+      options,
+    );
+  }
+  if (normalizedPlatform === "epic-official") {
+    return resolveEpicOfficialCacheAccountId(
+      configName,
+      normalizedPlatform,
+      options,
+    );
+  }
+  return "";
+}
+
+function resolveShadPs4AchievementCacheUserId(
+  configName,
+  platform = "steam",
+  options = null,
+) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  if (normalizedPlatform !== "shadps4") return "";
+  const resolved = normalizeAchievementCacheOptions(options);
+  const explicitUserId = String(
+    resolved.shadps4UserId ||
+      resolved.shadps4_user_id ||
+      resolved.userId ||
+      resolved.user_id ||
+      "",
+  ).trim();
+  if (explicitUserId) return sanitizeConfigName(explicitUserId) || explicitUserId;
+
+  const candidatePaths = [
+    resolved.progressPath,
+    resolved.progress_path,
+    resolved.filePath,
+    resolved.savePath,
+    resolved.save_path,
+  ];
+  for (const candidate of candidatePaths) {
+    const userId = getPs4UserIdFromProgressPath(candidate);
+    if (userId) return sanitizeConfigName(userId) || userId;
+  }
+
+  const cfg = readConfigForAchievementCache(configName);
+  const configuredUserId = String(cfg?.shadps4_user_id || "").trim();
+  if (configuredUserId) {
+    return sanitizeConfigName(configuredUserId) || configuredUserId;
+  }
+  const progressPath = cfg ? resolvePs4ProgressPathForConfig(cfg) : "";
+  const resolvedUserId = getPs4UserIdFromProgressPath(progressPath);
+  return resolvedUserId
+    ? sanitizeConfigName(resolvedUserId) || resolvedUserId
+    : "";
+}
+
 const DEFAULT_PREFERENCES = {
   startInTray: false,
   screenshotFolder: getDefaultScreenshotFolder(),
@@ -740,7 +1002,9 @@ const DEFAULT_PREFERENCES = {
   overlayControllerSupportEnabled: false,
   overlayControllerBackend: "auto",
   overlayControllerDebugLogging: false,
-  overlayControllerToggleBinding: [...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING],
+  overlayControllerToggleBinding: [
+    ...DEFAULT_OVERLAY_CONTROLLER_TOGGLE_BINDING,
+  ],
   overlayControllerControlModeBinding: [
     ...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
   ],
@@ -748,6 +1012,7 @@ const DEFAULT_PREFERENCES = {
   schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
   steamOfficialSteamId: "",
+  epicOfficialAccountId: "",
 };
 
 const UI_LOCALE_DIR = path.join(__dirname, "assets", "locales");
@@ -907,7 +1172,8 @@ function normalizeAppIdValue(value) {
     /^[0-9a-fA-F]+$/.test(trimmed) ||
     /^CUSA\d+$/i.test(trimmed) ||
     /^NP[A-Z0-9_]+$/i.test(trimmed) ||
-    /^0x[0-9a-f]+$/i.test(trimmed)
+    /^0x[0-9a-f]+$/i.test(trimmed) ||
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(trimmed)
   ) {
     return trimmed;
   }
@@ -915,7 +1181,9 @@ function normalizeAppIdValue(value) {
 }
 
 function normalizeBlacklistPlatformValue(value) {
-  const trimmed = String(value || "").trim().toLowerCase();
+  const trimmed = String(value || "")
+    .trim()
+    .toLowerCase();
   return trimmed || "steam";
 }
 
@@ -1294,6 +1562,7 @@ function findConfigDirFromSelection(selDir, appid = "", platform = "") {
       "ea-official",
       "steam",
       "epic",
+      "epic-official",
       "gog",
       "gog-official",
     ].forEach((plat) =>
@@ -1472,6 +1741,219 @@ function resolveTropusrPathForConfig(config) {
   return direct;
 }
 
+function isPs4ProgressXmlPath(filePath) {
+  const base = path.basename(String(filePath || ""));
+  if (!/^NP[A-Z0-9_]+\.xml$/i.test(base)) return false;
+  const parts = String(filePath || "").split(/[\\/]+/);
+  const len = parts.length;
+  return (
+    len >= 4 &&
+    parts[len - 2]?.toLowerCase() === "trophy" &&
+    Boolean(parts[len - 3]) &&
+    parts[len - 4]?.toLowerCase() === "home"
+  );
+}
+
+function getPs4UserIdFromProgressPath(filePath) {
+  if (!isPs4ProgressXmlPath(filePath)) return "";
+  const parts = String(filePath || "").split(/[\\/]+/);
+  return String(parts[parts.length - 3] || "").trim();
+}
+
+function getPs4ProgressFileMtimeMs(progressPath) {
+  try {
+    return fs.statSync(progressPath).mtimeMs || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function collectPs4ProgressFilesForConfig(root, npcommid, preferredUser = "") {
+  const normalizedNpCommId = String(npcommid || "").trim();
+  if (!root || !normalizedNpCommId) return [];
+  const homeDir = path.join(root, "home");
+  const seen = new Set();
+  const out = [];
+  const addCandidate = (userId, progressPath) => {
+    if (!userId || !progressPath || !fs.existsSync(progressPath)) return;
+    const key = path.normalize(progressPath).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({
+      userId: String(userId),
+      progressPath,
+      mtimeMs: getPs4ProgressFileMtimeMs(progressPath),
+      preferred: Boolean(
+        preferredUser && String(userId) === String(preferredUser),
+      ),
+    });
+  };
+  if (preferredUser) {
+    addCandidate(
+      preferredUser,
+      path.join(homeDir, preferredUser, "trophy", `${normalizedNpCommId}.xml`),
+    );
+  }
+  try {
+    for (const ent of fs.readdirSync(homeDir, { withFileTypes: true })) {
+      if (!ent.isDirectory() || !ent.name) continue;
+      addCandidate(
+        ent.name,
+        path.join(homeDir, ent.name, "trophy", `${normalizedNpCommId}.xml`),
+      );
+    }
+  } catch {}
+  out.sort((a, b) => {
+    if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+    if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+    return String(a.userId).localeCompare(String(b.userId), undefined, {
+      numeric: true,
+      sensitivity: "base",
+    });
+  });
+  return out;
+}
+
+function selectPs4ProgressFileForConfig(
+  root,
+  npcommid,
+  preferredUser = "",
+  direct = "",
+) {
+  const candidates = collectPs4ProgressFilesForConfig(
+    root,
+    npcommid,
+    preferredUser,
+  );
+  if (direct && fs.existsSync(direct)) {
+    const directUser = getPs4UserIdFromProgressPath(direct) || preferredUser;
+    const directKey = path.normalize(direct).toLowerCase();
+    if (
+      !candidates.some(
+        (candidate) =>
+          path.normalize(candidate.progressPath).toLowerCase() === directKey,
+      )
+    ) {
+      candidates.push({
+        userId: directUser,
+        progressPath: direct,
+        mtimeMs: getPs4ProgressFileMtimeMs(direct),
+        preferred: Boolean(
+          preferredUser && String(directUser) === String(preferredUser),
+        ),
+      });
+    }
+    candidates.sort((a, b) => {
+      if (b.mtimeMs !== a.mtimeMs) return b.mtimeMs - a.mtimeMs;
+      if (a.preferred !== b.preferred) return a.preferred ? -1 : 1;
+      return String(a.userId).localeCompare(String(b.userId), undefined, {
+        numeric: true,
+        sensitivity: "base",
+      });
+    });
+  }
+  return candidates[0] || null;
+}
+
+function resolvePs4TrophyDirForConfig(config) {
+  if (!config) return "";
+  const npcommid = String(config.shadps4_npcommid || "").trim();
+  if (npcommid) {
+    const modernRoot = resolveShadPs4RootForConfig(config);
+    const modernSchema = modernRoot
+      ? path.join(modernRoot, "trophy", npcommid)
+      : "";
+    if (modernSchema && fs.existsSync(modernSchema)) return modernSchema;
+  }
+  const schemaPath =
+    typeof config.shadps4_schema_path === "string" &&
+    config.shadps4_schema_path
+      ? config.shadps4_schema_path
+      : "";
+  if (schemaPath && fs.existsSync(schemaPath)) return schemaPath;
+  const trophyPath =
+    typeof config.trophy_path === "string" && config.trophy_path
+      ? config.trophy_path
+      : "";
+  if (trophyPath && fs.existsSync(trophyPath)) return trophyPath;
+  const savePath = typeof config.save_path === "string" ? config.save_path : "";
+  if (savePath) {
+    try {
+      const stat = fs.statSync(savePath);
+      if (stat.isDirectory()) return savePath;
+    } catch {}
+  }
+  return schemaPath || trophyPath || "";
+}
+
+function resolveShadPs4RootForConfig(config) {
+  const candidates = [
+    config?.shadps4_schema_path,
+    config?.trophy_path,
+    config?.shadps4_progress_path,
+    config?.save_path,
+    config?.config_path,
+  ].filter(Boolean);
+  const envRoot = process.env.APPDATA && path.join(process.env.APPDATA, "shadPS4");
+  if (envRoot) candidates.push(envRoot);
+  for (const candidate of candidates) {
+    const raw = String(candidate || "");
+    if (!raw) continue;
+    const parts = raw.split(/[\\/]+/);
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i]?.toLowerCase() !== "shadps4") continue;
+      const root = parts.slice(0, i + 1).join(path.sep);
+      if (root && fs.existsSync(root)) return root;
+    }
+    if (path.basename(raw).toLowerCase() === "user" && fs.existsSync(raw)) {
+      return raw;
+    }
+  }
+  return "";
+}
+
+function resolvePs4ProgressPathForConfig(config) {
+  if (!config) return "";
+  const direct =
+    typeof config.shadps4_progress_path === "string" &&
+    config.shadps4_progress_path
+      ? config.shadps4_progress_path
+      : typeof config.save_path === "string" && config.save_path
+        ? config.save_path
+        : "";
+  const npcommid = String(config.shadps4_npcommid || "").trim();
+  const trophyDir = resolvePs4TrophyDirForConfig(config);
+  if (!npcommid) {
+    if (direct) {
+      try {
+        const stat = fs.statSync(direct);
+        if (stat.isFile()) return direct;
+      } catch {}
+    }
+    return "";
+  }
+  const root =
+    resolveShadPs4RootForConfig(config) ||
+    (trophyDir ? path.dirname(path.dirname(trophyDir)) : "");
+  if (!root) {
+    if (direct) {
+      try {
+        const stat = fs.statSync(direct);
+        if (stat.isFile()) return direct;
+      } catch {}
+    }
+    return "";
+  }
+  const preferredUser = String(config.shadps4_user_id || "").trim();
+  const selected = selectPs4ProgressFileForConfig(
+    root,
+    npcommid,
+    preferredUser,
+    direct,
+  );
+  return selected?.progressPath || "";
+}
+
 const ACHGEN_BUFFER_MAX = 300;
 const achgenBuffer = [];
 const generationProgressJobs = new Map();
@@ -1489,7 +1971,8 @@ function normalizeGenerationProgressState(payload = {}, fallback = {}) {
   const current =
     Number.isFinite(Number(payload.current)) && Number(payload.current) >= 0
       ? Number(payload.current)
-      : Number.isFinite(Number(fallback.current)) && Number(fallback.current) >= 0
+      : Number.isFinite(Number(fallback.current)) &&
+          Number(fallback.current) >= 0
         ? Number(fallback.current)
         : 0;
   const total =
@@ -1537,7 +2020,8 @@ function getLatestActiveGenerationProgress() {
 }
 
 function createGenerationProgressJob(seed = {}) {
-  const id = seed.id || `generation-${Date.now()}-${++generationProgressSequence}`;
+  const id =
+    seed.id || `generation-${Date.now()}-${++generationProgressSequence}`;
   const initial = normalizeGenerationProgressState(
     { ...seed, id, status: "running" },
     { id },
@@ -1591,7 +2075,9 @@ function createGenerationProgressJob(seed = {}) {
         generationProgressJobs.get(id) ||
         normalizeGenerationProgressState({ ...seed, id }, { id });
       const fallbackPercent =
-        current.percent > 0 ? current.percent : clampGenerationPercent(seed.percent, 0);
+        current.percent > 0
+          ? current.percent
+          : clampGenerationPercent(seed.percent, 0);
       const next = normalizeGenerationProgressState(
         {
           ...current,
@@ -2029,12 +2515,16 @@ function parseLooseAppVersion(version) {
   return {
     raw: normalized,
     core: match[1].split(".").map((part) => Number(part) || 0),
-    suffix: String(match[2] || "").trim().toLowerCase(),
+    suffix: String(match[2] || "")
+      .trim()
+      .toLowerCase(),
   };
 }
 
 function classifyLooseAppVersionSuffix(suffix) {
-  const normalized = String(suffix || "").trim().toLowerCase();
+  const normalized = String(suffix || "")
+    .trim()
+    .toLowerCase();
   if (!normalized) {
     return { recognized: true, rank: 0, value: "" };
   }
@@ -2078,10 +2568,14 @@ function compareLooseAppVersions(leftVersion, rightVersion) {
   if (leftSuffix.value === rightSuffix.value) {
     return 0;
   }
-  const suffixCompare = leftSuffix.value.localeCompare(rightSuffix.value, undefined, {
-    numeric: true,
-    sensitivity: "base",
-  });
+  const suffixCompare = leftSuffix.value.localeCompare(
+    rightSuffix.value,
+    undefined,
+    {
+      numeric: true,
+      sensitivity: "base",
+    },
+  );
   if (suffixCompare === 0) return 0;
   return suffixCompare > 0 ? 1 : -1;
 }
@@ -2090,8 +2584,9 @@ function wasAppUpdatedOnCurrentLaunch(argv = process.argv) {
   return Array.isArray(argv)
     ? argv.some(
         (arg) =>
-          String(arg || "").trim().toLowerCase() ===
-          APP_UPDATE_INSTALL_COMPLETE_ARG,
+          String(arg || "")
+            .trim()
+            .toLowerCase() === APP_UPDATE_INSTALL_COMPLETE_ARG,
       )
     : false;
 }
@@ -2137,7 +2632,9 @@ async function pruneAppUpdatePendingCache(options = {}) {
 
     let pendingInfo = null;
     try {
-      pendingInfo = JSON.parse(await fs.promises.readFile(updateInfoPath, "utf8"));
+      pendingInfo = JSON.parse(
+        await fs.promises.readFile(updateInfoPath, "utf8"),
+      );
     } catch (err) {
       await clearAppUpdatePendingDir(pendingDir, {
         trigger,
@@ -2170,7 +2667,10 @@ async function pruneAppUpdatePendingCache(options = {}) {
 
     const currentVersion = String(app.getVersion() || "").trim();
     const pendingVersion = extractAppUpdateVersionFromFileName(pendingFileName);
-    const versionCompare = compareLooseAppVersions(currentVersion, pendingVersion);
+    const versionCompare = compareLooseAppVersions(
+      currentVersion,
+      pendingVersion,
+    );
     if (versionCompare !== null && versionCompare >= 0) {
       await clearAppUpdatePendingDir(pendingDir, {
         trigger,
@@ -2249,7 +2749,8 @@ function formatAppUpdateBytes(value) {
     current /= 1024;
     unitIndex += 1;
   }
-  const precision = current >= 100 || unitIndex === 0 ? 0 : current >= 10 ? 1 : 2;
+  const precision =
+    current >= 100 || unitIndex === 0 ? 0 : current >= 10 ? 1 : 2;
   return `${current.toFixed(precision)} ${units[unitIndex]}`;
 }
 
@@ -2464,7 +2965,8 @@ function initializeStartupAppUpdater() {
   autoUpdater.on("update-downloaded", (info) => {
     appUpdateDownloadRequested = false;
     appUpdateDownloadInFlight = false;
-    appUpdateKnownVersion = getUpdateVersionLabel(info) || appUpdateKnownVersion;
+    appUpdateKnownVersion =
+      getUpdateVersionLabel(info) || appUpdateKnownVersion;
     updateLogger.info("app-update:downloaded", {
       version: info?.version || null,
     });
@@ -2493,7 +2995,11 @@ ipcMain.handle("app:update-download", async () => {
     ensureAppUpdateProgressJob({
       version: appUpdateKnownVersion,
       phase: "downloading",
-      detail: tUi("main.update.progress.downloading", {}, "Downloading update..."),
+      detail: tUi(
+        "main.update.progress.downloading",
+        {},
+        "Downloading update...",
+      ),
     });
     return { success: true, state: "downloading" };
   }
@@ -2615,15 +3121,21 @@ function getOverlayControllerControlModeBinding(prefs = null) {
       : cachedPreferences && typeof cachedPreferences === "object"
         ? cachedPreferences
         : readPrefsSafe?.() || {};
-  return normalizeControllerBinding(source?.overlayControllerControlModeBinding, {
-    allowSingle: true,
-    maxButtons: 2,
-    allowedButtons: OVERLAY_CONTROLLER_CONTROL_MODE_ALLOWED_BUTTONS,
-    defaultBinding: DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
-  });
+  return normalizeControllerBinding(
+    source?.overlayControllerControlModeBinding,
+    {
+      allowSingle: true,
+      maxButtons: 2,
+      allowedButtons: OVERLAY_CONTROLLER_CONTROL_MODE_ALLOWED_BUTTONS,
+      defaultBinding: DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
+    },
+  );
 }
 
-function overlayControllerBindingsCanConflict(toggleBinding, controlModeBinding) {
+function overlayControllerBindingsCanConflict(
+  toggleBinding,
+  controlModeBinding,
+) {
   const toggleButtons = Array.isArray(toggleBinding) ? toggleBinding : [];
   const controlButtons = Array.isArray(controlModeBinding)
     ? controlModeBinding
@@ -2791,11 +3303,7 @@ function registerOverlayShortcut(newShortcut) {
       const onboardingBlocked =
         isBootOnboardingGatePending() || global.bootOnboardingRequired;
       const currentlyPresented = isOverlayEffectivelyPresented();
-      const overlayLabel = tUi(
-        "settings-overlayControlsTitle",
-        {},
-        "Overlay",
-      );
+      const overlayLabel = tUi("settings-overlayControlsTitle", {}, "Overlay");
       overlayLogger.info("overlay:shortcut-trigger", {
         shortcut: newShortcut,
         onboardingBlocked,
@@ -3479,28 +3987,16 @@ function nudgeOverlayPosition(direction, step = OVERLAY_NUDGE_STEP_PX) {
   const resolvedStep = Math.max(1, Number(step) || OVERLAY_NUDGE_STEP_PX);
   const dir = String(direction || "").toLowerCase();
   if (dir === "left") {
-    return setOverlayPositionClamped(
-      ctx.bounds.x - resolvedStep,
-      ctx.bounds.y,
-    );
+    return setOverlayPositionClamped(ctx.bounds.x - resolvedStep, ctx.bounds.y);
   }
   if (dir === "right") {
-    return setOverlayPositionClamped(
-      ctx.bounds.x + resolvedStep,
-      ctx.bounds.y,
-    );
+    return setOverlayPositionClamped(ctx.bounds.x + resolvedStep, ctx.bounds.y);
   }
   if (dir === "up") {
-    return setOverlayPositionClamped(
-      ctx.bounds.x,
-      ctx.bounds.y - resolvedStep,
-    );
+    return setOverlayPositionClamped(ctx.bounds.x, ctx.bounds.y - resolvedStep);
   }
   if (dir === "down") {
-    return setOverlayPositionClamped(
-      ctx.bounds.x,
-      ctx.bounds.y + resolvedStep,
-    );
+    return setOverlayPositionClamped(ctx.bounds.x, ctx.bounds.y + resolvedStep);
   }
   return false;
 }
@@ -3753,10 +4249,12 @@ function buildOverlayControllerRuntimeState(prefs = null, overrides = {}) {
     supportEnabled: isOverlayControllerSupportEnabled(prefs),
     toggleBinding: getOverlayControllerToggleBinding(prefs),
     controlModeBinding: getOverlayControllerControlModeBinding(prefs),
-    controlModeActive:
-      Object.prototype.hasOwnProperty.call(overrides || {}, "controlModeActive")
-        ? overrides.controlModeActive === true
-        : overlayControllerRuntimeStateCache.controlModeActive === true,
+    controlModeActive: Object.prototype.hasOwnProperty.call(
+      overrides || {},
+      "controlModeActive",
+    )
+      ? overrides.controlModeActive === true
+      : overlayControllerRuntimeStateCache.controlModeActive === true,
     controlModeUserIndex: Number.isFinite(
       Number(overrides?.controlModeUserIndex),
     )
@@ -4199,6 +4697,7 @@ const UI_CONSOLE_SUPPRESS_PATTERNS = [
   /\bsteamdb:launch-metadata:/i,
   /\bsteam-appcache:/i,
   /\bsteam-official:(?:list-accounts|librarycache:|preferences-refresh-failed|pending-schema|skip-existing|skip-nonselected-account)\b/i,
+  /\bepic-official:/i,
   /\bauto-select:index-(?:build-failed|built)\b/i,
   /\bDeprecationWarning\b/i,
   /\[DEP\d{4}\]/i,
@@ -4347,6 +4846,8 @@ let configsWatcher = chokidar.watch(configsDir, {
   depth: 0,
   awaitWriteFinish: { stabilityThreshold: 250, pollInterval: 100 },
 });
+let configsChangedNotifyTimer = null;
+const CONFIGS_CHANGED_NOTIFY_DEBOUNCE_MS = 500;
 
 function broadcastToAll(channel, payload) {
   for (const win of BrowserWindow.getAllWindows()) {
@@ -4359,7 +4860,11 @@ function broadcastToAll(channel, payload) {
 }
 
 function notifyConfigsChanged() {
-  broadcastToAll("configs:changed");
+  clearTimeout(configsChangedNotifyTimer);
+  configsChangedNotifyTimer = setTimeout(() => {
+    configsChangedNotifyTimer = null;
+    broadcastToAll("configs:changed");
+  }, CONFIGS_CHANGED_NOTIFY_DEBOUNCE_MS);
 }
 
 configsWatcher
@@ -4533,10 +5038,16 @@ function applyPreferenceSideEffects(
     refreshOverlayInputBackend("preferences:force-global-overlay-shortcuts");
   }
   if (
-    Object.prototype.hasOwnProperty.call(patch, "overlayControllerSupportEnabled")
-    || Object.prototype.hasOwnProperty.call(patch, "overlayControllerBackend")
-    || Object.prototype.hasOwnProperty.call(patch, "overlayControllerToggleBinding")
-    || Object.prototype.hasOwnProperty.call(
+    Object.prototype.hasOwnProperty.call(
+      patch,
+      "overlayControllerSupportEnabled",
+    ) ||
+    Object.prototype.hasOwnProperty.call(patch, "overlayControllerBackend") ||
+    Object.prototype.hasOwnProperty.call(
+      patch,
+      "overlayControllerToggleBinding",
+    ) ||
+    Object.prototype.hasOwnProperty.call(
       patch,
       "overlayControllerControlModeBinding",
     )
@@ -4649,15 +5160,20 @@ function updatePreferences(patch = {}) {
     }
   }
 
-  if (
-    Object.prototype.hasOwnProperty.call(incoming, "steamOfficialSteamId")
-  ) {
+  if (Object.prototype.hasOwnProperty.call(incoming, "steamOfficialSteamId")) {
     incoming.steamOfficialSteamId = normalizeSteamOfficialSteamId(
       incoming.steamOfficialSteamId,
     );
   }
+  if (Object.prototype.hasOwnProperty.call(incoming, "epicOfficialAccountId")) {
+    incoming.epicOfficialAccountId = normalizeEpicAccountId(
+      incoming.epicOfficialAccountId,
+    );
+  }
 
-  if (Object.prototype.hasOwnProperty.call(incoming, "overlayControllerBackend")) {
+  if (
+    Object.prototype.hasOwnProperty.call(incoming, "overlayControllerBackend")
+  ) {
     incoming.overlayControllerBackend = normalizeBackendPreference(
       incoming.overlayControllerBackend,
     );
@@ -4673,11 +5189,13 @@ function updatePreferences(patch = {}) {
   }
 
   if (
-    Object.prototype.hasOwnProperty.call(incoming, "overlayControllerToggleBinding")
-  ) {
-    incoming.overlayControllerToggleBinding = getOverlayControllerToggleBinding(
+    Object.prototype.hasOwnProperty.call(
       incoming,
-    );
+      "overlayControllerToggleBinding",
+    )
+  ) {
+    incoming.overlayControllerToggleBinding =
+      getOverlayControllerToggleBinding(incoming);
   }
   if (
     Object.prototype.hasOwnProperty.call(
@@ -4695,9 +5213,8 @@ function updatePreferences(patch = {}) {
       ...current,
       ...incoming,
     });
-    merged.overlayControllerToggleBinding = getOverlayControllerToggleBinding(
-      merged,
-    );
+    merged.overlayControllerToggleBinding =
+      getOverlayControllerToggleBinding(merged);
     merged.overlayControllerControlModeBinding =
       getOverlayControllerControlModeBinding(merged);
     if (
@@ -4706,10 +5223,13 @@ function updatePreferences(patch = {}) {
         merged.overlayControllerControlModeBinding,
       )
     ) {
-      prefsLogger.warn("preferences:update:overlay-controller-binding-conflict", {
-        toggleBinding: merged.overlayControllerToggleBinding,
-        controlModeBinding: merged.overlayControllerControlModeBinding,
-      });
+      prefsLogger.warn(
+        "preferences:update:overlay-controller-binding-conflict",
+        {
+          toggleBinding: merged.overlayControllerToggleBinding,
+          controlModeBinding: merged.overlayControllerControlModeBinding,
+        },
+      );
       notifyError(
         tUi(
           "main.notify.overlayControllerBindingConflict",
@@ -4947,7 +5467,7 @@ async function runAchievementsGenerator(
 }
 
 async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
-  const appidStr = String(appid || "");
+  let appidStr = String(appid || "").trim();
   const onGenerationProgress =
     typeof options.onGenerationProgress === "function"
       ? options.onGenerationProgress
@@ -4960,7 +5480,8 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
         phase: String(progress.phase || ""),
         detail: String(progress.detail || ""),
         current:
-          Number.isFinite(Number(progress.current)) && Number(progress.current) >= 0
+          Number.isFinite(Number(progress.current)) &&
+          Number(progress.current) >= 0
             ? Number(progress.current)
             : 0,
         total:
@@ -4974,10 +5495,13 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   if (!platform && /[a-f]/i.test(appidStr)) {
     platform = "epic";
   }
-  if (!/^[0-9a-fA-F]+$/.test(String(appid || ""))) return null;
+  const normalizedPlatform = normalizeStoragePlatform(platform);
+  const sanitizedAppId = sanitizeAppIdForPlatform(appidStr, normalizedPlatform);
+  if (!sanitizedAppId) return null;
+  appidStr = sanitizedAppId;
+  appid = sanitizedAppId;
 
   const schemaBase = SCHEMA_ROOT_PATH; // %APPDATA%\Achievements\configs\schema
-  const normalizedPlatform = normalizeStoragePlatform(platform);
   const destDir = resolveSchemaDirForPlatform(appid, normalizedPlatform);
   const achJson = path.join(destDir, "achievements.json");
   if (normalizedPlatform === "xenia") {
@@ -5021,6 +5545,50 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
       });
       return { dir: legacyDir, existed: true };
     }
+  }
+
+  if (normalizedPlatform === "epic-official") {
+    emitGenerationProgress({
+      phase: "generatingSchema",
+      detail: "Generating schema",
+      percent: 20,
+    });
+    try {
+      const result = await ensureEpicOfficialSchema(appid, destDir, {
+        ...options,
+        productId:
+          options?.epic_product_id ||
+          options?.epicProductId ||
+          options?.productId,
+        sandboxId:
+          options?.epic_sandbox_id ||
+          options?.epicSandboxId ||
+          options?.epic_namespace ||
+          options?.epicNamespace,
+      });
+      if (result?.dir && fs.existsSync(achJson)) {
+        emitGenerationProgress({
+          phase: "finalizing",
+          detail: "Finalizing",
+          percent: 96,
+        });
+        ipcLogger.info("schema:ensure-generated-epic-official", {
+          appid,
+          platform: normalizedPlatform,
+          dir: result.dir,
+          productId: result.productId || null,
+          sandboxId: result.sandboxId || null,
+        });
+        return { ...result, dir: result.dir, existed: false };
+      }
+    } catch (err) {
+      ipcLogger.warn("schema:epic-official-failed", {
+        appid,
+        error: err?.message || String(err),
+      });
+      throw err;
+    }
+    return null;
   }
 
   if (normalizedPlatform === "gog-official") {
@@ -5185,7 +5753,9 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
       onProgress: (progress) => {
         emitGenerationProgress({
           ...progress,
-          percent: 18 + Math.round(clampGenerationPercent(progress?.percent, 0) * 0.72),
+          percent:
+            18 +
+            Math.round(clampGenerationPercent(progress?.percent, 0) * 0.72),
         });
       },
     });
@@ -5288,6 +5858,9 @@ ipcMain.handle("load-preferences", () => {
   cachedPreferences.steamOfficialSteamId = normalizeSteamOfficialSteamId(
     cachedPreferences.steamOfficialSteamId,
   );
+  cachedPreferences.epicOfficialAccountId = normalizeEpicAccountId(
+    cachedPreferences.epicOfficialAccountId,
+  );
   const safePrefs = { ...cachedPreferences };
   if (safePrefs.steamApiKey) {
     safePrefs.steamApiKeyMasked = maskSteamApiKey(safePrefs.steamApiKey);
@@ -5303,7 +5876,9 @@ ipcMain.handle("steam-official:list-accounts", () => {
   appLogger.info("steam-official:list-accounts", {
     steamRoot: catalog?.steamRoot || "",
     loginUsersPath: catalog?.loginUsersPath || "",
-    accountCount: Array.isArray(catalog?.accounts) ? catalog.accounts.length : 0,
+    accountCount: Array.isArray(catalog?.accounts)
+      ? catalog.accounts.length
+      : 0,
   });
   return {
     steamRoot: catalog?.steamRoot || "",
@@ -5323,6 +5898,588 @@ ipcMain.handle("steam-official:list-accounts", () => {
         }))
       : [],
   };
+});
+
+function normalizeEpicAuthCode(value) {
+  const code = String(value || "")
+    .trim()
+    .replace(/^["']|["']$/g, "");
+  return /^[a-zA-Z0-9_-]{20,256}$/.test(code) ? code : "";
+}
+
+function extractEpicAuthResult(rawUrl) {
+  const raw = String(rawUrl || "");
+  try {
+    const parsed = new URL(raw);
+    const code = normalizeEpicAuthCode(parsed.searchParams.get("code"));
+    const errorCode = parsed.searchParams.get("error");
+    const errorDescription = parsed.searchParams.get("error_description");
+    if (code) return { code };
+    if (errorCode || errorDescription) {
+      return {
+        error: errorDescription || errorCode || "epic-auth-failed",
+      };
+    }
+  } catch {}
+  try {
+    const parsed = JSON.parse(raw);
+    const code =
+      normalizeEpicAuthCode(parsed?.authorizationCode) ||
+      normalizeEpicAuthCode(parsed?.code);
+    if (code) return { code };
+    const redirectUrl = String(parsed?.redirectUrl || "");
+    const redirectMatch = redirectUrl.match(
+      /[?&]code=([a-zA-Z0-9_-]{20,256})/i,
+    );
+    const redirectCode = normalizeEpicAuthCode(redirectMatch?.[1]);
+    if (redirectCode) return { code: redirectCode };
+  } catch {}
+  const codeMatch =
+    raw.match(
+      /localhost\/launcher\/authorized\?code=([a-zA-Z0-9_-]{20,256})/i,
+    ) ||
+    raw.match(
+      /["']authorizationCode["']\s*:\s*["']([a-zA-Z0-9_-]{20,256})["']/i,
+    ) ||
+    raw.match(/["']code["']\s*:\s*["']([a-zA-Z0-9_-]{20,256})["']/i);
+  const matchedCode = normalizeEpicAuthCode(codeMatch?.[1]);
+  if (matchedCode) {
+    return { code: matchedCode };
+  }
+  return null;
+}
+
+function getEpicAuthRequestOptions(extra = {}) {
+  return {
+    userDataDir: app.getPath("userData"),
+    ...extra,
+  };
+}
+
+const EPIC_OFFICIAL_AUTH_PARTITION = "persist:epic-official-auth";
+
+async function clearEpicOfficialAuthSession(reason = "unknown") {
+  try {
+    const authSession = session.fromPartition(EPIC_OFFICIAL_AUTH_PARTITION);
+    await authSession.clearStorageData({
+      storages: [
+        "cookies",
+        "localstorage",
+        "indexdb",
+        "serviceworkers",
+        "cachestorage",
+      ],
+    });
+    try {
+      await authSession.clearCache();
+    } catch {}
+    epicOfficialLogger.info("epic-official:auth-session:cleared", {
+      reason,
+      partition: EPIC_OFFICIAL_AUTH_PARTITION,
+    });
+  } catch (err) {
+    epicOfficialLogger.warn("epic-official:auth-session:clear-failed", {
+      reason,
+      error: err?.message || String(err),
+    });
+  }
+}
+
+function waitForEpicAuthCode(parentWindow, authOptions = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let authWindow = null;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      try {
+        if (authWindow && !authWindow.isDestroyed()) authWindow.close();
+      } catch {}
+      fn(value);
+    };
+    try {
+      const loginUrl = buildEpicLoginUrl(authOptions);
+      authWindow = new BrowserWindow({
+        width: 980,
+        height: 720,
+        parent:
+          parentWindow && !parentWindow.isDestroyed()
+            ? parentWindow
+            : undefined,
+        modal: false,
+        show: true,
+        title: "Connect Epic",
+        webPreferences: {
+          partition: EPIC_OFFICIAL_AUTH_PARTITION,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+      authWindow.webContents.setUserAgent(EPIC_LAUNCHER_USER_AGENT);
+      const handleUrl = (rawUrl) => {
+        const result = extractEpicAuthResult(rawUrl);
+        if (!result) return;
+        if (result.code) {
+          settle(resolve, result.code);
+        } else {
+          settle(reject, new Error(result.error || "epic-auth-failed"));
+        }
+      };
+      const interceptAuthNavigation = (event, url) => {
+        const result = extractEpicAuthResult(url);
+        if (!result) return;
+        event.preventDefault();
+        if (result.code) {
+          settle(resolve, result.code);
+        } else {
+          settle(reject, new Error(result.error || "epic-auth-failed"));
+        }
+      };
+      const inspectPageForCode = async () => {
+        if (settled || !authWindow || authWindow.isDestroyed()) return;
+        try {
+          const payload = await authWindow.webContents.executeJavaScript(
+            `({
+              url: location.href,
+              text: document.body ? document.body.innerText : "",
+              html: document.documentElement ? document.documentElement.outerHTML : ""
+            })`,
+            true,
+          );
+          handleUrl(payload?.url);
+          handleUrl(payload?.text);
+          handleUrl(payload?.html);
+        } catch {}
+      };
+      authWindow.webContents.on("will-navigate", interceptAuthNavigation);
+      authWindow.webContents.on("will-redirect", interceptAuthNavigation);
+      authWindow.webContents.on("did-navigate", (_event, url) =>
+        handleUrl(url),
+      );
+      authWindow.webContents.on("did-navigate-in-page", (_event, url) =>
+        handleUrl(url),
+      );
+      authWindow.webContents.on("dom-ready", inspectPageForCode);
+      authWindow.webContents.on("did-finish-load", inspectPageForCode);
+      authWindow.on("closed", () => {
+        authWindow = null;
+        if (!settled) reject(new Error("epic-auth-cancelled"));
+      });
+      authWindow.loadURL(loginUrl).catch((err) => {
+        settle(reject, err);
+      });
+    } catch (err) {
+      settle(reject, err);
+    }
+  });
+}
+
+ipcMain.handle("epic-official:status", async () => {
+  try {
+    const status = await getEpicAuthStatus(getEpicAuthRequestOptions());
+    const { tokensFile: _tokensFile, ...safeStatus } = status;
+    return { success: true, ...safeStatus };
+  } catch (err) {
+    epicOfficialLogger.warn("epic-official:status-failed", {
+      error: err?.message || String(err),
+    });
+    return {
+      success: false,
+      connected: false,
+      error: err?.message || String(err),
+    };
+  }
+});
+
+ipcMain.handle("epic-official:connect", async (event) => {
+  try {
+    const parent = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+    const authOptions = getEpicAuthRequestOptions({
+      timeoutMs: 15000,
+    });
+    await clearEpicOfficialAuthSession("connect");
+    const code = await waitForEpicAuthCode(parent, authOptions);
+    const token = await authenticateEpicWithCode(code, authOptions);
+    const accountId = normalizeEpicAccountId(token?.account_id);
+    if (accountId) {
+      updatePreferences({ epicOfficialAccountId: accountId });
+    }
+    const status = await getEpicAuthStatus(getEpicAuthRequestOptions());
+    const { tokensFile: _tokensFile, ...safeStatus } = status;
+    epicOfficialLogger.info("epic-official:connect-success", {
+      accountId: status.accountId || null,
+    });
+    return { success: true, ...safeStatus };
+  } catch (err) {
+    epicOfficialLogger.warn("epic-official:connect-failed", {
+      error: err?.message || String(err),
+    });
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+ipcMain.handle("epic-official:disconnect", async () => {
+  try {
+    stopEpicOfficialActivePoll("disconnect");
+    await clearEpicTokens({ userDataDir: app.getPath("userData") });
+    await clearEpicOfficialAuthSession("disconnect");
+    updatePreferences({ epicOfficialAccountId: "" });
+    epicOfficialLogger.info("epic-official:disconnect-success");
+    return { success: true, connected: false };
+  } catch (err) {
+    epicOfficialLogger.warn("epic-official:disconnect-failed", {
+      error: err?.message || String(err),
+    });
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+async function seedEpicOfficialImportCaches(imported = [], options = {}) {
+  const entries = Array.isArray(imported)
+    ? imported.filter((entry) => entry?.name && entry?.appid)
+    : [];
+  const stats = {
+    total: entries.length,
+    seeded: 0,
+    unchanged: 0,
+    skipped: 0,
+    skippedExistingCache: 0,
+    failed: 0,
+  };
+  if (!entries.length) return stats;
+
+  const accountId = normalizeEpicAccountId(options?.accountId);
+  let token = options?.token || null;
+  const timeoutMs =
+    Number.isFinite(Number(options?.timeoutMs)) && Number(options.timeoutMs) > 0
+      ? Number(options.timeoutMs)
+      : 15000;
+  const onProgress =
+    typeof options?.onProgress === "function" ? options.onProgress : null;
+  const concurrency = Math.max(
+    1,
+    Math.min(4, Number(options?.concurrency || 3) || 3),
+  );
+  let index = 0;
+
+  epicOfficialLogger.info("epic-official:import-cache-seed:start", {
+    total: stats.total,
+    accountId: accountId || null,
+    concurrency,
+  });
+
+  let refreshTokenInFlight = null;
+  const isUnauthorizedEpicOfficialSyncError = (err) =>
+    /(?:status code|HTTP)\s*401\b|\b401\b/i.test(
+      String(err?.message || err || ""),
+    );
+  const refreshEpicOfficialSeedToken = async (reason = "401") => {
+    if (!refreshTokenInFlight) {
+      epicOfficialLogger.info("epic-official:import-cache-seed:token-refresh", {
+        reason,
+        accountId: accountId || null,
+      });
+      refreshTokenInFlight = ensureEpicAccessToken(
+        getEpicAuthRequestOptions({
+          timeoutMs,
+          forceRefresh: true,
+        }),
+      )
+        .then((refreshed) => {
+          token = refreshed;
+          return refreshed;
+        })
+        .finally(() => {
+          refreshTokenInFlight = null;
+        });
+    }
+    return refreshTokenInFlight;
+  };
+  const syncEpicOfficialSeedWithAuthRetry = async (
+    config,
+    syncOptions,
+    entry,
+  ) => {
+    try {
+      return await syncEpicOfficialAchievements(config, syncOptions);
+    } catch (err) {
+      if (!isUnauthorizedEpicOfficialSyncError(err)) throw err;
+      const refreshed = await refreshEpicOfficialSeedToken("sync-401");
+      const retryOptions = getEpicAuthRequestOptions({
+        ...syncOptions,
+        token: refreshed,
+        accountId:
+          syncOptions?.accountId ||
+          normalizeEpicAccountId(refreshed?.account_id) ||
+          "",
+      });
+      epicOfficialLogger.info("epic-official:import-cache-seed:retry", {
+        configName: sanitizeConfigName(entry?.name || "") || null,
+        appid: entry?.appid || null,
+        reason: "sync-401",
+      });
+      return await syncEpicOfficialAchievements(config, retryOptions);
+    }
+  };
+
+  const worker = async (entry) => {
+    const current = ++index;
+    const safeName = sanitizeConfigName(entry?.name || "");
+    onProgress?.({
+      phase: "seedingCache",
+      detail: entry?.title || safeName || "Epic Official",
+      appid: entry?.appid || "",
+      current,
+      total: stats.total,
+      percent: 90 + Math.round((current / Math.max(stats.total, 1)) * 9),
+    });
+    if (!safeName) {
+      stats.skipped += 1;
+      return;
+    }
+
+    try {
+      const configPath = path.join(configsDir, `${safeName}.json`);
+      if (!fs.existsSync(configPath)) {
+        stats.skipped += 1;
+        return;
+      }
+      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      if (normalizePlatform(config?.platform) !== "epic-official") {
+        stats.skipped += 1;
+        return;
+      }
+      const schemaPath = resolveAchievementsSchemaPath(config);
+      if (!schemaPath || !fs.existsSync(schemaPath)) {
+        stats.skipped += 1;
+        return;
+      }
+      let schemaAchievements = [];
+      try {
+        const parsed = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+        if (Array.isArray(parsed)) schemaAchievements = parsed;
+      } catch {}
+      if (!schemaAchievements.length) {
+        stats.skipped += 1;
+        return;
+      }
+
+      let productId = String(
+        config?.epic_product_id ||
+          config?.epicProductId ||
+          config?.appid ||
+          entry?.appid ||
+          "",
+      ).trim();
+      try {
+        const sidecarPath = path.join(
+          path.dirname(schemaPath),
+          "achievementpercentages.json",
+        );
+        if (fs.existsSync(sidecarPath)) {
+          const sidecar = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+          if (sidecar?.appid) productId = String(sidecar.appid).trim();
+        }
+      } catch {}
+      const resolvedAccountId =
+        accountId || resolvePreferredEpicOfficialAccountId(config, token);
+      const cached =
+        (await loadPreviousAchievements(safeName, "epic-official", {
+          accountId: resolvedAccountId,
+        })) || {};
+      if (
+        entry?.skippedUnchanged === true &&
+        cached &&
+        typeof cached === "object" &&
+        Object.keys(cached).length > 0
+      ) {
+        stats.skippedExistingCache += 1;
+        return;
+      }
+      const syncOptions = getEpicAuthRequestOptions({
+        token,
+        accountId: resolvedAccountId,
+        productId,
+        schemaAchievements,
+        timeoutMs,
+      });
+      const synced = await syncEpicOfficialSeedWithAuthRetry(
+        config,
+        syncOptions,
+        entry,
+      );
+      const nextAccountId = synced.accountId || resolvedAccountId || "";
+      const nextProductId = synced.productId || productId || "";
+      const snapshot = mergeEarnedTimeFromCached(synced.snapshot || {}, cached);
+      const result = {
+        achievements: snapshot || {},
+        save_path: config.save_path || "",
+      };
+      markEpicOfficialRecentLoadSync(
+        safeName,
+        nextAccountId,
+        nextProductId,
+        result,
+      );
+      if (deepEqual(cached || {}, snapshot || {})) {
+        stats.unchanged += 1;
+        return;
+      }
+      const saved = savePreviousAchievements(
+        safeName,
+        snapshot,
+        "epic-official",
+        { accountId: nextAccountId },
+      );
+      if (saved) stats.seeded += 1;
+      else stats.unchanged += 1;
+    } catch (err) {
+      stats.failed += 1;
+      epicOfficialLogger.warn("epic-official:import-cache-seed:failed", {
+        configName: safeName || null,
+        appid: entry?.appid || null,
+        error: err?.message || String(err),
+      });
+    }
+  };
+
+  let nextIndex = 0;
+  const runners = Array.from(
+    { length: Math.min(concurrency, entries.length) },
+    async () => {
+      while (nextIndex < entries.length) {
+        const entry = entries[nextIndex++];
+        await worker(entry);
+      }
+    },
+  );
+  await Promise.all(runners);
+
+  epicOfficialLogger.info("epic-official:import-cache-seed:summary", stats);
+  return stats;
+}
+
+ipcMain.handle("epic-official:import-library", async () => {
+  let progressJob = null;
+  try {
+    const token = await ensureEpicAccessToken(
+      getEpicAuthRequestOptions({
+        timeoutMs: 15000,
+      }),
+    );
+    const accountId = normalizeEpicAccountId(token?.account_id);
+    progressJob = createGenerationProgressJob({
+      kind: "config-generate",
+      scope: "batch",
+      status: "running",
+      itemName: "Epic Official",
+      appid: "",
+      phase: "fetchingLibrary",
+      detail: "Fetching Epic library",
+      current: 0,
+      total: 0,
+      percent: 5,
+    });
+    const result = await importEpicOfficialLibrary(
+      configsDir,
+      getEpicAuthRequestOptions({
+        token,
+        accountId,
+        schemaRootDir: SCHEMA_ROOT_PATH,
+        timeoutMs: 15000,
+        onProgress: (progress = {}) => {
+          progressJob?.update({
+            itemName: progress?.itemName || progress?.detail || "Epic Official",
+            appid: progress?.appid || "",
+            phase: progress?.phase || "importingLibrary",
+            detail: progress?.detail || "",
+            current:
+              Number.isFinite(Number(progress?.current)) &&
+              Number(progress.current) >= 0
+                ? Number(progress.current)
+                : 0,
+            total:
+              Number.isFinite(Number(progress?.total)) &&
+              Number(progress.total) >= 0
+                ? Number(progress.total)
+                : 0,
+            percent: clampGenerationPercent(progress?.percent, 5),
+          });
+        },
+      }),
+    );
+    const cacheSeed = await seedEpicOfficialImportCaches(result?.imported, {
+      token,
+      accountId: result?.accountId || accountId,
+      timeoutMs: 15000,
+      onProgress: (progress = {}) => {
+        progressJob?.update({
+          itemName: progress?.detail || "Epic Official",
+          appid: progress?.appid || "",
+          phase: progress?.phase || "seedingCache",
+          detail: progress?.detail || "Seeding Epic Official cache",
+          current:
+            Number.isFinite(Number(progress?.current)) &&
+            Number(progress.current) >= 0
+              ? Number(progress.current)
+              : 0,
+          total:
+            Number.isFinite(Number(progress?.total)) &&
+            Number(progress.total) >= 0
+              ? Number(progress.total)
+              : 0,
+          percent: clampGenerationPercent(progress?.percent, 90),
+        });
+      },
+    });
+    notifyConfigsChanged();
+    progressJob?.succeed({
+      phase: "completed",
+      detail: "Epic library imported",
+      current: result?.totalAssets || 0,
+      total: result?.totalAssets || 0,
+      percent: 100,
+    });
+    epicOfficialLogger.info("epic-official:import-library-success", {
+      accountId: result?.accountId || accountId || null,
+      totalAssets: result?.totalAssets || 0,
+      entitlementsTotal: result?.entitlementsTotal || 0,
+      libraryAssetsTotal: result?.libraryAssetsTotal || 0,
+      ownedGamesTotal: result?.ownedGamesTotal || 0,
+      created: result?.created || 0,
+      updated: result?.updated || 0,
+      skipped: result?.skipped || 0,
+      skippedUnchanged: result?.skippedUnchanged || 0,
+      skippedNoAchievementsCached: result?.skippedNoAchievementsCached || 0,
+      withoutAchievements: result?.withoutAchievements || 0,
+      failed: result?.failed || 0,
+      schemaChecked: result?.schemaChecked || 0,
+      existingSchemaSkipped: result?.existingSchemaSkipped || 0,
+      imageSkippedExisting: result?.imageSkippedExisting || 0,
+      localInstallUpdated: result?.localInstallUpdated || 0,
+      importMetaUpdated: result?.importMetaUpdated === true,
+      cacheSeed,
+    });
+    return {
+      success: true,
+      message: `Epic library imported. Created ${result.created}, updated ${result.updated}, unchanged ${result.skippedUnchanged || 0}, skipped ${result.withoutAchievements} without achievements.`,
+      cacheSeed,
+      ...result,
+    };
+  } catch (err) {
+    progressJob?.fail({
+      phase: "failed",
+      detail: err?.message || "Epic library import failed",
+    });
+    epicOfficialLogger.warn("epic-official:import-library-failed", {
+      error: err?.message || String(err),
+    });
+    return {
+      success: false,
+      message: err?.message || "Epic library import failed.",
+    };
+  }
 });
 
 ipcMain.handle("blacklist:check", async (_event, appid) => {
@@ -5879,8 +7036,12 @@ ipcMain.handle("saveConfig", async (event, config) => {
               const curr = JSON.parse(fs.readFileSync(filePath, "utf8"));
               if (curr.config_path !== res.dir) {
                 curr.config_path = res.dir;
-                fs.writeFileSync(filePath, JSON.stringify(curr, null, 2));
               }
+              if (normalizePlatform(curr.platform) === "epic-official") {
+                if (res.productId) curr.epic_product_id = res.productId;
+                if (res.sandboxId) curr.epic_namespace = res.sandboxId;
+              }
+              fs.writeFileSync(filePath, JSON.stringify(curr, null, 2));
             } catch (e) {
               notifyError(
                 tUi("main.notify.schema.persistConfigPathFailed", {
@@ -5969,7 +7130,13 @@ ipcMain.handle("loadConfigs", () => {
     const fullPath = path.join(configsDir, file);
     try {
       const raw = JSON.parse(fs.readFileSync(fullPath, "utf8"));
-      let platformNorm = normalizePlatform(raw?.platform);
+      const mapping = raw?.appid
+        ? uplayToSteam.get(String(raw.appid).trim())
+        : null;
+      const inferredPlatform =
+        inferOfficialPlatformFromMarkers(raw) ||
+        inferPlatformAndSteamId({ config: raw, mapping }).platform;
+      let platformNorm = normalizePlatform(inferredPlatform || raw?.platform);
       const isXenia = platformNorm === "xenia";
       const isRpcs3 = platformNorm === "rpcs3";
       const looksSteamOfficial =
@@ -6004,7 +7171,21 @@ ipcMain.handle("loadConfigs", () => {
             .includes(
               `${path.sep}schema${path.sep}ea-official${path.sep}`.toLowerCase(),
             ));
+      const looksEpicOfficial =
+        platformNorm === "epic-official" ||
+        (typeof raw?.config_path === "string" &&
+          raw.config_path
+            .toLowerCase()
+            .includes(
+              `${path.sep}schema${path.sep}epic-official${path.sep}`.toLowerCase(),
+            ));
       meta.platform = platformNorm || null;
+      if (platformNorm && raw?.platform !== platformNorm) {
+        raw.platform = platformNorm;
+        try {
+          fs.writeFileSync(fullPath, JSON.stringify(raw, null, 2));
+        } catch {}
+      }
       if (raw?.displayName) {
         meta.displayName =
           getSafeLocalizedText(raw.displayName, lang) || raw.name || baseName;
@@ -6022,6 +7203,9 @@ ipcMain.handle("loadConfigs", () => {
       }
       if (looksEaOfficial) {
         meta.platform = "ea-official";
+      }
+      if (looksEpicOfficial) {
+        meta.platform = "epic-official";
       }
       if (isXenia) {
         const desiredDisplay = ensureXeniaDisplayName(
@@ -6301,510 +7485,814 @@ ipcMain.handle("load-achievements", async (event, configName, options = {}) => {
   }
 });
 
-ipcMain.handle("load-saved-achievements", async (_event, configName) => {
-  ipcLogger.info("load-saved-achievements:request", { configName });
-  try {
-    const rawName = String(configName || "").trim();
-    if (!rawName) {
-      ipcLogger.warn("load-saved-achievements:missing-name", { configName });
-      return { achievements: {}, save_path: "", error: "configName required" };
-    }
-    const seedWaitTimedOut = await waitForBootManualSeedBeforeLoad(15000);
-    if (seedWaitTimedOut && !bootManualSeedWaitWarned) {
-      bootManualSeedWaitWarned = true;
-      ipcLogger.warn("load-saved-achievements:seed-wait-timeout", {
-        timeoutMs: 15000,
-      });
-    }
-    const safeName = sanitizeConfigName(configName);
-    const configPath = path.join(configsDir, `${safeName}.json`);
-    if (!fs.existsSync(configPath)) {
-      const ready = await waitForFileExists(configPath, 50, 100);
-      if (!ready || !fs.existsSync(configPath)) {
-        ipcLogger.warn("load-saved-achievements:not-found", {
-          configName: safeName,
-          configPath,
-        });
-        return { achievements: {}, save_path: "", error: "config not ready" };
+ipcMain.handle(
+  "load-saved-achievements",
+  async (_event, configName, options = null) => {
+    const requestOptions = normalizeAchievementCacheOptions(options);
+    ipcLogger.info("load-saved-achievements:request", {
+      configName,
+      cacheOnly: requestOptions.cacheOnly === true,
+    });
+    try {
+      const rawName = String(configName || "").trim();
+      if (!rawName) {
+        ipcLogger.warn("load-saved-achievements:missing-name", { configName });
+        return {
+          achievements: {},
+          save_path: "",
+          error: "configName required",
+        };
       }
-    }
-    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      const seedWaitTimedOut = await waitForBootManualSeedBeforeLoad(15000);
+      if (seedWaitTimedOut && !bootManualSeedWaitWarned) {
+        bootManualSeedWaitWarned = true;
+        ipcLogger.warn("load-saved-achievements:seed-wait-timeout", {
+          timeoutMs: 15000,
+        });
+      }
+      const safeName = sanitizeConfigName(configName);
+      const configPath = path.join(configsDir, `${safeName}.json`);
+      if (!fs.existsSync(configPath)) {
+        const ready = await waitForFileExists(configPath, 50, 100);
+        if (!ready || !fs.existsSync(configPath)) {
+          ipcLogger.warn("load-saved-achievements:not-found", {
+            configName: safeName,
+            configPath,
+          });
+          return { achievements: {}, save_path: "", error: "config not ready" };
+        }
+      }
+      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
-    const normalizedPlatform = normalizePlatform(config?.platform);
-    const cacheFallbackPlatforms = new Set([
-      "xenia",
-      "steam",
-      "uplay",
-      "ubisoft-official",
-      "ea-official",
-      "gog",
-      "gog-official",
-      "epic",
-    ]);
-    const getCacheFallback = async () =>
-      (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
-    const shouldUseCacheFallback = () =>
-      cacheFallbackPlatforms.has(normalizedPlatform);
+      const normalizedPlatform = normalizePlatform(config?.platform);
+      const cacheFallbackPlatforms = new Set([
+        "xenia",
+        "steam",
+        "uplay",
+        "ubisoft-official",
+        "ea-official",
+        "gog",
+        "gog-official",
+        "epic",
+        "epic-official",
+        "shadps4",
+      ]);
+      const getCacheFallback = async () =>
+        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
+      const shouldUseCacheFallback = () =>
+        cacheFallbackPlatforms.has(normalizedPlatform);
 
-    if (normalizedPlatform === "xenia") {
-      const gpdPath = resolveGpdPathForConfig(config);
-      if (!gpdPath || !fs.existsSync(gpdPath)) {
-        if (shouldUseCacheFallback()) {
-          const cached = await getCacheFallback();
-          if (cached && Object.keys(cached).length) {
-            return {
-              achievements: cached,
-              save_path: config.save_path || "",
-              error: "gpd not found (cached)",
-            };
+      if (normalizedPlatform === "xenia") {
+        const gpdPath = resolveGpdPathForConfig(config);
+        if (!gpdPath || !fs.existsSync(gpdPath)) {
+          if (shouldUseCacheFallback()) {
+            const cached = await getCacheFallback();
+            if (cached && Object.keys(cached).length) {
+              return {
+                achievements: cached,
+                save_path: config.save_path || "",
+                error: "gpd not found (cached)",
+              };
+            }
           }
+          return {
+            achievements: {},
+            save_path: config.save_path || "",
+            error: "gpd not found",
+          };
         }
-        return {
-          achievements: {},
-          save_path: config.save_path || "",
-          error: "gpd not found",
-        };
+        try {
+          const parsed = parseGpdFile(gpdPath);
+          const snapshot = buildSnapshotFromGpd(parsed);
+          return {
+            achievements: snapshot || {},
+            save_path: config.save_path || path.dirname(gpdPath),
+          };
+        } catch (error) {
+          return {
+            achievements: {},
+            save_path: config.save_path || path.dirname(gpdPath),
+            error: error.message,
+          };
+        }
       }
-      try {
-        const parsed = parseGpdFile(gpdPath);
-        const snapshot = buildSnapshotFromGpd(parsed);
-        return {
-          achievements: snapshot || {},
-          save_path: config.save_path || path.dirname(gpdPath),
-        };
-      } catch (error) {
-        return {
-          achievements: {},
-          save_path: config.save_path || path.dirname(gpdPath),
-          error: error.message,
-        };
+      if (normalizedPlatform === "rpcs3") {
+        const trophyDir = resolveRpcs3TrophyDirForConfig(config);
+        const usrPath = resolveTropusrPathForConfig(config);
+        if (!trophyDir || !usrPath || !fs.existsSync(usrPath)) {
+          return {
+            achievements: {},
+            save_path: config.save_path || "",
+            error: "tropusr not found",
+          };
+        }
+        try {
+          const parsed = parseTrophySetDir(trophyDir);
+          const snapshot = buildSnapshotFromTrophy(parsed);
+          const cached = await loadPreviousAchievements(
+            configName,
+            normalizedPlatform,
+          );
+          const merged = mergeRpcs3EarnedTime(snapshot, cached);
+          return {
+            achievements: merged || snapshot || {},
+            save_path: config.save_path || trophyDir,
+          };
+        } catch (error) {
+          return {
+            achievements: {},
+            save_path: config.save_path || trophyDir,
+            error: error.message,
+          };
+        }
       }
-    }
-    if (normalizedPlatform === "rpcs3") {
-      const trophyDir = resolveRpcs3TrophyDirForConfig(config);
-      const usrPath = resolveTropusrPathForConfig(config);
-      if (!trophyDir || !usrPath || !fs.existsSync(usrPath)) {
-        return {
-          achievements: {},
-          save_path: config.save_path || "",
-          error: "tropusr not found",
-        };
+      if (normalizedPlatform === "shadps4") {
+        const progressPath = resolvePs4ProgressPathForConfig(config);
+        const trophyDir = resolvePs4TrophyDirForConfig(config);
+        const xmlPath = trophyDir ? path.join(trophyDir, "Xml", "TROP.XML") : "";
+        if (
+          (!progressPath || !fs.existsSync(progressPath)) &&
+          (!trophyDir || !fs.existsSync(xmlPath))
+        ) {
+          return {
+            achievements: {},
+            save_path: progressPath || trophyDir,
+            error: "trop xml not found",
+          };
+        }
+        try {
+          const ps4Trophy = require("./utils/shadps4-trophy");
+          const ps4CacheOptions = {
+            appid: config?.appid || "",
+            filePath: progressPath || "",
+            savePath: progressPath || trophyDir || config?.save_path || "",
+            shadps4UserId: getPs4UserIdFromProgressPath(progressPath),
+          };
+          const previous =
+            (await loadPreviousAchievements(
+              configName,
+              normalizedPlatform,
+              ps4CacheOptions,
+            )) || {};
+          const snapshot =
+            progressPath && fs.existsSync(progressPath)
+              ? ps4Trophy.buildSnapshotFromPs4ProgressFile(
+                  progressPath,
+                  previous,
+                )
+              : (() => {
+                  const parsed = ps4Trophy.parsePs4TrophySetDir(trophyDir);
+                  parsed.appid = config.appid || parsed.appid;
+                  return ps4Trophy.buildSnapshotFromPs4(parsed, previous);
+                })();
+          return {
+            achievements: snapshot || {},
+            save_path: progressPath || trophyDir,
+          };
+        } catch (error) {
+          return {
+            achievements: {},
+            save_path: progressPath || trophyDir,
+            error: error.message,
+          };
+        }
       }
-      try {
-        const parsed = parseTrophySetDir(trophyDir);
-        const snapshot = buildSnapshotFromTrophy(parsed);
-        const cached = await loadPreviousAchievements(
-          configName,
-          normalizedPlatform,
-        );
-        const merged = mergeRpcs3EarnedTime(snapshot, cached);
-        return {
-          achievements: merged || snapshot || {},
-          save_path: config.save_path || trophyDir,
-        };
-      } catch (error) {
-        return {
-          achievements: {},
-          save_path: config.save_path || trophyDir,
-          error: error.message,
-        };
-      }
-    }
-    if (normalizedPlatform === "shadps4") {
-      const trophyDir = config.save_path || "";
-      const xmlPath = path.join(trophyDir, "Xml", "TROP.XML");
-      if (!trophyDir || !fs.existsSync(xmlPath)) {
-        return {
-          achievements: {},
-          save_path: trophyDir,
-          error: "trop xml not found",
-        };
-      }
-      try {
-        const parsed = require("./utils/shadps4-trophy").parsePs4TrophySetDir(
-          trophyDir,
-        );
-        parsed.appid = config.appid || parsed.appid;
-        const snapshot = require("./utils/shadps4-trophy").buildSnapshotFromPs4(
-          parsed,
+
+      if (isLumaPlayConfig(config)) {
+        const cached =
           (await loadPreviousAchievements(configName, normalizedPlatform)) ||
-            {},
-        );
-        return {
-          achievements: snapshot || {},
-          save_path: trophyDir,
-        };
-      } catch (error) {
-        return {
-          achievements: {},
-          save_path: trophyDir,
-          error: error.message,
-        };
-      }
-    }
-
-    if (isLumaPlayConfig(config)) {
-      const cached =
-        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
-      if (!isLumaPlayWatcherEnabled()) {
-        return {
-          achievements: cached || {},
-          save_path: config.save_path || "",
-        };
-      }
-      try {
-        const parsed = readLumaPlayAchievementsSnapshot({
-          appid: String(config?.appid || ""),
-          configPath: config?.config_path || "",
-          preferredUser: config?.lumaplay_user || config?.lumaplayUser || "",
-          preferredKeyPath:
-            config?.lumaplay_key_path || config?.lumaplayKeyPath || "",
-          previousSnapshot: cached,
-        });
-        if (parsed?.user && parsed.user !== config?.lumaplay_user) {
-          config.lumaplay_user = parsed.user;
-          try {
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-          } catch {}
-        }
-        const snapshot =
-          parsed?.snapshot && Object.keys(parsed.snapshot).length
-            ? parsed.snapshot
-            : cached;
-        const merged = mergeEarnedTimeFromCached(snapshot, cached);
-        return {
-          achievements: merged || snapshot || {},
-          save_path: config.save_path || "",
-        };
-      } catch (error) {
-        return {
-          achievements: cached || {},
-          save_path: config.save_path || "",
-          error: error?.message || "lumaplay read failed",
-        };
-      }
-    }
-
-    if (normalizedPlatform === "gog-official") {
-      const cached =
-        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
-      const resolved = resolveGogOfficialGameplayDbForConfig(config);
-      const gameplayDbPath = resolved?.gameplayDbPath || "";
-      const gameplayDir = resolved?.gameplayDir || config.save_path || "";
-      if (!gameplayDbPath || !fs.existsSync(gameplayDbPath)) {
-        return {
-          achievements: cached || {},
-          save_path: gameplayDir,
-          error: "gameplay.db not found",
-        };
-      }
-      try {
-        const parsed = readGogGameplayDb(gameplayDbPath);
-        const snapshot = buildGogOfficialSnapshot(parsed?.achievements || []);
-        const merged = mergeEarnedTimeFromCached(snapshot, cached);
-
-        const nextClientId = resolved?.clientId || config?.gog_client_id || "";
-        const nextUserId = resolved?.userId || config?.gog_user_id || "";
-        const nextSavePath = gameplayDir || config.save_path || "";
-        if (
-          nextSavePath !== config.save_path ||
-          nextClientId !== (config?.gog_client_id || "") ||
-          nextUserId !== (config?.gog_user_id || "") ||
-          gameplayDbPath !== (config?.gog_gameplay_db || "")
-        ) {
-          config.save_path = nextSavePath;
-          config.gog_client_id = nextClientId;
-          config.gog_user_id = nextUserId;
-          config.gog_gameplay_db = gameplayDbPath;
-          try {
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-          } catch {}
-        }
-
-        return {
-          achievements: merged || snapshot || {},
-          save_path: nextSavePath,
-        };
-      } catch (error) {
-        return {
-          achievements: cached || {},
-          save_path: gameplayDir,
-          error: error?.message || "gameplay db read failed",
-        };
-      }
-    }
-
-    if (normalizedPlatform === "ubisoft-official") {
-      const cached =
-        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
-      const resolved = resolveUbisoftOfficialSpoolFileForConfig(config);
-      const spoolFilePath = resolved?.spoolFilePath || "";
-      const spoolDir = resolved?.spoolDir || config.save_path || "";
-      if (!spoolFilePath || !fs.existsSync(spoolFilePath)) {
-        return {
-          achievements: cached || {},
-          save_path: spoolDir,
-          error: "spool file not found",
-        };
-      }
-      try {
-        const parsed = readUbisoftSpoolFile(spoolFilePath);
-        const snapshot = buildUbisoftOfficialSnapshot(parsed?.records || []);
-        const merged = mergeEarnedTimeFromCached(snapshot, cached);
-        const nextUserId = resolved?.userId || config?.ubisoft_user_id || "";
-        const nextSavePath = spoolDir || config.save_path || "";
-        if (
-          nextSavePath !== config.save_path ||
-          nextUserId !== (config?.ubisoft_user_id || "") ||
-          spoolFilePath !== (config?.ubisoft_spool_file || "")
-        ) {
-          config.save_path = nextSavePath;
-          config.ubisoft_user_id = nextUserId;
-          config.ubisoft_spool_file = spoolFilePath;
-          try {
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-          } catch {}
-        }
-        return {
-          achievements: merged || snapshot || {},
-          save_path: nextSavePath,
-        };
-      } catch (error) {
-        return {
-          achievements: cached || {},
-          save_path: spoolDir,
-          error: error?.message || "spool read failed",
-        };
-      }
-    }
-
-    if (normalizedPlatform === "ea-official") {
-      const cached =
-        (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
-      const resolved = resolveEaOfficialVerboseLogForConfig(config);
-      const logFilePath = resolved?.logFilePath || "";
-      const logsRoot = resolved?.logsRoot || config.save_path || "";
-      if (!logFilePath || !fs.existsSync(logFilePath)) {
-        return {
-          achievements: cached || {},
-          save_path: logsRoot,
-          error: "ea verbose log not found",
-        };
-      }
-      try {
-        const parsed = readEaDesktopVerboseLog(logFilePath);
-        const entry = resolveEaOfficialAchievementSetForAppId(config.appid, {
-          achievementSet: config?.ea_achievement_set || "",
-          savePath: logsRoot,
-          logFilePath,
-          parsedLog: parsed,
-        });
-        const achievementSet =
-          entry?.achievementSet || config?.ea_achievement_set || "";
-        if (!entry && !achievementSet) {
+          {};
+        if (!isLumaPlayWatcherEnabled()) {
           return {
             achievements: cached || {},
-            save_path: logsRoot,
-            error: "ea achievement set not found",
+            save_path: config.save_path || "",
+          };
+        }
+        try {
+          const parsed = readLumaPlayAchievementsSnapshot({
+            appid: String(config?.appid || ""),
+            configPath: config?.config_path || "",
+            preferredUser: config?.lumaplay_user || config?.lumaplayUser || "",
+            preferredKeyPath:
+              config?.lumaplay_key_path || config?.lumaplayKeyPath || "",
+            previousSnapshot: cached,
+          });
+          if (parsed?.user && parsed.user !== config?.lumaplay_user) {
+            config.lumaplay_user = parsed.user;
+            try {
+              fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            } catch {}
+          }
+          const snapshot =
+            parsed?.snapshot && Object.keys(parsed.snapshot).length
+              ? parsed.snapshot
+              : cached;
+          const merged = mergeEarnedTimeFromCached(snapshot, cached);
+          return {
+            achievements: merged || snapshot || {},
+            save_path: config.save_path || "",
+          };
+        } catch (error) {
+          return {
+            achievements: cached || {},
+            save_path: config.save_path || "",
+            error: error?.message || "lumaplay read failed",
+          };
+        }
+      }
+
+      if (normalizedPlatform === "gog-official") {
+        const cached =
+          (await loadPreviousAchievements(configName, normalizedPlatform)) ||
+          {};
+        const resolved = resolveGogOfficialGameplayDbForConfig(config);
+        const gameplayDbPath = resolved?.gameplayDbPath || "";
+        const gameplayDir = resolved?.gameplayDir || config.save_path || "";
+        if (!gameplayDbPath || !fs.existsSync(gameplayDbPath)) {
+          return {
+            achievements: cached || {},
+            save_path: gameplayDir,
+            error: "gameplay.db not found",
+          };
+        }
+        try {
+          const parsed = readGogGameplayDb(gameplayDbPath);
+          const snapshot = buildGogOfficialSnapshot(parsed?.achievements || []);
+          const merged = mergeEarnedTimeFromCached(snapshot, cached);
+          updateAchCacheMetaEntry(
+            configName,
+            normalizedPlatform,
+            gameplayDbPath,
+            String(config?.appid || ""),
+          );
+
+          const nextClientId =
+            resolved?.clientId || config?.gog_client_id || "";
+          const nextUserId = resolved?.userId || config?.gog_user_id || "";
+          const nextSavePath = gameplayDir || config.save_path || "";
+          if (
+            nextSavePath !== config.save_path ||
+            nextClientId !== (config?.gog_client_id || "") ||
+            nextUserId !== (config?.gog_user_id || "") ||
+            gameplayDbPath !== (config?.gog_gameplay_db || "")
+          ) {
+            config.save_path = nextSavePath;
+            config.gog_client_id = nextClientId;
+            config.gog_user_id = nextUserId;
+            config.gog_gameplay_db = gameplayDbPath;
+            try {
+              fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            } catch {}
+          }
+
+          return {
+            achievements: merged || snapshot || {},
+            save_path: nextSavePath,
+          };
+        } catch (error) {
+          return {
+            achievements: cached || {},
+            save_path: gameplayDir,
+            error: error?.message || "gameplay db read failed",
+          };
+        }
+      }
+
+      if (normalizedPlatform === "epic-official") {
+        const cached =
+          (await loadPreviousAchievements(
+            configName,
+            normalizedPlatform,
+            null,
+          )) || {};
+        if (requestOptions.cacheOnly === true) {
+          const cacheCount = Object.keys(cached || {}).length;
+          if (shouldLogEpicOfficialCacheOnly(configName, cacheCount)) {
+            epicOfficialLogger.info(
+              "load-saved-achievements:epic-official:cache-only",
+              {
+                configName,
+                cacheCount,
+              },
+            );
+          }
+          return {
+            achievements: cached || {},
+            save_path: config.save_path || "",
+          };
+        }
+        let token = null;
+        try {
+          token = await ensureEpicAccessToken(
+            getEpicAuthRequestOptions({
+              timeoutMs: 15000,
+            }),
+          );
+        } catch (error) {
+          return {
+            achievements: cached || {},
+            save_path: config.save_path || "",
+            error: error?.message || "epic auth missing",
           };
         }
 
-        const snapshot = buildEaOfficialSnapshot(
-          entry || achievementSet,
-          parsed,
-          cached || {},
-        );
-        const nextSavePath = logsRoot || config.save_path || "";
-        const nextLogFile = logFilePath || config?.ea_log_file || "";
-        const nextAchievementSet = achievementSet;
-        const nextOfferId = entry?.offerId || config?.ea_offer_id || "";
-        const nextInstallPath = entry?.installPath || config?.ea_install_path || "";
-        const nextExecutable = entry?.exePath || config?.executable || "";
-        const nextProcessName = normalizeProcessNameValue(
-          entry?.processName ||
-            config?.process_name ||
-            (nextExecutable ? path.basename(nextExecutable) : ""),
-        );
-        if (
-          nextSavePath !== config.save_path ||
-          nextLogFile !== (config?.ea_log_file || "") ||
-          nextAchievementSet !== (config?.ea_achievement_set || "") ||
-          nextOfferId !== (config?.ea_offer_id || "") ||
-          nextInstallPath !== (config?.ea_install_path || "") ||
-          nextExecutable !== (config?.executable || "") ||
-          !processNameValuesEqual(nextProcessName, config?.process_name)
-        ) {
-          config.save_path = nextSavePath;
-          config.ea_log_file = nextLogFile;
-          config.ea_achievement_set = nextAchievementSet;
-          config.ea_offer_id = nextOfferId;
-          config.ea_install_path = nextInstallPath;
-          config.executable = nextExecutable;
-          config.process_name = nextProcessName;
+        const accountId = resolvePreferredEpicOfficialAccountId(config, token);
+        const schemaPath = resolveAchievementsSchemaPath(config);
+        let schemaAchievements = [];
+        if (schemaPath && fs.existsSync(schemaPath)) {
           try {
-            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            const parsed = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+            if (Array.isArray(parsed)) schemaAchievements = parsed;
           } catch {}
         }
-
-        return {
-          achievements: snapshot || cached || {},
-          save_path: nextSavePath,
-        };
-      } catch (error) {
-        return {
-          achievements: cached || {},
-          save_path: logsRoot,
-          error: error?.message || "ea verbose log read failed",
-        };
-      }
-    }
-
-    if (normalizedPlatform === "steam-official") {
-      const schemaPath = resolveConfigSchemaPath(config);
-      const schemaArr =
-        schemaPath && fs.existsSync(schemaPath)
-          ? JSON.parse(fs.readFileSync(schemaPath, "utf-8"))
-          : [];
-      const entries = Array.isArray(schemaArr)
-        ? schemaArr
-            .map((e) => ({
-              api: e?.name || e?.api,
-              statId: e?.statId,
-              bit: e?.bit,
-            }))
-            .filter(
-              (e) =>
-                e.api && Number.isInteger(e.statId) && Number.isInteger(e.bit),
-            )
-        : [];
-      const statsDir = config.save_path || "";
-      const cached =
-        (await loadPreviousAchievements(
+        let productId = String(
+          config?.epic_product_id ||
+            config?.epicProductId ||
+            config?.appid ||
+            "",
+        ).trim();
+        if (schemaPath) {
+          try {
+            const sidecarPath = path.join(
+              path.dirname(schemaPath),
+              "achievementpercentages.json",
+            );
+            if (fs.existsSync(sidecarPath)) {
+              const sidecar = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+              if (sidecar?.appid) productId = String(sidecar.appid).trim();
+            }
+          } catch {}
+        }
+        const syncKey = buildEpicOfficialLoadSyncKey(
           configName,
-          normalizedPlatform,
-          statsDir,
-        )) || {};
-      const userBin =
-        statsDir && config.appid
-          ? pickConfiguredSteamOfficialUserBin(
-              statsDir,
-              config.appid,
-              cachedPreferences,
-            )
-          : null;
-      const hasPinnedSteamOfficialAccount = !!normalizeSteamOfficialSteamId(
-        cachedPreferences?.steamOfficialSteamId,
-      );
+          accountId,
+          productId || config?.epic_product_id || config?.appid || "",
+        );
+        const passiveResult = buildEpicOfficialPassiveSyncResult(
+          config,
+          cached,
+        );
+        const isPrioritySyncTarget =
+          isEpicOfficialPrioritySyncTarget(configName);
+        if (!isPrioritySyncTarget && !isEpicOfficialBackgroundWorkBootReady()) {
+          epicOfficialLogger.info(
+            "load-saved-achievements:epic-official:sync-deferred",
+            {
+              configName,
+              accountId,
+              productId: productId || config?.epic_product_id || config?.appid,
+              reason: "boot-priority",
+            },
+          );
+          return passiveResult;
+        }
+        const passiveSync = epicOfficialPassiveLoadSync.get(syncKey);
+        if (!isPrioritySyncTarget && passiveSync) {
+          const passiveAgeMs = Date.now() - passiveSync.timestamp;
+          if (passiveAgeMs <= EPIC_OFFICIAL_PASSIVE_SYNC_TTL_MS) {
+            epicOfficialLogger.info(
+              "load-saved-achievements:epic-official:sync-deduped",
+              {
+                configName,
+                accountId,
+                productId:
+                  productId || config?.epic_product_id || config?.appid,
+                source: "passive-cache",
+                ageMs: passiveAgeMs,
+              },
+            );
+            return passiveSync.result || passiveResult;
+          }
+          epicOfficialPassiveLoadSync.delete(syncKey);
+        }
+        const recentSync = epicOfficialRecentLoadSync.get(syncKey);
+        if (
+          recentSync &&
+          Date.now() - recentSync.timestamp <= EPIC_OFFICIAL_LOAD_SYNC_DEDUPE_MS
+        ) {
+          epicOfficialLogger.info(
+            "load-saved-achievements:epic-official:sync-deduped",
+            {
+              configName,
+              accountId,
+              productId: productId || config?.epic_product_id || config?.appid,
+              source: "recent",
+              ageMs: Date.now() - recentSync.timestamp,
+            },
+          );
+          return recentSync.result;
+        }
+        if (recentSync) {
+          epicOfficialRecentLoadSync.delete(syncKey);
+        }
+        const inflightSync = epicOfficialLoadSyncInflight.get(syncKey);
+        if (inflightSync) {
+          epicOfficialLogger.info(
+            "load-saved-achievements:epic-official:sync-deduped",
+            {
+              configName,
+              accountId,
+              productId: productId || config?.epic_product_id || config?.appid,
+              source: "inflight",
+            },
+          );
+          return inflightSync;
+        }
+        try {
+          const syncJob = (async () => {
+            epicOfficialLogger.info(
+              "load-saved-achievements:epic-official:sync-start",
+              {
+                configName,
+                accountId,
+                productId,
+              },
+            );
+            const synced = await syncEpicOfficialAchievements(
+              config,
+              getEpicAuthRequestOptions({
+                token,
+                accountId,
+                productId,
+                schemaAchievements,
+                timeoutMs: 15000,
+              }),
+            );
+            const snapshot = mergeEarnedTimeFromCached(
+              synced.snapshot || {},
+              cached,
+            );
+            const nextAccountId = synced.accountId || accountId || "";
+            const nextProductId = synced.productId || productId || "";
+            const delta = getEpicOfficialUnlockedDelta(cached, snapshot);
+            const hadCachedSnapshot = Object.keys(cached || {}).length > 0;
+            if (!hadCachedSnapshot && Number(synced.totalUnlocked || 0) > 0) {
+              markEpicOfficialSilentSeed(
+                configName,
+                nextAccountId,
+                nextProductId,
+                {
+                  expectedUnlocked: synced.totalUnlocked || 0,
+                  reason: "load-saved-achievements",
+                },
+              );
+            }
+            const snapshotChanged = !deepEqual(cached || {}, snapshot || {});
+            if (snapshotChanged) {
+              savePreviousAchievements(
+                configName,
+                snapshot,
+                normalizedPlatform,
+                {
+                  accountId: nextAccountId,
+                },
+              );
+            }
+            epicOfficialLogger.info(
+              "load-saved-achievements:epic-official:sync-success",
+              {
+                configName,
+                count: Object.keys(snapshot || {}).length,
+                accountId: nextAccountId,
+                productId: nextProductId,
+              },
+            );
+            if (
+              nextAccountId !== (config?.epic_account_id || "") ||
+              nextProductId !== (config?.epic_product_id || "")
+            ) {
+              config.epic_account_id = nextAccountId;
+              config.epic_product_id = nextProductId;
+              try {
+                fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+              } catch {}
+            }
+            const result = {
+              achievements: snapshot || {},
+              save_path: config.save_path || "",
+            };
+            if (
+              snapshotChanged &&
+              isEpicOfficialConfigActiveForPolling(configName)
+            ) {
+              handleEpicOfficialSnapshotDelta({
+                source: "load-saved-achievements",
+                trigger: "sync",
+                config,
+                configName,
+                schemaAchievements,
+                snapshot,
+                delta,
+                hadCachedSnapshot,
+                accountId: nextAccountId,
+                productId: nextProductId,
+              });
+            }
+            markEpicOfficialRecentLoadSync(
+              configName,
+              synced.accountId || accountId,
+              synced.productId || productId,
+              result,
+            );
+            return result;
+          })().finally(() => {
+            epicOfficialLoadSyncInflight.delete(syncKey);
+          });
+          epicOfficialLoadSyncInflight.set(syncKey, syncJob);
+          return await syncJob;
+        } catch (error) {
+          epicOfficialLogger.warn(
+            "load-saved-achievements:epic-official:sync-failed",
+            {
+              configName,
+              error: error?.message || String(error),
+            },
+          );
+          return {
+            achievements: cached || {},
+            save_path: config.save_path || "",
+            error: error?.message || "epic official sync failed",
+          };
+        }
+      }
 
-      // If we don't have schema entries yet, just surface cached so UI isn't empty.
-      if (!entries.length) {
+      if (normalizedPlatform === "ubisoft-official") {
+        const cached =
+          (await loadPreviousAchievements(configName, normalizedPlatform)) ||
+          {};
+        const resolved = resolveUbisoftOfficialSpoolFileForConfig(config);
+        const spoolFilePath = resolved?.spoolFilePath || "";
+        const spoolDir = resolved?.spoolDir || config.save_path || "";
+        if (!spoolFilePath || !fs.existsSync(spoolFilePath)) {
+          return {
+            achievements: cached || {},
+            save_path: spoolDir,
+            error: "spool file not found",
+          };
+        }
+        try {
+          const parsed = readUbisoftSpoolFile(spoolFilePath);
+          const snapshot = buildUbisoftOfficialSnapshot(parsed?.records || []);
+          const merged = mergeEarnedTimeFromCached(snapshot, cached);
+          const nextUserId = resolved?.userId || config?.ubisoft_user_id || "";
+          const nextSavePath = spoolDir || config.save_path || "";
+          if (
+            nextSavePath !== config.save_path ||
+            nextUserId !== (config?.ubisoft_user_id || "") ||
+            spoolFilePath !== (config?.ubisoft_spool_file || "")
+          ) {
+            config.save_path = nextSavePath;
+            config.ubisoft_user_id = nextUserId;
+            config.ubisoft_spool_file = spoolFilePath;
+            try {
+              fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            } catch {}
+          }
+          return {
+            achievements: merged || snapshot || {},
+            save_path: nextSavePath,
+          };
+        } catch (error) {
+          return {
+            achievements: cached || {},
+            save_path: spoolDir,
+            error: error?.message || "spool read failed",
+          };
+        }
+      }
+
+      if (normalizedPlatform === "ea-official") {
+        const cached =
+          (await loadPreviousAchievements(configName, normalizedPlatform)) ||
+          {};
+        const resolved = resolveEaOfficialVerboseLogForConfig(config);
+        const logFilePath = resolved?.logFilePath || "";
+        const logsRoot = resolved?.logsRoot || config.save_path || "";
+        if (!logFilePath || !fs.existsSync(logFilePath)) {
+          return {
+            achievements: cached || {},
+            save_path: logsRoot,
+            error: "ea verbose log not found",
+          };
+        }
+        try {
+          const parsed = readEaDesktopVerboseLog(logFilePath);
+          const entry = resolveEaOfficialAchievementSetForAppId(config.appid, {
+            achievementSet: config?.ea_achievement_set || "",
+            savePath: logsRoot,
+            logFilePath,
+            parsedLog: parsed,
+          });
+          const achievementSet =
+            entry?.achievementSet || config?.ea_achievement_set || "";
+          if (!entry && !achievementSet) {
+            return {
+              achievements: cached || {},
+              save_path: logsRoot,
+              error: "ea achievement set not found",
+            };
+          }
+
+          const snapshot = buildEaOfficialSnapshot(
+            entry || achievementSet,
+            parsed,
+            cached || {},
+          );
+          const nextSavePath = logsRoot || config.save_path || "";
+          const nextLogFile = logFilePath || config?.ea_log_file || "";
+          const nextAchievementSet = achievementSet;
+          const nextOfferId = entry?.offerId || config?.ea_offer_id || "";
+          const nextInstallPath =
+            entry?.installPath || config?.ea_install_path || "";
+          const nextExecutable = entry?.exePath || config?.executable || "";
+          const nextProcessName = normalizeProcessNameValue(
+            entry?.processName ||
+              config?.process_name ||
+              (nextExecutable ? path.basename(nextExecutable) : ""),
+          );
+          if (
+            nextSavePath !== config.save_path ||
+            nextLogFile !== (config?.ea_log_file || "") ||
+            nextAchievementSet !== (config?.ea_achievement_set || "") ||
+            nextOfferId !== (config?.ea_offer_id || "") ||
+            nextInstallPath !== (config?.ea_install_path || "") ||
+            nextExecutable !== (config?.executable || "") ||
+            !processNameValuesEqual(nextProcessName, config?.process_name)
+          ) {
+            config.save_path = nextSavePath;
+            config.ea_log_file = nextLogFile;
+            config.ea_achievement_set = nextAchievementSet;
+            config.ea_offer_id = nextOfferId;
+            config.ea_install_path = nextInstallPath;
+            config.executable = nextExecutable;
+            config.process_name = nextProcessName;
+            try {
+              fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+            } catch {}
+          }
+
+          return {
+            achievements: snapshot || cached || {},
+            save_path: nextSavePath,
+          };
+        } catch (error) {
+          return {
+            achievements: cached || {},
+            save_path: logsRoot,
+            error: error?.message || "ea verbose log read failed",
+          };
+        }
+      }
+
+      if (normalizedPlatform === "steam-official") {
+        const schemaPath = resolveConfigSchemaPath(config);
+        const schemaArr =
+          schemaPath && fs.existsSync(schemaPath)
+            ? JSON.parse(fs.readFileSync(schemaPath, "utf-8"))
+            : [];
+        const entries = Array.isArray(schemaArr)
+          ? schemaArr
+              .map((e) => ({
+                api: e?.name || e?.api,
+                statId: e?.statId,
+                bit: e?.bit,
+              }))
+              .filter(
+                (e) =>
+                  e.api &&
+                  Number.isInteger(e.statId) &&
+                  Number.isInteger(e.bit),
+              )
+          : [];
+        const statsDir = config.save_path || "";
+        const cached =
+          (await loadPreviousAchievements(
+            configName,
+            normalizedPlatform,
+            statsDir,
+          )) || {};
+        const userBin =
+          statsDir && config.appid
+            ? pickConfiguredSteamOfficialUserBin(
+                statsDir,
+                config.appid,
+                cachedPreferences,
+              )
+            : null;
+        const hasPinnedSteamOfficialAccount = !!normalizeSteamOfficialSteamId(
+          cachedPreferences?.steamOfficialSteamId,
+        );
+
+        // If we don't have schema entries yet, just surface cached so UI isn't empty.
+        if (!entries.length) {
+          return {
+            achievements:
+              hasPinnedSteamOfficialAccount && !userBin ? {} : cached,
+            save_path: statsDir,
+          };
+        }
+
+        if (userBin && fs.existsSync(userBin)) {
+          try {
+            const kv = parseSteamKv(fs.readFileSync(userBin));
+            const userStats = extractUserStats(kv.data);
+            let snapshot = buildSnapshotFromAppcache(entries, userStats);
+            // merge with cache to keep any extra metadata (e.g., previously detected times)
+            const merged = { ...snapshot };
+            for (const [k, v] of Object.entries(cached)) {
+              if (!merged[k]) {
+                merged[k] = v;
+                continue;
+              }
+              if (
+                merged[k].earned &&
+                (merged[k].earned_time == null ||
+                  merged[k].earned_time === undefined) &&
+                v.earned_time != null
+              ) {
+                merged[k].earned_time = v.earned_time;
+              }
+            }
+            snapshot = merged;
+            return {
+              achievements: snapshot || {},
+              save_path: statsDir,
+            };
+          } catch (error) {
+            ipcLogger.warn("load-saved-achievements:steam-appcache-failed", {
+              configName,
+              error: error.message,
+            });
+          }
+        }
+        // Fallback to cache if parsing failed or no user bin yet
         return {
-          achievements:
-            hasPinnedSteamOfficialAccount && !userBin ? {} : cached,
+          achievements: hasPinnedSteamOfficialAccount ? {} : cached,
           save_path: statsDir,
         };
       }
 
-      if (userBin && fs.existsSync(userBin)) {
-        try {
-          const kv = parseSteamKv(fs.readFileSync(userBin));
-          const userStats = extractUserStats(kv.data);
-          let snapshot = buildSnapshotFromAppcache(entries, userStats);
-          // merge with cache to keep any extra metadata (e.g., previously detected times)
-          const merged = { ...snapshot };
-          for (const [k, v] of Object.entries(cached)) {
-            if (!merged[k]) {
-              merged[k] = v;
-              continue;
-            }
-            if (
-              merged[k].earned &&
-              (merged[k].earned_time == null ||
-                merged[k].earned_time === undefined) &&
-              v.earned_time != null
-            ) {
-              merged[k].earned_time = v.earned_time;
-            }
-          }
-          snapshot = merged;
+      const saveBase = config.save_path;
+      const appid = String(config.appid || "");
+      const saveJsonPath = resolveSaveFilePath(saveBase, appid);
+      const {
+        tenokeIni: tenokeIniPath,
+        ini: achievementsIniPath,
+        ofx: achievementsIniOnlineFixPath,
+        bin: achievementsBinPath,
+      } = resolveSaveSidecarPaths(saveBase, appid);
+
+      const safeExists = (p) =>
+        typeof p === "string" && p.length > 0 && fs.existsSync(p);
+
+      let effectiveSavePath = "";
+      if (safeExists(saveJsonPath))
+        effectiveSavePath = path.dirname(saveJsonPath);
+      else if (safeExists(tenokeIniPath))
+        effectiveSavePath = path.dirname(tenokeIniPath);
+      else if (safeExists(achievementsIniPath))
+        effectiveSavePath = path.dirname(achievementsIniPath);
+      else if (safeExists(achievementsIniOnlineFixPath))
+        effectiveSavePath = path.dirname(achievementsIniOnlineFixPath);
+      else if (safeExists(achievementsBinPath))
+        effectiveSavePath = path.dirname(achievementsBinPath);
+
+      const schemaPath = resolveConfigSchemaPath(config);
+      const achievements = loadAchievementsFromSaveFile(
+        effectiveSavePath || saveBase,
+        {},
+        {
+          configMeta: config,
+          fullSchemaPath: schemaPath,
+        },
+      );
+
+      const hasAchievements =
+        achievements && Object.keys(achievements).length > 0;
+      if (!hasAchievements && !effectiveSavePath && shouldUseCacheFallback()) {
+        const cached = await getCacheFallback();
+        if (cached && Object.keys(cached).length) {
           return {
-            achievements: snapshot || {},
-            save_path: statsDir,
+            achievements: cached,
+            save_path: effectiveSavePath || saveBase || "",
+            error: "save file missing (cached)",
           };
-        } catch (error) {
-          ipcLogger.warn("load-saved-achievements:steam-appcache-failed", {
-            configName,
-            error: error.message,
-          });
         }
       }
-      // Fallback to cache if parsing failed or no user bin yet
+
       return {
-        achievements: hasPinnedSteamOfficialAccount ? {} : cached,
-        save_path: statsDir,
+        achievements: achievements || {},
+        save_path: effectiveSavePath || saveBase || "",
       };
+    } catch (error) {
+      ipcLogger.error("load-saved-achievements:error", {
+        configName,
+        error: error.message,
+      });
+      return { achievements: {}, save_path: "", error: error.message };
     }
-
-    const saveBase = config.save_path;
-    const appid = String(config.appid || "");
-    const saveJsonPath = resolveSaveFilePath(saveBase, appid);
-    const {
-      tenokeIni: tenokeIniPath,
-      ini: achievementsIniPath,
-      ofx: achievementsIniOnlineFixPath,
-      bin: achievementsBinPath,
-    } = resolveSaveSidecarPaths(saveBase, appid);
-
-    const safeExists = (p) =>
-      typeof p === "string" && p.length > 0 && fs.existsSync(p);
-
-    let effectiveSavePath = "";
-    if (safeExists(saveJsonPath))
-      effectiveSavePath = path.dirname(saveJsonPath);
-    else if (safeExists(tenokeIniPath))
-      effectiveSavePath = path.dirname(tenokeIniPath);
-    else if (safeExists(achievementsIniPath))
-      effectiveSavePath = path.dirname(achievementsIniPath);
-    else if (safeExists(achievementsIniOnlineFixPath))
-      effectiveSavePath = path.dirname(achievementsIniOnlineFixPath);
-    else if (safeExists(achievementsBinPath))
-      effectiveSavePath = path.dirname(achievementsBinPath);
-
-    const schemaPath = resolveConfigSchemaPath(config);
-    const achievements = loadAchievementsFromSaveFile(
-      effectiveSavePath || saveBase,
-      {},
-      {
-        configMeta: config,
-        fullSchemaPath: schemaPath,
-      },
-    );
-
-    const hasAchievements =
-      achievements && Object.keys(achievements).length > 0;
-    if (!hasAchievements && !effectiveSavePath && shouldUseCacheFallback()) {
-      const cached = await getCacheFallback();
-      if (cached && Object.keys(cached).length) {
-        return {
-          achievements: cached,
-          save_path: effectiveSavePath || saveBase || "",
-          error: "save file missing (cached)",
-        };
-      }
-    }
-
-    return {
-      achievements: achievements || {},
-      save_path: effectiveSavePath || saveBase || "",
-    };
-  } catch (error) {
-    ipcLogger.error("load-saved-achievements:error", {
-      configName,
-      error: error.message,
-    });
-    return { achievements: {}, save_path: "", error: error.message };
-  }
-});
+  },
+);
 
 // Handler for config deletion
 ipcMain.handle("delete-config", async (_event, payload) => {
@@ -6886,10 +8374,12 @@ ipcMain.handle("delete-config", async (_event, payload) => {
           sanitizeAppId(configData?.steamAppId) ||
           ""
         : "";
+      const inferredConfigPlatform = needsConfigData
+        ? inferOfficialPlatformFromMarkers(configData) ||
+          normalizePlatform(configData?.platform)
+        : "";
       const platform = needsConfigData
-        ? normalizePlatform(configData?.platform) ||
-          getPlatformForAppId(appid) ||
-          "steam"
+        ? inferredConfigPlatform || getPlatformForAppId(appid) || "steam"
         : "steam";
       const savePath =
         needsConfigData && typeof configData?.save_path === "string"
@@ -6940,8 +8430,10 @@ ipcMain.handle("delete-config", async (_event, payload) => {
             `${safeName}_achievements_cache.json`,
           );
           if (fs.existsSync(legacyCachePath)) {
-            await runDeleteWithRetries("legacy-cache-file", legacyCachePath, () =>
-              fs.unlinkSync(legacyCachePath),
+            await runDeleteWithRetries(
+              "legacy-cache-file",
+              legacyCachePath,
+              () => fs.unlinkSync(legacyCachePath),
             );
           }
         } catch (err) {
@@ -6952,13 +8444,15 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         }
         if (appid) {
           try {
-            const imagesDir = path.join(
-              app.getPath("userData"),
-              "images",
-              platform || "steam",
-              String(appid),
-            );
-            if (fs.existsSync(imagesDir)) {
+            const imagePlatforms = getImagePlatformCandidates(appid, platform);
+            for (const imagePlatform of imagePlatforms) {
+              const imagesDir = path.join(
+                app.getPath("userData"),
+                "images",
+                imagePlatform || "steam",
+                String(appid),
+              );
+              if (!fs.existsSync(imagesDir)) continue;
               await runDeleteWithRetries("images-dir", imagesDir, () =>
                 fs.rmSync(imagesDir, { recursive: true, force: true }),
               );
@@ -6997,6 +8491,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       if (deleteSaveFiles) {
         if (
           platform === "steam-official" ||
+          platform === "epic-official" ||
           platform === "gog-official" ||
           platform === "ubisoft-official" ||
           platform === "ea-official"
@@ -7010,7 +8505,9 @@ ipcMain.handle("delete-config", async (_event, payload) => {
             if (!p || typeof p !== "string") return;
             try {
               if (fs.existsSync(p) && fs.statSync(p).isFile()) {
-                await runDeleteWithRetries("save-file", p, () => fs.unlinkSync(p));
+                await runDeleteWithRetries("save-file", p, () =>
+                  fs.unlinkSync(p),
+                );
                 logDeleteInfo("delete-config:save-delete", {
                   configName,
                   path: p,
@@ -7246,7 +8743,10 @@ ipcMain.handle("blacklist:reset", async () => {
   try {
     const before = buildBlacklistPayload();
     resetBlacklist();
-    if ((before?.appids?.length || 0) > 0 || (before?.configKeys?.length || 0) > 0) {
+    if (
+      (before?.appids?.length || 0) > 0 ||
+      (before?.configKeys?.length || 0) > 0
+    ) {
       try {
         ipcMain.emit("blacklist:removed-appid", null, null);
       } catch {}
@@ -7434,34 +8934,53 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
       percent: 18,
     });
 
+    let schemaResult = null;
     try {
-      await runAchievementsGenerator(
-        appid,
-        SCHEMA_ROOT_PATH,
-        app.getPath("userData"),
-        {
-          platform,
-          langs: getSchemaLanguagesFromPreferences(),
-          onProgress: (progress) => {
-            const childPercent = clampGenerationPercent(progress?.percent, 0);
-            progressJob?.update({
-              phase: progress?.phase || "generatingSchema",
-              detail: progress?.detail || "",
-              current:
-                Number.isFinite(Number(progress?.current)) &&
-                Number(progress.current) >= 0
-                  ? Number(progress.current)
-                  : 0,
-              total:
-                Number.isFinite(Number(progress?.total)) &&
-                Number(progress.total) >= 0
-                  ? Number(progress.total)
-                  : 0,
-              percent: 18 + Math.round(childPercent * 0.72),
-            });
+      if (platform === "epic-official") {
+        schemaResult = await ensureEpicOfficialSchema(appid, destDir, {
+          ...config,
+          productId: config?.epic_product_id || config?.epicProductId,
+          sandboxId:
+            config?.epic_sandbox_id ||
+            config?.epicSandboxId ||
+            config?.epic_namespace ||
+            config?.epicNamespace,
+          timeoutMs: 15000,
+        });
+        progressJob?.update({
+          phase: "generatingSchema",
+          detail: "Generating schema",
+          percent: 90,
+        });
+      } else {
+        await runAchievementsGenerator(
+          appid,
+          SCHEMA_ROOT_PATH,
+          app.getPath("userData"),
+          {
+            platform,
+            langs: getSchemaLanguagesFromPreferences(),
+            onProgress: (progress) => {
+              const childPercent = clampGenerationPercent(progress?.percent, 0);
+              progressJob?.update({
+                phase: progress?.phase || "generatingSchema",
+                detail: progress?.detail || "",
+                current:
+                  Number.isFinite(Number(progress?.current)) &&
+                  Number(progress.current) >= 0
+                    ? Number(progress.current)
+                    : 0,
+                total:
+                  Number.isFinite(Number(progress?.total)) &&
+                  Number(progress.total) >= 0
+                    ? Number(progress.total)
+                    : 0,
+                percent: 18 + Math.round(childPercent * 0.72),
+              });
+            },
           },
-        },
-      );
+        );
+      }
     } catch (err) {
       ipcLogger.error("schema:regenerate-failed", {
         appid,
@@ -7483,6 +9002,18 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
 
     const achJson = path.join(destDir, "achievements.json");
     if (fs.existsSync(achJson)) {
+      if (platform === "epic-official" && schemaResult) {
+        try {
+          const current = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
+          if (schemaResult.productId) {
+            current.epic_product_id = schemaResult.productId;
+          }
+          if (schemaResult.sandboxId) {
+            current.epic_namespace = schemaResult.sandboxId;
+          }
+          fs.writeFileSync(cfgFile, JSON.stringify(current, null, 2));
+        } catch {}
+      }
       progressJob?.update({
         phase: "finalizing",
         detail: "Refreshing achievements",
@@ -8323,6 +9854,7 @@ ipcMain.handle("checkLocalGameImage", async (_event, appid, platformArg) => {
   const platform = normalizePlatform(platformArg) || getPlatformForAppId(appid);
   ipcLogger.info("checkLocalGameImage:request", { appid, platform });
   const baseDir = path.join(app.getPath("userData"), "images");
+  const candidatePlatforms = getImagePlatformCandidates(appid, platform);
   const newPath = path.join(
     baseDir,
     platform || "steam",
@@ -8339,17 +9871,59 @@ ipcMain.handle("checkLocalGameImage", async (_event, appid, platformArg) => {
     });
     return newPath;
   } catch {}
+  for (const candidatePlatform of candidatePlatforms) {
+    if (candidatePlatform === platform) continue;
+    const candidatePath = path.join(
+      baseDir,
+      candidatePlatform,
+      `${appid}`,
+      `${appid}.jpg`,
+    );
+    try {
+      await fs.promises.access(candidatePath, fs.constants.F_OK);
+      try {
+        fs.mkdirSync(path.dirname(newPath), { recursive: true });
+        if (!fs.existsSync(newPath)) {
+          fs.copyFileSync(candidatePath, newPath);
+        }
+      } catch {}
+      ipcLogger.info("checkLocalGameImage:platform-alias-hit", {
+        appid,
+        platform,
+        aliasPlatform: candidatePlatform,
+        imagePath: candidatePath,
+      });
+      return fs.existsSync(newPath) ? newPath : candidatePath;
+    } catch {}
+  }
   try {
     await fs.promises.access(legacyPath, fs.constants.F_OK);
+    try {
+      fs.mkdirSync(path.dirname(newPath), { recursive: true });
+      if (!fs.existsSync(newPath)) {
+        fs.copyFileSync(legacyPath, newPath);
+      }
+    } catch {}
     ipcLogger.info("checkLocalGameImage:legacy-hit", {
       appid,
       platform,
       imagePath: legacyPath,
     });
-    return legacyPath;
+    return fs.existsSync(newPath) ? newPath : legacyPath;
   } catch {}
   ipcLogger.info("checkLocalGameImage:miss", { appid, platform });
   return null;
+});
+
+// Check if executable file exists
+ipcMain.handle("checkExecutableExists", async (_event, exePath) => {
+  if (!exePath) return false;
+  try {
+    await fs.promises.access(exePath, fs.constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
 });
 
 // Save image locally from renderer
@@ -8909,13 +10483,21 @@ function makeCacheKey(configName, platform = "steam", options = null) {
   const safeName = sanitizeConfigName(configName || "") || "unknown";
   const safePlatform = normalizePlatform(platform) || "steam";
   const parts = [safeName, safePlatform];
-  const steamOfficialAccountId = resolveSteamOfficialCacheAccountId(
+  const scopedAccountId = resolveScopedAchievementCacheAccountId(
     configName,
     safePlatform,
     options,
   );
-  if (steamOfficialAccountId) {
-    parts.push(`acct_${steamOfficialAccountId}`);
+  if (scopedAccountId) {
+    parts.push(`acct_${scopedAccountId}`);
+  }
+  const shadPs4UserId = resolveShadPs4AchievementCacheUserId(
+    configName,
+    safePlatform,
+    options,
+  );
+  if (shadPs4UserId) {
+    parts.push(`user_${shadPs4UserId}`);
   }
   return parts.join("_");
 }
@@ -8928,21 +10510,24 @@ function getCachePath(configName, platform = "steam", options = null) {
   return path.join(cacheDir, `${key}_achievements_cache.json`);
 }
 
-function listScopedSteamOfficialCachePaths(configName, platform = "steam") {
+function listScopedAchievementCachePaths(configName, platform = "steam") {
   const normalizedPlatform = normalizePlatform(platform) || "steam";
-  if (normalizedPlatform !== "steam-official") {
+  if (
+    normalizedPlatform !== "steam-official" &&
+    normalizedPlatform !== "epic-official" &&
+    normalizedPlatform !== "shadps4"
+  ) {
     const exactPath = getCachePath(configName, normalizedPlatform);
     return exactPath ? [exactPath] : [];
   }
   const safeName = sanitizeConfigName(configName || "") || "unknown";
-  const baseKey = [safeName, normalizedPlatform].join("_").replace(
-    /[:\\/]+/g,
-    "_",
-  );
+  const baseKey = [safeName, normalizedPlatform]
+    .join("_")
+    .replace(/[:\\/]+/g, "_");
   if (!cacheDir || !fs.existsSync(cacheDir)) return [];
   const escapedBaseKey = baseKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rx = new RegExp(
-    `^${escapedBaseKey}(?:_acct_\\d+)?_achievements_cache\\.json$`,
+    `^${escapedBaseKey}(?:_acct_[A-Za-z0-9-]+)?(?:_user_[A-Za-z0-9._-]+)?_achievements_cache\\.json$`,
     "i",
   );
   try {
@@ -8953,6 +10538,10 @@ function listScopedSteamOfficialCachePaths(configName, platform = "steam") {
   } catch {
     return [];
   }
+}
+
+function listScopedSteamOfficialCachePaths(configName, platform = "steam") {
+  return listScopedAchievementCachePaths(configName, platform);
 }
 
 const achCacheMetaPath = (() => {
@@ -8976,6 +10565,8 @@ const achCacheMetaPath = (() => {
 })();
 let achCacheMetaLoaded = false;
 const achCacheMeta = new Map();
+let achCacheMetaDirty = false;
+let achCacheMetaSaveTimer = null;
 
 function normalizeAchCacheMetaPath(inputPath) {
   if (!inputPath) return "";
@@ -9037,6 +10628,43 @@ function isAchCacheMetaMatch(configName, platform, filePath, appid = "") {
   return stat.mtimeMs === expectedMtime && stat.size === expectedSize;
 }
 
+function scheduleAchCacheMetaSave() {
+  if (!achCacheMetaPath) return;
+  achCacheMetaDirty = true;
+  if (achCacheMetaSaveTimer) {
+    clearTimeout(achCacheMetaSaveTimer);
+  }
+  achCacheMetaSaveTimer = setTimeout(() => {
+    if (!achCacheMetaDirty) return;
+    achCacheMetaDirty = false;
+    try {
+      const payload = {
+        version: 1,
+        files: Object.fromEntries(achCacheMeta),
+      };
+      fs.mkdirSync(path.dirname(achCacheMetaPath), { recursive: true });
+      fs.writeFileSync(achCacheMetaPath, JSON.stringify(payload, null, 2));
+    } catch {}
+  }, 500);
+}
+
+function updateAchCacheMetaEntry(configName, platform, filePath, appid = "") {
+  const key = getAchCacheMetaKey(configName, platform, filePath, appid);
+  if (!key || !filePath) return;
+  let stat = null;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    return;
+  }
+  const mtimeMs = Number(stat.mtimeMs ?? 0);
+  const size = Number(stat.size ?? 0);
+  if (!Number.isFinite(mtimeMs) || !Number.isFinite(size)) return;
+  loadAchCacheMetaOnce();
+  achCacheMeta.set(key, { mtimeMs, size });
+  scheduleAchCacheMetaSave();
+}
+
 function resolveBootSeedCandidatePath(config) {
   const savePathRaw = config?.save_path;
   if (!savePathRaw) return null;
@@ -9053,6 +10681,7 @@ function resolveBootSeedCandidatePath(config) {
   if (!candidatePath) {
     if (!fs.existsSync(saveRoot)) return null;
     const appid = String(config?.appid || "").trim();
+    if (normalizedPlatform === "epic-official") return null;
     if (normalizedPlatform === "gog-official") {
       const resolved = resolveGogOfficialGameplayDbForConfig(config);
       if (resolved?.gameplayDbPath && fs.existsSync(resolved.gameplayDbPath)) {
@@ -9335,7 +10964,12 @@ async function loadPreviousAchievements(
 ) {
   const normalizedPlatform = normalizePlatform(platform) || "steam";
   const resolvedOptions = normalizeAchievementCacheOptions(options);
-  const scopedAccountId = resolveSteamOfficialCacheAccountId(
+  const scopedAccountId = resolveScopedAchievementCacheAccountId(
+    configName,
+    normalizedPlatform,
+    resolvedOptions,
+  );
+  const scopedShadPs4UserId = resolveShadPs4AchievementCacheUserId(
     configName,
     normalizedPlatform,
     resolvedOptions,
@@ -9359,7 +10993,14 @@ async function loadPreviousAchievements(
     }
   }
   // fallback legacy cache (name-only) for compatibility
-  if (!(normalizedPlatform === "steam-official" && scopedAccountId)) {
+  if (
+    !(
+      (normalizedPlatform === "steam-official" ||
+        normalizedPlatform === "epic-official") &&
+      scopedAccountId
+    ) &&
+    !(normalizedPlatform === "shadps4" && scopedShadPs4UserId)
+  ) {
     const legacyPath = path.join(
       cacheDir,
       `${configName}_achievements_cache.json`,
@@ -9428,7 +11069,7 @@ function savePreviousAchievements(
 ) {
   const normalizedPlatform = normalizePlatform(platform) || "steam";
   const resolvedOptions = normalizeAchievementCacheOptions(options);
-  const scopedAccountId = resolveSteamOfficialCacheAccountId(
+  const scopedAccountId = resolveScopedAchievementCacheAccountId(
     configName,
     normalizedPlatform,
     resolvedOptions,
@@ -9488,6 +11129,14 @@ function savePreviousAchievements(
       }
       ordered[key] = normalized;
     }
+    const existing = readCacheSilent(
+      configName,
+      normalizedPlatform,
+      effectiveOptions,
+    );
+    if (existing && deepEqual(existing, ordered)) {
+      return false;
+    }
     fs.writeFileSync(cachePath, JSON.stringify(ordered, null, 2));
     persistenceLogger.info("save-achievement-cache", {
       config: configName,
@@ -9496,14 +11145,28 @@ function savePreviousAchievements(
         normalizedPlatform === "steam-official"
           ? effectiveOptions.accountId || null
           : null,
+      epicOfficialAccountId:
+        normalizedPlatform === "epic-official"
+          ? effectiveOptions.accountId || null
+          : null,
+      shadps4UserId:
+        normalizedPlatform === "shadps4"
+          ? resolveShadPs4AchievementCacheUserId(
+              configName,
+              normalizedPlatform,
+              effectiveOptions,
+            ) || null
+          : null,
       count: data ? Object.keys(data).length : 0,
     });
+    return true;
   } catch (e) {
     notifyError(tUi("main.notify.cache.readFailed", { error: e.message }));
     persistenceLogger.error("save-achievement-cache:error", {
       config: configName,
       error: e.message,
     });
+    return false;
   }
 }
 
@@ -9518,7 +11181,25 @@ function seedCacheFromSnapshot(
   options = null,
 ) {
   if (!configName || !snapshot) return;
-  savePreviousAchievements(configName, snapshot, platform, options);
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  if (normalizedPlatform === "shadps4") {
+    const resolvedOptions = normalizeAchievementCacheOptions(options);
+    const progressPath =
+      resolvedOptions.progressPath ||
+      resolvedOptions.progress_path ||
+      resolvedOptions.filePath ||
+      resolvedOptions.savePath ||
+      resolvedOptions.save_path ||
+      "";
+    if (!isPs4ProgressXmlPath(progressPath)) {
+      persistenceLogger.info("save-achievement-cache:shadps4-skip-nonprogress", {
+        config: configName,
+        source: progressPath || null,
+      });
+      return;
+    }
+  }
+  savePreviousAchievements(configName, snapshot, normalizedPlatform, options);
   markCacheSeedKeyFromName(configName);
 }
 
@@ -9711,13 +11392,119 @@ async function monitorAchievementsFile(filePath) {
     normalizePlatform(selectedPlatform) ||
     normalizePlatform(configMeta?.platform) ||
     "steam";
-  previousAchievements =
-    (await loadPreviousAchievements(configName, currentPlatform)) || {};
   const isPs4 =
     normalizePlatform(configMeta?.platform) === "shadps4" ||
     String(filePath || "")
       .toLowerCase()
       .endsWith(".xml");
+  const selectedPs4ProgressPath = isPs4
+    ? (isPs4ProgressXmlPath(filePath) ? filePath : "") ||
+      resolvePs4ProgressPathForConfig(configMeta)
+    : "";
+  const currentCacheOptions = {
+    appid: configMeta?.appid || currentAppId || "",
+    filePath: selectedPs4ProgressPath || filePath || "",
+    savePath:
+      selectedPs4ProgressPath ||
+      configMeta?.save_path ||
+      path.dirname(filePath || ""),
+    shadps4UserId: getPs4UserIdFromProgressPath(selectedPs4ProgressPath),
+  };
+  previousAchievements =
+    (await loadPreviousAchievements(
+      configName,
+      currentPlatform,
+      currentCacheOptions,
+    )) || {};
+  const ps4PreviousByPath = new Map();
+  const ps4FirstLoadByPath = new Map();
+  const normalizePs4ProgressKey = (fp) =>
+    path.normalize(String(fp || "")).toLowerCase();
+  const makePs4CacheOptionsForPath = (sourcePath) => {
+    const progressPath =
+      (isPs4ProgressXmlPath(sourcePath) ? sourcePath : "") ||
+      selectedPs4ProgressPath ||
+      "";
+    return {
+      appid: configMeta?.appid || currentAppId || "",
+      filePath: progressPath || sourcePath || "",
+      savePath:
+        progressPath ||
+        configMeta?.save_path ||
+        path.dirname(sourcePath || filePath || ""),
+      shadps4UserId: getPs4UserIdFromProgressPath(progressPath),
+    };
+  };
+  const maybeUpdateSelectedPs4User = (progressPath) => {
+    if (!isPs4ProgressXmlPath(progressPath) || !configFile) return;
+    const userId = getPs4UserIdFromProgressPath(progressPath);
+    if (!userId) return;
+    const currentProgress = String(configMeta?.shadps4_progress_path || "");
+    const currentUser = String(configMeta?.shadps4_user_id || "");
+    if (
+      path.normalize(currentProgress || "") === path.normalize(progressPath) &&
+      currentUser === userId
+    ) {
+      return;
+    }
+    try {
+      const cfg = fs.existsSync(configFile)
+        ? JSON.parse(fs.readFileSync(configFile, "utf8"))
+        : null;
+      if (!cfg || normalizePlatform(cfg.platform) !== "shadps4") return;
+      cfg.save_path = progressPath;
+      cfg.shadps4_progress_path = progressPath;
+      cfg.shadps4_user_id = userId;
+      fs.writeFileSync(configFile, JSON.stringify(cfg, null, 2));
+      configMeta.save_path = progressPath;
+      configMeta.shadps4_progress_path = progressPath;
+      configMeta.shadps4_user_id = userId;
+      notifyConfigsChanged();
+      ipcLogger.info("shadps4:active-user-updated", {
+        configName,
+        appid: cfg.appid || null,
+        userId,
+        progressPath,
+      });
+    } catch {}
+  };
+  if (isPs4 && configMeta?.shadps4_npcommid) {
+    const root = resolveShadPs4RootForConfig(configMeta);
+    const progressFiles = root
+      ? collectPs4ProgressFilesForConfig(
+          root,
+          configMeta.shadps4_npcommid,
+          String(configMeta?.shadps4_user_id || "").trim(),
+        )
+      : [];
+    if (
+      selectedPs4ProgressPath &&
+      fs.existsSync(selectedPs4ProgressPath) &&
+      !progressFiles.some(
+        (entry) =>
+          normalizePs4ProgressKey(entry.progressPath) ===
+          normalizePs4ProgressKey(selectedPs4ProgressPath),
+      )
+    ) {
+      progressFiles.unshift({
+        userId: getPs4UserIdFromProgressPath(selectedPs4ProgressPath),
+        progressPath: selectedPs4ProgressPath,
+      });
+    }
+    for (const progressFile of progressFiles) {
+      const progressPath = progressFile?.progressPath || "";
+      if (!progressPath || !fs.existsSync(progressPath)) continue;
+      const cacheOptions = makePs4CacheOptionsForPath(progressPath);
+      const previous =
+        (await loadPreviousAchievements(
+          configName,
+          currentPlatform,
+          cacheOptions,
+        )) || {};
+      ps4PreviousByPath.set(normalizePs4ProgressKey(progressPath), previous);
+      ps4FirstLoadByPath.set(normalizePs4ProgressKey(progressPath), true);
+    }
+  }
   const isSteamOfficial =
     normalizePlatform(configMeta?.platform) === "steam-official" ||
     String(filePath || "")
@@ -9752,21 +11539,47 @@ async function monitorAchievementsFile(filePath) {
     fullConfig = [];
     crcMap = {};
   }
-  const processSnapshot = (isRetry = false) => {
+  const processSnapshot = (isRetry = false, sourceFilePath = filePath, opts = {}) => {
+    const activeFilePath = sourceFilePath || filePath;
+    const activePs4ProgressPath = isPs4
+      ? (isPs4ProgressXmlPath(activeFilePath) ? activeFilePath : "") ||
+        selectedPs4ProgressPath
+      : "";
+    const activeCacheOptions = isPs4
+      ? makePs4CacheOptionsForPath(activeFilePath)
+      : currentCacheOptions;
+    const ps4ProgressKey =
+      isPs4 && activePs4ProgressPath
+        ? normalizePs4ProgressKey(activePs4ProgressPath)
+        : "";
+    if (isPs4 && ps4ProgressKey) {
+      if (!ps4PreviousByPath.has(ps4ProgressKey)) {
+        ps4PreviousByPath.set(ps4ProgressKey, {});
+      }
+      if (!ps4FirstLoadByPath.has(ps4ProgressKey)) {
+        ps4FirstLoadByPath.set(ps4ProgressKey, true);
+      }
+      previousAchievements = ps4PreviousByPath.get(ps4ProgressKey) || {};
+      isFirstLoad = ps4FirstLoadByPath.get(ps4ProgressKey) !== false;
+      if (opts?.updatePs4User === true) {
+        maybeUpdateSelectedPs4User(activePs4ProgressPath);
+      }
+    }
     let currentAchievements = null;
     let touchedInLoop = false;
     let lumaPlayReadFailed = false;
     try {
       if (isXenia) {
-        const parsed = parseGpdFile(filePath);
+        const parsed = parseGpdFile(activeFilePath);
         currentAchievements = buildSnapshotFromGpd(parsed);
       } else if (isRpcs3) {
         const trophyDir =
-          resolveRpcs3TrophyDirForConfig(configMeta) || path.dirname(filePath);
+          resolveRpcs3TrophyDirForConfig(configMeta) ||
+          path.dirname(activeFilePath);
         const parsed = parseTrophySetDir(trophyDir);
         currentAchievements = buildSnapshotFromTrophy(parsed);
       } else if (isSteamOfficial) {
-        const statsDir = configMeta?.save_path || path.dirname(filePath);
+        const statsDir = configMeta?.save_path || path.dirname(activeFilePath);
         const schemaPath = fullAchievementsConfigPath;
         const schemaArr =
           schemaPath && fs.existsSync(schemaPath)
@@ -9786,7 +11599,7 @@ async function monitorAchievementsFile(filePath) {
                   Number.isInteger(e.bit),
               )
           : [];
-        let userBin = filePath;
+        let userBin = activeFilePath;
         const base = path.basename(userBin || "").toLowerCase();
         if (!base.startsWith("usergamestats_") || !base.endsWith(".bin")) {
           userBin = pickConfiguredSteamOfficialUserBin(
@@ -9803,27 +11616,36 @@ async function monitorAchievementsFile(filePath) {
           currentAchievements = previousAchievements;
         }
       } else if (isPs4) {
-        const trophyDir =
-          configMeta?.save_path ||
-          path.dirname(path.dirname(filePath)) ||
-          path.dirname(filePath);
-        const parsed = require("./utils/shadps4-trophy").parsePs4TrophySetDir(
-          trophyDir,
-        );
-        parsed.appid = configMeta?.appid || parsed.appid;
-        currentAchievements =
-          require("./utils/shadps4-trophy").buildSnapshotFromPs4(
+        const ps4Trophy = require("./utils/shadps4-trophy");
+        const progressPath =
+          activePs4ProgressPath ||
+          (isPs4ProgressXmlPath(activeFilePath) ? activeFilePath : "") ||
+          resolvePs4ProgressPathForConfig(configMeta);
+        if (progressPath && fs.existsSync(progressPath)) {
+          currentAchievements = ps4Trophy.buildSnapshotFromPs4ProgressFile(
+            progressPath,
+            previousAchievements,
+          );
+        } else {
+          const trophyDir =
+            resolvePs4TrophyDirForConfig(configMeta) ||
+            path.dirname(path.dirname(activeFilePath)) ||
+            path.dirname(activeFilePath);
+          const parsed = ps4Trophy.parsePs4TrophySetDir(trophyDir);
+          parsed.appid = configMeta?.appid || parsed.appid;
+          currentAchievements = ps4Trophy.buildSnapshotFromPs4(
             parsed,
             previousAchievements,
           );
+        }
       } else if (isUbisoftOfficial) {
-        const parsed = readUbisoftSpoolFile(filePath);
+        const parsed = readUbisoftSpoolFile(activeFilePath);
         currentAchievements = buildUbisoftOfficialSnapshot(
           parsed?.records || [],
         );
       } else if (isEaOfficial) {
         currentAchievements = loadAchievementsFromSaveFile(
-          path.dirname(filePath),
+          path.dirname(activeFilePath),
           previousAchievements,
           {
             configMeta,
@@ -9862,7 +11684,7 @@ async function monitorAchievementsFile(filePath) {
         }
       } else {
         currentAchievements = loadAchievementsFromSaveFile(
-          path.dirname(filePath),
+          path.dirname(activeFilePath),
           previousAchievements,
           {
             configMeta,
@@ -9899,6 +11721,7 @@ async function monitorAchievementsFile(filePath) {
           configName,
           previousAchievements,
           currentPlatform,
+          currentCacheOptions,
         );
         isFirstLoad = false;
         bootSeeding = false;
@@ -9914,7 +11737,7 @@ async function monitorAchievementsFile(filePath) {
       if (earnedKeys.length > 0) {
         earnedKeys.forEach((key) => {
           const current = currentAchievements[key];
-          const isBin = path.basename(filePath).endsWith(".bin");
+          const isBin = path.basename(activeFilePath).endsWith(".bin");
           const achievementConfig = fullConfig.find((a) => a.name === key);
 
           const lang = selectedLanguage || "english";
@@ -9972,7 +11795,7 @@ async function monitorAchievementsFile(filePath) {
         );
 
         if (pendingProgress.length) {
-          const isBin = path.basename(filePath).endsWith(".bin");
+          const isBin = path.basename(activeFilePath).endsWith(".bin");
           for (const key of pendingProgress) {
             const cur = currentAchievements[key];
             const achievementConfig = isBin
@@ -10012,7 +11835,7 @@ async function monitorAchievementsFile(filePath) {
 
       if (newlyEarned) {
         touchedInLoop = true;
-        const isBin = path.basename(filePath).endsWith(".bin");
+        const isBin = path.basename(activeFilePath).endsWith(".bin");
         const achievementConfig = fullConfig.find((a) => a.name === key);
 
         if (!achievementConfig) {
@@ -10122,14 +11945,21 @@ async function monitorAchievementsFile(filePath) {
       !isEaOfficial ||
       !deepEqual(currentAchievements || {}, previousAchievements || {});
     previousAchievements = currentAchievements;
+    if (isPs4 && ps4ProgressKey) {
+      ps4PreviousByPath.set(ps4ProgressKey, currentAchievements);
+      ps4FirstLoadByPath.set(ps4ProgressKey, false);
+    }
     if (shouldPersistSnapshot && !(isLumaPlay && lumaPlayReadFailed)) {
       savePreviousAchievements(
         configName,
         previousAchievements,
         currentPlatform,
+        activeCacheOptions,
       );
     }
-    isFirstLoad = false;
+    if (!isPs4) {
+      isFirstLoad = false;
+    }
   };
   achievementsWatcher = () => processSnapshot(false);
   const refreshAchievementsUi = () => {
@@ -10226,6 +12056,66 @@ async function monitorAchievementsFile(filePath) {
 
   const checkFileLoop = () => {
     if (monitorToken !== achievementMonitorToken) return;
+    if (isPs4) {
+      const root = resolveShadPs4RootForConfig(configMeta);
+      const npcommid = String(configMeta?.shadps4_npcommid || "").trim();
+      const progressFiles =
+        root && npcommid
+          ? collectPs4ProgressFilesForConfig(
+              root,
+              npcommid,
+              String(configMeta?.shadps4_user_id || "").trim(),
+            )
+          : [];
+      const watchSet = new Set();
+      for (const entry of progressFiles) {
+        if (entry?.progressPath && fs.existsSync(entry.progressPath)) {
+          watchSet.add(entry.progressPath);
+        }
+      }
+      if (isPs4ProgressXmlPath(filePath) && fs.existsSync(filePath)) {
+        watchSet.add(filePath);
+      }
+      if (watchSet.size) {
+        const watchFiles = Array.from(watchSet);
+        const primary =
+          watchFiles.find(
+            (fp) =>
+              path.normalize(fp).toLowerCase() ===
+              path.normalize(filePath).toLowerCase(),
+          ) || watchFiles[0];
+        currentAchievementsFilePath = primary;
+        for (const fp of watchFiles) {
+          processSnapshot(false, fp, { updatePs4User: false });
+        }
+        refreshAchievementsUi();
+
+        try {
+          fs.unwatchFile(primary);
+        } catch {}
+        achievementsWatcher = () =>
+          processSnapshot(false, primary, { updatePs4User: true });
+        fs.watchFile(primary, { interval: 1000 }, achievementsWatcher);
+
+        for (const fp of watchFiles) {
+          if (
+            path.normalize(fp).toLowerCase() ===
+            path.normalize(primary).toLowerCase()
+          ) {
+            continue;
+          }
+          try {
+            fs.unwatchFile(fp);
+          } catch {}
+          extraAchievementFiles.add(fp);
+          fs.watchFile(fp, { interval: 1000 }, () =>
+            processSnapshot(false, fp, { updatePs4User: true }),
+          );
+        }
+        achievementMonitorTimer = null;
+        return;
+      }
+    }
     if (fs.existsSync(filePath)) {
       processSnapshot(false);
       refreshAchievementsUi();
@@ -10432,6 +12322,10 @@ async function clearActiveConfigSelection(options = {}) {
   });
 
   try {
+    stopEpicOfficialActivePoll("clear-active-config", {
+      reason,
+      activeConfig: previousConfig || null,
+    });
     await monitorAchievementsFile(null);
   } catch (err) {
     appLogger.warn("active-config:clear:monitor-stop-failed", {
@@ -10491,7 +12385,10 @@ ipcMain.handle("config:clear-active", async (_event, payload = {}) => {
 
 ipcMain.on(
   "update-config",
-  async (event, { configName, preset, position, platform }) => {
+  async (
+    event,
+    { configName, preset, position, platform, allowBlacklistedSelection },
+  ) => {
     const safeName = configName ? sanitizeConfigName(configName) : null;
 
     if (!safeName) {
@@ -10512,17 +12409,6 @@ ipcMain.on(
       return;
     }
 
-    const appIdString =
-      config?.appid != null ? String(config.appid).trim() : "";
-
-    if (appIdString && isAppIdBlacklisted(appIdString, config?.platform)) {
-      ipcLogger.info("update-config:ignored-blacklisted", {
-        configName: configName || null,
-        appid: appIdString,
-      });
-      return;
-    }
-
     selectedPreset = preset || "default";
     selectedPosition = position || "center-bottom";
     selectedConfig = configName;
@@ -10538,6 +12424,52 @@ ipcMain.on(
       : null;
 
     const normalizedPlatform = normalizePlatform(config.platform);
+    const appIdString =
+      config?.appid != null ? String(config.appid).trim() : "";
+    const isBlacklisted =
+      appIdString && isAppIdBlacklisted(appIdString, config?.platform);
+    if (isBlacklisted) {
+      if (
+        normalizedPlatform === "epic-official" &&
+        allowBlacklistedSelection === true
+      ) {
+        currentAppId = appIdString || null;
+        achievementsFilePath = null;
+        stopEpicOfficialActivePoll("blacklisted-selection", {
+          configName: safeName,
+          appid: appIdString,
+        });
+        monitorAchievementsFile(null);
+        if (isNonEmptyString(configName)) {
+          pendingMissingAchievementFiles.delete(configName);
+        }
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+          overlayWindow.webContents.send("set-language", {
+            language: selectedLanguage,
+            uiLanguage: selectedUiLanguage,
+          });
+        }
+        ipcLogger.info("update-config:selection-only-blacklisted", {
+          configName: configName || null,
+          appid: appIdString,
+          platform: normalizedPlatform,
+        });
+        return;
+      }
+      ipcLogger.info("update-config:ignored-blacklisted", {
+        configName: configName || null,
+        appid: appIdString,
+      });
+      return;
+    }
+
+    if (normalizedPlatform !== "epic-official") {
+      stopEpicOfficialActivePoll("config-switch", {
+        nextConfig: safeName,
+        nextPlatform: normalizedPlatform || null,
+      });
+    }
     if (isLumaPlayConfig(config)) {
       const appid = String(config.appid || "");
       currentAppId = appid || null;
@@ -10640,10 +12572,15 @@ ipcMain.on(
     if (normalizedPlatform === "shadps4") {
       const appid = String(config.appid || "");
       currentAppId = appid || null;
-      const trophyDir = config.save_path || "";
-      const xmlRoot = path.join(trophyDir, "Xml");
-      const xmlMain = path.join(xmlRoot, "TROP.XML");
-      achievementsFilePath = fs.existsSync(xmlMain) ? xmlMain : null;
+      const progressPath = resolvePs4ProgressPathForConfig(config);
+      const trophyDir = resolvePs4TrophyDirForConfig(config);
+      const xmlMain = trophyDir ? path.join(trophyDir, "Xml", "TROP.XML") : "";
+      achievementsFilePath =
+        progressPath && fs.existsSync(progressPath)
+          ? progressPath
+          : xmlMain && fs.existsSync(xmlMain)
+            ? xmlMain
+            : null;
       if (!achievementsFilePath) {
         monitorAchievementsFile(null);
         achievementsFilePath = null;
@@ -10714,6 +12651,25 @@ ipcMain.on(
           uiLanguage: selectedUiLanguage,
         });
       }
+      return;
+    }
+
+    if (normalizedPlatform === "epic-official") {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      achievementsFilePath = null;
+      monitorAchievementsFile(null);
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      startEpicOfficialActivePoll(safeName, "update-config");
       return;
     }
 
@@ -10905,8 +12861,16 @@ ipcMain.on(
     if (normalizedPlatform === "shadps4") {
       const appid = String(config.appid || "");
       currentAppId = appid || null;
-      achievementsFilePath = null; // we watch via renderer requests; overlay uses config path data
-      monitorAchievementsFile(null);
+      const progressPath = resolvePs4ProgressPathForConfig(config);
+      const trophyDir = resolvePs4TrophyDirForConfig(config);
+      const xmlMain = trophyDir ? path.join(trophyDir, "Xml", "TROP.XML") : "";
+      achievementsFilePath =
+        progressPath && fs.existsSync(progressPath)
+          ? progressPath
+          : xmlMain && fs.existsSync(xmlMain)
+            ? xmlMain
+            : null;
+      monitorAchievementsFile(achievementsFilePath);
       if (overlayWindow && !overlayWindow.isDestroyed()) {
         overlayWindow.webContents.send("load-overlay-data", selectedConfig);
         overlayWindow.webContents.send("set-language", {
@@ -11101,6 +13065,25 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
       return { __notFound: true, name: safe, __error: "corrupt-or-busy" };
     }
 
+    try {
+      const mapping = data?.appid
+        ? uplayToSteam.get(String(data.appid).trim())
+        : null;
+      const inferredPlatform =
+        inferOfficialPlatformFromMarkers(data) ||
+        inferPlatformAndSteamId({ config: data, mapping }).platform;
+      const normalizedInferredPlatform = normalizePlatform(inferredPlatform);
+      if (
+        normalizedInferredPlatform &&
+        data.platform !== normalizedInferredPlatform
+      ) {
+        data.platform = normalizedInferredPlatform;
+        try {
+          fs.writeFileSync(configPath, JSON.stringify(data, null, 2));
+        } catch {}
+      }
+    } catch {}
+
     const appid = String(data?.appid || data?.appId || data?.steamAppId || "");
     const hasAppId = /^[0-9a-fA-F]+$/.test(appid);
     const hasConfigPath = isNonEmptyString(data?.config_path);
@@ -11287,7 +13270,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     payload.platform = nextPlatform;
     const oldCachePath = getCachePath(safeOld, prevPlatform || "steam");
     const newCachePath = getCachePath(safeNew, nextPlatform);
-    const oldScopedCachePaths = listScopedSteamOfficialCachePaths(
+    const oldScopedCachePaths = listScopedAchievementCachePaths(
       safeOld,
       prevPlatform || "steam",
     );
@@ -11312,16 +13295,21 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     const updateRenameSchemaProgress = (progress = {}) => {
       ensureRenameProgressJob().update({
         itemName:
-          progress?.itemName || payload.displayName || payload.name || payload.appid,
+          progress?.itemName ||
+          payload.displayName ||
+          payload.name ||
+          payload.appid,
         appid: progress?.appid || payload.appid,
         phase: progress?.phase || "generatingSchema",
         detail: progress?.detail || "",
         current:
-          Number.isFinite(Number(progress?.current)) && Number(progress.current) >= 0
+          Number.isFinite(Number(progress?.current)) &&
+          Number(progress.current) >= 0
             ? Number(progress.current)
             : 0,
         total:
-          Number.isFinite(Number(progress?.total)) && Number(progress.total) >= 0
+          Number.isFinite(Number(progress?.total)) &&
+          Number(progress.total) >= 0
             ? Number(progress.total)
             : 0,
         percent: clampGenerationPercent(progress?.percent, 5),
@@ -11331,7 +13319,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     // missing config_path, generate and set path
     if (
       !payload.config_path &&
-      /^[0-9a-fA-F]+$/.test(String(payload.appid || ""))
+      sanitizeAppIdForPlatform(payload.appid, payload.platform)
     ) {
       try {
         global.mainWindow = BrowserWindow.fromWebContents(event.sender);
@@ -11346,7 +13334,13 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
           ...payload,
           onGenerationProgress: updateRenameSchemaProgress,
         });
-        if (res && res.dir) payload.config_path = res.dir;
+        if (res && res.dir) {
+          payload.config_path = res.dir;
+          if (nextPlatform === "epic-official") {
+            if (res.productId) payload.epic_product_id = res.productId;
+            if (res.sandboxId) payload.epic_namespace = res.sandboxId;
+          }
+        }
       } catch (err) {
         progressJob?.fail({
           phase: "failed",
@@ -11365,7 +13359,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
       if (
         isNonEmptyString(selForSave) &&
         fs.existsSync(selForSave) &&
-        /^[0-9a-fA-F]+$/.test(String(payload.appid || ""))
+        sanitizeAppIdForPlatform(payload.appid, payload.platform)
       ) {
         const detectedBase = findSaveBaseFromSelection(
           selForSave,
@@ -11379,12 +13373,15 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     if (fs.existsSync(oldCachePath)) {
       fs.renameSync(oldCachePath, newCachePath);
     }
+    const prevCachePlatform = normalizePlatform(prevPlatform);
+    const nextCachePlatform = normalizePlatform(nextPlatform);
     if (
-      normalizePlatform(prevPlatform) === "steam-official" &&
-      normalizePlatform(nextPlatform) === "steam-official"
+      prevCachePlatform === nextCachePlatform &&
+      (nextCachePlatform === "steam-official" ||
+        nextCachePlatform === "epic-official")
     ) {
-      const oldPrefix = `${sanitizeConfigName(safeOld || "")}_steam-official`;
-      const newPrefix = `${sanitizeConfigName(safeNew || "")}_steam-official`;
+      const oldPrefix = `${sanitizeConfigName(safeOld || "")}_${nextCachePlatform}`;
+      const newPrefix = `${sanitizeConfigName(safeNew || "")}_${nextCachePlatform}`;
       for (const scopedOldPath of oldScopedCachePaths) {
         if (!scopedOldPath || !fs.existsSync(scopedOldPath)) continue;
         const baseName = path.basename(scopedOldPath);
@@ -11409,7 +13406,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
       prevPlatform &&
       prevPlatform !== nextPlatform &&
       managesSchemaPath &&
-      /^[0-9a-fA-F]+$/.test(String(payload.appid || ""))
+      sanitizeAppIdForPlatform(payload.appid, nextPlatform)
     ) {
       ipcLogger.info("config:platform-change", {
         name: safeNew,
@@ -11431,8 +13428,12 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
           const current = JSON.parse(fs.readFileSync(newConfigPath, "utf8"));
           if (current.config_path !== res.dir) {
             current.config_path = res.dir;
-            fs.writeFileSync(newConfigPath, JSON.stringify(current, null, 2));
           }
+          if (nextPlatform === "epic-official") {
+            if (res.productId) current.epic_product_id = res.productId;
+            if (res.sandboxId) current.epic_namespace = res.sandboxId;
+          }
+          fs.writeFileSync(newConfigPath, JSON.stringify(current, null, 2));
         }
         progressJob?.succeed({
           phase: "completed",
@@ -13078,6 +15079,631 @@ ipcMain.handle("launchExecutable", async (_event, exePath, argsString) => {
 });
 
 let currentAppId = null;
+const EPIC_OFFICIAL_ACTIVE_POLL_INITIAL_MS = 45000;
+const EPIC_OFFICIAL_ACTIVE_POLL_INTERVAL_MS = 5000;
+const EPIC_OFFICIAL_ACTIVE_POLL_ERROR_DELAYS_MS = [30000, 60000, 120000];
+let epicOfficialActivePollTimer = null;
+let epicOfficialActivePollInFlight = null;
+let epicOfficialActivePollState = null;
+let epicOfficialActivePollGeneration = 0;
+
+function isEpicOfficialBackgroundWorkBootReady() {
+  if (
+    global.bootDone !== true ||
+    global.bootUiReady !== true ||
+    global.bootManualSeedComplete !== true
+  ) {
+    return false;
+  }
+  if (!isProcessNameWatcherEnabled(cachedPreferences)) {
+    return true;
+  }
+  return autoSelectProcessPollerStarted === true;
+}
+
+function isEpicOfficialPrioritySyncTarget(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  if (isEpicOfficialConfigActiveForPolling(safeName)) return true;
+  const activeState = getEpicOfficialActivePollState();
+  return sanitizeConfigName(activeState?.configName || "") === safeName;
+}
+
+function isEpicOfficialConfigBlacklisted(configName, config = null) {
+  const resolvedConfig =
+    config && typeof config === "object"
+      ? config
+      : readConfigForAchievementCache(configName);
+  if (!resolvedConfig || typeof resolvedConfig !== "object") return false;
+  const appid = String(
+    resolvedConfig?.appid ||
+      resolvedConfig?.epic_product_id ||
+      resolvedConfig?.epicProductId ||
+      "",
+  ).trim();
+  if (!appid) return false;
+  return isAppIdBlacklisted(appid, "epic-official");
+}
+
+function isEpicOfficialConfigActiveForPolling(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  if (isEpicOfficialConfigSelectedForPolling(safeName)) {
+    return true;
+  }
+  if (sanitizeConfigName(detectedConfigName || "") === safeName) return true;
+  for (const activeName of activePlaytimeConfigs) {
+    if (sanitizeConfigName(activeName || "") === safeName) return true;
+  }
+  return false;
+}
+
+function isEpicOfficialConfigSelectedForPolling(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName || sanitizeConfigName(selectedConfig || "") !== safeName) {
+    return false;
+  }
+  if (normalizePlatform(selectedPlatform) === "epic-official") return true;
+  const config = readConfigForAchievementCache(safeName);
+  return normalizePlatform(config?.platform) === "epic-official";
+}
+
+function shouldLogEpicOfficialCacheOnly(configName, cacheCount) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  const now = Date.now();
+  const previous = epicOfficialCacheOnlyLogState.get(safeName);
+  if (
+    previous &&
+    previous.cacheCount === cacheCount &&
+    now - previous.loggedAt < EPIC_OFFICIAL_CACHE_ONLY_LOG_TTL_MS
+  ) {
+    return false;
+  }
+  epicOfficialCacheOnlyLogState.set(safeName, {
+    cacheCount,
+    loggedAt: now,
+  });
+  return true;
+}
+
+function clearEpicOfficialActivePollTimer() {
+  if (!epicOfficialActivePollTimer) return;
+  clearTimeout(epicOfficialActivePollTimer);
+  epicOfficialActivePollTimer = null;
+}
+
+function getEpicOfficialActivePollState() {
+  return epicOfficialActivePollState &&
+    typeof epicOfficialActivePollState === "object"
+    ? epicOfficialActivePollState
+    : null;
+}
+
+function stopEpicOfficialActivePoll(reason = "manual", meta = {}) {
+  const state = getEpicOfficialActivePollState();
+  clearEpicOfficialActivePollTimer();
+  epicOfficialActivePollGeneration += 1;
+  epicOfficialActivePollState = null;
+  epicOfficialActivePollInFlight = null;
+  if (!state) return;
+  epicOfficialLogger.info("epic-official:poll:stopped", {
+    reason,
+    configName: state.configName || null,
+    accountId: state.accountId || null,
+    productId: state.productId || null,
+    ...meta,
+  });
+}
+
+function stopEpicOfficialActivePollIfMatches(
+  configName,
+  reason = "manual",
+  meta = {},
+) {
+  const state = getEpicOfficialActivePollState();
+  if (!state) return;
+  if (
+    sanitizeConfigName(state.configName || "") !==
+    sanitizeConfigName(configName || "")
+  ) {
+    return;
+  }
+  if (
+    reason === "process-exit" &&
+    isEpicOfficialConfigSelectedForPolling(state.configName)
+  ) {
+    epicOfficialLogger.info("epic-official:poll:keep-selected", {
+      reason,
+      configName: state.configName || null,
+      accountId: state.accountId || null,
+      productId: state.productId || null,
+      ...meta,
+    });
+    return;
+  }
+  stopEpicOfficialActivePoll(reason, meta);
+}
+
+function scheduleEpicOfficialActivePoll(delayMs, reason = "reschedule") {
+  const state = getEpicOfficialActivePollState();
+  if (!state) return;
+  clearEpicOfficialActivePollTimer();
+  const safeDelay = Math.max(1000, Number(delayMs) || 0);
+  state.nextDelayMs = safeDelay;
+  epicOfficialLogger.info("epic-official:poll:scheduled", {
+    reason,
+    configName: state.configName || null,
+    delayMs: safeDelay,
+    errorCount: state.errorCount || 0,
+  });
+  epicOfficialActivePollTimer = setTimeout(() => {
+    epicOfficialActivePollTimer = null;
+    void runEpicOfficialActivePoll("timer");
+  }, safeDelay);
+}
+
+function markEpicOfficialRecentLoadSync(
+  configName,
+  accountId,
+  productId,
+  result,
+) {
+  const syncKey = buildEpicOfficialLoadSyncKey(
+    configName,
+    accountId,
+    productId,
+  );
+  const nextEntry = {
+    timestamp: Date.now(),
+    result,
+  };
+  epicOfficialRecentLoadSync.set(syncKey, nextEntry);
+  epicOfficialPassiveLoadSync.set(syncKey, nextEntry);
+}
+
+function getEpicOfficialUnlockedDelta(
+  previousSnapshot = {},
+  nextSnapshot = {},
+) {
+  const unlockedKeys = [];
+  let changed = false;
+  const allKeys = new Set([
+    ...Object.keys(previousSnapshot || {}),
+    ...Object.keys(nextSnapshot || {}),
+  ]);
+  for (const key of allKeys) {
+    const prev = previousSnapshot?.[key] || {};
+    const next = nextSnapshot?.[key] || {};
+    const prevEarned = Boolean(prev?.earned);
+    const nextEarned = Boolean(next?.earned);
+    const prevEarnedTime = Number(prev?.earned_time || 0);
+    const nextEarnedTime = Number(next?.earned_time || 0);
+    if (prevEarned !== nextEarned || prevEarnedTime !== nextEarnedTime) {
+      changed = true;
+    }
+    if (nextEarned && !prevEarned) {
+      unlockedKeys.push(key);
+    }
+  }
+  return { changed, unlockedKeys };
+}
+
+function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
+  if (!Array.isArray(schemaAchievements) || !schemaAchievements.length) return;
+  if (!Array.isArray(unlockedKeys) || !unlockedKeys.length) return;
+  const schemaMap = new Map();
+  for (const entry of schemaAchievements) {
+    const key = String(entry?.name || entry?.api || "").trim();
+    if (!key) continue;
+    schemaMap.set(key, entry);
+  }
+  for (const key of unlockedKeys) {
+    const achievementConfig = schemaMap.get(String(key || "").trim());
+    if (!achievementConfig) continue;
+    queueAchievementNotification({
+      displayName: achievementConfig.displayName,
+      description: achievementConfig.description,
+      icon: achievementConfig.icon,
+      icon_gray: achievementConfig.icon_gray || achievementConfig.icongray,
+      config_path: config?.config_path || selectedConfigPath || "",
+      preset: selectedPreset,
+      position: selectedPosition,
+      sound: getUserPreferredSound() || "mute",
+    });
+  }
+}
+
+function filterRecentEpicOfficialUnlockNotificationKeys(
+  configName,
+  accountId,
+  productId,
+  unlockedKeys,
+) {
+  if (!Array.isArray(unlockedKeys) || !unlockedKeys.length) return [];
+  const now = Date.now();
+  if (epicOfficialRecentUnlockNotificationState.size > 1000) {
+    for (const [key, timestamp] of epicOfficialRecentUnlockNotificationState) {
+      if (now - timestamp > EPIC_OFFICIAL_UNLOCK_NOTIFY_DEDUPE_MS) {
+        epicOfficialRecentUnlockNotificationState.delete(key);
+      }
+    }
+  }
+  const scope = buildEpicOfficialLoadSyncKey(configName, accountId, productId);
+  const nextKeys = [];
+  for (const unlockKey of unlockedKeys) {
+    const normalizedUnlockKey = String(unlockKey || "").trim();
+    if (!normalizedUnlockKey) continue;
+    const dedupeKey = `${scope}::${normalizedUnlockKey}`;
+    const previous = epicOfficialRecentUnlockNotificationState.get(dedupeKey);
+    if (previous && now - previous <= EPIC_OFFICIAL_UNLOCK_NOTIFY_DEDUPE_MS) {
+      continue;
+    }
+    epicOfficialRecentUnlockNotificationState.set(dedupeKey, now);
+    nextKeys.push(normalizedUnlockKey);
+  }
+  return nextKeys;
+}
+
+function handleEpicOfficialSnapshotDelta({
+  source = "poll",
+  trigger = "manual",
+  config,
+  configName,
+  schemaAchievements,
+  snapshot,
+  delta,
+  hadCachedSnapshot,
+  accountId,
+  productId,
+} = {}) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName || !delta?.changed) return false;
+
+  const suppressFromSilentSeed =
+    hadCachedSnapshot &&
+    shouldSuppressEpicOfficialUnlocksFromSilentSeed(
+      safeName,
+      accountId,
+      productId,
+      snapshot,
+      delta,
+    );
+
+  if (
+    hadCachedSnapshot &&
+    Array.isArray(delta.unlockedKeys) &&
+    delta.unlockedKeys.length &&
+    !suppressFromSilentSeed
+  ) {
+    const notificationKeys = filterRecentEpicOfficialUnlockNotificationKeys(
+      safeName,
+      accountId,
+      productId,
+      delta.unlockedKeys,
+    );
+    notifyEpicOfficialUnlocks(config, schemaAchievements, notificationKeys);
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("refresh-achievements-table", safeName);
+  }
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+    overlayWindow.webContents.send("set-language", {
+      language: selectedLanguage,
+      uiLanguage: selectedUiLanguage,
+    });
+  }
+  broadcastToAll("achievements:file-updated", {
+    appid: currentAppId || config?.appid || null,
+    configName: safeName,
+  });
+  const logEvent =
+    source === "active-poll"
+      ? "epic-official:poll:new-achievements"
+      : "load-saved-achievements:epic-official:new-achievements";
+  epicOfficialLogger.info(logEvent, {
+    source,
+    trigger,
+    configName: safeName,
+    accountId: accountId || null,
+    productId: productId || null,
+    unlockedCount: Array.isArray(delta.unlockedKeys)
+      ? delta.unlockedKeys.length
+      : 0,
+    changed: true,
+  });
+  return true;
+}
+
+async function runEpicOfficialActivePoll(trigger = "manual") {
+  const state = getEpicOfficialActivePollState();
+  if (!state) return;
+  if (epicOfficialActivePollInFlight) {
+    epicOfficialLogger.info("epic-official:poll:skip-inflight", {
+      trigger,
+      configName: state.configName || null,
+    });
+    return;
+  }
+  if (!isEpicOfficialConfigActiveForPolling(state.configName)) {
+    stopEpicOfficialActivePoll("process-exit", {
+      trigger,
+      configName: state.configName || null,
+    });
+    return;
+  }
+
+  const generation = epicOfficialActivePollGeneration;
+  const job = (async () => {
+    const safeName = sanitizeConfigName(state.configName || "");
+    if (!safeName) {
+      stopEpicOfficialActivePoll("invalid-config-name", { trigger });
+      return;
+    }
+    const cfgPath = path.join(configsDir, `${safeName}.json`);
+    if (!fs.existsSync(cfgPath)) {
+      stopEpicOfficialActivePoll("config-missing", {
+        trigger,
+        configName: safeName,
+      });
+      return;
+    }
+    let config = null;
+    try {
+      config = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    } catch (error) {
+      epicOfficialLogger.warn("epic-official:poll:config-read-failed", {
+        trigger,
+        configName: safeName,
+        error: error?.message || String(error),
+      });
+      scheduleEpicOfficialActivePoll(
+        EPIC_OFFICIAL_ACTIVE_POLL_ERROR_DELAYS_MS[
+          Math.min(
+            state.errorCount || 0,
+            EPIC_OFFICIAL_ACTIVE_POLL_ERROR_DELAYS_MS.length - 1,
+          )
+        ],
+        "config-read-failed",
+      );
+      state.errorCount = (state.errorCount || 0) + 1;
+      return;
+    }
+    if (normalizePlatform(config?.platform) !== "epic-official") {
+      stopEpicOfficialActivePoll("platform-changed", {
+        trigger,
+        configName: safeName,
+        platform: config?.platform || null,
+      });
+      return;
+    }
+    if (isEpicOfficialConfigBlacklisted(safeName, config)) {
+      stopEpicOfficialActivePoll("blacklisted", {
+        trigger,
+        configName: safeName,
+        appid:
+          String(
+            config?.appid ||
+              config?.epic_product_id ||
+              config?.epicProductId ||
+              "",
+          ).trim() || null,
+      });
+      return;
+    }
+
+    const schemaPath = resolveAchievementsSchemaPath(config);
+    let schemaAchievements = [];
+    if (schemaPath && fs.existsSync(schemaPath)) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+        if (Array.isArray(parsed)) schemaAchievements = parsed;
+      } catch {}
+    }
+    let productId = String(
+      config?.epic_product_id || config?.epicProductId || config?.appid || "",
+    ).trim();
+    if (schemaPath) {
+      try {
+        const sidecarPath = path.join(
+          path.dirname(schemaPath),
+          "achievementpercentages.json",
+        );
+        if (fs.existsSync(sidecarPath)) {
+          const sidecar = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+          if (sidecar?.appid) productId = String(sidecar.appid).trim();
+        }
+      } catch {}
+    }
+    const token = await ensureEpicAccessToken(
+      getEpicAuthRequestOptions({
+        timeoutMs: 15000,
+      }),
+    );
+    const accountId = resolvePreferredEpicOfficialAccountId(config, token);
+    const cached =
+      (await loadPreviousAchievements(safeName, "epic-official", {
+        accountId,
+      })) || {};
+
+    epicOfficialLogger.info("epic-official:poll:start", {
+      trigger,
+      configName: safeName,
+      accountId: accountId || null,
+      productId: productId || null,
+    });
+
+    const synced = await syncEpicOfficialAchievements(
+      config,
+      getEpicAuthRequestOptions({
+        token,
+        accountId,
+        productId,
+        schemaAchievements,
+        timeoutMs: 15000,
+      }),
+    );
+    if (generation !== epicOfficialActivePollGeneration) return;
+
+    const snapshot = mergeEarnedTimeFromCached(synced.snapshot || {}, cached);
+    const result = {
+      achievements: snapshot || {},
+      save_path: config.save_path || "",
+    };
+    const nextAccountId = synced.accountId || accountId || "";
+    const nextProductId = synced.productId || productId || "";
+    const delta = getEpicOfficialUnlockedDelta(cached, snapshot);
+    const hadCachedSnapshot = Object.keys(cached || {}).length > 0;
+    if (!hadCachedSnapshot && Number(synced.totalUnlocked || 0) > 0) {
+      markEpicOfficialSilentSeed(safeName, nextAccountId, nextProductId, {
+        expectedUnlocked: synced.totalUnlocked || 0,
+        reason: "active-poll",
+      });
+    }
+
+    if (!deepEqual(cached || {}, snapshot || {})) {
+      savePreviousAchievements(safeName, snapshot, "epic-official", {
+        accountId: nextAccountId,
+      });
+    }
+    markEpicOfficialRecentLoadSync(
+      safeName,
+      nextAccountId,
+      nextProductId,
+      result,
+    );
+
+    if (
+      nextAccountId !== (config?.epic_account_id || "") ||
+      nextProductId !== (config?.epic_product_id || "")
+    ) {
+      config.epic_account_id = nextAccountId;
+      config.epic_product_id = nextProductId;
+      try {
+        fs.writeFileSync(cfgPath, JSON.stringify(config, null, 2));
+      } catch {}
+    }
+
+    state.accountId = nextAccountId;
+    state.productId = nextProductId;
+    state.errorCount = 0;
+
+    if (delta.changed) {
+      handleEpicOfficialSnapshotDelta({
+        source: "active-poll",
+        trigger,
+        config,
+        configName: safeName,
+        schemaAchievements,
+        snapshot,
+        delta,
+        hadCachedSnapshot,
+        accountId: nextAccountId || null,
+        productId: nextProductId || null,
+      });
+    } else {
+      epicOfficialLogger.info("epic-official:poll:no-change", {
+        trigger,
+        configName: safeName,
+        accountId: nextAccountId || null,
+        productId: nextProductId || null,
+      });
+    }
+
+    epicOfficialLogger.info("epic-official:poll:success", {
+      trigger,
+      configName: safeName,
+      accountId: nextAccountId || null,
+      productId: nextProductId || null,
+      snapshotCount: Object.keys(snapshot || {}).length,
+      unlockedCount: delta.unlockedKeys.length,
+      changed: delta.changed,
+    });
+    scheduleEpicOfficialActivePoll(
+      EPIC_OFFICIAL_ACTIVE_POLL_INTERVAL_MS,
+      "success",
+    );
+  })()
+    .catch((error) => {
+      const currentState = getEpicOfficialActivePollState();
+      if (!currentState) return;
+      currentState.errorCount = (currentState.errorCount || 0) + 1;
+      const delayMs =
+        EPIC_OFFICIAL_ACTIVE_POLL_ERROR_DELAYS_MS[
+          Math.min(
+            currentState.errorCount - 1,
+            EPIC_OFFICIAL_ACTIVE_POLL_ERROR_DELAYS_MS.length - 1,
+          )
+        ];
+      epicOfficialLogger.warn("epic-official:poll:error", {
+        trigger,
+        configName: currentState.configName || null,
+        error: error?.message || String(error),
+        retryInMs: delayMs,
+        errorCount: currentState.errorCount,
+      });
+      scheduleEpicOfficialActivePoll(delayMs, "error-backoff");
+    })
+    .finally(() => {
+      if (generation === epicOfficialActivePollGeneration) {
+        epicOfficialActivePollInFlight = null;
+      }
+    });
+
+  epicOfficialActivePollInFlight = job;
+  await job;
+}
+
+function startEpicOfficialActivePoll(configName, reason = "active-config") {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  if (isEpicOfficialConfigBlacklisted(safeName)) {
+    stopEpicOfficialActivePoll("blacklisted", {
+      reason,
+      configName: safeName,
+    });
+    epicOfficialLogger.info("epic-official:poll:skip-blacklisted", {
+      reason,
+      configName: safeName,
+    });
+    return false;
+  }
+  if (!isEpicOfficialConfigActiveForPolling(safeName)) {
+    stopEpicOfficialActivePoll("inactive-config", {
+      reason,
+      configName: safeName,
+    });
+    return false;
+  }
+  const existing = getEpicOfficialActivePollState();
+  if (existing?.configName === safeName) {
+    epicOfficialLogger.info("epic-official:poll:already-active", {
+      reason,
+      configName: safeName,
+    });
+    return true;
+  }
+  stopEpicOfficialActivePoll("restart", {
+    reason,
+    nextConfig: safeName,
+  });
+  epicOfficialActivePollState = {
+    configName: safeName,
+    accountId: "",
+    productId: "",
+    errorCount: 0,
+    nextDelayMs: EPIC_OFFICIAL_ACTIVE_POLL_INITIAL_MS,
+  };
+  epicOfficialLogger.info("epic-official:poll:started", {
+    reason,
+    configName: safeName,
+    delayMs: EPIC_OFFICIAL_ACTIVE_POLL_INITIAL_MS,
+  });
+  scheduleEpicOfficialActivePoll(EPIC_OFFICIAL_ACTIVE_POLL_INITIAL_MS, reason);
+  return true;
+}
 
 ipcMain.on("toggle-overlay", (_event, selectedConfig) => {
   if (isBootOnboardingGatePending() || global.bootOnboardingRequired) return;
@@ -13897,6 +16523,41 @@ async function upsertAutoSelectIndexEntryFromPath(filePath) {
     return;
   }
 
+  if (
+    normalizePlatform(data?.platform) === "epic-official" &&
+    !hasProcessNameValue(data?.process_name)
+  ) {
+    const localInstall = resolveEpicLocalInstallation({
+      namespace: data?.epic_namespace,
+      catalogItemId: data?.epic_catalog_item_id,
+      appName: data?.epic_app_name,
+    });
+    if (localInstall) {
+      const nextData = {
+        ...data,
+        save_path: data?.save_path || localInstall.installLocation || "",
+        executable: data?.executable || localInstall.executablePath || "",
+        arguments: data?.arguments || localInstall.additionalCommandArgs || "",
+        process_name: data?.process_name || localInstall.processName || "",
+      };
+      const shouldPersist =
+        nextData.save_path !== (data?.save_path || "") ||
+        nextData.executable !== (data?.executable || "") ||
+        nextData.arguments !== (data?.arguments || "") ||
+        nextData.process_name !== (data?.process_name || "");
+      data = nextData;
+      if (shouldPersist) {
+        try {
+          await fs.promises.writeFile(
+            filePath,
+            JSON.stringify(nextData, null, 2),
+            "utf8",
+          );
+        } catch {}
+      }
+    }
+  }
+
   const exeLowers = getProcessExecutableNames(data?.process_name);
   if (!exeLowers.length) {
     removeAutoSelectIndexEntry(safeName);
@@ -14065,6 +16726,11 @@ function startAutoSelectProcessPoller() {
   appLogger.info("process-poller:auto-select-started", {
     delayMs: AUTO_SELECT_AFTER_BOOT_DELAY_MS,
   });
+  try {
+    broadcastToAll("epic-official:background-ready", {
+      reason: "process-poller-started",
+    });
+  } catch {}
 }
 
 function scheduleAutoSelectProcessPollerAfterBoot() {
@@ -14226,7 +16892,10 @@ async function autoSelectRunningGameConfig(processes) {
         : entry?.exeLower
           ? [entry.exeLower]
           : [];
-      if (!exeLowers.length || !hasProcessNameValue(entry?.data?.process_name)) {
+      if (
+        !exeLowers.length ||
+        !hasProcessNameValue(entry?.data?.process_name)
+      ) {
         return false;
       }
       return exeLowers.some((exeLower) => {
@@ -14241,6 +16910,14 @@ async function autoSelectRunningGameConfig(processes) {
     if (manualLaunchInProgress) {
       const entry = getEntry(detectedConfigName);
       if (!entry) {
+        stopEpicOfficialActivePollIfMatches(
+          detectedConfigName,
+          "entry-missing",
+          {
+            configName: detectedConfigName || null,
+            source: "manual-launch",
+          },
+        );
         manualLaunchInProgress = false;
         detectedConfigName = null;
       } else {
@@ -14250,6 +16927,14 @@ async function autoSelectRunningGameConfig(processes) {
             tUi("main.notify.config.closed", {
               name: entry?.data?.name || entry?.name || detectedConfigName,
             }),
+          );
+          stopEpicOfficialActivePollIfMatches(
+            entry?.name || detectedConfigName,
+            "process-exit",
+            {
+              configName: entry?.name || detectedConfigName || null,
+              source: "manual-launch",
+            },
           );
           manualLaunchInProgress = false;
           activePlaytimeConfigs.delete(entry?.data?.name || detectedConfigName);
@@ -14261,6 +16946,14 @@ async function autoSelectRunningGameConfig(processes) {
     if (detectedConfigName) {
       const entry = getEntry(detectedConfigName);
       if (!entry) {
+        stopEpicOfficialActivePollIfMatches(
+          detectedConfigName,
+          "entry-missing",
+          {
+            configName: detectedConfigName || null,
+            source: "detected-config",
+          },
+        );
         detectedConfigName = null;
       } else {
         const isStillRunning = isEntryRunning(entry, detectedConfigName);
@@ -14269,6 +16962,14 @@ async function autoSelectRunningGameConfig(processes) {
             tUi("main.notify.config.closed", {
               name: entry?.data?.name || entry?.name || detectedConfigName,
             }),
+          );
+          stopEpicOfficialActivePollIfMatches(
+            entry?.name || detectedConfigName,
+            "process-exit",
+            {
+              configName: entry?.name || detectedConfigName || null,
+              source: "detected-config",
+            },
           );
           activePlaytimeConfigs.delete(entry?.data?.name || detectedConfigName);
           if (detectedConfigName === entry?.data?.name)
@@ -14280,6 +16981,10 @@ async function autoSelectRunningGameConfig(processes) {
     for (const activeName of [...activePlaytimeConfigs]) {
       const entry = getEntry(activeName);
       if (!entry) {
+        stopEpicOfficialActivePollIfMatches(activeName, "entry-missing", {
+          configName: activeName || null,
+          source: "active-playtime-set",
+        });
         activePlaytimeConfigs.delete(activeName);
         if (detectedConfigName === activeName) detectedConfigName = null;
         continue;
@@ -14290,6 +16995,14 @@ async function autoSelectRunningGameConfig(processes) {
           tUi("main.notify.config.closed", {
             name: entry?.data?.name || entry?.name || activeName,
           }),
+        );
+        stopEpicOfficialActivePollIfMatches(
+          entry?.name || activeName,
+          "process-exit",
+          {
+            configName: entry?.name || activeName || null,
+            source: "active-playtime-set",
+          },
         );
         activePlaytimeConfigs.delete(activeName);
         if (detectedConfigName === activeName) detectedConfigName = null;
@@ -14409,6 +17122,23 @@ const {
   resolveEaOfficialAchievementSetForAppId,
   resolveEaOfficialVerboseLogForConfig,
 } = require("./utils/ea-desktop-local");
+const {
+  EPIC_LAUNCHER_USER_AGENT,
+  authenticateEpicWithCode,
+  buildEpicLoginUrl,
+  clearEpicTokens,
+  ensureEpicAccessToken,
+  getEpicAuthStatus,
+  normalizeEpicAccountId,
+} = require("./utils/epic-auth");
+const {
+  ensureEpicOfficialSchema,
+  importEpicOfficialLibrary,
+  syncEpicOfficialAchievements,
+} = require("./utils/epic-official");
+const {
+  resolveEpicLocalInstallation,
+} = require("./utils/epic-local-installations");
 
 async function seedManualConfigsAtBoot() {
   if (bootManualSeedRunning) return;
@@ -14475,6 +17205,120 @@ async function seedManualConfigsAtBoot() {
     if (seedKey && bootSeededCacheKeys.has(seedKey)) return;
 
     const platform = normalizePlatform(config?.platform) || "steam";
+
+    if (platform === "shadps4") {
+      try {
+        const ps4Trophy = require("./utils/shadps4-trophy");
+        const progressPath = resolvePs4ProgressPathForConfig(config);
+        const trophyDir = resolvePs4TrophyDirForConfig(config);
+        const npcommid = String(config?.shadps4_npcommid || "").trim();
+        const shadPs4Root = resolveShadPs4RootForConfig(config);
+        const progressFiles =
+          shadPs4Root && npcommid
+            ? collectPs4ProgressFilesForConfig(
+                shadPs4Root,
+                npcommid,
+                String(config?.shadps4_user_id || "").trim(),
+              )
+            : [];
+        if (
+          progressPath &&
+          fs.existsSync(progressPath) &&
+          !progressFiles.some(
+            (entry) =>
+              path.normalize(entry.progressPath).toLowerCase() ===
+              path.normalize(progressPath).toLowerCase(),
+          )
+        ) {
+          progressFiles.unshift({
+            userId: getPs4UserIdFromProgressPath(progressPath),
+            progressPath,
+          });
+        }
+        let snapshot = null;
+        let seededAnyPs4User = false;
+        for (const progressFile of progressFiles) {
+          const currentProgressPath = progressFile?.progressPath || "";
+          if (!currentProgressPath || !fs.existsSync(currentProgressPath)) {
+            continue;
+          }
+          const ps4CacheOptions = {
+            appid: config?.appid || "",
+            filePath: currentProgressPath,
+            savePath: currentProgressPath,
+            shadps4UserId:
+              progressFile?.userId ||
+              getPs4UserIdFromProgressPath(currentProgressPath),
+          };
+          const previous =
+            (await loadPreviousAchievements(
+              configFileName,
+              platform,
+              ps4CacheOptions,
+            )) || {};
+          const userSnapshot = ps4Trophy.buildSnapshotFromPs4ProgressFile(
+            currentProgressPath,
+            previous,
+          );
+          if (userSnapshot && Object.keys(userSnapshot).length) {
+            seedCacheFromSnapshot(
+              configFileName,
+              userSnapshot,
+              platform,
+              ps4CacheOptions,
+            );
+            updateAchCacheMetaEntry(
+              configFileName,
+              platform,
+              currentProgressPath,
+              String(config?.appid || ""),
+            );
+            seededAnyPs4User = true;
+            bumpCacheBatchStat("seeded");
+          }
+        }
+        if (!seededAnyPs4User && trophyDir && fs.existsSync(trophyDir)) {
+          const ps4CacheOptions = {
+            appid: config?.appid || "",
+            filePath: "",
+            savePath: trophyDir || config?.save_path || "",
+            shadps4UserId: String(config?.shadps4_user_id || "").trim(),
+          };
+          const schemaFile = path.join(trophyDir, "Xml", "TROP.XML");
+          const parsed = ps4Trophy.parsePs4TrophySetDir(trophyDir);
+          parsed.appid = String(config?.appid || parsed.appid || "");
+          const previous =
+            (await loadPreviousAchievements(
+              configFileName,
+              platform,
+              ps4CacheOptions,
+            )) || {};
+          snapshot = ps4Trophy.buildSnapshotFromPs4(parsed, previous);
+          if (fs.existsSync(schemaFile)) {
+            updateAchCacheMetaEntry(
+              configFileName,
+              platform,
+              schemaFile,
+              String(config?.appid || ""),
+            );
+          }
+        }
+        if (snapshot && Object.keys(snapshot).length) {
+          seedCacheFromSnapshot(
+            configFileName,
+            snapshot,
+            platform,
+            ps4CacheOptions,
+          );
+          if (seedKey) bootSeededCacheKeys.add(seedKey);
+          bumpCacheBatchStat("seeded");
+        }
+        if (seededAnyPs4User && seedKey) bootSeededCacheKeys.add(seedKey);
+      } catch {
+        bumpCacheBatchStat("errors");
+      }
+      return;
+    }
 
     const cachePath = getCachePath(configFileName, platform);
     if (fs.existsSync(cachePath)) {
@@ -14621,6 +17465,7 @@ const {
   normalizePlatform,
   sanitizeAppId,
   sanitizeAppIdForPlatform,
+  inferOfficialPlatformFromMarkers,
   inferPlatformAndSteamId,
   migrateSchemaStorage,
 } = require("./utils/config-platform-migrator");
@@ -14846,6 +17691,7 @@ function applyConfigPlatformDefaults(payload = {}) {
     normalizedPlatform === "rpcs3" ||
     normalizedPlatform === "shadps4" ||
     normalizedPlatform === "steam-official" ||
+    normalizedPlatform === "epic-official" ||
     normalizedPlatform === "gog-official" ||
     normalizedPlatform === "ubisoft-official" ||
     normalizedPlatform === "ea-official"
@@ -14898,6 +17744,7 @@ const SCHEMA_PLATFORM_DIRS = [
   "gog",
   "gog-official",
   "epic",
+  "epic-official",
   "xenia",
   "rpcs3",
   "shadps4",
@@ -14912,6 +17759,7 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "gog") return "gog";
   if (normalized === "gog-official") return "gog-official";
   if (normalized === "epic") return "epic";
+  if (normalized === "epic-official") return "epic-official";
   if (normalized === "xenia") return "xenia";
   if (normalized === "rpcs3") return "rpcs3";
   if (normalized === "shadps4") return "shadps4";
@@ -14969,18 +17817,34 @@ function getPlatformForAppId(appid) {
     const idx = global.configPlatformIndex;
     const set = idx && typeof idx.get === "function" ? idx.get(key) : null;
     if (!set || set.size === 0) return "steam";
-    const order = [
-      "steam",
-      "steam-official",
-      "ea-official",
-      "ubisoft-official",
-      "uplay",
-      "gog",
-      "epic",
-      "xenia",
-      "rpcs3",
-      "shadps4",
-    ];
+    const order = /^\d+$/.test(key)
+      ? [
+          "steam",
+          "steam-official",
+          "ea-official",
+          "ubisoft-official",
+          "uplay",
+          "gog",
+          "epic",
+          "epic-official",
+          "xenia",
+          "rpcs3",
+          "shadps4",
+        ]
+      : [
+          "epic-official",
+          "epic",
+          "gog-official",
+          "steam",
+          "steam-official",
+          "ea-official",
+          "ubisoft-official",
+          "uplay",
+          "gog",
+          "xenia",
+          "rpcs3",
+          "shadps4",
+        ];
     for (const p of order) {
       if (set.has(p)) return p;
     }
@@ -14989,6 +17853,25 @@ function getPlatformForAppId(appid) {
   } catch {
     return "steam";
   }
+}
+
+function getImagePlatformCandidates(appid, platform) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  const rawAppId = String(appid || "").trim();
+  const candidates = [normalizedPlatform];
+  const isLikelyEpicId = !!rawAppId && !/^\d+$/.test(rawAppId);
+  if (isLikelyEpicId) {
+    if (normalizedPlatform === "epic-official") {
+      candidates.push("epic", "steam");
+    } else if (normalizedPlatform === "epic") {
+      candidates.push("epic-official", "steam");
+    }
+  }
+  return Array.from(
+    new Set(
+      candidates.map((value) => normalizePlatform(value) || "").filter(Boolean),
+    ),
+  );
 }
 
 function pickFresherPath(src, dest) {
@@ -15011,13 +17894,56 @@ function migrateImagesToPlatformStorage() {
   }
   if (!imagesRoot || !fs.existsSync(imagesRoot)) return;
 
-  const isNumeric = (name) => /^[0-9a-fA-F]+$/.test(String(name || ""));
+  const topLevelPlatformDirs = new Set(SCHEMA_PLATFORM_DIRS);
+  const isLegacyImageAppId = (name) =>
+    /^[A-Za-z0-9][A-Za-z0-9._:]{0,127}$/.test(String(name || ""));
   const entries = fs.readdirSync(imagesRoot, { withFileTypes: true });
+
+  // Repair accidental nesting like images/steam/steam-official/... back to images/steam-official/...
+  try {
+    const steamRoot = path.join(imagesRoot, "steam");
+    if (fs.existsSync(steamRoot) && fs.statSync(steamRoot).isDirectory()) {
+      const nested = fs.readdirSync(steamRoot, { withFileTypes: true });
+      for (const entry of nested) {
+        if (!entry.isDirectory()) continue;
+        if (!topLevelPlatformDirs.has(String(entry.name || "").trim()))
+          continue;
+        const srcDir = path.join(steamRoot, entry.name);
+        const destDir = path.join(imagesRoot, entry.name);
+        try {
+          fs.mkdirSync(destDir, { recursive: true });
+          const children = fs.readdirSync(srcDir);
+          for (const child of children) {
+            const src = path.join(srcDir, child);
+            const dest = path.join(destDir, child);
+            if (!fs.existsSync(dest)) {
+              fs.renameSync(src, dest);
+            }
+          }
+          try {
+            const remaining = fs.readdirSync(srcDir);
+            if (!remaining.length) {
+              fs.rmdirSync(srcDir);
+            }
+          } catch {}
+        } catch (err) {
+          ipcLogger?.warn?.("images:repair-platform-nesting-failed", {
+            platform: entry.name,
+            error: err?.message || String(err),
+          });
+        }
+      }
+    }
+  } catch (err) {
+    ipcLogger?.warn?.("images:repair-platform-nesting-root-failed", {
+      error: err?.message || String(err),
+    });
+  }
 
   // Covers: images/<appid>.jpg -> images/<platform>/<appid>/<appid>.jpg
   for (const entry of entries) {
     if (!entry.isFile()) continue;
-    const m = entry.name.match(/^(\d+)\.jpg$/i);
+    const m = entry.name.match(/^([A-Za-z0-9][A-Za-z0-9._:-]{0,127})\.jpg$/i);
     if (!m) continue;
     const appid = m[1];
     const platform = getPlatformForAppId(appid);
@@ -15045,7 +17971,8 @@ function migrateImagesToPlatformStorage() {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const appid = entry.name;
-    if (!isNumeric(appid)) continue;
+    if (topLevelPlatformDirs.has(String(appid || "").trim())) continue;
+    if (!isLegacyImageAppId(appid)) continue;
     const srcDir = path.join(imagesRoot, appid);
     const platform = getPlatformForAppId(appid);
     const destDir = path.join(imagesRoot, platform, appid);
@@ -15119,9 +18046,12 @@ ipcMain.handle("generate-auto-configs", async (event, folderPath) => {
   try {
     ensureSteamApiKeyFileFromPrefs();
     const result = await generateGameConfigs(folderPath, outputDir, {
-      onSeedCache: ({ appid, configName, snapshot }) => {
+      onSeedCache: ({ appid, configName, snapshot, platform, savePath }) => {
         try {
-          seedCacheFromSnapshot(configName, snapshot);
+          seedCacheFromSnapshot(configName, snapshot, platform || "steam", {
+            appid,
+            savePath: savePath || null,
+          });
         } catch (e) {
           console.warn(
             `[seed-cache] ${configName} (${appid}) failed: ${e.message}`,
@@ -15140,7 +18070,8 @@ ipcMain.handle("generate-auto-configs", async (event, folderPath) => {
               ? Number(progress.current)
               : 0,
           total:
-            Number.isFinite(Number(progress?.total)) && Number(progress.total) >= 0
+            Number.isFinite(Number(progress?.total)) &&
+            Number(progress.total) >= 0
               ? Number(progress.total)
               : 0,
           percent: clampGenerationPercent(progress?.percent, 0),
@@ -15293,6 +18224,7 @@ ipcMain.handle(
       platform === "uplay" ||
       platform === "ubisoft-official" ||
       platform === "epic" ||
+      platform === "epic-official" ||
       platform === "gog" ||
       platform === "gog-official";
 
@@ -15300,7 +18232,7 @@ ipcMain.handle(
       return {
         success: false,
         code: "unsupported-platform",
-        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/GOG configs (current: ${platform}).`,
+        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG configs (current: ${platform}).`,
       };
     }
 
@@ -15457,26 +18389,40 @@ ipcMain.handle(
       }
     }
 
-    if (platform === "epic") {
-      const productId =
-        config?.appid != null ? String(config.appid).trim() : "";
-      if (!productId) {
+    if (platform === "epic" || platform === "epic-official") {
+      const rarityTargetId =
+        platform === "epic-official"
+          ? config?.epic_namespace != null
+            ? String(config.epic_namespace).trim()
+            : ""
+          : config?.epic_product_id != null
+            ? String(config.epic_product_id).trim()
+            : config?.appid != null
+              ? String(config.appid).trim()
+              : "";
+      if (!rarityTargetId) {
         return {
           success: false,
-          code: "invalid-epic-product-id",
-          message: "Epic Product ID for rarity refresh is invalid.",
+          code:
+            platform === "epic-official"
+              ? "invalid-epic-namespace"
+              : "invalid-epic-product-id",
+          message:
+            platform === "epic-official"
+              ? "Epic Namespace for rarity refresh is invalid."
+              : "Epic Product ID for rarity refresh is invalid.",
         };
       }
       const source = RARITY_SOURCES.epicPublic;
       rarityLogger.info("rarity:manual-refresh:start", {
         configName: config?.name || safeName,
         platform,
-        appid: productId,
+        appid: rarityTargetId,
         source,
       });
       try {
         const fetchedMap = await fetchEpicGlobalAchievementPercentages(
-          productId,
+          rarityTargetId,
           {
             locale: "en",
             timeoutMs: 15000,
@@ -15484,7 +18430,7 @@ ipcMain.handle(
         );
         if (!fetchedMap.size) {
           rarityLogger.warn("rarity:epic:empty", {
-            appid: productId,
+            appid: rarityTargetId,
             source,
             configName: config?.name || safeName,
           });
@@ -15501,14 +18447,14 @@ ipcMain.handle(
         );
         const sidecarPath = writeAchievementPercentagesSidecar(
           path.dirname(schemaPath),
-          productId,
+          rarityTargetId,
           entries,
           { source },
         );
         rarityLogger.info("rarity:manual-refresh:written", {
           configName: config?.name || safeName,
           platform,
-          appid: productId,
+          appid: rarityTargetId,
           source,
           sidecarPath,
           fetchedCount: fetchedMap.size,
@@ -15519,7 +18465,7 @@ ipcMain.handle(
           success: true,
           configName: config?.name || safeName,
           platform,
-          appid: productId,
+          appid: rarityTargetId,
           sidecarPath,
           fetchedCount: fetchedMap.size,
           matchedCount: entries.length,
@@ -15528,7 +18474,7 @@ ipcMain.handle(
         rarityLogger.warn("rarity:manual-refresh:failed", {
           configName: config?.name || safeName,
           platform,
-          appid: productId,
+          appid: rarityTargetId,
           source,
           error: err?.message || String(err),
         });

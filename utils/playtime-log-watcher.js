@@ -19,11 +19,11 @@ const defaultUplaySteamMapPath = path.join(
   __dirname,
   "..",
   "assets",
-  "uplay-steam.json"
+  "uplay-steam.json",
 );
 const runtimeUplaySteamMapPath = path.join(
   path.dirname(preferencesPath),
-  "uplay-steam.json"
+  "uplay-steam.json",
 );
 
 let steamLookupCache = null;
@@ -88,7 +88,9 @@ const UI_LOCALE_DIR = path.join(__dirname, "..", "assets", "locales");
 const uiLocaleCache = new Map();
 
 function normalizeUiLanguage(value) {
-  const raw = String(value || "").trim().toLowerCase();
+  const raw = String(value || "")
+    .trim()
+    .toLowerCase();
   if (!raw) return "english";
   return raw === "latam" || raw === "es-419" ? "latam" : raw;
 }
@@ -189,17 +191,134 @@ function downloadImage(url, dest) {
   });
 }
 
-async function cacheHeaderImage(
-  userDataDir,
-  appid,
-  headerUrl,
-  options = {}
-) {
+let epicProductMapCache = null;
+function fetchJson(url) {
+  return new Promise((resolve, reject) => {
+    const req = https
+      .get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error(`HTTP ${res.statusCode}`));
+          return;
+        }
+        let raw = "";
+        res.setEncoding("utf8");
+        res.on("data", (chunk) => {
+          raw += chunk;
+        });
+        res.on("end", () => {
+          try {
+            resolve(JSON.parse(raw));
+          } catch (err) {
+            reject(err);
+          }
+        });
+        res.on("error", reject);
+      })
+      .on("error", reject)
+      .setTimeout(15000, function () {
+        this.destroy(new Error("Request timed out"));
+      });
+    req.on("error", reject);
+  });
+}
+
+async function loadEpicProductMap() {
+  if (epicProductMapCache && typeof epicProductMapCache === "object") {
+    return epicProductMapCache;
+  }
+  try {
+    const data = await fetchJson(
+      "https://store-content.ak.epicgames.com/api/content/productmapping/",
+    );
+    if (data && typeof data === "object") {
+      epicProductMapCache = data;
+      return epicProductMapCache;
+    }
+  } catch {}
+  epicProductMapCache = {};
+  return epicProductMapCache;
+}
+
+function extractEpicHero(data) {
+  return (
+    data?.hero ||
+    (Array.isArray(data?.pages)
+      ? data.pages
+          .map((page) => page?.data?.hero || page?.hero)
+          .find(
+            (hero) =>
+              hero &&
+              (hero.portraitBackgroundImageUrl ||
+                hero.backgroundImageUrl ||
+                hero.title),
+          )
+      : null) ||
+    null
+  );
+}
+
+function buildEpicSlugCandidates(appid, configData = null) {
+  return [
+    configData?.epic_store_slug,
+    configData?.epicStoreSlug,
+    appid,
+    configData?.appid,
+    configData?.appId,
+    configData?.epic_product_id,
+    configData?.epicProductId,
+    configData?.epic_app_name,
+    configData?.epicAppName,
+    configData?.appName,
+    configData?.epic_catalog_item_id,
+    configData?.epicCatalogItemId,
+    configData?.catalogItemId,
+    configData?.epic_namespace,
+    configData?.epicNamespace,
+    configData?.namespace,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter((value, index, array) => value && array.indexOf(value) === index);
+}
+
+async function resolveEpicStoreSlug(appid, configData = null) {
+  const explicitSlug = String(
+    configData?.epic_store_slug || configData?.epicStoreSlug || "",
+  ).trim();
+  if (explicitSlug) return explicitSlug;
+  const map = await loadEpicProductMap();
+  for (const candidate of buildEpicSlugCandidates(appid, configData)) {
+    const slug = map?.[candidate] || map?.[candidate.toLowerCase()] || null;
+    if (slug) return slug;
+  }
+  return "";
+}
+
+async function fetchEpicStoreHeaderUrl(appid, configData = null) {
+  const slug = await resolveEpicStoreSlug(appid, configData);
+  if (!slug) return "";
+  try {
+    const data = await fetchJson(
+      `https://store-content.ak.epicgames.com/api/en-US/content/products/${encodeURIComponent(
+        slug,
+      )}`,
+    );
+    const hero = extractEpicHero(data);
+    return String(
+      hero?.backgroundImageUrl || hero?.portraitBackgroundImageUrl || "",
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+
+async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
   const platform = normalizePlatform(options?.platform) || "steam";
   const preferLocalOnly =
     platform === "gog" ||
     platform === "gog-official" ||
     platform === "epic" ||
+    platform === "epic-official" ||
     platform === "ea-official";
   const imageDir = path.join(userDataDir, "images", platform, String(appid));
   try {
@@ -222,15 +341,13 @@ async function cacheHeaderImage(
     let out = String(name || "").trim();
     if (!out) return "";
     const rx =
-      /\s*\((?:steam|steam[-\s]?official|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
+      /\s*\((?:steam|steam[-\s]?official|epic|epic[-\s]?official|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
     while (rx.test(out)) out = out.replace(rx, "").trim();
     return out;
   };
   const coverName = stripCoverSuffix(fallbackName) || fallbackName;
-  const fallbackSize = options?.gridSize || "460x215";
-  const fallbackSizes = [fallbackSize, "920x430"].filter(
-    (size, idx, arr) => size && arr.indexOf(size) === idx
-  );
+  const fallbackSize = options?.gridSize || "460x215,920x430";
+  const fallbackSizes = [fallbackSize].filter(Boolean);
   const downloadToLocal = async (url) => {
     await downloadImage(url, headerPath);
     return { headerUrl: localUrl() };
@@ -241,6 +358,19 @@ async function cacheHeaderImage(
     }
   } catch (err) {
     // fallthrough to steamgrid
+  }
+  if (platform === "epic" || platform === "epic-official") {
+    try {
+      const epicHeaderUrl = await fetchEpicStoreHeaderUrl(
+        appid,
+        options?.configData || null,
+      );
+      if (epicHeaderUrl) {
+        return await downloadToLocal(epicHeaderUrl);
+      }
+    } catch {
+      // fallthrough to steamgrid
+    }
   }
   if (coverName) {
     for (const size of fallbackSizes) {
@@ -255,7 +385,7 @@ async function cacheHeaderImage(
         if (size === fallbackSizes[fallbackSizes.length - 1]) {
           console.warn(
             `steamgriddb header fallback failed for ${appid}:`,
-            gridErr.message || gridErr
+            gridErr.message || gridErr,
           );
         }
       }
@@ -273,11 +403,7 @@ function sendPlaytimeNotification(playData) {
 }
 
 function formatDuration(ms) {
-  const prefix = tUi(
-    "playtime.duration.prefix",
-    {},
-    "You played for",
-  );
+  const prefix = tUi("playtime.duration.prefix", {}, "You played for");
   const formatUnit = (count, unit, fallback) => {
     const key = `playtime.duration.${unit}.${count === 1 ? "one" : "other"}`;
     return tUi(key, { count }, fallback);
@@ -298,11 +424,7 @@ function formatDuration(ms) {
   if (totalMinutes < 60) {
     const mins = totalMinutes;
     const parts = [
-      formatUnit(
-        mins,
-        "minutes",
-        `${mins} minute${mins !== 1 ? "s" : ""}`,
-      ),
+      formatUnit(mins, "minutes", `${mins} minute${mins !== 1 ? "s" : ""}`),
     ];
     if (seconds) {
       parts.push(
@@ -394,13 +516,18 @@ function startPlaytimeLogWatcher(configData) {
   const remoteHeaderUrl = isSteamGridOnly
     ? ""
     : `https://cdn.steamstatic.com/steam/apps/${effectiveAppId}/header.jpg`;
-  const logoFallbackPath = path.join(__dirname, "..", "assets", "achievements-logo.png");
+  const logoFallbackPath = path.join(
+    __dirname,
+    "..",
+    "assets",
+    "achievements-logo.png",
+  );
   const headerPathLocal = path.join(
     userDataDir,
     "images",
     platform,
     String(appid),
-    "header.jpg"
+    "header.jpg",
   );
   const localHeaderIfExists = () => {
     try {
@@ -419,6 +546,7 @@ function startPlaytimeLogWatcher(configData) {
     platform === "gog" ||
     platform === "gog-official" ||
     platform === "epic" ||
+    platform === "epic-official" ||
     platform === "ea-official" ||
     isSteamGridOnly
       ? pathToFileURL(logoFallbackPath).toString()
@@ -503,8 +631,9 @@ function startPlaytimeLogWatcher(configData) {
 
   cacheHeaderImage(userDataDir, appid, remoteHeaderUrl, {
     gameName,
-    gridSize: "460x215",
+    gridSize: "460x215,920x430",
     platform,
+    configData,
   })
     .then(({ headerUrl }) => {
       if (closed) return;
@@ -524,7 +653,9 @@ function startPlaytimeLogWatcher(configData) {
     const running = list.some((p) => {
       if (launchPid && p.pid === launchPid) return true;
       if (!normalizedProcessNames.length) return false;
-      if (!normalizedProcessNames.includes(String(p.name || "").toLowerCase())) {
+      if (
+        !normalizedProcessNames.includes(String(p.name || "").toLowerCase())
+      ) {
         return false;
       }
       return true;
@@ -541,15 +672,16 @@ function startPlaytimeLogWatcher(configData) {
             "images",
             platform,
             String(appid),
-            "header.jpg"
+            "header.jpg",
           );
           const headerPathLegacy = path.join(
             userDataDir,
             "images",
             String(appid),
-            "header.jpg"
+            "header.jpg",
           );
-          let headerLocal = remoteHeaderUrl || lastHeaderUrl || fallbackHeaderUrl;
+          let headerLocal =
+            remoteHeaderUrl || lastHeaderUrl || fallbackHeaderUrl;
           if (fs.existsSync(headerPathNew)) {
             headerLocal = pathToFileURL(headerPathNew).toString();
           } else if (fs.existsSync(headerPathLegacy)) {

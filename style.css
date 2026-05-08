@@ -1937,9 +1937,16 @@ body::-webkit-scrollbar {
   transform: scale(0.96);
 }
 
-.dash-card:hover .dash-play.is-disabled {
+.dash-card:hover .dash-play.is-disabled,
+#dashboardGrid .dash-card.active .dash-play.is-disabled,
+#dashboardGrid .dash-card:focus .dash-play.is-disabled,
+#dashboardGrid .dash-card:focus-within .dash-play.is-disabled,
+#dashboardGrid .dash-card .dash-play.force-show.is-disabled {
   cursor: not-allowed;
   filter: grayscale(30%);
+  background: var(--dracula-comment);
+  color: var(--dracula-foreground);
+  opacity: 0.6;
 }
 
 body.window-maximized .dashboard-grid {
@@ -1963,6 +1970,7 @@ body.window-maximized .dashboard-grid {
 #dashboardGrid .dash-card .dash-play.force-show {
   opacity: 1;
   transform: none;
+  pointer-events: auto;
 }
 
 /* ——— Folders list  ——— */
@@ -2656,6 +2664,8 @@ kbd {
 
 .dash-menu-item:focus-visible {
   outline: 2px solid #6ee7ff;
+  opacity: 0.5;
+  cursor: not-allowed;
   outline-offset: 1px;
 }
 
