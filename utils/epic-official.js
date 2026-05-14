@@ -28,7 +28,9 @@ const {
   fetchEpicPublicProductAchievements,
 } = require("./epic-api");
 
-const epicOfficialLogger = createLogger("epic-official");
+const epicOfficialLogger = createLogger("epic-official", {
+  level: process.env.EPIC_OFFICIAL_LOG_LEVEL || "info",
+});
 let epicProductMap = null;
 const EPIC_OFFICIAL_IMPORT_META_FILE = "epic-official-import-meta.json";
 const EPIC_OFFICIAL_IMPORT_CONCURRENCY = 5;
@@ -2054,7 +2056,7 @@ async function syncEpicOfficialAchievements(config = {}, options = {}) {
   ).trim();
   if (!accountId) throw new Error("epic-account-id-required");
   if (!productId) throw new Error("productId-required");
-  epicOfficialLogger.info("epic-official:sync:start", {
+  epicOfficialLogger.debug?.("epic-official:sync:start", {
     accountId,
     productId,
     configName: String(config?.name || config?.displayName || "").trim() || null,
@@ -2093,7 +2095,7 @@ async function syncEpicOfficialAchievements(config = {}, options = {}) {
         locale: options?.locale || "en-US",
       });
       if (fallbackSchema?.productId && fallbackSchema.productId !== productId) {
-        epicOfficialLogger.info("epic-official:sync:retry-product-id", {
+        epicOfficialLogger.debug?.("epic-official:sync:retry-product-id", {
           accountId,
           fromProductId: productId,
           toProductId: fallbackSchema.productId,
@@ -2130,7 +2132,7 @@ async function syncEpicOfficialAchievements(config = {}, options = {}) {
     totalUnlocked: response.totalUnlocked,
     totalXP: response.totalXP,
   };
-  epicOfficialLogger.info("epic-official:sync:success", {
+  epicOfficialLogger.debug?.("epic-official:sync:success", {
     accountId: result.accountId || accountId,
     productId: result.productId || productId,
     totalUnlocked: result.totalUnlocked || 0,

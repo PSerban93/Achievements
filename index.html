@@ -230,6 +230,67 @@
         color: #888;
       }
 
+      .settings-links {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-top: auto;
+        margin-left: 10px;
+        margin-right: 10px;
+        margin-bottom: 8px;
+        padding-top: 12px;
+      }
+
+      .settings-link-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 42px;
+        height: 42px;
+        border: 1px solid rgba(189, 147, 249, 0.4);
+        border-radius: 10px;
+        background: rgba(68, 71, 90, 0.55);
+        color: #f8f8f2;
+        cursor: pointer;
+        transition:
+          transform 0.15s ease,
+          border-color 0.15s ease,
+          background 0.15s ease,
+          color 0.15s ease;
+      }
+
+      .settings-link-btn:hover {
+        transform: translateY(-1px);
+        border-color: rgba(139, 233, 253, 0.65);
+        background: rgba(80, 85, 112, 0.72);
+        color: #8be9fd;
+      }
+
+      .settings-link-btn:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(139, 233, 253, 0.28);
+      }
+
+      .settings-link-btn svg {
+        width: 22px;
+        height: 22px;
+        fill: currentColor;
+      }
+
+      .settings-link-btn img {
+        width: 22px;
+        height: 22px;
+        display: block;
+      }
+
+      .settings-version {
+        margin-left: 10px;
+        margin-right: 10px;
+        margin-bottom: 6px;
+        color: rgba(248, 248, 242, 0.78);
+        font-size: 12px;
+      }
+
       .sort-btn {
         position: relative;
         top: 2px;
@@ -516,6 +577,44 @@
           >
             Platform Guide
           </button>
+          <div
+            class="settings-links"
+            role="group"
+            aria-label="Project links"
+            id="settingsProjectLinks"
+          >
+            <button
+              id="settingsGithubLink"
+              class="settings-link-btn"
+              type="button"
+              aria-label="Open GitHub project page"
+              title="Open GitHub project page"
+            >
+              <img
+                src="assets/icons/github-mark.svg"
+                alt=""
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              id="settingsDocsLink"
+              class="settings-link-btn"
+              type="button"
+              aria-label="Open setup and configuration guide"
+              title="Open setup and configuration guide"
+            >
+              <img
+                src="assets/icons/docs-info.svg"
+                alt=""
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <div
+            id="settingsVersion"
+            class="settings-version"
+            aria-live="polite"
+          ></div>
         </div>
 
         <div class="settings-tabs-content" tabindex="0">
@@ -3080,11 +3179,6 @@
           </div>
         </div>
 
-        <div
-          id="settingsVersion"
-          class="settings-version"
-          aria-live="polite"
-        ></div>
       </div>
     </div>
 
@@ -5069,7 +5163,12 @@
 
         // update main
         if (!window.__imageListenerAttached) {
-          window.api.onImageUpdate(async (payload) => {
+          if (typeof window.__imageListenerUnsub === "function") {
+            try {
+              window.__imageListenerUnsub();
+            } catch {}
+          }
+          window.__imageListenerUnsub = window.api.onImageUpdate(async (payload) => {
             const appid =
               typeof payload === "object" && payload?.appid
                 ? String(payload.appid)
@@ -6485,7 +6584,12 @@
         );
       }
 
-      window.api.onNotify((payload = {}) => {
+      if (typeof window.__notifyUnsub === "function") {
+        try {
+          window.__notifyUnsub();
+        } catch {}
+      }
+      window.__notifyUnsub = window.api.onNotify((payload = {}) => {
         const { message, color } = payload;
         if (shouldSuppressGenerationNotification(payload)) return;
         if (shouldSuppressAppUpdateNotification(payload)) return;
@@ -6542,6 +6646,30 @@
         }
         applyGenerationProgressState(payload, { autoHide: true });
       });
+
+      if (!window.__globalListenerCleanupAttached) {
+        window.addEventListener(
+          "beforeunload",
+          () => {
+            const cleanupKeys = [
+              "__notifyUnsub",
+              "__schemaReadyUnsub",
+              "__imageListenerUnsub",
+              "__dashboardImageListenerUnsub",
+            ];
+            for (const key of cleanupKeys) {
+              const fn = window[key];
+              if (typeof fn !== "function") continue;
+              try {
+                fn();
+              } catch {}
+              window[key] = null;
+            }
+          },
+          { once: true },
+        );
+        window.__globalListenerCleanupAttached = true;
+      }
 
       window.addEventListener("DOMContentLoaded", () => {
         window.api
@@ -7121,7 +7249,12 @@
         });
       }
 
-      window.api.onSchemaReady(async (data) => {
+      if (typeof window.__schemaReadyUnsub === "function") {
+        try {
+          window.__schemaReadyUnsub();
+        } catch {}
+      }
+      window.__schemaReadyUnsub = window.api.onSchemaReady(async (data) => {
         if (!pendingSchemaRefresh) return;
         const appidMatch =
           data?.appid &&
@@ -7422,6 +7555,81 @@
       }
 
       let cachedAppVersion = "";
+      const SETTINGS_GITHUB_URL =
+        "https://github.com/PSerban93/Achievements";
+      const SETTINGS_DOCS_URL =
+        "https://pserban93.github.io/Achievements-Docs/";
+
+      async function openSettingsExternalUrl(url) {
+        if (!url) return;
+        try {
+          if (window.api?.openExternalUrl) {
+            const result = await window.api.openExternalUrl(url);
+            if (!result?.success) {
+              throw new Error(result?.error || "open-external-failed");
+            }
+          } else {
+            window.open(url, "_blank", "noopener");
+          }
+        } catch (err) {
+          console.error("settings external link open failed:", err);
+          showNotification(
+            tUi(
+              "settings.externalLinkOpenFailed",
+              "Could not open external link.",
+            ),
+            "#f44336",
+          );
+        }
+      }
+
+      function refreshSettingsProjectLinksText() {
+        const linksGroup = document.getElementById("settingsProjectLinks");
+        if (linksGroup) {
+          const groupLabel = tUi("settings.projectLinks", "Project links");
+          linksGroup.setAttribute("aria-label", groupLabel);
+        }
+
+        const githubBtn = document.getElementById("settingsGithubLink");
+        if (githubBtn) {
+          const githubLabel = tUi(
+            "settings.githubLink",
+            "Open GitHub project page",
+          );
+          githubBtn.title = githubLabel;
+          githubBtn.setAttribute("aria-label", githubLabel);
+        }
+
+        const docsBtn = document.getElementById("settingsDocsLink");
+        if (docsBtn) {
+          const docsLabel = tUi(
+            "settings.docsLink",
+            "Open setup and configuration guide",
+          );
+          docsBtn.title = docsLabel;
+          docsBtn.setAttribute("aria-label", docsLabel);
+        }
+      }
+
+      function bindSettingsProjectLinks() {
+        const githubBtn = document.getElementById("settingsGithubLink");
+        if (githubBtn && githubBtn.dataset.bound !== "1") {
+          githubBtn.dataset.bound = "1";
+          githubBtn.addEventListener("click", () => {
+            void openSettingsExternalUrl(SETTINGS_GITHUB_URL);
+          });
+        }
+
+        const docsBtn = document.getElementById("settingsDocsLink");
+        if (docsBtn && docsBtn.dataset.bound !== "1") {
+          docsBtn.dataset.bound = "1";
+          docsBtn.addEventListener("click", () => {
+            void openSettingsExternalUrl(SETTINGS_DOCS_URL);
+          });
+        }
+
+        refreshSettingsProjectLinksText();
+      }
 
       function refreshSettingsVersionText() {
         const el = document.getElementById("settingsVersion");
@@ -7460,6 +7668,7 @@
         if (appLanguageSelect) appLanguageSelect.value = uiLanguage;
         renderSchemaLanguageSelection(getCachedPreferences());
         bindSchemaLanguageSelectionEvents();
+        bindSettingsProjectLinks();
         if (typeof updateSortIconsUI === "function") {
           updateSortIconsUI();
         }
@@ -10113,6 +10322,7 @@
           );
           achievementLanguageManual = prefs.achievementLanguageManual === true;
           await applyUiLanguage(storedUiLang);
+          bindSettingsProjectLinks();
           await loadAppVersionLabel();
           const storedAchLang = normalizeLangValue(
             prefs.language ||
@@ -13915,7 +14125,12 @@
         }
 
         if (!window.__dashboardImageListenerAttached) {
-          window.api.onImageUpdate(async (payload) => {
+          if (typeof window.__dashboardImageListenerUnsub === "function") {
+            try {
+              window.__dashboardImageListenerUnsub();
+            } catch {}
+          }
+          window.__dashboardImageListenerUnsub = window.api.onImageUpdate(async (payload) => {
             const appid =
               typeof payload === "object" && payload?.appid
                 ? String(payload.appid)

@@ -371,6 +371,7 @@ module.exports = function makeWatchedFolders({
   configsDir,
   generateGameConfigs,
   generateConfigForAppId = null,
+  generateConfigsForAppIds = null,
   notifyWarn = (m) => console.warn(m),
   onEarned = null,
   onProgress = null,
@@ -550,7 +551,8 @@ module.exports = function makeWatchedFolders({
     const normalizedPath = String(normalizedSavePath || "");
     let candidates = desiredPlatform
       ? metas.filter(
-          (meta) => (normalizePlatform(meta?.platform) || "steam") === desiredPlatform,
+          (meta) =>
+            (normalizePlatform(meta?.platform) || "steam") === desiredPlatform,
         )
       : metas.slice();
     if (!candidates.length) candidates = metas.slice();
@@ -570,24 +572,38 @@ module.exports = function makeWatchedFolders({
       new Set(
         [
           ...getSaveWatchTargets(meta),
-          meta?.gog_gameplay_db || path.join(meta?.save_path || "", GAMEPLAY_DB_NAME),
-          normalizedRootDir ? path.join(normalizedRootDir, "achievements.json") : null,
-          meta?.save_path ? path.join(meta.save_path, "achievements.json") : null,
+          meta?.gog_gameplay_db ||
+            path.join(meta?.save_path || "", GAMEPLAY_DB_NAME),
+          normalizedRootDir
+            ? path.join(normalizedRootDir, "achievements.json")
+            : null,
+          meta?.save_path
+            ? path.join(meta.save_path, "achievements.json")
+            : null,
           meta?.save_path
             ? path.join(meta.save_path, id, "achievements.json")
             : null,
           meta?.save_path
-            ? path.join(meta.save_path, "steam_settings", id, "achievements.json")
+            ? path.join(
+                meta.save_path,
+                "steam_settings",
+                id,
+                "achievements.json",
+              )
             : null,
           meta?.save_path
             ? path.join(meta.save_path, "remote", id, "achievements.json")
             : null,
-          normalizedRootDir ? path.join(normalizedRootDir, "achievements.ini") : null,
+          normalizedRootDir
+            ? path.join(normalizedRootDir, "achievements.ini")
+            : null,
           normalizedRootDir
             ? path.join(normalizedRootDir, "Stats", "achievements.ini")
             : null,
           normalizedRootDir ? path.join(normalizedRootDir, "stats.bin") : null,
-          meta?.save_path ? path.join(meta.save_path, "achievements.ini") : null,
+          meta?.save_path
+            ? path.join(meta.save_path, "achievements.ini")
+            : null,
           meta?.save_path
             ? path.join(meta.save_path, "Stats", "achievements.ini")
             : null,
@@ -597,17 +613,12 @@ module.exports = function makeWatchedFolders({
     );
   }
 
-  function promoteInitialNotifyForMeta(
-    appid,
-    meta,
-    candidates,
-    context = {},
-  ) {
+  function promoteInitialNotifyForMeta(appid, meta, candidates, context = {}) {
     if (!meta?.name) return false;
     if (bootMode) return false;
-    const existingCandidates = (Array.isArray(candidates) ? candidates : []).filter(
-      (candidate) => candidate && fs.existsSync(candidate),
-    );
+    const existingCandidates = (
+      Array.isArray(candidates) ? candidates : []
+    ).filter((candidate) => candidate && fs.existsSync(candidate));
     if (!existingCandidates.length) return false;
     if (initialNotifyPromotedConfigs.has(meta.name)) return false;
     initialNotifyPromotedConfigs.add(meta.name);
@@ -618,9 +629,14 @@ module.exports = function makeWatchedFolders({
       rootPath: context.rootPath || meta?.save_path || null,
       platform: normalizePlatform(meta?.platform) || null,
     });
-    runInitialSeedForMeta(String(appid || meta?.appid || ""), meta, existingCandidates, {
-      suppressInitialNotify: false,
-    });
+    runInitialSeedForMeta(
+      String(appid || meta?.appid || ""),
+      meta,
+      existingCandidates,
+      {
+        suppressInitialNotify: false,
+      },
+    );
     return true;
   }
 
@@ -934,11 +950,17 @@ module.exports = function makeWatchedFolders({
       const normalizedCandidate = normalizePathForMetaMatch(candidatePath);
       if (!normalizedCandidate) return;
       if (normalizedFilePath === normalizedCandidate) {
-        bestScore = Math.max(bestScore, exactScore + normalizedCandidate.length);
+        bestScore = Math.max(
+          bestScore,
+          exactScore + normalizedCandidate.length,
+        );
         return;
       }
       if (normalizedFilePath.startsWith(`${normalizedCandidate}${path.sep}`)) {
-        bestScore = Math.max(bestScore, parentScore + normalizedCandidate.length);
+        bestScore = Math.max(
+          bestScore,
+          parentScore + normalizedCandidate.length,
+        );
       }
     };
 
@@ -1424,6 +1446,27 @@ module.exports = function makeWatchedFolders({
     });
   }
 
+  function isBootBatchableGenerationTask(task = {}) {
+    const appid = String(task?.appid || "").trim();
+    if (!/^[0-9a-fA-F]+$/.test(appid)) return false;
+    const platform = normalizePlatform(task?.forcePlatform) || "steam";
+    if (platform.endsWith("-official")) return false;
+    if (task.__emu) return false;
+    if (
+      task.__gogClientId ||
+      task.__gogUserId ||
+      task.__gogGameplayDbPath ||
+      task.__ubisoftUserId ||
+      task.__ubisoftSpoolFile ||
+      task.__eaAchievementSet ||
+      task.__eaLogFile ||
+      task.__eaGameName
+    ) {
+      return false;
+    }
+    return true;
+  }
+
   function createGenerationBatchReporter(tasks, meta = {}) {
     const list = Array.isArray(tasks) ? tasks : [];
     const total = list.length;
@@ -1433,13 +1476,22 @@ module.exports = function makeWatchedFolders({
     const states = list.map((task, index) => ({
       index,
       appid: String(task?.appid || ""),
-      itemName: String(task?.__eaGameName || task?.__gogName || task?.appid || "").trim(),
+      itemName: String(
+        task?.__eaGameName || task?.__gogName || task?.appid || "",
+      ).trim(),
       percent: 0,
       phase: "preparing",
       detail: "",
       finalState: null,
     }));
     let lastIndex = 0;
+    let progressOverrideCurrent = 0;
+    let progressOverrideTotal = 0;
+    let progressOverridePercent = 0;
+    let progressOverrideAppId = "";
+    let progressOverrideItemName = "";
+    let progressOverridePhase = "";
+    let progressOverrideDetail = "";
 
     const clampPercent = (value, fallback = 0) => {
       const n = Number(value);
@@ -1450,8 +1502,9 @@ module.exports = function makeWatchedFolders({
     };
 
     const currentState = () => {
-      const active =
-        states.find((entry) => entry.percent > 0 && entry.percent < 100) ||
+      const active = states.find(
+        (entry) => entry.percent > 0 && entry.percent < 100,
+      ) ||
         states[lastIndex] ||
         states[0] || {
           appid: "",
@@ -1461,8 +1514,17 @@ module.exports = function makeWatchedFolders({
         };
       const completed = states.filter((entry) => entry.percent >= 100).length;
       const current =
-        total > 0 ? Math.min(total, completed + (completed < total ? 1 : 0)) : 0;
-      const percent =
+        progressOverrideCurrent > 0
+          ? Math.min(
+              progressOverrideTotal > 0 ? progressOverrideTotal : total,
+              progressOverrideCurrent,
+            )
+          : total > 0
+            ? Math.min(total, completed + (completed < total ? 1 : 0))
+            : 0;
+      const resolvedTotal =
+        progressOverrideTotal > 0 ? progressOverrideTotal : total;
+      const computedPercent =
         total > 0
           ? Math.round(
               states.reduce(
@@ -1471,14 +1533,23 @@ module.exports = function makeWatchedFolders({
               ) / total,
             )
           : 0;
+      const percent =
+        progressOverridePercent > 0
+          ? Math.max(computedPercent, progressOverridePercent)
+          : computedPercent;
       return {
         current,
-        total,
+        total: resolvedTotal,
         percent,
-        appid: active.appid || "",
-        itemName: active.itemName || active.appid || "",
-        phase: active.phase || "preparing",
+        appid: progressOverrideAppId || active.appid || "",
+        itemName:
+          progressOverrideItemName ||
+          active.itemName ||
+          active.appid ||
+          "",
+        phase: progressOverridePhase || active.phase || "preparing",
         detail:
+          progressOverrideDetail ||
           active.detail ||
           String(meta?.defaultDetail || "Preparing config generation"),
       };
@@ -1522,11 +1593,33 @@ module.exports = function makeWatchedFolders({
       if (!deferStartUntilVisible) return true;
       const phase = String(progress?.phase || state?.phase || "").toLowerCase();
       const status = String(progress?.status || "").toLowerCase();
-      const detail = String(progress?.detail || state?.detail || "").toLowerCase();
+      const detail = String(
+        progress?.detail || state?.detail || "",
+      ).toLowerCase();
       if (status === "failed" || phase === "failed") return true;
-      if (detail === "config created" || detail === "config updated") return true;
+      if (
+        phase === "schemaparse" ||
+        phase === "generatingschema" ||
+        phase === "fetchsteamapi" ||
+        phase === "fetchsteamdb" ||
+        phase === "fetchepic" ||
+        phase === "finalizing"
+      ) {
+        return true;
+      }
+      if (
+        detail.includes("schema") ||
+        detail.includes("steamdb") ||
+        detail.includes("epic achievements") ||
+        detail.includes("finalizing")
+      ) {
+        return true;
+      }
+      if (detail === "config created" || detail === "config updated")
+        return true;
       if (detail === "waiting for schema generation") return true;
-      if (phase === "skipped" || detail === "config generation skipped") return false;
+      if (phase === "skipped" || detail === "config generation skipped")
+        return false;
       return false;
     };
 
@@ -1543,7 +1636,9 @@ module.exports = function makeWatchedFolders({
         const state = states[taskIndex];
         if (!state) return;
         lastIndex = taskIndex;
-        state.appid = String(progress?.appid || task?.appid || state.appid || "");
+        state.appid = String(
+          progress?.appid || task?.appid || state.appid || "",
+        );
         state.itemName = String(
           progress?.itemName ||
             progress?.name ||
@@ -1554,6 +1649,30 @@ module.exports = function makeWatchedFolders({
         state.phase = String(progress?.phase || state.phase || "");
         state.detail = String(progress?.detail || state.detail || "");
         state.percent = clampPercent(progress?.percent, state.percent || 0);
+        if (
+          Number.isFinite(Number(progress?.current)) &&
+          Number(progress.current) > 0
+        ) {
+          progressOverrideCurrent = Number(progress.current);
+        }
+        if (
+          Number.isFinite(Number(progress?.total)) &&
+          Number(progress.total) > 0
+        ) {
+          progressOverrideTotal = Number(progress.total);
+        }
+        if (
+          Number.isFinite(Number(progress?.percent)) &&
+          Number(progress.percent) > 0
+        ) {
+          progressOverridePercent = clampPercent(progress.percent, 0);
+        }
+        progressOverrideAppId = String(progress?.appid || state.appid || "");
+        progressOverrideItemName = String(
+          progress?.itemName || progress?.name || state.itemName || "",
+        ).trim();
+        progressOverridePhase = String(progress?.phase || state.phase || "");
+        progressOverrideDetail = String(progress?.detail || state.detail || "");
         const summary = currentState();
         if (!started) {
           if (!shouldRevealProgress(progress, state)) return;
@@ -1576,9 +1695,26 @@ module.exports = function makeWatchedFolders({
         lastIndex = taskIndex;
         state.appid = String(task?.appid || state.appid || "");
         state.itemName = String(
-          state.itemName || task?.__eaGameName || task?.__gogName || state.appid,
+          state.itemName ||
+            task?.__eaGameName ||
+            task?.__gogName ||
+            state.appid,
         ).trim();
         state.percent = 100;
+        if (progressOverrideCurrent > 0) {
+          progressOverrideCurrent = Math.max(
+            progressOverrideCurrent,
+            taskIndex + 1,
+          );
+        }
+        progressOverridePercent = Math.max(
+          progressOverridePercent,
+          clampPercent(state.percent, 0),
+        );
+        progressOverrideAppId = state.appid || progressOverrideAppId;
+        progressOverrideItemName = state.itemName || progressOverrideItemName;
+        progressOverridePhase = state.phase || progressOverridePhase;
+        progressOverrideDetail = state.detail || progressOverrideDetail;
         if (result?.created === true) {
           state.phase = "completed";
           state.detail = "Config created";
@@ -1631,8 +1767,12 @@ module.exports = function makeWatchedFolders({
           percent: status === "failed" ? summary.percent : 100,
           appid: summary.appid,
           itemName:
-            String(meta?.rootLabel || summary.itemName || meta?.fallbackItemName || "")
-              .trim() || "",
+            String(
+              meta?.rootLabel ||
+                summary.itemName ||
+                meta?.fallbackItemName ||
+                "",
+            ).trim() || "",
           phase: status === "failed" ? "failed" : "completed",
           detail:
             String(
@@ -1749,7 +1889,11 @@ module.exports = function makeWatchedFolders({
         : readPrefsSafe();
     return steamId64ToAccountId(prefs?.steamOfficialSteamId || "");
   }
-  function pickConfiguredSteamOfficialUserBin(statsDir, appid, sourcePrefs = null) {
+  function pickConfiguredSteamOfficialUserBin(
+    statsDir,
+    appid,
+    sourcePrefs = null,
+  ) {
     return pickPreferredUserBin(
       statsDir,
       appid,
@@ -2642,7 +2786,11 @@ module.exports = function makeWatchedFolders({
       const grandParent = path.dirname(parent);
       const grandParentBase = path.basename(grandParent).toLowerCase();
 
-      if (base === "applications" && parentBase === "galaxy" && grandParentBase === "gog.com") {
+      if (
+        base === "applications" &&
+        parentBase === "galaxy" &&
+        grandParentBase === "gog.com"
+      ) {
         push(cursor);
       }
       if (base === "galaxy" && parentBase === "gog.com") {
@@ -2680,11 +2828,7 @@ module.exports = function makeWatchedFolders({
       } catch {
         relative = "";
       }
-      if (
-        !relative ||
-        relative.startsWith("..") ||
-        path.isAbsolute(relative)
-      ) {
+      if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
         continue;
       }
       return {
@@ -3205,7 +3349,12 @@ module.exports = function makeWatchedFolders({
     if (preferredUser) {
       addCandidate(
         preferredUser,
-        path.join(homeDir, preferredUser, "trophy", `${normalizedNpCommId}.xml`),
+        path.join(
+          homeDir,
+          preferredUser,
+          "trophy",
+          `${normalizedNpCommId}.xml`,
+        ),
       );
     }
     try {
@@ -3228,7 +3377,12 @@ module.exports = function makeWatchedFolders({
     return out;
   }
 
-  function selectPs4ProgressFile(root, npcommid, preferredUser = "", direct = "") {
+  function selectPs4ProgressFile(
+    root,
+    npcommid,
+    preferredUser = "",
+    direct = "",
+  ) {
     const candidates = collectPs4ProgressFiles(root, npcommid, preferredUser);
     if (direct && fs.existsSync(direct)) {
       const directUser = getPs4UserIdFromProgressPath(direct) || preferredUser;
@@ -3536,7 +3690,9 @@ module.exports = function makeWatchedFolders({
         };
         continue;
       }
-      const npMatch = line.match(/Successfully extracted .* for (NP[A-Z0-9_]+)/i);
+      const npMatch = line.match(
+        /Successfully extracted .* for (NP[A-Z0-9_]+)/i,
+      );
       if (npMatch && current) {
         map.set(npMatch[1].toLowerCase(), { ...current, npcommid: npMatch[1] });
       }
@@ -3619,7 +3775,9 @@ module.exports = function makeWatchedFolders({
           path.join(xmlDir, "TROP.XML"),
           path.join(xmlDir, "TROPCONF.XML"),
         ];
-        const xmlPath = candidates.find((candidate) => fs.existsSync(candidate));
+        const xmlPath = candidates.find((candidate) =>
+          fs.existsSync(candidate),
+        );
         if (!xmlPath) continue;
         const npcommid = readSimpleXmlTag(xmlPath, "npcommid");
         if (!npcommid) continue;
@@ -3922,9 +4080,7 @@ module.exports = function makeWatchedFolders({
             ? data.shadps4_progress_path
             : "",
         shadps4_user_id:
-          typeof data?.shadps4_user_id === "string"
-            ? data.shadps4_user_id
-            : "",
+          typeof data?.shadps4_user_id === "string" ? data.shadps4_user_id : "",
         lumaplay_user:
           typeof data?.lumaplay_user === "string"
             ? data.lumaplay_user
@@ -4189,6 +4345,12 @@ module.exports = function makeWatchedFolders({
     if (!meta?.config_path) return null;
     const p1 = path.join(meta.config_path, "achievements.json");
     if (fs.existsSync(p1)) return p1;
+    const pSteamSettings = path.join(
+      meta.config_path,
+      "steam_settings",
+      "achievements.json",
+    );
+    if (fs.existsSync(pSteamSettings)) return pSteamSettings;
     if (meta?.appid != null) {
       const p2 = path.join(
         meta.config_path,
@@ -4198,6 +4360,46 @@ module.exports = function makeWatchedFolders({
       if (fs.existsSync(p2)) return p2;
     }
     return null;
+  }
+
+  function schemaPayloadLooksValid(payload) {
+    return Array.isArray(payload) || Array.isArray(payload?.achievements);
+  }
+
+  function configMetaHasValidSchema(meta) {
+    const schemaPath = resolveAchievementsSchemaPath(meta);
+    if (!schemaPath || !fs.existsSync(schemaPath)) return false;
+    return schemaPayloadLooksValid(readJsonSafe(schemaPath));
+  }
+
+  function findExistingSchemaMetaForGeneration(
+    appid,
+    platform = null,
+    normalizedSavePath = "",
+  ) {
+    const preferred = findConfigMetaForGeneration(
+      appid,
+      platform,
+      normalizedSavePath,
+    );
+    if (preferred && configMetaHasValidSchema(preferred)) return preferred;
+    const metas = getConfigMetas(appid);
+    if (!metas.length) return null;
+    const desiredPlatform = normalizePlatform(platform) || null;
+    const normalizedPath = String(normalizedSavePath || "");
+    let candidates = desiredPlatform
+      ? metas.filter(
+          (meta) => normalizePlatform(meta?.platform) === desiredPlatform,
+        )
+      : metas.slice();
+    if (!candidates.length) candidates = metas.slice();
+    if (normalizedPath) {
+      const pathMatch = candidates.find(
+        (meta) => getMetaNormalizedSavePath(meta) === normalizedPath,
+      );
+      if (pathMatch && configMetaHasValidSchema(pathMatch)) return pathMatch;
+    }
+    return candidates.find((meta) => configMetaHasValidSchema(meta)) || null;
   }
 
   function getConfigEntry(meta, key) {
@@ -4259,7 +4461,9 @@ module.exports = function makeWatchedFolders({
       const spoolFilePath =
         resolved?.spoolFilePath ||
         meta.ubisoft_spool_file ||
-        (spoolDir && meta.appid ? path.join(spoolDir, `${meta.appid}.spool`) : "");
+        (spoolDir && meta.appid
+          ? path.join(spoolDir, `${meta.appid}.spool`)
+          : "");
       if (spoolDir) out.add(spoolDir);
       if (spoolFilePath) out.add(spoolFilePath);
       return Array.from(out);
@@ -4485,7 +4689,8 @@ module.exports = function makeWatchedFolders({
         appid: String(meta?.appid || appid || ""),
         configPath: meta?.config_path || "",
         preferredUser: meta?.lumaplay_user || "",
-        preferredKeyPath: meta?.lumaplay_key_path || meta?.lumaplayKeyPath || "",
+        preferredKeyPath:
+          meta?.lumaplay_key_path || meta?.lumaplayKeyPath || "",
         previousSnapshot: prev,
         readCache: lumaPlayReadCache,
       });
@@ -4967,12 +5172,15 @@ module.exports = function makeWatchedFolders({
       return;
     }
     clearLumaPlayDiscoveryTimer();
-    lumaPlayDiscoveryTimer = setTimeout(() => {
-      lumaPlayDiscoveryTimer = null;
-      const scheduledOptions = lumaPlayDiscoveryScheduledOptions || {};
-      lumaPlayDiscoveryScheduledOptions = null;
-      runLumaPlayDiscoveryTick(scheduledOptions).catch(() => {});
-    }, Math.max(0, Number(delayMs) || 0));
+    lumaPlayDiscoveryTimer = setTimeout(
+      () => {
+        lumaPlayDiscoveryTimer = null;
+        const scheduledOptions = lumaPlayDiscoveryScheduledOptions || {};
+        lumaPlayDiscoveryScheduledOptions = null;
+        runLumaPlayDiscoveryTick(scheduledOptions).catch(() => {});
+      },
+      Math.max(0, Number(delayMs) || 0),
+    );
   }
 
   async function evaluateLumaPlayWatcherEntry(
@@ -5678,19 +5886,13 @@ module.exports = function makeWatchedFolders({
             meta?.gog_gameplay_db ||
             path.join(meta?.save_path || "", GAMEPLAY_DB_NAME);
           const expectedDbPath = path
-            .normalize(
-              expectedDbPathRaw,
-            )
+            .normalize(expectedDbPathRaw)
             .toLowerCase();
           const expectedDirRaw =
             resolved?.gameplayDir ||
             meta?.save_path ||
             path.dirname(expectedDbPathRaw);
-          const expectedDir = path
-            .normalize(
-              expectedDirRaw,
-            )
-            .toLowerCase();
+          const expectedDir = path.normalize(expectedDirRaw).toLowerCase();
           const baseName = path.basename(normFile);
           const isGameplayTrigger =
             baseName === GAMEPLAY_DB_NAME ||
@@ -5718,19 +5920,13 @@ module.exports = function makeWatchedFolders({
             meta?.ubisoft_spool_file ||
             path.join(meta?.save_path || "", `${meta?.appid || appid}.spool`);
           const expectedSpoolFile = path
-            .normalize(
-              expectedSpoolFileRaw,
-            )
+            .normalize(expectedSpoolFileRaw)
             .toLowerCase();
           const expectedDirRaw =
             resolved?.spoolDir ||
             meta?.save_path ||
             path.dirname(expectedSpoolFileRaw);
-          const expectedDir = path
-            .normalize(
-              expectedDirRaw,
-            )
-            .toLowerCase();
+          const expectedDir = path.normalize(expectedDirRaw).toLowerCase();
           const baseName = path.basename(normFile);
           const isSpoolTrigger = /\.spool$/i.test(baseName);
 
@@ -6499,10 +6695,14 @@ module.exports = function makeWatchedFolders({
       opts.normalizedSavePath ||
       normalizeObservedPath(appDir || "", appid) ||
       "";
-    if (isObservedGenerationPending(appid, desiredPlatform, normalizedSavePath)) {
+    if (
+      isObservedGenerationPending(appid, desiredPlatform, normalizedSavePath)
+    ) {
       return { created: false, reason: "pending-save-path" };
     }
-    if (wasObservedGenerationRecent(appid, desiredPlatform, normalizedSavePath)) {
+    if (
+      wasObservedGenerationRecent(appid, desiredPlatform, normalizedSavePath)
+    ) {
       return { created: false, reason: "recent-save-path" };
     }
     markObservedGenerationPending(appid, desiredPlatform, normalizedSavePath);
@@ -6564,6 +6764,40 @@ module.exports = function makeWatchedFolders({
               genOptions.preferredName ||
               appid,
           ).trim() || String(appid);
+        const shouldRevealSingleGeneration = (progress = {}) => {
+          const phase = String(progress?.phase || "").toLowerCase();
+          const status = String(progress?.status || "").toLowerCase();
+          const detail = String(progress?.detail || "").toLowerCase();
+          if (status === "failed" || phase === "failed") return true;
+          if (
+            phase === "schemaparse" ||
+            phase === "generatingschema" ||
+            phase === "fetchsteamapi" ||
+            phase === "fetchsteamdb" ||
+            phase === "fetchepic" ||
+            phase === "finalizing" ||
+            phase === "completed"
+          ) {
+            return true;
+          }
+          if (
+            detail.includes("schema") ||
+            detail.includes("steamdb") ||
+            detail.includes("epic achievements") ||
+            detail.includes("finalizing")
+          ) {
+            return true;
+          }
+          if (detail === "config created" || detail === "config updated") {
+            return true;
+          }
+          if (detail === "waiting for schema generation") return true;
+          if (phase === "skipped" || detail === "config generation skipped") {
+            return false;
+          }
+          return false;
+        };
+        let singleGenerationStarted = false;
         const emitSingleGeneration = (phaseType, payload = {}) => {
           const nextPayload = {
             id: singleGenerationId,
@@ -6582,6 +6816,32 @@ module.exports = function makeWatchedFolders({
             } catch {}
             return;
           }
+          if (phaseType === "start") {
+            if (singleGenerationStarted) return;
+            singleGenerationStarted = true;
+          } else if (phaseType === "update") {
+            if (!singleGenerationStarted) {
+              if (!shouldRevealSingleGeneration(nextPayload)) return;
+              try {
+                broadcastAll("generation:progress:start", {
+                  ...nextPayload,
+                  status: "running",
+                });
+              } catch {}
+              singleGenerationStarted = true;
+            }
+          } else if (phaseType === "end") {
+            if (!singleGenerationStarted) {
+              if (!shouldRevealSingleGeneration(nextPayload)) return;
+              try {
+                broadcastAll("generation:progress:start", {
+                  ...nextPayload,
+                  status: "running",
+                });
+              } catch {}
+              singleGenerationStarted = true;
+            }
+          }
           const channel =
             phaseType === "start"
               ? "generation:progress:start"
@@ -6595,12 +6855,6 @@ module.exports = function makeWatchedFolders({
         genOptions.onGenerationProgress = (progress = {}) => {
           emitSingleGeneration("update", progress);
         };
-        emitSingleGeneration("start", {
-          status: "running",
-          phase: "preparing",
-          detail: "Preparing config generation",
-          percent: 0,
-        });
         let result = null;
         try {
           result = await generateConfigForAppId(appid, configsDir, genOptions);
@@ -6629,7 +6883,8 @@ module.exports = function makeWatchedFolders({
           });
           return {
             created: false,
-            reason: result?.pendingSchema === true ? "pending-schema" : "skipped",
+            reason:
+              result?.pendingSchema === true ? "pending-schema" : "skipped",
           };
         }
         existingConfigIds.add(appid);
@@ -6703,7 +6958,11 @@ module.exports = function makeWatchedFolders({
       return { created: false, reason: "missing-generator" };
     } finally {
       inflightAppIds.delete(inflightKey);
-      clearObservedGenerationPending(appid, desiredPlatform, normalizedSavePath);
+      clearObservedGenerationPending(
+        appid,
+        desiredPlatform,
+        normalizedSavePath,
+      );
       if (normalizedSavePath) {
         clearPendingSavePath(appid, normalizedSavePath);
       }
@@ -6783,7 +7042,9 @@ module.exports = function makeWatchedFolders({
       [
         String(row?.appid || "").trim(),
         String(row?.user || "").trim(),
-        String(row?.keyPath || "").trim().toLowerCase(),
+        String(row?.keyPath || "")
+          .trim()
+          .toLowerCase(),
       ].join("::");
 
     const markConfigAsLumaPlay = (meta, user, keyPath) => {
@@ -6854,7 +7115,9 @@ module.exports = function makeWatchedFolders({
       if (hasLumaPlay) {
         for (const meta of metas) {
           if (!isLumaPlayMeta(meta)) continue;
-          if (isAppIdBlacklisted(appid, meta?.platform || "uplay", blacklistState)) {
+          if (
+            isAppIdBlacklisted(appid, meta?.platform || "uplay", blacklistState)
+          ) {
             continue;
           }
           if (markConfigAsLumaPlay(meta, user, keyPath)) {
@@ -6864,9 +7127,10 @@ module.exports = function makeWatchedFolders({
         continue;
       }
 
-      const task =
-        lumaGenerationTaskIndex.get(buildLumaTaskKey(row)) || null;
-      const taskIndex = Number.isInteger(task?.__taskIndex) ? task.__taskIndex : -1;
+      const task = lumaGenerationTaskIndex.get(buildLumaTaskKey(row)) || null;
+      const taskIndex = Number.isInteger(task?.__taskIndex)
+        ? task.__taskIndex
+        : -1;
       const generationResult = await generateOneAppId(appid, null, {
         forcePlatform: "uplay",
         __emu: "lumaplay",
@@ -7018,10 +7282,14 @@ module.exports = function makeWatchedFolders({
         typeof getCachedSnapshot === "function" &&
         !lastSnapshot.has(snapKey)
       ) {
-        const cached = getCachedSnapshot(meta?.name || appid, meta?.platform || null, {
-          savePath: meta?.save_path || null,
-          appid,
-        });
+        const cached = getCachedSnapshot(
+          meta?.name || appid,
+          meta?.platform || null,
+          {
+            savePath: meta?.save_path || null,
+            appid,
+          },
+        );
         if (cached && typeof cached === "object") {
           lastSnapshot.set(snapKey, cached);
         }
@@ -7075,14 +7343,16 @@ module.exports = function makeWatchedFolders({
           metaPath = targetDb;
         } else if (isUbisoftOfficialMeta(meta)) {
           const targetSpool =
-            /\.spool$/i.test(path.basename(fp)) && !fs.statSync(fp).isDirectory()
+            /\.spool$/i.test(path.basename(fp)) &&
+            !fs.statSync(fp).isDirectory()
               ? fp
               : path.join(fp, `${appid}.spool`);
           if (!fs.existsSync(targetSpool)) continue;
           metaPath = targetSpool;
         } else if (isEaOfficialMeta(meta)) {
           const targetLog =
-            path.basename(fp).toLowerCase() === EA_VERBOSE_LOG_NAME.toLowerCase()
+            path.basename(fp).toLowerCase() ===
+            EA_VERBOSE_LOG_NAME.toLowerCase()
               ? fp
               : path.join(fp, EA_VERBOSE_LOG_NAME);
           if (!fs.existsSync(targetLog)) continue;
@@ -7118,15 +7388,15 @@ module.exports = function makeWatchedFolders({
                 try {
                   const cached =
                     typeof getCachedSnapshot === "function"
-                  ? getCachedSnapshot(
-                      meta?.name || appid,
-                      meta?.platform || null,
-                      {
-                        savePath: cacheSavePathForFp,
-                        appid,
-                      },
-                    )
-                  : null;
+                      ? getCachedSnapshot(
+                          meta?.name || appid,
+                          meta?.platform || null,
+                          {
+                            savePath: cacheSavePathForFp,
+                            appid,
+                          },
+                        )
+                      : null;
                   if (cached && typeof cached === "object") {
                     lastSnapshot.set(snapKey, cached);
                   }
@@ -7330,10 +7600,14 @@ module.exports = function makeWatchedFolders({
 
     if (!seeded && typeof getCachedSnapshot === "function") {
       const snapKey = makeSnapshotKey(meta, appid);
-      const cached = getCachedSnapshot(meta?.name || appid, meta?.platform || null, {
-        savePath: meta?.save_path || null,
-        appid,
-      });
+      const cached = getCachedSnapshot(
+        meta?.name || appid,
+        meta?.platform || null,
+        {
+          savePath: meta?.save_path || null,
+          appid,
+        },
+      );
       if (cached && typeof cached === "object") {
         lastSnapshot.set(snapKey, cached);
       }
@@ -7401,9 +7675,9 @@ module.exports = function makeWatchedFolders({
                 ? task.__taskIndex
                 : -1;
             const gpdPath = task?.gpdPath || "";
-            const appid =
-              String(task?.appid || path.basename(gpdPath, path.extname(gpdPath)))
-                .trim();
+            const appid = String(
+              task?.appid || path.basename(gpdPath, path.extname(gpdPath)),
+            ).trim();
             if (
               !appid ||
               isAppIdBlacklisted(appid, "xenia", blacklistState) ||
@@ -7422,9 +7696,11 @@ module.exports = function makeWatchedFolders({
               xeniaBatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
                 itemName: appid,
-                phase: "generatingSchema",
-                detail: "Parsing Xenia achievements",
-                percent: 15,
+                phase: bootMode ? "preparing" : "generatingSchema",
+                detail: bootMode
+                  ? "Checking Xenia achievements"
+                  : "Parsing Xenia achievements",
+                percent: bootMode ? 5 : 15,
               });
               const result = generateConfigFromGpd(gpdPath, configsDir, {
                 schemaRoot,
@@ -7494,7 +7770,11 @@ module.exports = function makeWatchedFolders({
               handleGpd,
             );
           } else {
-            for (let taskIndex = 0; taskIndex < xeniaTasks.length; taskIndex += 1) {
+            for (
+              let taskIndex = 0;
+              taskIndex < xeniaTasks.length;
+              taskIndex += 1
+            ) {
               await handleGpd(xeniaTasks[taskIndex], taskIndex);
             }
           }
@@ -7548,7 +7828,9 @@ module.exports = function makeWatchedFolders({
                 ? task.__taskIndex
                 : -1;
             const trophyDir = task?.trophyDir || "";
-            const appid = String(task?.appid || path.basename(trophyDir)).trim();
+            const appid = String(
+              task?.appid || path.basename(trophyDir),
+            ).trim();
             if (
               !appid ||
               isAppIdBlacklisted(appid, "rpcs3", blacklistState) ||
@@ -7567,9 +7849,11 @@ module.exports = function makeWatchedFolders({
               rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
                 itemName: appid,
-                phase: "generatingSchema",
-                detail: "Parsing RPCS3 trophies",
-                percent: 15,
+                phase: bootMode ? "preparing" : "generatingSchema",
+                detail: bootMode
+                  ? "Checking RPCS3 trophies"
+                  : "Parsing RPCS3 trophies",
+                percent: bootMode ? 5 : 15,
               });
               const result = await generateConfigFromTrophyDir(
                 trophyDir,
@@ -7646,7 +7930,11 @@ module.exports = function makeWatchedFolders({
               handleTrophyDir,
             );
           } else {
-            for (let taskIndex = 0; taskIndex < rpcs3Tasks.length; taskIndex += 1) {
+            for (
+              let taskIndex = 0;
+              taskIndex < rpcs3Tasks.length;
+              taskIndex += 1
+            ) {
               await handleTrophyDir(rpcs3Tasks[taskIndex], taskIndex);
             }
           }
@@ -7726,9 +8014,11 @@ module.exports = function makeWatchedFolders({
               ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
                 itemName: task?.title || appid,
-                phase: "generatingSchema",
-                detail: "Parsing shadPS4 trophies",
-                percent: 15,
+                phase: bootMode ? "preparing" : "generatingSchema",
+                detail: bootMode
+                  ? "Checking shadPS4 trophies"
+                  : "Parsing shadPS4 trophies",
+                percent: bootMode ? 5 : 15,
               });
               const result = await generateConfigFromPs4Dir(
                 task.schemaDir,
@@ -7756,10 +8046,7 @@ module.exports = function makeWatchedFolders({
                 result?.schemaUpdated === true ||
                 result?.configUpdated === true;
               if (ps4ResultChanged) ps4Changed = true;
-              if (
-                bootMode &&
-                typeof onSeedCache === "function"
-              ) {
+              if (bootMode && typeof onSeedCache === "function") {
                 const progressFiles = Array.isArray(task?.progressFiles)
                   ? task.progressFiles
                   : [];
@@ -7809,7 +8096,8 @@ module.exports = function makeWatchedFolders({
               knownAppIds.add(String(result.appid));
               ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid: String(result.appid || appid),
-                itemName: result?.name || result?.displayName || task?.title || appid,
+                itemName:
+                  result?.name || result?.displayName || task?.title || appid,
                 phase: ps4ResultChanged ? "completed" : "skipped",
                 detail:
                   result?.created === true
@@ -7839,7 +8127,11 @@ module.exports = function makeWatchedFolders({
               handleModernPs4Set,
             );
           } else {
-            for (let taskIndex = 0; taskIndex < ps4Tasks.length; taskIndex += 1) {
+            for (
+              let taskIndex = 0;
+              taskIndex < ps4Tasks.length;
+              taskIndex += 1
+            ) {
               await handleModernPs4Set(ps4Tasks[taskIndex], taskIndex);
             }
           }
@@ -7896,12 +8188,11 @@ module.exports = function makeWatchedFolders({
                 ? task.__taskIndex
                 : -1;
             const trophyDir = task?.trophyDir || "";
-            const appid =
-              String(
-                task?.appid ||
-                  getLegacyPs4AppIdFromTrophyDir(trophyDir) ||
-                  path.basename(path.dirname(path.dirname(trophyDir))),
-              ).trim();
+            const appid = String(
+              task?.appid ||
+                getLegacyPs4AppIdFromTrophyDir(trophyDir) ||
+                path.basename(path.dirname(path.dirname(trophyDir))),
+            ).trim();
             const npcommid = String(task?.npcommid || "").trim();
             if (
               !appid ||
@@ -7924,9 +8215,11 @@ module.exports = function makeWatchedFolders({
               ps4BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
                 itemName: appid,
-                phase: "generatingSchema",
-                detail: "Parsing PS4 trophies",
-                percent: 15,
+                phase: bootMode ? "preparing" : "generatingSchema",
+                detail: bootMode
+                  ? "Checking PS4 trophies"
+                  : "Parsing PS4 trophies",
+                percent: bootMode ? 5 : 15,
               });
               const result = await generateConfigFromPs4Dir(
                 trophyDir,
@@ -8004,7 +8297,11 @@ module.exports = function makeWatchedFolders({
               handlePs4Dir,
             );
           } else {
-            for (let taskIndex = 0; taskIndex < ps4Tasks.length; taskIndex += 1) {
+            for (
+              let taskIndex = 0;
+              taskIndex < ps4Tasks.length;
+              taskIndex += 1
+            ) {
               await handlePs4Dir(ps4Tasks[taskIndex], taskIndex);
             }
           }
@@ -8206,8 +8503,9 @@ module.exports = function makeWatchedFolders({
               continue;
             }
             const existingOfficial =
-              getConfigMetas(productId).find((meta) => isEaOfficialMeta(meta)) ||
-              null;
+              getConfigMetas(productId).find((meta) =>
+                isEaOfficialMeta(meta),
+              ) || null;
             const current =
               existingOfficial &&
               String(existingOfficial.ea_achievement_set || "").trim() ===
@@ -8224,7 +8522,8 @@ module.exports = function makeWatchedFolders({
 
           for (const entry of entriesByAppId.values()) {
             const productId = String(entry.appid || "").trim();
-            const logsRoot = entry.logsRoot || path.dirname(entry.logFilePath || "");
+            const logsRoot =
+              entry.logsRoot || path.dirname(entry.logFilePath || "");
             const normalizedPath = normalizeObservedPath(logsRoot, productId);
             const pendingSet = pendingSavePathIndex.get(productId);
             const knownPaths = configSavePathIndex.get(productId);
@@ -8284,17 +8583,14 @@ module.exports = function makeWatchedFolders({
             const productId = String(entry?.appid || "").trim();
             if (
               !productId ||
-              isAppIdBlacklisted(
-                productId,
-                "ubisoft-official",
-                blacklistState,
-              )
+              isAppIdBlacklisted(productId, "ubisoft-official", blacklistState)
             ) {
               continue;
             }
             const existingOfficial =
-              getConfigMetas(productId).find((meta) => isUbisoftOfficialMeta(meta)) ||
-              null;
+              getConfigMetas(productId).find((meta) =>
+                isUbisoftOfficialMeta(meta),
+              ) || null;
             const current =
               existingOfficial &&
               existingOfficial.ubisoft_user_id === entry.userId;
@@ -8341,124 +8637,129 @@ module.exports = function makeWatchedFolders({
         }
 
         if (!eaLogsRoots.length && !ubisoftSpoolRoots.length) {
-          const gogGalaxyApplicationRoots = resolveGogGalaxyApplicationsRoots(
-            scanBase,
-          );
+          const gogGalaxyApplicationRoots =
+            resolveGogGalaxyApplicationsRoots(scanBase);
           if (gogGalaxyApplicationRoots.length) {
-          let gameplayEntries = [];
-          const seenGameplayDb = new Set();
-          for (const applicationsRoot of gogGalaxyApplicationRoots) {
-            try {
-              const entries = listGogOfficialGameplayEntries(applicationsRoot);
-              for (const entry of entries) {
-                const key = String(entry?.gameplayDbPath || "").toLowerCase();
-                if (!key || seenGameplayDb.has(key)) continue;
-                seenGameplayDb.add(key);
-                gameplayEntries.push(entry);
+            let gameplayEntries = [];
+            const seenGameplayDb = new Set();
+            for (const applicationsRoot of gogGalaxyApplicationRoots) {
+              try {
+                const entries =
+                  listGogOfficialGameplayEntries(applicationsRoot);
+                for (const entry of entries) {
+                  const key = String(entry?.gameplayDbPath || "").toLowerCase();
+                  if (!key || seenGameplayDb.has(key)) continue;
+                  seenGameplayDb.add(key);
+                  gameplayEntries.push(entry);
+                }
+              } catch (err) {
+                watcherLogger.warn("gog-official:scan-failed", {
+                  root: applicationsRoot,
+                  error: err?.message || String(err),
+                });
               }
-            } catch (err) {
-              watcherLogger.warn("gog-official:scan-failed", {
-                root: applicationsRoot,
-                error: err?.message || String(err),
+            }
+
+            const entriesByProduct = new Map();
+            for (const entry of gameplayEntries) {
+              const productId = String(entry?.productId || "").trim();
+              if (
+                !productId ||
+                isAppIdBlacklisted(productId, "gog-official", blacklistState)
+              ) {
+                continue;
+              }
+              const existingOfficial =
+                getConfigMetas(productId).find((meta) =>
+                  isGogOfficialMeta(meta),
+                ) || null;
+              const current =
+                existingOfficial &&
+                existingOfficial.gog_client_id === entry.clientId &&
+                existingOfficial.gog_user_id === entry.userId;
+              if (!entriesByProduct.has(productId) || current) {
+                entriesByProduct.set(productId, entry);
+              }
+            }
+
+            for (const entry of entriesByProduct.values()) {
+              const productId = String(entry.productId || "").trim();
+              const normalizedPath = normalizeObservedPath(
+                entry.gameplayDir,
+                productId,
+              );
+              const pendingSet = pendingSavePathIndex.get(productId);
+              const knownPaths = configSavePathIndex.get(productId);
+              const alreadyTracked =
+                normalizedPath &&
+                ((knownPaths && knownPaths.has(normalizedPath)) ||
+                  (pendingSet && pendingSet.has(normalizedPath)));
+              const hasOfficialVariant = hasPlatformVariant(
+                productId,
+                "gog-official",
+              );
+              knownAppIds.add(productId);
+              if (alreadyTracked && hasOfficialVariant) continue;
+
+              generationTasks.push({
+                appid: productId,
+                forcePlatform: "gog-official",
+                appDir: path.dirname(entry.gameplayDir),
+                normalizedPath,
+                allowExistingVariant: hasOfficialVariant,
+                __savePathOverride: entry.gameplayDir,
+                __gogName: entry.title || null,
+                __gogClientId: entry.clientId || null,
+                __gogUserId: entry.userId || null,
+                __gogGameplayDbPath: entry.gameplayDbPath || null,
               });
+              if (normalizedPath)
+                markPendingSavePath(productId, normalizedPath);
             }
-          }
-
-          const entriesByProduct = new Map();
-          for (const entry of gameplayEntries) {
-            const productId = String(entry?.productId || "").trim();
-            if (
-              !productId ||
-              isAppIdBlacklisted(productId, "gog-official", blacklistState)
-            ) {
-              continue;
-            }
-            const existingOfficial =
-              getConfigMetas(productId).find((meta) => isGogOfficialMeta(meta)) ||
-              null;
-            const current =
-              existingOfficial &&
-              existingOfficial.gog_client_id === entry.clientId &&
-              existingOfficial.gog_user_id === entry.userId;
-            if (!entriesByProduct.has(productId) || current) {
-              entriesByProduct.set(productId, entry);
-            }
-          }
-
-          for (const entry of entriesByProduct.values()) {
-            const productId = String(entry.productId || "").trim();
-            const normalizedPath = normalizeObservedPath(
-              entry.gameplayDir,
-              productId,
-            );
-            const pendingSet = pendingSavePathIndex.get(productId);
-            const knownPaths = configSavePathIndex.get(productId);
-            const alreadyTracked =
-              normalizedPath &&
-              ((knownPaths && knownPaths.has(normalizedPath)) ||
-                (pendingSet && pendingSet.has(normalizedPath)));
-            const hasOfficialVariant = hasPlatformVariant(
-              productId,
-              "gog-official",
-            );
-            knownAppIds.add(productId);
-            if (alreadyTracked && hasOfficialVariant) continue;
-
-            generationTasks.push({
-              appid: productId,
-              forcePlatform: "gog-official",
-              appDir: path.dirname(entry.gameplayDir),
-              normalizedPath,
-              allowExistingVariant: hasOfficialVariant,
-              __savePathOverride: entry.gameplayDir,
-              __gogName: entry.title || null,
-              __gogClientId: entry.clientId || null,
-              __gogUserId: entry.userId || null,
-              __gogGameplayDbPath: entry.gameplayDbPath || null,
-            });
-            if (normalizedPath) markPendingSavePath(productId, normalizedPath);
-          }
 
             if (generationTasks.length === 0) {
               return;
             }
           } else {
-          // Prefer GOG .info detection: if found, ignore other numeric folders under this root
-          gogInfoFound = await findGogInfoAppId(scanBase, 6, yieldIfNeeded).catch(
-            () => null,
-          );
-          if (gogInfoFound) {
-            const gogId = String(gogInfoFound.appid || "").trim();
-            if (gogId && !isAppIdBlacklisted(gogId, "gog", blacklistState)) {
-              const shippingDir = await findShippingExeDir(scanBase, 6);
-              const saveRoot = shippingDir || gogInfoFound.baseDir || scanBase;
-              const normalizedPath = normalizeObservedPath(saveRoot, gogId);
-              generationTasks.push({
-                appid: gogId,
-                forcePlatform: "gog",
-                appDir: gogInfoFound.baseDir || scanBase,
-                normalizedPath,
-                __savePathOverride: saveRoot,
-                __gogName: gogInfoFound.name || null,
-              });
-              if (normalizedPath) markPendingSavePath(gogId, normalizedPath);
+            // Prefer GOG .info detection: if found, ignore other numeric folders under this root
+            gogInfoFound = await findGogInfoAppId(
+              scanBase,
+              6,
+              yieldIfNeeded,
+            ).catch(() => null);
+            if (gogInfoFound) {
+              const gogId = String(gogInfoFound.appid || "").trim();
+              if (gogId && !isAppIdBlacklisted(gogId, "gog", blacklistState)) {
+                const shippingDir = await findShippingExeDir(scanBase, 6);
+                const saveRoot =
+                  shippingDir || gogInfoFound.baseDir || scanBase;
+                const normalizedPath = normalizeObservedPath(saveRoot, gogId);
+                generationTasks.push({
+                  appid: gogId,
+                  forcePlatform: "gog",
+                  appDir: gogInfoFound.baseDir || scanBase,
+                  normalizedPath,
+                  __savePathOverride: saveRoot,
+                  __gogName: gogInfoFound.name || null,
+                });
+                if (normalizedPath) markPendingSavePath(gogId, normalizedPath);
+              }
             }
-          }
-  
-          // If no GOG .info, fall back to numeric discovery (with Epic container handling)
-          const epicDiscoveredMap =
-            !gogInfoFound && (await discoverNemirtingasEpicAppIds(rootPath));
-          const shouldFallbackEpic =
-            epicDiscoveredMap instanceof Map && epicDiscoveredMap.size === 0;
-          discoveredMap =
-            epicDiscoveredMap !== null && !shouldFallbackEpic
-              ? epicDiscoveredMap
-              : !gogInfoFound
-                ? await discoverAppIdsUnder(scanBase, 6, yieldIfNeeded)
-                : null;
-          discovered = discoveredMap
-            ? Array.from(discoveredMap.keys()).map((id) => String(id))
-            : [];
+
+            // If no GOG .info, fall back to numeric discovery (with Epic container handling)
+            const epicDiscoveredMap =
+              !gogInfoFound && (await discoverNemirtingasEpicAppIds(rootPath));
+            const shouldFallbackEpic =
+              epicDiscoveredMap instanceof Map && epicDiscoveredMap.size === 0;
+            discoveredMap =
+              epicDiscoveredMap !== null && !shouldFallbackEpic
+                ? epicDiscoveredMap
+                : !gogInfoFound
+                  ? await discoverAppIdsUnder(scanBase, 6, yieldIfNeeded)
+                  : null;
+            discovered = discoveredMap
+              ? Array.from(discoveredMap.keys()).map((id) => String(id))
+              : [];
           }
         }
       } else {
@@ -8634,7 +8935,54 @@ module.exports = function makeWatchedFolders({
         batchProgress?.start();
 
         if (bootMode) {
-          generatedIds = await generateIdsThrottled(generationTasks, {
+          generatedIds = new Set();
+          const batchableTasks =
+            typeof generateConfigsForAppIds === "function"
+              ? generationTasks.filter(isBootBatchableGenerationTask)
+              : [];
+          const singleTasks =
+            batchableTasks.length > 0
+              ? generationTasks.filter(
+                  (task) => !isBootBatchableGenerationTask(task),
+                )
+              : generationTasks;
+          if (batchableTasks.length > 0) {
+            try {
+              const batchResult = await generateConfigsForAppIds(
+                batchableTasks,
+                configsDir,
+                {
+                  onSeedCache,
+                  onTaskProgress: (task, taskIndex, progress) => {
+                    batchProgress?.updateTask(task, taskIndex, progress);
+                  },
+                  onTaskSettled: (task, taskIndex, result) => {
+                    batchProgress?.settleTask(task, taskIndex, result);
+                  },
+                },
+              );
+              for (const id of batchResult?.generated || []) {
+                generatedIds.add(String(id));
+              }
+            } catch (err) {
+              watcherLogger.warn("watcher:generate-batch-failed", {
+                error: err?.message || String(err),
+                count: batchableTasks.length,
+              });
+              const fallbackIds = await generateIdsThrottled(batchableTasks, {
+                onTaskProgress: (task, taskIndex, progress) => {
+                  batchProgress?.updateTask(task, taskIndex, progress);
+                },
+                onTaskSettled: (task, taskIndex, result) => {
+                  batchProgress?.settleTask(task, taskIndex, result);
+                },
+              });
+              for (const id of fallbackIds) {
+                generatedIds.add(String(id));
+              }
+            }
+          }
+          const singleGeneratedIds = await generateIdsThrottled(singleTasks, {
             onTaskProgress: (task, taskIndex, progress) => {
               batchProgress?.updateTask(task, taskIndex, progress);
             },
@@ -8642,33 +8990,40 @@ module.exports = function makeWatchedFolders({
               batchProgress?.settleTask(task, taskIndex, result);
             },
           });
+          for (const id of singleGeneratedIds) {
+            generatedIds.add(String(id));
+          }
         } else {
           generatedIds = new Set();
-          for (let taskIndex = 0; taskIndex < generationTasks.length; taskIndex += 1) {
+          for (
+            let taskIndex = 0;
+            taskIndex < generationTasks.length;
+            taskIndex += 1
+          ) {
             const task = generationTasks[taskIndex];
             const generationResult = await generateOneAppId(
               task.appid,
               task.appDir || null,
-                {
-                  forcePlatform: task.forcePlatform,
-                  normalizedSavePath: task.normalizedPath || "",
-                  skipPostIndex: true,
-                  allowExistingVariant: task.allowExistingVariant === true,
-                  __savePathOverride: task.__savePathOverride || null,
-                  __gogClientId: task.__gogClientId || null,
-                  __gogUserId: task.__gogUserId || null,
-                  __gogGameplayDbPath: task.__gogGameplayDbPath || null,
-                  __ubisoftUserId: task.__ubisoftUserId || null,
-                  __ubisoftSpoolFile: task.__ubisoftSpoolFile || null,
-                  __eaAchievementSet: task.__eaAchievementSet || null,
-                  __eaLogFile: task.__eaLogFile || null,
-                  __eaGameName: task.__eaGameName || null,
-                  __emu: task.__emu || null,
-                  onGenerationProgress: (progress) => {
-                    batchProgress?.updateTask(task, taskIndex, progress);
-                  },
+              {
+                forcePlatform: task.forcePlatform,
+                normalizedSavePath: task.normalizedPath || "",
+                skipPostIndex: true,
+                allowExistingVariant: task.allowExistingVariant === true,
+                __savePathOverride: task.__savePathOverride || null,
+                __gogClientId: task.__gogClientId || null,
+                __gogUserId: task.__gogUserId || null,
+                __gogGameplayDbPath: task.__gogGameplayDbPath || null,
+                __ubisoftUserId: task.__ubisoftUserId || null,
+                __ubisoftSpoolFile: task.__ubisoftSpoolFile || null,
+                __eaAchievementSet: task.__eaAchievementSet || null,
+                __eaLogFile: task.__eaLogFile || null,
+                __eaGameName: task.__eaGameName || null,
+                __emu: task.__emu || null,
+                onGenerationProgress: (progress) => {
+                  batchProgress?.updateTask(task, taskIndex, progress);
                 },
-              );
+              },
+            );
             batchProgress?.settleTask(task, taskIndex, generationResult);
             if (generationResult?.created === true) {
               generatedIds.add(String(task.appid));
@@ -8725,7 +9080,8 @@ module.exports = function makeWatchedFolders({
           for (const id of generatedIds) {
             const metas = getConfigMetas(id);
             for (const m of metas) {
-              const createdTaskInfo = createdTaskInfoByMetaName.get(m.name) || null;
+              const createdTaskInfo =
+                createdTaskInfoByMetaName.get(m.name) || null;
               const rootDir =
                 createdTaskInfo?.rootDir ||
                 discoveredMap?.get(id) ||
@@ -8743,7 +9099,9 @@ module.exports = function makeWatchedFolders({
               const canPromoteInitialNotify =
                 shouldPromoteInitialNotify &&
                 !initialNotifyPromotedConfigs.has(m.name) &&
-                maybe.some((candidate) => candidate && fs.existsSync(candidate));
+                maybe.some(
+                  (candidate) => candidate && fs.existsSync(candidate),
+                );
               const bucket = appidSaveWatchers.get(id);
               const alreadySeeded = bucket && bucket.has(m.name);
               const seededBefore = seededInitialConfigs.has(m.name);
@@ -8897,7 +9255,9 @@ module.exports = function makeWatchedFolders({
         userId = getPs4UserIdFromProgressPath(filePath) || "";
         schemaDir = path.join(root, "trophy", npcommid);
       } else if (base === "trop.xml") {
-        const xmlDir = path.basename(path.dirname(filePath) || "").toLowerCase();
+        const xmlDir = path
+          .basename(path.dirname(filePath) || "")
+          .toLowerCase();
         const candidateSchemaDir = path.dirname(path.dirname(filePath));
         const candidateNpCommId = path.basename(candidateSchemaDir || "");
         const candidateRoot = path.dirname(path.dirname(candidateSchemaDir));
@@ -8911,8 +9271,9 @@ module.exports = function makeWatchedFolders({
         } else if (
           xmlDir === "xml" &&
           /^NP[A-Z0-9_]+$/i.test(candidateNpCommId) &&
-          path.basename(path.dirname(candidateSchemaDir) || "").toLowerCase() ===
-            "trophy"
+          path
+            .basename(path.dirname(candidateSchemaDir) || "")
+            .toLowerCase() === "trophy"
         ) {
           npcommid = candidateNpCommId;
           schemaDir = candidateSchemaDir;
@@ -8969,19 +9330,26 @@ module.exports = function makeWatchedFolders({
             broadcastAll("configs:changed");
             broadcastAll("refresh-achievements-table");
           }
-          if (progressPath && path.normalize(progressPath) === path.normalize(filePath)) {
+          if (
+            progressPath &&
+            path.normalize(progressPath) === path.normalize(filePath)
+          ) {
             const progressSnapKey = makeSnapshotKey(meta, String(meta.appid), {
               filePath: progressPath,
               savePath: progressPath,
             });
             const cachedForUser =
               typeof getCachedSnapshot === "function"
-                ? getCachedSnapshot(meta?.name || result.appid, meta?.platform || null, {
-                    appid: String(result.appid || meta.appid || ""),
-                    savePath: progressPath,
-                    filePath: progressPath,
-                    shadps4UserId: userId,
-                  })
+                ? getCachedSnapshot(
+                    meta?.name || result.appid,
+                    meta?.platform || null,
+                    {
+                      appid: String(result.appid || meta.appid || ""),
+                      savePath: progressPath,
+                      filePath: progressPath,
+                      shadps4UserId: userId,
+                    },
+                  )
                 : null;
             if (
               !lastSnapshot.has(progressSnapKey) &&
@@ -8990,12 +9358,16 @@ module.exports = function makeWatchedFolders({
                 Array.isArray(cachedForUser))
             ) {
               try {
-                const snapshot = buildSnapshotFromPs4ProgressFile(progressPath, {});
+                const snapshot = buildSnapshotFromPs4ProgressFile(
+                  progressPath,
+                  {},
+                );
                 lastSnapshot.set(progressSnapKey, snapshot);
                 if (typeof onSeedCache === "function") {
                   onSeedCache({
                     appid: String(result.appid || meta.appid || ""),
-                    configName: meta.name || result.name || String(result.appid),
+                    configName:
+                      meta.name || result.name || String(result.appid),
                     platform: meta?.platform || "shadps4",
                     savePath: progressPath,
                     snapshot,
@@ -9015,9 +9387,14 @@ module.exports = function makeWatchedFolders({
             ) {
               lastSnapshot.set(progressSnapKey, cachedForUser);
             }
-            const evalResult = await evaluateFile(String(meta.appid), meta, filePath, {
-              initial: false,
-            });
+            const evalResult = await evaluateFile(
+              String(meta.appid),
+              meta,
+              filePath,
+              {
+                initial: false,
+              },
+            );
             if (evalResult) {
               broadcastAll("achievements:file-updated", {
                 appid: String(meta.appid),
@@ -9617,6 +9994,36 @@ module.exports = function makeWatchedFolders({
           try {
             const alternatePlatform = determineAlternatePlatform(base);
             const normalizedDir = normalizeObservedPath(dir, base);
+            const existingSchemaMeta = findExistingSchemaMetaForGeneration(
+              String(base),
+              alternatePlatform,
+              normalizedDir || "",
+            );
+            if (existingSchemaMeta) {
+              watcherLogger.info("watcher:addDir-skip-existing-schema", {
+                appid: String(base),
+                path: dir,
+                platform: alternatePlatform || null,
+                configName: existingSchemaMeta.name || null,
+                normalizedPath: normalizedDir || null,
+              });
+              if (normalizedDir) recordExistingSavePath(base, normalizedDir);
+              const existingBucket = ensureWatcherBucket(String(base));
+              if (existingBucket.has(existingSchemaMeta.name)) {
+                const maybe = buildInitialSeedCandidatesForMeta(
+                  existingSchemaMeta,
+                  dir,
+                );
+                runInitialSeedForMeta(String(base), existingSchemaMeta, maybe, {
+                  suppressInitialNotify: false,
+                });
+              } else {
+                attachWatcherForMeta(existingSchemaMeta, {
+                  suppressInitialNotify: false,
+                });
+              }
+              return;
+            }
             if (normalizedDir) markPendingSavePath(base, normalizedDir);
             let generationResult = {
               created: false,
@@ -9628,10 +10035,7 @@ module.exports = function makeWatchedFolders({
                 normalizedSavePath: normalizedDir || "",
               });
             } finally {
-              if (
-                normalizedDir &&
-                generationResult?.reason !== "inflight"
-              ) {
+              if (normalizedDir && generationResult?.reason !== "inflight") {
                 clearPendingSavePath(base, normalizedDir);
               }
             }
@@ -9656,7 +10060,10 @@ module.exports = function makeWatchedFolders({
               if (createdMeta) {
                 const createdBucket = ensureWatcherBucket(String(base));
                 if (createdBucket.has(createdMeta.name)) {
-                  const maybe = buildInitialSeedCandidatesForMeta(createdMeta, dir);
+                  const maybe = buildInitialSeedCandidatesForMeta(
+                    createdMeta,
+                    dir,
+                  );
                   runInitialSeedForMeta(String(base), createdMeta, maybe, {
                     suppressInitialNotify: false,
                   });

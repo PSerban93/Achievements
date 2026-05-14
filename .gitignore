@@ -8,4 +8,3 @@ scripts/
 logs/
 tests/
 tests/overlay-shortcut-manager.test.js
-tools/

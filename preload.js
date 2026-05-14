@@ -6,6 +6,14 @@ contextBridge.exposeInMainWorld("customApi", {
   closeWindow: () => ipcRenderer.send("close-window"),
 });
 let overlayDataHandler = null;
+
+function subscribeIpc(channel, callback, mapArgs = (_event, data) => [data]) {
+  if (typeof callback !== "function") return () => {};
+  const handler = (event, ...args) => callback(...mapArgs(event, ...args));
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}
+
 contextBridge.exposeInMainWorld("api", {
   // Config management
   saveConfig: (config) => ipcRenderer.invoke("saveConfig", config),
@@ -78,8 +86,9 @@ contextBridge.exposeInMainWorld("api", {
   queueProgressNotification: (data) =>
     ipcRenderer.send("queue-progress-notification", data),
   onNotification: (callback) =>
-    ipcRenderer.on("show-notification", (event, data) => callback(data)),
-  onNotify: (callback) => ipcRenderer.on("notify", (_, data) => callback(data)),
+    subscribeIpc("show-notification", callback, (_event, data) => [data]),
+  onNotify: (callback) =>
+    subscribeIpc("notify", callback, (_event, data) => [data]),
   notifyMain: (msg) => ipcRenderer.send("notify-from-child", msg),
   once: (channel, callback) => {
     ipcRenderer.once(channel, (_, data) => callback(data));
@@ -93,10 +102,12 @@ contextBridge.exposeInMainWorld("api", {
   getDisplayWorkArea: () => ipcRenderer.invoke("get-display-workarea"),
   // Event for receiving a new monitored achievement
   onNewAchievement: (callback) =>
-    ipcRenderer.on("new-achievement", (event, data) => callback(data)),
+    subscribeIpc("new-achievement", callback, (_event, data) => [data]),
   onRefreshAchievementsTable: (callback) =>
-    ipcRenderer.on("refresh-achievements-table", (event, data) =>
-      callback(data),
+    subscribeIpc(
+      "refresh-achievements-table",
+      callback,
+      (_event, data) => [data],
     ),
 
   // Update the configuration (now uses the 'update-config' event)
@@ -110,14 +121,19 @@ contextBridge.exposeInMainWorld("api", {
       ipcRenderer.removeListener("load-overlay-data", overlayDataHandler);
       overlayDataHandler = null;
     }
-    if (typeof callback !== "function") return;
+    if (typeof callback !== "function") return () => {};
     overlayDataHandler = (_event, config) => callback(config);
     ipcRenderer.on("load-overlay-data", overlayDataHandler);
+    return () => {
+      if (!overlayDataHandler) return;
+      ipcRenderer.removeListener("load-overlay-data", overlayDataHandler);
+      overlayDataHandler = null;
+    };
   },
   onToggleOverlayShortcut: (callback) =>
-    ipcRenderer.on("toggle-overlay-shortcut", () => callback()),
+    subscribeIpc("toggle-overlay-shortcut", callback, () => []),
   onSetLanguage: (callback) =>
-    ipcRenderer.on("set-language", (event, lang) => callback(lang)),
+    subscribeIpc("set-language", callback, (_event, lang) => [lang]),
 
   // Other functionalities
   savePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
@@ -134,9 +150,9 @@ contextBridge.exposeInMainWorld("api", {
   getSoundFullPath: (fileName) =>
     ipcRenderer.invoke("get-sound-path", fileName),
   onPlaySound: (callback) =>
-    ipcRenderer.on("play-sound", (event, sound) => callback(sound)),
+    subscribeIpc("play-sound", callback, (_event, sound) => [sound]),
   onProgressUpdate: (callback) =>
-    ipcRenderer.on("show-progress", (event, data) => callback(data)),
+    subscribeIpc("show-progress", callback, (_event, data) => [data]),
   closeNotificationWindow: () => ipcRenderer.send("close-notification-window"),
   notificationRenderReady: () => ipcRenderer.send("notification-render-ready"),
   parseStatsBin: (filePath) => ipcRenderer.invoke("parse-stats-bin", filePath),
@@ -156,9 +172,9 @@ contextBridge.exposeInMainWorld("api", {
   requestPlatinumManual: (payload) =>
     ipcRenderer.invoke("platinum:manual", payload),
   onAchievementsMissing: (callback) =>
-    ipcRenderer.on("achievements-missing", (e, configName) =>
-      callback(configName),
-    ),
+    subscribeIpc("achievements-missing", callback, (_event, configName) => [
+      configName,
+    ]),
   logCoverEvent: (level, message, meta) =>
     ipcRenderer.invoke("covers:ui-log", { level, message, meta }),
   logUiEvent: (level, message, meta) =>
@@ -174,9 +190,9 @@ contextBridge.exposeInMainWorld("api", {
   saveGameImage: (appid, buffer, platform) =>
     ipcRenderer.invoke("saveGameImage", appid, buffer, platform),
   onImageUpdate: (callback) =>
-    ipcRenderer.on("update-image", (_, url) => callback(url)),
+    subscribeIpc("update-image", callback, (_event, data) => [data]),
   on: (channel, callback) =>
-    ipcRenderer.on(channel, (_, data) => callback(data)),
+    subscribeIpc(channel, callback, (_event, data) => [data]),
   setZoom: (zoomFactor) => ipcRenderer.send("set-zoom", zoomFactor),
   updateOverlayShortcut: (combo) =>
     ipcRenderer.send("update-overlay-shortcut", combo),
@@ -193,10 +209,12 @@ contextBridge.exposeInMainWorld("api", {
   setLanguage: (lang) => {
     window.currentLang = lang;
   },
-  onConfigsChanged: (handler) => ipcRenderer.on("configs:changed", handler),
-  onSchemaReady: (handler) => ipcRenderer.on("config:schema-ready", handler),
+  onConfigsChanged: (handler) =>
+    subscribeIpc("configs:changed", handler, (_event, data) => [data]),
+  onSchemaReady: (handler) =>
+    subscribeIpc("config:schema-ready", handler, (_event, data) => [data]),
   onAutoSelectConfig: (handler) =>
-    ipcRenderer.on("auto-select-config", (_e, name) => handler(name)),
+    subscribeIpc("auto-select-config", handler, (_event, name) => [name]),
   getBootStatus: () => ipcRenderer.invoke("boot:status"),
   getAppVersion: () => ipcRenderer.invoke("app:get-version"),
   bootOverlayHidden: () => ipcRenderer.send("boot:overlay-hidden"),
@@ -221,7 +239,7 @@ contextBridge.exposeInMainWorld("api", {
   isDashboardOpen: () => ipcRenderer.invoke("dashboard:is-open"),
   dashboardReady: () => ipcRenderer.send("dashboard:ready"),
   onDashboardPollPause: (handler) =>
-    ipcRenderer.on("dashboard:poll-pause", (_e, state) => handler(state)),
+    subscribeIpc("dashboard:poll-pause", handler, (_event, state) => [state]),
   onOverlayControllerRuntimeState: (callback) => {
     if (typeof callback !== "function") return () => {};
     const handler = (_event, data) => callback(data);
