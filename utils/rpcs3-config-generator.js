@@ -326,7 +326,7 @@ async function enrichSchemaFromExophase(schemaDir, parsed, exoData) {
       updated = true;
     }
 
-    // Icon handling pentru RPCS3 rămâne nativ (TROP*.PNG); nu suprascriem cu Exophase.
+    // Icon handling for RPCS3 stays native (TROP*.PNG); do not overwrite with Exophase.
   }
 
   if (updated) {
@@ -419,7 +419,7 @@ function updateSchemaFromTrophy(schemaDir, parsed) {
     if (trophyId === undefined || trophyId === null) {
       continue;
     }
-    // nu atingem icon/icon_gray; ele rămân cele din schema existentă (sau exophase)
+    // do not touch icon/icon_gray; keep the ones from the existing schema (or Exophase)
   }
 
   if (updated) {
@@ -525,7 +525,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
         skipExo = true;
       }
     } catch {}
-    // dacă nu am adăugat entry-uri noi și deja avem cel puțin o limbă non-english pe fiecare, sărim
+    // if no new entries were added and each one already has at least one non-English language, skip
     if (!skipExo && (added > 0 || !hasMultiLang(currentEntries))) {
     const variants = buildExophaseSlugVariants(title || appid);
     const slugCandidates = Array.from(

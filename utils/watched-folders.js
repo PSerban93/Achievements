@@ -4672,7 +4672,7 @@ module.exports = function makeWatchedFolders({
     }
     let shouldSeed =
       typeof onSeedCache === "function" && !lastSnapshot.has(snapKey);
-    // Tenoke: dacă fișierul apare după boot (ev add), nu seed-uit pentru a permite notificări
+    // Tenoke: if the file appears after boot (add event), do not seed it so notifications can still fire
     if (shouldSeed && meta.__tenoke && isAddEvent && !bootMode) {
       shouldSeed = false;
     }
@@ -9959,7 +9959,7 @@ module.exports = function makeWatchedFolders({
         const looksRpcs3 = /^npwr\d+/i.test(base);
         if (!isAppIdName(base) && !looksPs4 && !looksRpcs3) return;
 
-        // PS4/RPCS3: lăsăm scanarea dedicată să se ocupe (evităm generateConfigForAppId care cere appid numeric)
+        // PS4/RPCS3: let the dedicated scan handle it (avoid generateConfigForAppId, which expects a numeric appid)
         if (looksPs4 || looksRpcs3) {
           schedule();
           return;

@@ -75,7 +75,7 @@ function isBadName(name) {
 }
 function extractNameFromSteamHuntersHtml(html) {
   const H = String(html || "");
-  // 1) Banner: <span.flex-link-underline> din <h1><a>…</a></h1>
+  // 1) Banner: <span.flex-link-underline> from <h1><a>…</a></h1>
   //    (not “Steam Hunters”, second)
   let m =
     /<main[\s\S]*?<div[^>]*class="[^"]*\bbanner\b[^"]*"[^>]*>[\s\S]*?<div[^>]*class="[^"]*\bmedia-body\b[^"]*"[^>]*>[\s\S]*?<h1[^>]*>[\s\S]*?<a[^>]*>\s*<span[^>]*class="[^"]*\bflex-link-underline\b[^"]*"[^>]*>[\s\S]*?<\/span>\s*<span[^>]*class="[^"]*\bflex-link-underline\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(

@@ -7488,7 +7488,7 @@ ipcMain.handle("load-achievements", async (event, configName, options = {}) => {
     const p1 = path.join(cfgDir, "steam_settings", "achievements.json");
     // 2) <cfgDir>/achievements.json
     const p2 = path.join(cfgDir, "achievements.json");
-    // 3) (opțional) <cfgDir>/<appid>/achievements.json – auto-generated
+    // 3) (optional) <cfgDir>/<appid>/achievements.json – auto-generated
     const p3 =
       config.appid != null
         ? path.join(cfgDir, String(config.appid), "achievements.json")
