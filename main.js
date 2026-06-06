@@ -1092,6 +1092,7 @@ const DEFAULT_PREFERENCES = {
   disableHardwareAcceleration: true,
   disableUpdate: false,
   disablePlaytime: false,
+  progressPosition: "bottom-left",
   platinumSound: "mute",
   platinumPreset: "default",
   platinumPosition: "center-bottom",
@@ -1115,6 +1116,7 @@ const DEFAULT_PREFERENCES = {
     ...DEFAULT_OVERLAY_CONTROLLER_CONTROL_MODE_BINDING,
   ],
   ignoreLeadingArticlesSort: true,
+  hideZeroCompletionGames: false,
   schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
   steamOfficialSteamId: "",
@@ -1244,9 +1246,11 @@ let appUpdateKnownVersion = "";
 let appUpdateProgressJob = null;
 let appUpdateCheckTimer = null;
 let appUpdateCheckRequested = false;
+let appUpdateCheckContext = null;
 const APP_UPDATE_INSTALL_COMPLETE_ARG = "--updated";
 const APP_UPDATE_PENDING_INFO_FILE = "update-info.json";
 const APP_UPDATE_PENDING_BLOCKMAP_FILE = "current.blockmap";
+const APP_UPDATE_NO_PUBLISHED_GITHUB_RE = /No published versions on GitHub/i;
 let selectedSound = "mute";
 let selectedPreset = "default";
 let selectedPosition = "center-bottom";
@@ -2493,6 +2497,54 @@ function isPrereleaseAppVersion(version = app.getVersion()) {
   return typeof version === "string" && /-[0-9A-Za-z]/.test(version);
 }
 
+function isNoPublishedGitHubUpdateError(err) {
+  const message = String(err?.message || err || "").trim();
+  return APP_UPDATE_NO_PUBLISHED_GITHUB_RE.test(message);
+}
+
+function shouldFallbackPrereleaseUpdateCheckToStable(err, options = {}) {
+  if (options?.allowPrerelease !== true) return false;
+  return isNoPublishedGitHubUpdateError(err);
+}
+
+async function checkForAppUpdatesWithStableFallback(trigger = "startup") {
+  const originalAllowPrerelease = autoUpdater.allowPrerelease === true;
+  appUpdateCheckContext = {
+    trigger,
+    allowPrerelease: originalAllowPrerelease,
+    phase: originalAllowPrerelease ? "primary-prerelease" : "primary-stable",
+  };
+  try {
+    return await autoUpdater.checkForUpdates();
+  } catch (err) {
+    if (
+      !shouldFallbackPrereleaseUpdateCheckToStable(err, {
+        allowPrerelease: originalAllowPrerelease,
+      })
+    ) {
+      throw err;
+    }
+    updateLogger.warn("app-update:stable-fallback", {
+      trigger,
+      fromPrerelease: true,
+      reason: err?.message || String(err),
+    });
+    autoUpdater.allowPrerelease = false;
+    appUpdateCheckContext = {
+      trigger,
+      allowPrerelease: false,
+      phase: "stable-fallback",
+    };
+    try {
+      return await autoUpdater.checkForUpdates();
+    } finally {
+      autoUpdater.allowPrerelease = originalAllowPrerelease;
+    }
+  } finally {
+    appUpdateCheckContext = null;
+  }
+}
+
 function getUpdateDialogParentWindow() {
   if (
     mainWindow &&
@@ -2533,7 +2585,7 @@ function scheduleStartupAppUpdateCheck(prefs = cachedPreferences) {
       return;
     }
     appUpdateCheckRequested = true;
-    autoUpdater.checkForUpdates().catch((err) => {
+    checkForAppUpdatesWithStableFallback("startup").catch((err) => {
       updateLogger.error("app-update:check-failed", {
         error: err?.message || String(err),
       });
@@ -3029,6 +3081,14 @@ function initializeStartupAppUpdater() {
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = isPrereleaseAppVersion();
   autoUpdater.on("error", async (err) => {
+    if (
+      appUpdateCheckContext?.phase === "primary-prerelease" &&
+      shouldFallbackPrereleaseUpdateCheckToStable(err, {
+        allowPrerelease: appUpdateCheckContext?.allowPrerelease === true,
+      })
+    ) {
+      return;
+    }
     appUpdateDownloadRequested = false;
     appUpdateDownloadInFlight = false;
     updateLogger.error("app-update:error", {
@@ -8027,14 +8087,20 @@ ipcMain.handle(
                 timeoutMs: 15000,
               }),
             );
-            const snapshot = mergeEarnedTimeFromCached(
+            const preservedSnapshot = preserveEpicOfficialEarnedStateFromCache(
               synced.snapshot || {},
+              cached,
+            );
+            const snapshot = mergeEarnedTimeFromCached(
+              preservedSnapshot.snapshot || {},
               cached,
             );
             const nextAccountId = synced.accountId || accountId || "";
             const nextProductId = synced.productId || productId || "";
             const delta = getEpicOfficialUnlockedDelta(cached, snapshot);
             const hadCachedSnapshot = Object.keys(cached || {}).length > 0;
+            const cachedEarnedCount = countEpicOfficialEarnedAchievements(cached);
+            const nextEarnedCount = countEpicOfficialEarnedAchievements(snapshot);
             if (!hadCachedSnapshot && Number(synced.totalUnlocked || 0) > 0) {
               markEpicOfficialSilentSeed(
                 configName,
@@ -8047,6 +8113,23 @@ ipcMain.handle(
               );
             }
             const snapshotChanged = !deepEqual(cached || {}, snapshot || {});
+            if (preservedSnapshot.changed) {
+              epicOfficialLogger.warn(
+                "epic-official:sync:regression-preserved",
+                {
+                  source: "load-saved-achievements",
+                  configName,
+                  accountId: nextAccountId || null,
+                  productId: nextProductId || null,
+                  cachedEarnedCount,
+                  nextEarnedCount,
+                  preservedEarnedCount:
+                    preservedSnapshot.preservedEarnedCount || 0,
+                  reportedTotalUnlocked:
+                    Number(synced.totalUnlocked || 0) || 0,
+                },
+              );
+            }
             if (snapshotChanged) {
               savePreviousAchievements(
                 configName,
@@ -9964,62 +10047,76 @@ ipcMain.handle("checkLocalGameImage", async (_event, appid, platformArg) => {
   ipcLogger.info("checkLocalGameImage:request", { appid, platform });
   const baseDir = path.join(app.getPath("userData"), "images");
   const candidatePlatforms = getImagePlatformCandidates(appid, platform);
-  const newPath = path.join(
-    baseDir,
-    platform || "steam",
-    `${appid}`,
-    `${appid}.jpg`,
-  );
-  const legacyPath = path.join(baseDir, `${appid}.jpg`);
-  try {
-    await fs.promises.access(newPath, fs.constants.F_OK);
+  const preferredDir = path.join(baseDir, platform || "steam", `${appid}`);
+  const preferredPath = pickExistingCoverImagePath(preferredDir, appid);
+  if (preferredPath) {
     ipcLogger.info("checkLocalGameImage:hit", {
       appid,
       platform,
-      imagePath: newPath,
+      imagePath: preferredPath,
     });
-    return newPath;
-  } catch {}
+    return preferredPath;
+  }
   for (const candidatePlatform of candidatePlatforms) {
     if (candidatePlatform === platform) continue;
-    const candidatePath = path.join(
+    const candidateDir = path.join(
       baseDir,
       candidatePlatform,
       `${appid}`,
-      `${appid}.jpg`,
     );
+    const candidatePath = pickExistingCoverImagePath(candidateDir, appid);
+    if (!candidatePath) continue;
+    let resolvedPath = candidatePath;
     try {
-      await fs.promises.access(candidatePath, fs.constants.F_OK);
-      try {
-        fs.mkdirSync(path.dirname(newPath), { recursive: true });
-        if (!fs.existsSync(newPath)) {
-          fs.copyFileSync(candidatePath, newPath);
-        }
-      } catch {}
-      ipcLogger.info("checkLocalGameImage:platform-alias-hit", {
-        appid,
-        platform,
-        aliasPlatform: candidatePlatform,
-        imagePath: candidatePath,
-      });
-      return fs.existsSync(newPath) ? newPath : candidatePath;
-    } catch {}
-  }
-  try {
-    await fs.promises.access(legacyPath, fs.constants.F_OK);
-    try {
-      fs.mkdirSync(path.dirname(newPath), { recursive: true });
-      if (!fs.existsSync(newPath)) {
-        fs.copyFileSync(legacyPath, newPath);
+      fs.mkdirSync(preferredDir, { recursive: true });
+      const preferredExt = path.extname(candidatePath || "");
+      const preferredTarget = path.join(
+        preferredDir,
+        `${appid}${preferredExt || ".jpg"}`,
+      );
+      removeSiblingCoverImageFormats(preferredDir, appid, preferredTarget);
+      if (!fs.existsSync(preferredTarget)) {
+        fs.copyFileSync(candidatePath, preferredTarget);
       }
+      resolvedPath = fs.existsSync(preferredTarget)
+        ? preferredTarget
+        : candidatePath;
+    } catch {}
+    ipcLogger.info("checkLocalGameImage:platform-alias-hit", {
+      appid,
+      platform,
+      aliasPlatform: candidatePlatform,
+      imagePath: candidatePath,
+      resolvedPath,
+    });
+    return resolvedPath;
+  }
+  const legacyPath = pickExistingCoverImagePath(baseDir, appid);
+  if (legacyPath) {
+    let resolvedPath = legacyPath;
+    try {
+      fs.mkdirSync(preferredDir, { recursive: true });
+      const legacyExt = path.extname(legacyPath || "");
+      const preferredTarget = path.join(
+        preferredDir,
+        `${appid}${legacyExt || ".jpg"}`,
+      );
+      removeSiblingCoverImageFormats(preferredDir, appid, preferredTarget);
+      if (!fs.existsSync(preferredTarget)) {
+        fs.copyFileSync(legacyPath, preferredTarget);
+      }
+      resolvedPath = fs.existsSync(preferredTarget)
+        ? preferredTarget
+        : legacyPath;
     } catch {}
     ipcLogger.info("checkLocalGameImage:legacy-hit", {
       appid,
       platform,
       imagePath: legacyPath,
+      resolvedPath,
     });
-    return fs.existsSync(newPath) ? newPath : legacyPath;
-  } catch {}
+    return resolvedPath;
+  }
   ipcLogger.info("checkLocalGameImage:miss", { appid, platform });
   return null;
 });
@@ -10036,9 +10133,19 @@ ipcMain.handle("checkExecutableExists", async (_event, exePath) => {
 });
 
 // Save image locally from renderer
-ipcMain.handle("saveGameImage", async (_event, appid, buffer, platformArg) => {
+ipcMain.handle(
+  "saveGameImage",
+  async (_event, appid, buffer, platformArg, meta = {}) => {
   const platform = normalizePlatform(platformArg) || getPlatformForAppId(appid);
-  ipcLogger.info("saveGameImage:request", { appid, platform });
+  const extension = getCoverExtensionFromMeta(meta);
+  ipcLogger.info("saveGameImage:request", {
+    appid,
+    platform,
+    extension,
+    sourceUrl: String(meta?.sourceUrl || meta?.url || "").trim() || null,
+    contentType:
+      String(meta?.contentType || meta?.mimeType || "").trim() || null,
+  });
   try {
     const imageDir = path.join(
       app.getPath("userData"),
@@ -10047,7 +10154,8 @@ ipcMain.handle("saveGameImage", async (_event, appid, buffer, platformArg) => {
       String(appid),
     );
     if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
-    const fullPath = path.join(imageDir, `${appid}.jpg`);
+    const fullPath = path.join(imageDir, `${appid}${extension}`);
+    removeSiblingCoverImageFormats(imageDir, appid, fullPath);
     fs.writeFileSync(fullPath, Buffer.from(buffer));
     broadcastToAll("update-image", { appid: String(appid), platform });
     return { success: true, path: fullPath };
@@ -10055,7 +10163,8 @@ ipcMain.handle("saveGameImage", async (_event, appid, buffer, platformArg) => {
     notifyError(tUi("main.notify.image.saveFailed", { error: err.message }));
     return { success: false, error: err.message };
   }
-});
+  },
+);
 
 // Add new IPC handler for test achievements that doesn't require a config
 ipcMain.on("show-test-notification", (event, options) => {
@@ -10243,6 +10352,26 @@ let pendingPlatinumNotification = null;
 let platinumAwaitingNormal = false;
 let platinumFallbackTimer = null;
 const pendingNotificationScreenshots = new Map();
+const RECENT_ACHIEVEMENT_NOTIFICATION_DEDUPE_MS = 1500;
+const recentAchievementNotificationKeys = new Map();
+
+function pruneRecentAchievementNotificationKeys(now = Date.now()) {
+  for (const [key, timestamp] of recentAchievementNotificationKeys) {
+    if (now - timestamp > RECENT_ACHIEVEMENT_NOTIFICATION_DEDUPE_MS) {
+      recentAchievementNotificationKeys.delete(key);
+    }
+  }
+}
+
+function buildAchievementNotificationDedupeKey(notificationData = {}) {
+  const normalize = (value) => String(value || "").trim().toLowerCase();
+  return [
+    normalize(notificationData.config_path || notificationData.configName),
+    normalize(notificationData.displayName),
+    normalize(notificationData.description),
+    normalize(notificationData.icon || notificationData.icon_gray),
+  ].join("::");
+}
 
 function computeNotificationScreenshotFallbackDelay(durationMs) {
   const safeDuration =
@@ -10328,6 +10457,7 @@ function queueAchievementNotification(achievement) {
     icon: achievement.icon,
     icon_gray: achievement.icon_gray || achievement.icongray,
     config_path: achievement.config_path,
+    configName: achievement.configName || achievement.config_name || "",
     preset: resolvedPreset,
     position: resolvedPosition,
     sound: resolvedSound,
@@ -10336,6 +10466,21 @@ function queueAchievementNotification(achievement) {
     isTest: !!achievement.isTest,
   };
 
+  const isPlatinum = achievement.__isPlatinum === true;
+  if (!notificationData.isTest && !isPlatinum) {
+    const now = Date.now();
+    pruneRecentAchievementNotificationKeys(now);
+    const dedupeKey = buildAchievementNotificationDedupeKey(notificationData);
+    if (dedupeKey && recentAchievementNotificationKeys.has(dedupeKey)) {
+      notificationLogger.info("queue-achievement:deduped", {
+        displayName: notificationData.displayName,
+        config: notificationData.config_path || null,
+      });
+      return;
+    }
+    recentAchievementNotificationKeys.set(dedupeKey, now);
+  }
+
   notificationLogger.info("queue-achievement", {
     displayName: notificationData.displayName,
     preset: notificationData.preset || "default",
@@ -10343,7 +10488,6 @@ function queueAchievementNotification(achievement) {
     config: notificationData.config_path || null,
     test: notificationData.isTest || false,
   });
-  const isPlatinum = achievement.__isPlatinum === true;
   if (!isPlatinum && pendingPlatinumNotification) {
     platinumAwaitingNormal = false;
   }
@@ -13313,6 +13457,95 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
   return job;
 });
 
+ipcMain.handle("config:set-custom-cover-path", async (_event, payload = {}) => {
+  const safeName = sanitizeConfigName(payload?.configName || "");
+  if (!safeName) {
+    return { success: false, error: "Invalid config name." };
+  }
+  const configPath = path.join(configsDir, `${safeName}.json`);
+  if (!fs.existsSync(configPath)) {
+    return { success: false, error: "Config not found." };
+  }
+
+  const coverPathRaw = String(payload?.coverPath || "").trim();
+  const nextCoverPath = isNonEmptyString(coverPathRaw) ? coverPathRaw : "";
+
+  if (nextCoverPath) {
+    try {
+      await fs.promises.access(nextCoverPath, fs.constants.R_OK);
+    } catch (err) {
+      return {
+        success: false,
+        error: `Custom cover file is not readable: ${err?.message || String(err)}`,
+      };
+    }
+  }
+
+  try {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    const previousManagedCoverPath = isManagedCustomCoverPath(
+      config?.custom_cover_path,
+    )
+      ? String(config.custom_cover_path).trim()
+      : "";
+    if (nextCoverPath) {
+      const buffer = await fs.promises.readFile(nextCoverPath);
+      const detectedMime = detectImageMimeFromBuffer(buffer);
+      const extension = getCoverExtensionFromMeta({
+        extension: path.extname(nextCoverPath),
+        contentType: detectedMime,
+        sourceUrl: nextCoverPath,
+      });
+      const managedDir = getManagedCustomCoverDir();
+      fs.mkdirSync(managedDir, { recursive: true });
+      const managedCoverPath = path.join(managedDir, `${safeName}${extension}`);
+      removeManagedCustomCoverVariants(safeName, managedCoverPath);
+      fs.writeFileSync(managedCoverPath, buffer);
+      config.custom_cover_path = managedCoverPath;
+      config.custom_cover_source_path = nextCoverPath;
+    } else {
+      delete config.custom_cover_path;
+      delete config.custom_cover_source_path;
+    }
+    if (previousManagedCoverPath && previousManagedCoverPath !== config.custom_cover_path) {
+      try {
+        if (fs.existsSync(previousManagedCoverPath)) {
+          fs.unlinkSync(previousManagedCoverPath);
+        }
+      } catch {}
+      removeManagedCustomCoverVariants(safeName, config.custom_cover_path || "");
+    }
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    notifyConfigsChanged();
+    broadcastToAll("update-image", {
+      appid: String(config?.appid || ""),
+      platform: normalizePlatform(config?.platform) || null,
+      configName: safeName,
+      custom: !!nextCoverPath,
+    });
+    ipcLogger.info("config:set-custom-cover-path", {
+      configName: safeName,
+      appid: config?.appid || null,
+      custom: !!nextCoverPath,
+    });
+    return {
+      success: true,
+      configName: safeName,
+      coverPath: String(config?.custom_cover_path || "").trim() || null,
+      sourceCoverPath: String(config?.custom_cover_source_path || "").trim() || null,
+    };
+  } catch (err) {
+    ipcLogger.error("config:set-custom-cover-path:error", {
+      configName: safeName,
+      error: err?.message || String(err),
+    });
+    return {
+      success: false,
+      error: err?.message || String(err),
+    };
+  }
+});
+
 ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
   let progressJob = null;
   try {
@@ -15411,6 +15644,61 @@ function getEpicOfficialUnlockedDelta(
   return { changed, unlockedKeys };
 }
 
+function countEpicOfficialEarnedAchievements(snapshot = {}) {
+  let count = 0;
+  for (const entry of Object.values(snapshot || {})) {
+    if (entry && typeof entry === "object" && entry.earned === true) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
+function preserveEpicOfficialEarnedStateFromCache(
+  nextSnapshot = {},
+  cachedSnapshot = {},
+) {
+  const nextEntries =
+    nextSnapshot && typeof nextSnapshot === "object" ? nextSnapshot : {};
+  const cachedEntries =
+    cachedSnapshot && typeof cachedSnapshot === "object" ? cachedSnapshot : {};
+  let changed = false;
+  let preservedEarnedCount = 0;
+  const merged = { ...nextEntries };
+  for (const [key, cachedEntry] of Object.entries(cachedEntries)) {
+    if (!cachedEntry || typeof cachedEntry !== "object") continue;
+    if (cachedEntry.earned !== true) continue;
+    const nextEntry = merged[key];
+    if (!nextEntry || typeof nextEntry !== "object" || nextEntry.earned !== true) {
+      merged[key] = {
+        ...(nextEntry && typeof nextEntry === "object" ? nextEntry : {}),
+        ...cachedEntry,
+        earned: true,
+        earned_time: Number(cachedEntry.earned_time || 0) || cachedEntry.earned_time || 0,
+      };
+      changed = true;
+      preservedEarnedCount += 1;
+      continue;
+    }
+    const nextEarnedTime = Number(nextEntry.earned_time || 0);
+    const cachedEarnedTime = Number(cachedEntry.earned_time || 0);
+    if (nextEarnedTime <= 0 && cachedEarnedTime > 0) {
+      merged[key] = {
+        ...nextEntry,
+        earned: true,
+        earned_time: cachedEntry.earned_time,
+      };
+      changed = true;
+      preservedEarnedCount += 1;
+    }
+  }
+  return {
+    snapshot: changed ? merged : nextEntries,
+    changed,
+    preservedEarnedCount,
+  };
+}
+
 function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
   if (!Array.isArray(schemaAchievements) || !schemaAchievements.length) return;
   if (!Array.isArray(unlockedKeys) || !unlockedKeys.length) return;
@@ -15669,7 +15957,14 @@ async function runEpicOfficialActivePoll(trigger = "manual") {
     );
     if (generation !== epicOfficialActivePollGeneration) return;
 
-    const snapshot = mergeEarnedTimeFromCached(synced.snapshot || {}, cached);
+    const preservedSnapshot = preserveEpicOfficialEarnedStateFromCache(
+      synced.snapshot || {},
+      cached,
+    );
+    const snapshot = mergeEarnedTimeFromCached(
+      preservedSnapshot.snapshot || {},
+      cached,
+    );
     const result = {
       achievements: snapshot || {},
       save_path: config.save_path || "",
@@ -15678,10 +15973,25 @@ async function runEpicOfficialActivePoll(trigger = "manual") {
     const nextProductId = synced.productId || productId || "";
     const delta = getEpicOfficialUnlockedDelta(cached, snapshot);
     const hadCachedSnapshot = Object.keys(cached || {}).length > 0;
+    const cachedEarnedCount = countEpicOfficialEarnedAchievements(cached);
+    const nextEarnedCount = countEpicOfficialEarnedAchievements(snapshot);
     if (!hadCachedSnapshot && Number(synced.totalUnlocked || 0) > 0) {
       markEpicOfficialSilentSeed(safeName, nextAccountId, nextProductId, {
         expectedUnlocked: synced.totalUnlocked || 0,
         reason: "active-poll",
+      });
+    }
+
+    if (preservedSnapshot.changed) {
+      epicOfficialLogger.warn("epic-official:poll:regression-preserved", {
+        trigger,
+        configName: safeName,
+        accountId: nextAccountId || null,
+        productId: nextProductId || null,
+        cachedEarnedCount,
+        nextEarnedCount,
+        preservedEarnedCount: preservedSnapshot.preservedEarnedCount || 0,
+        reportedTotalUnlocked: Number(synced.totalUnlocked || 0) || 0,
       });
     }
 
@@ -15763,6 +16073,9 @@ async function runEpicOfficialActivePoll(trigger = "manual") {
         trigger,
         configName: currentState.configName || null,
         error: error?.message || String(error),
+        status: Number(error?.status || error?.response?.status || 0) || null,
+        code: error?.code || null,
+        endpoint: error?.endpoint || error?.url || null,
         retryInMs: delayMs,
         errorCount: currentState.errorCount,
       });
@@ -16182,8 +16495,50 @@ function showProgressNotification(data) {
       }
     }
   } catch {}
-  const x = 20;
-  const y = Math.max(0, height - progressHeight + 10);
+  const {
+    x: ax,
+    y: ay,
+    width: aw,
+    height: ah,
+  } = screen.getPrimaryDisplay().workArea;
+  const position =
+    String(
+      data?.position ||
+        cachedPreferences?.progressPosition ||
+        DEFAULT_PREFERENCES.progressPosition ||
+        "bottom-left",
+    ).trim() || "bottom-left";
+  const gapX = 20;
+  const gapY = 10;
+  let x = ax + gapX;
+  let y = Math.max(0, ay + ah - progressHeight + gapY);
+  switch (position) {
+    case "center-top":
+      x = ax + Math.floor((aw - progressWidth) / 2);
+      y = ay + gapY;
+      break;
+    case "top-right":
+      x = ax + aw - progressWidth - gapX;
+      y = ay + gapY;
+      break;
+    case "bottom-right":
+      x = ax + aw - progressWidth - gapX;
+      y = ay + ah - progressHeight - gapY;
+      break;
+    case "top-left":
+      x = ax + gapX;
+      y = ay + gapY;
+      break;
+    case "bottom-left":
+      x = ax + gapX;
+      y = ay + ah - progressHeight - gapY;
+      break;
+    case "center-bottom":
+    default:
+      x = ax + Math.floor((aw - progressWidth) / 2);
+      y = ay + ah - progressHeight - gapY;
+      break;
+  }
   const progressWindow = new BrowserWindow({
     width: progressWidth,
     height: progressHeight,
@@ -18008,6 +18363,174 @@ function getImagePlatformCandidates(appid, platform) {
   );
 }
 
+const SUPPORTED_LOCAL_COVER_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".jpe",
+  ".jfif",
+  ".png",
+  ".webp",
+  ".gif",
+  ".bmp",
+  ".avif",
+];
+
+const LOCAL_COVER_MIME_BY_EXTENSION = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".jpe": "image/jpeg",
+  ".jfif": "image/jpeg",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+  ".bmp": "image/bmp",
+  ".avif": "image/avif",
+};
+
+function detectImageMimeFromBuffer(buffer) {
+  if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 12) return "";
+  const hasPrefix = (bytes, offset = 0) =>
+    bytes.every((value, index) => buffer[offset + index] === value);
+
+  if (hasPrefix([0xff, 0xd8, 0xff])) return "image/jpeg";
+  if (
+    hasPrefix([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  ) {
+    return "image/png";
+  }
+  if (hasPrefix([0x47, 0x49, 0x46, 0x38])) return "image/gif";
+  if (hasPrefix([0x42, 0x4d])) return "image/bmp";
+  if (
+    hasPrefix([0x52, 0x49, 0x46, 0x46]) &&
+    hasPrefix([0x57, 0x45, 0x42, 0x50], 8)
+  ) {
+    return "image/webp";
+  }
+  const ftyp = buffer.toString("ascii", 4, 12);
+  if (
+    ftyp.startsWith("ftypavif") ||
+    ftyp.startsWith("ftypavis") ||
+    ftyp.startsWith("ftypmif1")
+  ) {
+    return "image/avif";
+  }
+  return "";
+}
+
+function normalizeCoverExtension(extension) {
+  const safe = String(extension || "")
+    .trim()
+    .toLowerCase();
+  if (!safe) return "";
+  const normalized = safe.startsWith(".") ? safe : `.${safe}`;
+  return SUPPORTED_LOCAL_COVER_EXTENSIONS.includes(normalized)
+    ? normalized
+    : "";
+}
+
+function getCoverExtensionFromMeta(meta = {}) {
+  const direct = normalizeCoverExtension(meta?.extension || meta?.ext);
+  if (direct) return direct;
+  const contentType = String(meta?.contentType || meta?.mimeType || "")
+    .trim()
+    .toLowerCase();
+  if (contentType) {
+    const byType = {
+      "image/jpeg": ".jpg",
+      "image/jpg": ".jpg",
+      "image/pjpeg": ".jpg",
+      "image/jfif": ".jpg",
+      "image/png": ".png",
+      "image/webp": ".webp",
+      "image/gif": ".gif",
+      "image/bmp": ".bmp",
+      "image/x-ms-bmp": ".bmp",
+      "image/avif": ".avif",
+    };
+    const mapped = normalizeCoverExtension(byType[contentType] || "");
+    if (mapped) return mapped;
+  }
+  const sourceUrl = String(meta?.sourceUrl || meta?.url || "").trim();
+  if (sourceUrl) {
+    try {
+      const parsed = new URL(sourceUrl);
+      const fromPath = normalizeCoverExtension(
+        path.extname(parsed.pathname || ""),
+      );
+      if (fromPath) return fromPath;
+    } catch {}
+  }
+  return ".jpg";
+}
+
+function getCoverImageCandidatePaths(baseDir, appid) {
+  const safeBaseDir = String(baseDir || "").trim();
+  const safeAppId = String(appid || "").trim();
+  if (!safeBaseDir || !safeAppId) return [];
+  return SUPPORTED_LOCAL_COVER_EXTENSIONS.map((extension) =>
+    path.join(safeBaseDir, `${safeAppId}${extension}`),
+  );
+}
+
+function pickExistingCoverImagePath(baseDir, appid) {
+  for (const candidate of getCoverImageCandidatePaths(baseDir, appid)) {
+    try {
+      if (fs.existsSync(candidate) && fs.statSync(candidate).size > 0) {
+        return candidate;
+      }
+    } catch {}
+  }
+  return "";
+}
+
+function removeSiblingCoverImageFormats(baseDir, appid, keepPath = "") {
+  const keepResolved = String(keepPath || "").trim();
+  for (const candidate of getCoverImageCandidatePaths(baseDir, appid)) {
+    if (keepResolved && path.resolve(candidate) === path.resolve(keepResolved)) {
+      continue;
+    }
+    try {
+      if (fs.existsSync(candidate)) {
+        fs.unlinkSync(candidate);
+      }
+    } catch {}
+  }
+}
+
+function getManagedCustomCoverDir() {
+  return path.join(app.getPath("userData"), "custom-covers");
+}
+
+function isManagedCustomCoverPath(filePath) {
+  const safePath = String(filePath || "").trim();
+  if (!safePath) return false;
+  try {
+    const managedDir = path.resolve(getManagedCustomCoverDir());
+    const target = path.resolve(safePath);
+    return target === managedDir || target.startsWith(`${managedDir}${path.sep}`);
+  } catch {
+    return false;
+  }
+}
+
+function removeManagedCustomCoverVariants(configName, keepPath = "") {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return;
+  const dir = getManagedCustomCoverDir();
+  const keepResolved = String(keepPath || "").trim();
+  for (const extension of SUPPORTED_LOCAL_COVER_EXTENSIONS) {
+    const candidate = path.join(dir, `${safeName}${extension}`);
+    if (keepResolved && path.resolve(candidate) === path.resolve(keepResolved)) {
+      continue;
+    }
+    try {
+      if (fs.existsSync(candidate)) {
+        fs.unlinkSync(candidate);
+      }
+    } catch {}
+  }
+}
+
 function pickFresherPath(src, dest) {
   try {
     if (!fs.existsSync(dest)) return src;
@@ -18150,6 +18673,48 @@ migrateImagesToPlatformStorage();
 ipcMain.handle("select-file", async () => {
   const result = await dialog.showOpenDialog({ properties: ["openFile"] });
   return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle("select-image-file", async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ["openFile"],
+    filters: [
+      {
+        name: "Images",
+        extensions: SUPPORTED_LOCAL_COVER_EXTENSIONS.map((ext) =>
+          ext.replace(/^\./, ""),
+        ),
+      },
+    ],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle("read-local-image-data-url", async (_event, filePath) => {
+  const safePath = String(filePath || "").trim();
+  if (!safePath) {
+    return { success: false, error: "Invalid image path." };
+  }
+  try {
+    await fs.promises.access(safePath, fs.constants.R_OK);
+    const buffer = await fs.promises.readFile(safePath);
+    const ext = normalizeCoverExtension(path.extname(safePath).toLowerCase());
+    const detectedMime = detectImageMimeFromBuffer(buffer);
+    const mime =
+      detectedMime ||
+      LOCAL_COVER_MIME_BY_EXTENSION[ext] ||
+      "application/octet-stream";
+    return {
+      success: true,
+      dataUrl: `data:${mime};base64,${buffer.toString("base64")}`,
+      mime,
+    };
+  } catch (err) {
+    return {
+      success: false,
+      error: err?.message || String(err),
+    };
+  }
 });
 
 ipcMain.handle("get-display-workarea", () => {

@@ -157,6 +157,9 @@ contextBridge.exposeInMainWorld("api", {
   notificationRenderReady: () => ipcRenderer.send("notification-render-ready"),
   parseStatsBin: (filePath) => ipcRenderer.invoke("parse-stats-bin", filePath),
   selectFile: () => ipcRenderer.invoke("select-file"),
+  selectImageFile: () => ipcRenderer.invoke("select-image-file"),
+  readLocalImageDataUrl: (filePath) =>
+    ipcRenderer.invoke("read-local-image-data-url", filePath),
   getConfigByName: async (name) => {
     try {
       return await ipcRenderer.invoke("get-config-by-name", name);
@@ -187,8 +190,10 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("checkLocalGameImage", appid, platform),
   checkExecutableExists: (exePath) =>
     ipcRenderer.invoke("checkExecutableExists", exePath),
-  saveGameImage: (appid, buffer, platform) =>
-    ipcRenderer.invoke("saveGameImage", appid, buffer, platform),
+  saveGameImage: (appid, buffer, platform, meta = {}) =>
+    ipcRenderer.invoke("saveGameImage", appid, buffer, platform, meta),
+  setCustomCoverPath: (configName, coverPath) =>
+    ipcRenderer.invoke("config:set-custom-cover-path", { configName, coverPath }),
   onImageUpdate: (callback) =>
     subscribeIpc("update-image", callback, (_event, data) => [data]),
   on: (channel, callback) =>

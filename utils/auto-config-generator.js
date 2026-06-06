@@ -13,6 +13,7 @@ const {
   buildGogOfficialSnapshot,
   ensureGogOfficialSchema,
   parseGameplayDirIdentity,
+  resolveGogGalaxyLaunchMetadataByProductId,
   resolveGogGalaxyProductByProductId,
   resolveGogOfficialGameplayEntryForProduct,
   waitForStableGogGameplayDb,
@@ -499,6 +500,17 @@ function applyLaunchMetadataToConfig(configData, metadata) {
   return changed;
 }
 
+function applyExecutableLaunchMetadataToConfig(configData, metadata) {
+  if (!configData || !metadata) return false;
+  let changed = applyLaunchMetadataToConfig(configData, metadata);
+  const executable = String(metadata.executable || "").trim();
+  if (executable && !String(configData.executable || "").trim()) {
+    configData.executable = executable;
+    changed = true;
+  }
+  return changed;
+}
+
 async function generateGogOfficialConfigForProduct(
   appid,
   outputDir,
@@ -516,6 +528,12 @@ async function generateGogOfficialConfigForProduct(
   const product = resolveGogGalaxyProductByProductId(productId, {
     storageDbPath: opts.storageDbPath,
   });
+  const gogLaunchMetadata = resolveGogGalaxyLaunchMetadataByProductId(
+    productId,
+    {
+      storageDbPath: opts.storageDbPath,
+    },
+  );
 
   let gameplayDir =
     typeof opts.savePathOverride === "string"
@@ -686,6 +704,7 @@ async function generateGogOfficialConfigForProduct(
         : "",
     process_name: normalizeProcessNameValue(existingConfig.process_name),
   };
+  applyExecutableLaunchMetadataToConfig(nextConfig, gogLaunchMetadata);
   if (nextConfig.steamAppId) delete nextConfig.steamAppId;
 
   const previousSerialized = fs.existsSync(targetInfo.filePath)
@@ -733,6 +752,7 @@ async function generateGogOfficialConfigForProduct(
     clientId: clientId || null,
     userId: userId || null,
     gameplayDbPath,
+    hasProcessName: hasProcessNameValue(nextConfig.process_name),
   });
 
   return {
@@ -938,6 +958,15 @@ async function generateUbisoftOfficialConfigForProduct(
         : "",
     process_name: normalizeProcessNameValue(existingConfig.process_name),
   };
+  applyLaunchMetadataToConfig(nextConfig, {
+    process_name: archiveInfo.processName || "",
+  });
+  if (steamAppId) {
+    applyLaunchMetadataToConfig(
+      nextConfig,
+      await fetchSteamDbLaunchMetadata(steamAppId),
+    );
+  }
 
   const previousSerialized = fs.existsSync(targetInfo.filePath)
     ? fs.readFileSync(targetInfo.filePath, "utf8")
@@ -2773,6 +2802,10 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
           if (applyLaunchMetadataToConfig(curr, launchMetadata)) {
             changed = true;
           }
+        } else if (platformMeta.platform === "gog") {
+          if (applyExecutableLaunchMetadataToConfig(curr, itemLaunchMetadata)) {
+            changed = true;
+          }
         }
         if (changed) {
           fs.writeFileSync(filePath, JSON.stringify(curr, null, 2));
@@ -2863,6 +2896,11 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
         itemLaunchMetadata ||
         (await fetchSteamDbLaunchMetadata(launchMetadataAppId));
       applyLaunchMetadataToConfig(gameData, launchMetadata);
+    } else if (platformMeta.platform === "gog") {
+      applyExecutableLaunchMetadataToConfig(
+        gameData,
+        itemLaunchMetadata,
+      );
     }
     emitBatchProgress(itemIndex, 92, {
       appid: uplayId,
@@ -3239,6 +3277,8 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
         forcePlatform: task.forcePlatform || null,
         savePathOverride: task.savePathOverride || task.appDir || null,
         preferredName: task.preferredName || null,
+        launchMetadata:
+          task.__gogLaunchMetadata || task.launchMetadata || null,
         emu: task.emu || null,
         schemaLanguages: task.schemaLanguages || schemaLanguages,
       });

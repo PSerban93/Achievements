@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TigerDX Award</title>
+    <meta name="duration" content="10000" />
+    <meta width="720" height="220" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Lobster&family=Open+Sans:wght@300;400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform-origin: center center;
+      }
+    </style>
+  </head>
+      <body>
+    <div class="overlay">
+      <div class="award-shell" id="shell">
+        <div
+          class="hex-particle-container"
+          id="particles"
+          aria-hidden="true"
+        ></div>
+
+        <div class="award-container" id="card">
+          <div class="content" id="content">
+            <span class="achievement-title" id="title"></span>
+            <span class="achievement-desc" id="desc"></span>
+          </div>
+
+          <div class="badge">
+            <div class="badge-hex">
+              <img id="icon" src="" alt="Achievement icon" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (() => {
+        const metaDur = document.querySelector('meta[name="duration"]');
+        const baseTotal = Math.max(1, Number(metaDur?.content || 10000));
+        const shell = document.getElementById("shell");
+        const card = document.getElementById("card");
+        const content = document.getElementById("content");
+        const particles = document.getElementById("particles");
+        const titleEl = document.getElementById("title");
+        const descEl = document.getElementById("desc");
+        const iconEl = document.getElementById("icon");
+        const palette = [
+          "#2196bd",
+          "#4bbfbf",
+          "#9776b5",
+          "#d25e9f",
+          "#4daf65",
+          "#d63d3d",
+          "#f26b3f",
+        ];
+
+        let closeTimer = null;
+        let outTimer = null;
+        let notificationSeq = 0;
+
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
+
+        function closeWindow() {
+          window.api?.closeNotificationWindow?.();
+          window.electronAPI?.closeNotificationWindow?.();
+        }
+
+        function applyScale(value) {
+          const numeric = parseFloat(value);
+          const safeScale =
+            Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
+          shell.style.setProperty("--scale", String(safeScale));
+        }
+
+        function fileUrl(pathValue) {
+          if (!pathValue) return "";
+          const normalized = String(pathValue).replace(/\\/g, "/");
+          return normalized.startsWith("file://")
+            ? normalized
+            : `file:///${normalized}`;
+        }
+
+        function safeText(value, fallback = "") {
+          const text = (value ?? "").toString().trim();
+          return text || fallback;
+        }
+
+        function preloadIcon(src, timeoutMs = 180) {
+          return new Promise((resolve) => {
+            if (!src) {
+              resolve("");
+              return;
+            }
+
+            let settled = false;
+            const done = () => {
+              if (settled) return;
+              settled = true;
+              resolve(src);
+            };
+
+            const img = new Image();
+            img.decoding = "async";
+            img.onload = done;
+            img.onerror = done;
+            const timer = setTimeout(done, timeoutMs);
+            img.onload = () => {
+              clearTimeout(timer);
+              done();
+            };
+            img.onerror = () => {
+              clearTimeout(timer);
+              done();
+            };
+            img.src = src;
+          });
+        }
+
+        function clearTimer() {
+          if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+          }
+          if (outTimer) {
+            clearTimeout(outTimer);
+            outTimer = null;
+          }
+        }
+
+        function cancelAnimations(element) {
+          if (!element) return;
+          try {
+            element.getAnimations().forEach((animation) => animation.cancel());
+          } catch {}
+        }
+
+        function resetScene() {
+          clearTimer();
+          [
+            card,
+            content,
+            titleEl,
+            descEl,
+            iconEl,
+            particles,
+          ].forEach(cancelAnimations);
+          particles.replaceChildren();
+        }
+
+        function makeParticle(x, y, color, delayMs, durationMs) {
+          const particle = document.createElement("span");
+          const angle = Math.random() * Math.PI * 2;
+          const distance = 110 + Math.random() * 140;
+          const dx = Math.round(Math.cos(angle) * distance);
+          const dy = Math.round(Math.sin(angle) * Math.min(distance * 0.55, 90));
+          const rotation = Math.round(-1080 + Math.random() * 2160);
+          const startScale = (1 + Math.random()).toFixed(2);
+          const endScale = (0.2 + Math.random() * 0.3).toFixed(2);
+          const size = 28 + Math.round(Math.random() * 12);
+
+          particle.className = "hex-p";
+          particle.style.left = `${x}px`;
+          particle.style.top = `${y}px`;
+          particle.style.width = `${size}px`;
+          particle.style.height = `${Math.round(size * 1.1)}px`;
+          particle.style.background = color;
+          particle.style.setProperty("--dx", `${dx}px`);
+          particle.style.setProperty("--dy", `${dy}px`);
+          particle.style.setProperty("--rot", `${rotation}deg`);
+          particle.style.setProperty("--start-scale", startScale);
+          particle.style.setProperty("--end-scale", endScale);
+          particle.style.animation = `particle-burst ${durationMs}ms ${delayMs}ms cubic-bezier(0.075, 0.82, 0.165, 1) forwards`;
+          return particle;
+        }
+
+        function spawnParticles(scale) {
+          particles.replaceChildren();
+          const delayMs = Math.round(800 * scale);
+          const durationMs = Math.round(3000 * scale);
+          const startX = 92;
+          const startY = 84;
+
+          palette.forEach((color) => {
+            particles.appendChild(
+              makeParticle(startX, startY, color, delayMs, durationMs)
+            );
+          });
+        }
+
+        function runAnimation(totalMs, currentSeq) {
+          const timelineScale = Math.max(0.1, totalMs / baseTotal);
+          const introMs = Math.round(800 * timelineScale);
+          const settleMs = Math.round(30 * timelineScale);
+          const bounceMs = Math.round(400 * timelineScale);
+          const panelDelayMs = Math.round(1270 * timelineScale);
+          const panelMs = Math.round(800 * timelineScale);
+          const textDelayMs = Math.round(1900 * timelineScale);
+          const textMs = Math.round(400 * timelineScale);
+          const outMs = Math.max(180, Math.round(600 * timelineScale));
+          const inTotalMs = introMs + settleMs + bounceMs;
+          const outStartMs = Math.max(0, totalMs - outMs);
+
+          cancelAnimations(card);
+          cancelAnimations(content);
+          cancelAnimations(titleEl);
+          cancelAnimations(descEl);
+          cancelAnimations(iconEl);
+
+          card.animate(
+            [
+              {
+                opacity: 0,
+                transform: "translate3d(275px, 0, 60px) scale(0.985)",
+              },
+              {
+                opacity: 1,
+                transform: "translate3d(275px, 0, -60px) scale(1)",
+                offset: introMs / Math.max(1, inTotalMs),
+              },
+              {
+                opacity: 1,
+                transform: "translate3d(275px, 0, 0) scale(1)",
+                offset: (introMs + settleMs) / Math.max(1, inTotalMs),
+              },
+              {
+                opacity: 1,
+                transform: "translate3d(0, 0, 0) scale(1)",
+              },
+            ],
+            {
+              duration: inTotalMs,
+              easing: "cubic-bezier(0.2, 0.75, 0.2, 1)",
+              fill: "both",
+            }
+          );
+
+          iconEl.animate(
+            [
+              { transform: "scale(1.5)" },
+              { transform: "scale(1)", offset: 0.66 },
+              { transform: "scale(0.82)", offset: 0.78 },
+              { transform: "scale(1)" },
+            ],
+            {
+              duration: inTotalMs,
+              easing: "cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+              fill: "both",
+            }
+          );
+
+          content.animate(
+            [
+              { width: "0px" },
+              { width: "600px" },
+            ],
+            {
+              delay: panelDelayMs,
+              duration: panelMs,
+              easing: "ease-in-out",
+              fill: "both",
+            }
+          );
+
+          titleEl.animate(
+            [
+              { opacity: 0, transform: "translateY(8px)" },
+              { opacity: 1, transform: "translateY(0)" },
+            ],
+            {
+              delay: textDelayMs,
+              duration: textMs,
+              easing: "ease-out",
+              fill: "both",
+            }
+          );
+
+          descEl.animate(
+            [
+              { opacity: 0, transform: "translateY(6px)" },
+              { opacity: 1, transform: "translateY(0)" },
+            ],
+            {
+              delay: textDelayMs + Math.round(90 * timelineScale),
+              duration: textMs,
+              easing: "ease-out",
+              fill: "both",
+            }
+          );
+
+          spawnParticles(timelineScale);
+          notifyScreenshotReady(textDelayMs + Math.round(140 * timelineScale));
+
+          outTimer = setTimeout(() => {
+            if (currentSeq !== notificationSeq) return;
+            cancelAnimations(card);
+            cancelAnimations(titleEl);
+            cancelAnimations(descEl);
+            cancelAnimations(iconEl);
+
+            card.animate(
+              [
+                {
+                  opacity: 1,
+                  transform: "translate3d(0, 0, 0) rotateX(0deg)",
+                },
+                {
+                  opacity: 0,
+                  transform: "translate3d(0, 20px, -30px) rotateX(-5deg)",
+                },
+              ],
+              {
+                duration: outMs,
+                easing: "ease-in",
+                fill: "both",
+              }
+            );
+          }, outStartMs);
+
+          closeTimer = setTimeout(() => {
+            if (currentSeq !== notificationSeq) return;
+            closeWindow();
+          }, totalMs + 40);
+        }
+
+        function handleNotification(payload = {}) {
+          notificationSeq += 1;
+          const currentSeq = notificationSeq;
+
+          resetScene();
+
+          const totalMs = Math.max(0, Number(metaDur?.content || baseTotal));
+          const titleText = safeText(payload?.displayName || payload?.title, "");
+          const descText = safeText(payload?.description || payload?.desc, "");
+          const iconSrc = fileUrl(payload?.iconPath || payload?.icon || "");
+
+          titleEl.textContent = titleText;
+          descEl.textContent = descText;
+          descEl.style.display = descText ? "block" : "none";
+          applyScale(payload?.scale);
+
+          preloadIcon(iconSrc).then((readySrc) => {
+            if (currentSeq !== notificationSeq) return;
+            if (readySrc) {
+              iconEl.src = readySrc;
+            } else {
+              iconEl.removeAttribute("src");
+            }
+            runAnimation(totalMs, currentSeq);
+          });
+        }
+
+        card.addEventListener("click", closeWindow);
+
+        if (window.api && typeof window.api.onNotification === "function") {
+          window.api.onNotification(handleNotification);
+        } else if (
+          window.electronAPI &&
+          typeof window.electronAPI.onNotification === "function"
+        ) {
+          window.electronAPI.onNotification(handleNotification);
+        }
+
+        applyScale(1);
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,183 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  perspective: 600px;
+  transform: translateZ(0);
+  pointer-events: none;
+}
+
+.award-shell {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 720px;
+  height: 220px;
+  transform: translate(-50%, -50%) scale(var(--scale, 1));
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.hex-particle-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.hex-p {
+  position: absolute;
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(0deg)
+    scale(var(--start-scale, 1.4));
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.18));
+  will-change: transform, opacity;
+}
+
+@keyframes particle-burst {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(0deg)
+      scale(var(--start-scale, 1.4));
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(
+        calc(-50% + var(--dx, 0px)),
+        calc(-50% + var(--dy, 0px))
+      )
+      rotate(var(--rot, 0deg)) scale(var(--end-scale, 0.35));
+  }
+}
+
+.award-container {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 650px;
+  height: 80px;
+  margin-left: -325px;
+  margin-top: -40px;
+  opacity: 0;
+  transform-style: preserve-3d;
+  pointer-events: auto;
+  font-family: "Open Sans", "Segoe UI", sans-serif;
+}
+
+.badge {
+  position: absolute;
+  left: -20px;
+  top: -25px;
+  width: 130px;
+  height: 130px;
+  z-index: 2;
+}
+
+.badge-hex {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 130px;
+  height: 130px;
+  clip-path: polygon(50% 1%, 95% 25%, 95% 75%, 50% 99%, 5% 75%, 5% 25%);
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 255, 255, 0.22), transparent 48%),
+    linear-gradient(180deg, #5f6670, #34383f);
+  box-shadow:
+    inset 0 0 0 4px rgba(255, 255, 255, 0.18),
+    inset 0 0 22px rgba(255, 255, 255, 0.08),
+    0 10px 18px rgba(0, 0, 0, 0.22);
+}
+
+.badge-hex::before {
+  content: "";
+  position: absolute;
+  inset: 9px;
+  clip-path: inherit;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(0, 0, 0, 0.08)),
+    linear-gradient(180deg, #14171b, #23262b);
+}
+
+.badge img {
+  position: absolute;
+  inset: 12px;
+  width: calc(100% - 24px);
+  height: calc(100% - 24px);
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  backface-visibility: hidden;
+  clip-path: polygon(50% 1%, 95% 25%, 95% 75%, 50% 99%, 5% 75%, 5% 25%);
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.22));
+}
+
+.content {
+  position: absolute;
+  left: 64px;
+  top: 8px;
+  width: 0;
+  height: 63px;
+  overflow: hidden;
+  background: #3e3e3c;
+  border-radius: 10px;
+  box-sizing: border-box;
+  color: #fff;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.24);
+  white-space: nowrap;
+  transform-origin: left center;
+}
+
+.content::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0)
+  );
+  pointer-events: none;
+}
+
+.achievement-title,
+.achievement-desc {
+  opacity: 0;
+}
+
+.achievement-title {
+  position: absolute;
+  top: 8px;
+  left: 22px;
+  width: 526px;
+  padding-right: 16px;
+  font-family: "Lobster", "Segoe Script", cursive;
+  font-size: 30px;
+  font-weight: 300;
+  line-height: 1.08;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.achievement-desc {
+  position: absolute;
+  top: 40px;
+  left: 22px;
+  width: 526px;
+  padding-right: 16px;
+  font-family: "Open Sans", "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 300;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.92);
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -8,6 +8,7 @@ const {
   writeAchievementPercentagesSidecar,
   RARITY_SOURCES,
 } = require("./achievement-rarity");
+const { normalizeProcessNameValue } = require("./process-name-utils");
 
 const gogGalaxyLogger = createLogger("gog-galaxy");
 
@@ -91,6 +92,52 @@ function safeCloseDatabase(db) {
   } catch {
     /* ignore */
   }
+}
+
+function normalizeLaunchExecutablePath(value) {
+  return isNonEmptyString(value) ? String(value).trim() : "";
+}
+
+function processNameFromExecutablePath(executablePath) {
+  const normalized = normalizeLaunchExecutablePath(executablePath);
+  if (!normalized) return "";
+  return path.win32.basename(normalized.replace(/\//g, "\\"));
+}
+
+function scoreGogLaunchCandidate(row) {
+  const executablePath = normalizeLaunchExecutablePath(row?.executablePath);
+  if (!executablePath || !/\.exe$/i.test(executablePath)) return -1000;
+  let score = 1000;
+  if (Number(row?.isPrimary) === 1) score += 250;
+  const type = String(row?.taskType || "").toLowerCase();
+  if (type === "builtinprimary") score += 150;
+  else if (type === "builtin") score += 75;
+  else if (type === "custom") score += 25;
+  const baseName = processNameFromExecutablePath(executablePath).toLowerCase();
+  if (/(updater|update|patch|launcher|setup|install|unins|uninstall)/i.test(baseName)) {
+    score -= 500;
+  }
+  if (/(editor|benchmark|settings|config|crash|reporter|support|server)/i.test(baseName)) {
+    score -= 250;
+  }
+  const order = Number(row?.taskOrder);
+  if (Number.isFinite(order)) score -= Math.max(0, Math.min(order, 100));
+  return score;
+}
+
+function buildGogLaunchMetadata(row) {
+  const executable = normalizeLaunchExecutablePath(row?.executablePath);
+  if (!executable) return null;
+  const processName = normalizeProcessNameValue(
+    row?.processName || processNameFromExecutablePath(executable),
+  );
+  return {
+    executable,
+    arguments: isNonEmptyString(row?.commandLineArgs)
+      ? String(row.commandLineArgs)
+      : "",
+    process_name: processName,
+  };
 }
 
 function titleScore(row) {
@@ -421,6 +468,38 @@ function readGogGalaxyProducts(options = {}) {
       }
     }
 
+    const launchRows = prepareAll(
+      db,
+        `
+          SELECT
+            ptrk.gogId AS productId,
+            pt.id AS playTaskId,
+            ptt.type AS taskType,
+            pt.isPrimary AS isPrimary,
+            pt."order" AS taskOrder,
+            ptlp.executablePath AS executablePath,
+            ptlp.commandLineArgs AS commandLineArgs,
+            ptlp.label AS label
+          FROM ProductsToReleaseKeys ptrk
+          INNER JOIN PlayTasks pt ON pt.gameReleaseKey = ptrk.releaseKey
+          LEFT JOIN PlayTaskTypes ptt ON ptt.id = pt.typeId
+          INNER JOIN PlayTaskLaunchParameters ptlp ON ptlp.playTaskId = pt.id
+          WHERE ptlp.executablePath IS NOT NULL AND TRIM(ptlp.executablePath) <> ''
+        `,
+      { readBigInts: true },
+    );
+    const launchByProductId = new Map();
+    for (const row of launchRows) {
+      const productId = normalizeId(row?.productId);
+      if (!productId) continue;
+      const score = scoreGogLaunchCandidate(row);
+      if (score <= 0) continue;
+      const prev = launchByProductId.get(productId);
+      if (!prev || score > prev.score) {
+        launchByProductId.set(productId, { row, score });
+      }
+    }
+
     const rows = [];
     const byClientId = new Map();
     const byProductId = new Map();
@@ -429,6 +508,9 @@ function readGogGalaxyProducts(options = {}) {
       const clientId = normalizeId(row?.clientId);
       if (!productId || !clientId) continue;
       const titleRow = titleByProductId.get(productId);
+      const launchMetadata = buildGogLaunchMetadata(
+        launchByProductId.get(productId)?.row,
+      );
       const entry = {
         productId,
         clientId,
@@ -447,6 +529,9 @@ function readGogGalaxyProducts(options = {}) {
           : "",
         cloudSavesEnabled: Number(row?.cloudSavesEnabled) === 1,
         createdAt: isNonEmptyString(row?.createdAt) ? String(row.createdAt) : "",
+        executablePath: launchMetadata?.executable || "",
+        launchArguments: launchMetadata?.arguments || "",
+        processName: launchMetadata?.process_name || "",
       };
       rows.push(entry);
       byClientId.set(clientId, entry);
@@ -478,6 +563,24 @@ function resolveGogGalaxyProductByProductId(productId, options = {}) {
   const products = readGogGalaxyProducts(options);
   const rows = products.byProductId.get(normalizedProductId) || [];
   return rows[0] || null;
+}
+
+function resolveGogGalaxyLaunchMetadataByProductId(productId, options = {}) {
+  const product = resolveGogGalaxyProductByProductId(productId, options);
+  if (!product) return null;
+  const metadata = {
+    executable: product.executablePath || "",
+    arguments: product.launchArguments || "",
+    process_name: product.processName || "",
+  };
+  if (
+    !metadata.executable &&
+    !metadata.arguments &&
+    !metadata.process_name
+  ) {
+    return null;
+  }
+  return metadata;
 }
 
 function listGogGalaxyUsers(options = {}) {
@@ -721,6 +824,7 @@ module.exports = {
   parseGameplayDirIdentity,
   readGogGalaxyProducts,
   readGogGameplayDb,
+  resolveGogGalaxyLaunchMetadataByProductId,
   resolveGogGalaxyProductByClientId,
   resolveGogGalaxyProductByProductId,
   resolveGogOfficialGameplayDbForConfig,

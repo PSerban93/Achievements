@@ -624,7 +624,7 @@
             role="tabpanel"
             aria-labelledby="tab-general"
           >
-            <div style="padding: 0 10px">
+            <div style="padding: 0 60px">
               <div class="settings-section">
                 <h4 id="settings-appScaleTitle">App Scale</h4>
                 <div class="settings-control">
@@ -638,6 +638,7 @@
                   </select>
                 </div>
               </div>
+              <hr style="margin: 18px 0 14px" />
               <div class="settings-section">
                 <h4 id="settings-appLanguageTitle">App Language</h4>
                 <div class="settings-control">
@@ -645,6 +646,7 @@
                   <select id="appLanguageSelect"></select>
                 </div>
               </div>
+              <hr style="margin: 18px 0 14px" />
               <div class="settings-section settings-section--pad-top">
                 <h4 id="settings-overlayShortcutTitle">Overlay Shortcut</h4>
                 <div class="settings-control">
@@ -699,6 +701,7 @@
                   </div>
                 </div>
               </div>
+              <hr style="margin: 18px 0 14px" />
               <div class="settings-section">
                 <h4 id="settings-hiddenAchievementsTitle">
                   Hidden Achievements
@@ -710,6 +713,7 @@
                   </label>
                 </div>
               </div>
+              <hr style="margin: 18px 0 14px" />
               <div class="settings-section">
                 <h4 id="settings-startupTitle">Startup</h4>
                 <div class="checkbox-control">
@@ -752,6 +756,7 @@
                   >
                 </div>
               </div>
+              <hr style="margin: 18px 0 14px" />
               <div class="settings-section" style="margin-bottom: 5px">
                 <h4 id="settings-screenshotsTitle">Achievements Screenshots</h4>
                 <div class="settings-control">
@@ -797,7 +802,7 @@
             aria-labelledby="tab-notification"
             hidden
           >
-            <div style="padding: 0 10px">
+            <div style="padding: 0 60px">
               <div class="settings-section">
                 <h4 id="settings-testingTitle">Achievement Testing</h4>
                 <button
@@ -807,6 +812,11 @@
                 >
                   Test Achievement
                 </button>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4 id="settings-notificationTogglesTitle">
+                  Notification Toggles
+                </h4>
 
                 <div class="checkbox-control">
                   <input
@@ -837,6 +847,11 @@
                     >Disable Platinum Notification</label
                   >
                 </div>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4 id="settings-achievementNotificationTitle">
+                  Achievement Notification
+                </h4>
 
                 <div class="settings-slider">
                   <label for="settings-scaleSlider"
@@ -930,7 +945,7 @@
                   <select id="settings-soundSelect"></select>
                 </div>
 
-                <hr />
+                <hr style="margin: 18px 0 14px" />
                 <h4 id="settings-platinumTitle" style="margin-top: 10px">
                   Platinum Notification
                 </h4>
@@ -961,6 +976,30 @@
                   >
                   <select id="settings-platinumSoundSelect"></select>
                 </div>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-progressNotificationTitle"
+                  data-i18n="settings-progressNotificationTitle"
+                  style="margin-top: 10px"
+                >
+                  Progress Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-progressPositionDropdown"
+                    data-i18n="label.settings-progressPositionDropdown"
+                    >Progress Notification Position:</label
+                  >
+                  <select id="settings-progressPositionDropdown">
+                    <option value="center-bottom">Center Bottom</option>
+                    <option value="center-top">Center Top</option>
+                    <option value="top-right">Top Right</option>
+                    <option value="bottom-right">Bottom Right</option>
+                    <option value="top-left">Top Left</option>
+                    <option value="bottom-left">Bottom Left</option>
+                  </select>
+                </div>
               </div>
             </div>
           </div>
@@ -971,7 +1010,7 @@
             aria-labelledby="tab-folders"
             hidden
           >
-            <div style="padding: 0 10px">
+            <div style="padding: 0 60px">
               <div class="settings-section">
                 <h4 id="settings-foldersTitle">
                   Folders (auto-detect achievements)
@@ -1003,7 +1042,7 @@
             aria-labelledby="tab-advanced"
             hidden
           >
-            <div style="padding: 0 10px">
+            <div style="padding: 0 60px">
               <div class="settings-section">
                 <div class="settings-section" style="margin-bottom: 5px">
                   <h4 id="settings-steamApiTitle">Steam Web API</h4>
@@ -1024,6 +1063,7 @@
                     </button>
                   </div>
                 </div>
+                <hr style="margin: 18px 0 14px" />
                 <div class="settings-section" style="margin-bottom: 5px">
                   <h4 id="settings-steamOfficialAccountTitle">
                     Steam Official Account
@@ -1050,6 +1090,7 @@
                     Uses Steam loginusers.vdf when available.
                   </div>
                 </div>
+                <hr style="margin: 18px 0 14px" />
                 <div class="settings-section" style="margin-bottom: 5px">
                   <h4
                     id="settings-epicOfficialAccountTitle"
@@ -1096,6 +1137,7 @@
                     Uses Epic login for Epic (Official) configs.
                   </div>
                 </div>
+                <hr style="margin: 18px 0 14px" />
                 <div class="settings-section">
                   <h4 id="settings-blacklistTitle">Blacklist</h4>
                   <div class="checkbox-control">
@@ -1120,6 +1162,7 @@
                     </button>
                   </div>
                 </div>
+                <hr style="margin: 18px 0 14px" />
                 <div class="settings-section">
                   <h4 id="settings-renderingTitle">Rendering</h4>
                   <div class="checkbox-control">
@@ -1210,7 +1253,17 @@
                       Ignore leading articles in sort (A/An/The)
                     </label>
                   </div>
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
+                      id="settings-hideZeroCompletionGamesCheckbox"
+                    />
+                    <label for="settings-hideZeroCompletionGamesCheckbox">
+                      Hide 0% completion games
+                    </label>
+                  </div>
                 </div>
+                <hr style="margin: 18px 0 14px" />
                 <div class="settings-section">
                   <h4 id="settings-schemaLanguagesTitle">
                     Achievements Schema Languages
@@ -1253,7 +1306,7 @@
             tabindex="0"
           >
             <template id="shortcutsTabTemplate">
-              <div style="padding: 0 10px">
+              <div style="padding: 0 60px">
                 <!-- Global -->
                 <div class="settings-section">
                   <h4 id="settings-globalTitle">Global</h4>
@@ -2645,7 +2698,7 @@
             hidden
             tabindex="0"
           >
-            <div style="padding: 0 10px">
+            <div style="padding: 0 60px">
               <div class="settings-section">
                 <h4 id="platformGuideTitle">Platform & Emulator Guide</h4>
                 <p id="platformGuideIntro" class="platform-guide-note">
@@ -3609,6 +3662,15 @@
                 >
                   ✎
                 </button>
+                <button
+                  id="redownload-cover-btn"
+                  type="button"
+                  onclick="redownloadGameCover()"
+                  title="Redownload cover from the next source"
+                  aria-label="Redownload cover from the next source"
+                >
+                  ↻
+                </button>
               </div>
 
               <div
@@ -3646,6 +3708,53 @@
                   >
                     ✖ Cancel
                   </button>
+                </div>
+                <div
+                  style="
+                    margin-top: 12px;
+                    width: 100%;
+                    max-width: 320px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 6px;
+                    align-items: center;
+                  "
+                >
+                  <label
+                    for="customCoverPath"
+                    id="customCoverPathLabel"
+                    style="font-size: 13px; opacity: 0.9"
+                  >
+                    Custom local image
+                  </label>
+                  <input
+                    type="text"
+                    id="customCoverPath"
+                    readonly
+                    placeholder="No custom image selected"
+                    style="
+                      padding: 5px;
+                      font-size: 13px;
+                      width: 100%;
+                      max-width: 320px;
+                    "
+                  />
+                  <div style="display: flex; gap: 6px; justify-content: center">
+                    <button
+                      id="customCoverChooseBtn"
+                      type="button"
+                      onclick="chooseCustomCoverImage()"
+                    >
+                      Choose Local Image
+                    </button>
+                    <button
+                      id="customCoverClearBtn"
+                      type="button"
+                      onclick="clearCustomCoverImage()"
+                    >
+                      Clear Custom Image
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3917,6 +4026,14 @@
           data-action="edit"
         >
           Edit
+        </button>
+        <button
+          id="dashboardMenuRedownloadCover"
+          class="dash-menu-item"
+          type="button"
+          data-action="redownload-cover"
+        >
+          Redownload Cover
         </button>
         <button
           id="dashboardMenuRegenerate"
@@ -4324,6 +4441,9 @@
         const embedRoot = document.getElementById("embeddedGameImage");
         const imgWrap = document.getElementById("embeddedImageContainer");
         const imgEl = document.getElementById("embeddedGameImageImg");
+        const redownloadCoverBtn = document.getElementById(
+          "redownload-cover-btn",
+        );
         const fallbackBox = document.getElementById("embeddedFallbackPrompt");
         const fallbackIcon = new URL(
           "./assets/achievements-logo.png",
@@ -4480,28 +4600,135 @@
         }
 
         function fileUrl(p) {
-          return `file:///${encodeURI(String(p).replace(/\\/g, "/"))}`;
+          const raw = String(p || "").trim();
+          if (!raw) return "";
+          const normalized = raw.replace(/\\/g, "/");
+          const segments = normalized.split("/");
+          if (/^[A-Za-z]:$/.test(segments[0] || "")) {
+            return `file:///${segments[0]}/${segments
+              .slice(1)
+              .map((part) => encodeURIComponent(part))
+              .join("/")}`;
+          }
+          if (normalized.startsWith("//")) {
+            const uncPath = normalized
+              .replace(/^\/+/, "")
+              .split("/")
+              .map((part) => encodeURIComponent(part))
+              .join("/");
+            return `file:////${uncPath}`;
+          }
+          return `file:///${segments
+            .map((part) => encodeURIComponent(part))
+            .join("/")}`;
         }
 
-        function setImg(src) {
-          return new Promise((resolve, reject) => {
-            const versioned = `${src}${
-              src.includes("?") ? "&" : "?"
-            }_=${Date.now()}`;
+        const customCoverDataUrlCache = new Map();
+        let embeddedCoverLoadToken = 0;
+        function cancelEmbeddedCoverLoads() {
+          embeddedCoverLoadToken += 1;
+        }
+        window.__cancelEmbeddedCoverLoads = cancelEmbeddedCoverLoads;
 
-            imgEl.onload = () => resolve();
+        async function resolveCustomCoverImageSrc(customCoverPath) {
+          const safePath = String(customCoverPath || "").trim();
+          if (!safePath) return "";
+          if (customCoverDataUrlCache.has(safePath)) {
+            return customCoverDataUrlCache.get(safePath) || "";
+          }
+          const result = await window.api.readLocalImageDataUrl?.(safePath);
+          const dataUrl =
+            result?.success && typeof result?.dataUrl === "string"
+              ? result.dataUrl
+              : "";
+          if (dataUrl) {
+            customCoverDataUrlCache.set(safePath, dataUrl);
+          } else {
+            customCoverDataUrlCache.delete(safePath);
+          }
+          return dataUrl;
+        }
+
+        function probeImageSource(src) {
+          return new Promise((resolve, reject) => {
+            const safeSrc = String(src || "").trim();
+            if (!safeSrc) {
+              reject(new Error("empty-image-source"));
+              return;
+            }
+            const probe = new Image();
+            const versioned = /^data:/i.test(safeSrc)
+              ? safeSrc
+              : `${safeSrc}${safeSrc.includes("?") ? "&" : "?"}_=${Date.now()}`;
+            probe.onload = () => resolve(versioned);
+            probe.onerror = () =>
+              reject(new Error(`image probe failed: ${versioned}`));
+            probe.src = versioned;
+          });
+        }
+
+        async function resolveRenderableCustomCoverSrc(customCoverPath) {
+          const safePath = String(customCoverPath || "").trim();
+          if (!safePath) return "";
+          const dataSrc = await resolveCustomCoverImageSrc(safePath);
+          if (dataSrc) {
+            try {
+              return await probeImageSource(dataSrc);
+            } catch {}
+          }
+          const localSrc = fileUrl(safePath);
+          if (localSrc) {
+            try {
+              return await probeImageSource(localSrc);
+            } catch {}
+          }
+          return "";
+        }
+        window.__resolveRenderableCustomCoverSrc = resolveRenderableCustomCoverSrc;
+
+        function setImg(src, token = null) {
+          return new Promise((resolve, reject) => {
+            const safeSrc = String(src || "");
+            const versioned = /^data:/i.test(safeSrc)
+              ? safeSrc
+              : `${safeSrc}${safeSrc.includes("?") ? "&" : "?"}_=${Date.now()}`;
+
+            imgEl.onload = () => {
+              if (
+                token != null &&
+                Number(token) !== Number(embeddedCoverLoadToken)
+              ) {
+                resolve();
+                return;
+              }
+              resolve();
+            };
             imgEl.onerror = () =>
               reject(new Error(`image load failed: ${versioned}`));
+            if (
+              token != null &&
+              Number(token) !== Number(embeddedCoverLoadToken)
+            ) {
+              resolve();
+              return;
+            }
             imgEl.src = "";
             requestAnimationFrame(() => {
+              if (
+                token != null &&
+                Number(token) !== Number(embeddedCoverLoadToken)
+              ) {
+                resolve();
+                return;
+              }
               imgEl.src = versioned;
             });
           });
         }
 
-        async function setImgFromLocal(localPath) {
+        async function setImgFromLocal(localPath, token = null) {
           const url = fileUrl(localPath);
-          await setImg(url);
+          await setImg(url, token);
         }
 
         const NOT_FOUND_TAG = "steamdb-miss";
@@ -4572,7 +4799,10 @@
             platformHint ||
             (await resolvePlatformForCurrentApp(targetAppId)) ||
             null;
-          await window.api.saveGameImage(String(targetAppId), buf, platform);
+          await window.api.saveGameImage(String(targetAppId), buf, platform, {
+            contentType: String(blob?.type || "").trim(),
+            sourceUrl: url,
+          });
           logCover("info", "download:saved", {
             appid: targetAppId,
             platform: platform || "auto",
@@ -4611,6 +4841,52 @@
             }
           } catch {}
           return null;
+        }
+        async function getConfigForCoverContext(appid, explicitConfigName = "") {
+          try {
+            const configName =
+              String(explicitConfigName || "").trim() ||
+              String(document.getElementById("configList")?.value || "").trim();
+            if (!configName || !window.api?.getConfigByName) return null;
+            const cfg = await window.api.getConfigByName(configName);
+            if (!cfg || cfg.__notFound || cfg.__failed) return null;
+            const wantedAppId = String(appid || "").trim();
+            const cfgIds = [
+              cfg?.appid,
+              cfg?.appId,
+              cfg?.steamAppId,
+            ]
+              .map((value) => String(value || "").trim())
+              .filter(Boolean);
+            if (
+              !wantedAppId ||
+              !cfgIds.length ||
+              cfgIds.includes(wantedAppId)
+            ) {
+              return cfg;
+            }
+          } catch {}
+          return null;
+        }
+        async function resolveCustomCoverPathForCurrentApp(
+          appid,
+          explicitConfigName = "",
+        ) {
+          const cfg = await getConfigForCoverContext(appid, explicitConfigName);
+          const customPath = String(cfg?.custom_cover_path || "").trim();
+          return customPath || "";
+        }
+        async function populateCustomCoverPathField(explicitConfigName = "") {
+          const field = document.getElementById("customCoverPath");
+          if (!field) return;
+          try {
+            const cfg = await getConfigForCoverContext("", explicitConfigName);
+            field.value = String(
+              cfg?.custom_cover_source_path || cfg?.custom_cover_path || "",
+            ).trim();
+          } catch {
+            field.value = "";
+          }
         }
         let epicCoverProductMap = null;
         async function loadEpicProductMapForCover() {
@@ -4891,16 +5167,15 @@
               });
               return false;
             }
-            const plain = [
+            const plainPortrait = [
               `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/library_600x900.jpg`,
               `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/library_600x900.jpg`,
               `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/portrait.png`,
               `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/portrait.png`,
               `https://cdn.akamai.steamstatic.com/steam/apps/${fetchAppId}/library_600x900.jpg`,
-              `https://cdn.akamai.steamstatic.com/steam/apps/${fetchAppId}/header.jpg`,
             ];
 
-            for (const url of plain) {
+            for (const url of plainPortrait) {
               try {
                 await downloadAndSave(targetAppId, url, platform);
                 logCover("info", "cdn:hit", { targetAppId, fetchAppId, url });
@@ -4937,21 +5212,6 @@
               });
             }
 
-            try {
-              await downloadFromStoreHeader(fetchAppId, targetAppId, platform);
-              logCover("info", "store:hit", {
-                targetAppId,
-                fetchAppId,
-              });
-              return true;
-            } catch (err) {
-              logCover("warn", "store:fail", {
-                targetAppId,
-                fetchAppId,
-                error: err?.message || String(err),
-              });
-            }
-
             if (fallbackName) {
               const ok = await downloadFromSteamGrid(
                 targetAppId,
@@ -4968,6 +5228,39 @@
                 });
                 return true;
               }
+            }
+
+            try {
+              const url = `https://cdn.akamai.steamstatic.com/steam/apps/${fetchAppId}/header.jpg`;
+              await downloadAndSave(targetAppId, url, platform);
+              logCover("info", "cdn:landscape-hit", {
+                targetAppId,
+                fetchAppId,
+                url,
+              });
+              return true;
+            } catch (err) {
+              logCover("warn", "cdn:landscape-miss", {
+                targetAppId,
+                fetchAppId,
+                url: `https://cdn.akamai.steamstatic.com/steam/apps/${fetchAppId}/header.jpg`,
+                error: err?.message || String(err),
+              });
+            }
+
+            try {
+              await downloadFromStoreHeader(fetchAppId, targetAppId, platform);
+              logCover("info", "store:hit", {
+                targetAppId,
+                fetchAppId,
+              });
+              return true;
+            } catch (err) {
+              logCover("warn", "store:fail", {
+                targetAppId,
+                fetchAppId,
+                error: err?.message || String(err),
+              });
             }
 
             logCover("warn", "covers:all-sources-failed", {
@@ -5014,12 +5307,229 @@
           }
         }
 
+        const COVER_REDOWNLOAD_STATE_PREFIX = "coverRedownloadSourceIndex::";
+        function getCoverRedownloadStateKey(targetAppId, platform, fetchAppId) {
+          return `${COVER_REDOWNLOAD_STATE_PREFIX}${String(
+            targetAppId || "",
+          ).trim()}::${normalizeCoverPlatform(platform) || "auto"}::${String(
+            fetchAppId || targetAppId || "",
+          ).trim()}`;
+        }
+
+        function readNextCoverRedownloadIndex(stateKey, sourceCount) {
+          if (!stateKey || !sourceCount) return 0;
+          try {
+            const raw = Number(localStorage.getItem(stateKey));
+            if (Number.isFinite(raw) && raw >= 0) {
+              return (Math.floor(raw) + 1) % sourceCount;
+            }
+          } catch {}
+          return 0;
+        }
+
+        function writeLastCoverRedownloadIndex(stateKey, index) {
+          if (!stateKey) return;
+          try {
+            localStorage.setItem(stateKey, String(Math.max(0, index || 0)));
+          } catch {}
+        }
+
+        function getCoverRedownloadSourceLabel(sourceId) {
+          const labels = {
+            "cdn-portrait": "Steam CDN Portrait",
+            steamdb: "SteamDB",
+            steamgriddb: "SteamGridDB",
+            "cdn-landscape": "Steam CDN Landscape",
+            "store-api": "Steam Store API",
+            "epic-store": "Epic Store",
+          };
+          return labels[sourceId] || sourceId || "Cover source";
+        }
+
+        function buildCoverRedownloadSources(context) {
+          const {
+            targetAppId,
+            fetchAppId,
+            platform,
+            fallbackName,
+            steamGridSize,
+            fallbackOnly,
+            normalizedPlatform,
+          } = context;
+          const sources = [];
+          if (fallbackOnly) {
+            if (
+              normalizedPlatform === "epic" ||
+              normalizedPlatform === "epic-official"
+            ) {
+              sources.push({
+                id: "epic-store",
+                run: () =>
+                  downloadFromEpicStoreContent(targetAppId, platform, {
+                    configName: context.configName || null,
+                    fetchAppId,
+                  }),
+              });
+            }
+            if (fallbackName) {
+              sources.push({
+                id: "steamgriddb",
+                run: () =>
+                  downloadFromSteamGrid(
+                    targetAppId,
+                    fallbackName,
+                    steamGridSize,
+                    platform,
+                  ),
+              });
+            }
+            return sources;
+          }
+
+          sources.push({
+            id: "cdn-portrait",
+            run: async () => {
+              const urls = [
+                `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/library_600x900.jpg`,
+                `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/library_600x900.jpg`,
+                `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/portrait.png`,
+                `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/portrait.png`,
+                `https://cdn.akamai.steamstatic.com/steam/apps/${fetchAppId}/library_600x900.jpg`,
+              ];
+              for (const url of urls) {
+                try {
+                  await downloadAndSave(targetAppId, url, platform);
+                  return true;
+                } catch {}
+              }
+              return false;
+            },
+          });
+
+          sources.push({
+            id: "steamdb",
+            run: async () => {
+              const r = await window.api.getSteamDbCover({
+                appid: fetchAppId,
+                platform,
+              });
+              if (!r?.url) return false;
+              await downloadAndSave(targetAppId, r.url, platform);
+              return true;
+            },
+          });
+
+          if (fallbackName) {
+            sources.push({
+              id: "steamgriddb",
+              run: () =>
+                downloadFromSteamGrid(
+                  targetAppId,
+                  fallbackName,
+                  steamGridSize,
+                  platform,
+                ),
+            });
+          }
+
+          sources.push({
+            id: "cdn-landscape",
+            run: async () => {
+              const url = `https://cdn.akamai.steamstatic.com/steam/apps/${fetchAppId}/header.jpg`;
+              await downloadAndSave(targetAppId, url, platform);
+              return true;
+            },
+          });
+
+          sources.push({
+            id: "store-api",
+            run: () => downloadFromStoreHeader(fetchAppId, targetAppId, platform),
+          });
+
+          return sources;
+        }
+
+        async function updateRedownloadCoverButtonState(
+          appid = "",
+          explicitConfigName = "",
+        ) {
+          if (!redownloadCoverBtn) return;
+          const customPath = await resolveCustomCoverPathForCurrentApp(
+            appid,
+            explicitConfigName,
+          );
+          if (customPath) {
+            redownloadCoverBtn.disabled = true;
+            const text = tUi(
+              "title.redownload-cover-btn.customBlocked",
+              "Custom local image is active. Clear it to redownload the default cover.",
+            );
+            redownloadCoverBtn.title = text;
+            redownloadCoverBtn.setAttribute("aria-label", text);
+            return;
+          }
+          redownloadCoverBtn.disabled = false;
+          const text = tUi(
+            "title.redownload-cover-btn",
+            "Redownload cover from the next source",
+          );
+          redownloadCoverBtn.title = text;
+          redownloadCoverBtn.setAttribute("aria-label", text);
+        }
+
+        async function refreshCoverAfterRedownload(
+          appid,
+          platform,
+          configName,
+          options = {},
+        ) {
+          const safeConfigName = String(configName || "").trim();
+          if (safeConfigName) {
+            try {
+              localStorage.removeItem(`${IMG_CACHE_PREFIX}${safeConfigName}`);
+            } catch {}
+            window.__clearDashboardCachesFor?.(safeConfigName);
+          }
+          try {
+            if (typeof clearDashboardImageCacheByAppId === "function") {
+              clearDashboardImageCacheByAppId(appid);
+            }
+            if (typeof clearDashboardCoverEnsureState === "function") {
+              clearDashboardCoverEnsureState(appid, platform || null);
+            }
+          } catch {}
+          if (options?.refreshEmbedded !== false) {
+            await loadLocalCover(String(appid), platform || null, {
+              configName: safeConfigName,
+            });
+          }
+          if (window.__dashboardOpen) {
+            if (
+              safeConfigName &&
+              typeof refreshDashboardImageByConfigName === "function"
+            ) {
+              await refreshDashboardImageByConfigName(safeConfigName, {
+                forceReload: true,
+              });
+            } else if (typeof refreshDashboardImageByAppId === "function") {
+              await refreshDashboardImageByAppId(appid, platform || null, {
+                forceReload: true,
+              });
+            } else if (typeof buildDashboard === "function") {
+              await buildDashboard();
+            }
+          } else {
+            window.__dashboardNeedsRebuild = true;
+          }
+        }
+
         // --- loader: local -> (fallback) -> CDN -> local ---
-        async function loadLocalCover(appid, platformHint = null) {
+        async function loadLocalCover(appid, platformHint = null, options = {}) {
           if (!appid) {
             showFallbackLogo();
             return;
           }
+          const loadToken = ++embeddedCoverLoadToken;
 
           const coverNameHint = getCoverSearchTerm(appid) || "";
           const platform =
@@ -5031,8 +5541,31 @@
             platform,
             steamAppId: steamAppIdHint,
           });
+          await updateRedownloadCoverButtonState(
+            appid,
+            options?.configName || "",
+          );
 
           try {
+            const customCoverPath = await resolveCustomCoverPathForCurrentApp(
+              appid,
+              options?.configName || "",
+            );
+            if (customCoverPath) {
+              try {
+                const customCoverSrc =
+                  await resolveRenderableCustomCoverSrc(customCoverPath);
+                if (!customCoverSrc) throw new Error("custom-cover-read-failed");
+                await setImg(customCoverSrc, loadToken);
+                if (loadToken !== embeddedCoverLoadToken) return;
+                setVisible(true);
+                return;
+              } catch {
+                if (loadToken !== embeddedCoverLoadToken) return;
+                showFallbackLogo();
+                return;
+              }
+            }
             const localPath = await window.api.checkLocalGameImage(
               String(appid),
               platform,
@@ -5040,7 +5573,8 @@
 
             if (localPath) {
               try {
-                await setImgFromLocal(localPath);
+                await setImgFromLocal(localPath, loadToken);
+                if (loadToken !== embeddedCoverLoadToken) return;
                 setVisible(true);
                 return;
               } catch {
@@ -5068,7 +5602,8 @@
             );
             if (newLocal) {
               try {
-                await setImgFromLocal(newLocal);
+                await setImgFromLocal(newLocal, loadToken);
+                if (loadToken !== embeddedCoverLoadToken) return;
                 setVisible(true);
               } catch {
                 showFallbackLogo();
@@ -5083,13 +5618,14 @@
         window.__applyEmbeddedGameImageForAppId = async function (
           appid,
           platformHint = null,
+          options = {},
         ) {
           if (!appid) {
             showFallbackLogo();
             return;
           }
           try {
-            await loadLocalCover(String(appid), platformHint);
+            await loadLocalCover(String(appid), platformHint, options || {});
           } catch {
             showFallbackLogo();
           }
@@ -5099,6 +5635,7 @@
         window.showAltAppIdPrompt = function () {
           if (fallbackBox) fallbackBox.style.display = "flex";
           imgWrap.style.display = "none";
+          void populateCustomCoverPathField();
           const input = document.getElementById("altAppId");
           if (input) {
             input.focus();
@@ -5109,6 +5646,252 @@
         window.cancelFallback = function () {
           if (fallbackBox) fallbackBox.style.display = "none";
           imgWrap.style.display = "flex";
+        };
+
+        async function redownloadGameCoverForConfig(configName = "", options = {}) {
+          const controlButton = options?.button || null;
+          if (controlButton?.disabled) {
+            showNotification?.(
+              tUi(
+                "cover.redownload.blockedCustom",
+                "Custom local image is active. Clear it to redownload the default cover.",
+              ),
+              "#ff9800",
+            );
+            return;
+          }
+
+          const selectedConfig = String(
+            configName || document.getElementById("configList")?.value || "",
+          ).trim();
+          if (!selectedConfig) {
+            showNotification?.(
+              tUi("alert.selectConfig", "Select a config!"),
+              "#f44336",
+            );
+            return;
+          }
+
+          const logCover = (level, message, meta = {}) => {
+            try {
+              window.api?.logCoverEvent?.(level, message, meta);
+            } catch {}
+          };
+
+          const previousDisabled = controlButton?.disabled || false;
+          let activeRedownloadAppId = "";
+          if (controlButton) controlButton.disabled = true;
+          try {
+            const currentConfig = await window.api.getConfigByName(
+              selectedConfig,
+            );
+            if (!currentConfig || currentConfig.__failed) {
+              showNotification?.(
+                tUi("alert.configLoadFailed", "Something went wrong loading the config."),
+                "#f44336",
+              );
+              return;
+            }
+
+            const customCoverPath = String(
+              currentConfig?.custom_cover_path || "",
+            ).trim();
+            if (customCoverPath) {
+              logCover("info", "cover:redownload:blocked-custom", {
+                configName: selectedConfig,
+                customCoverPath,
+              });
+              if (controlButton) {
+                await updateRedownloadCoverButtonState(
+                  currentConfig?.appid || currentConfig?.appId || "",
+                  selectedConfig,
+                );
+              }
+              showNotification?.(
+                tUi(
+                  "cover.redownload.blockedCustom",
+                  "Custom local image is active. Clear it to redownload the default cover.",
+                ),
+                "#ff9800",
+              );
+              return;
+            }
+
+            const targetAppId = String(
+              currentConfig?.appid ||
+                currentConfig?.appId ||
+                currentConfig?.steamAppId ||
+                "",
+            ).trim();
+            activeRedownloadAppId = targetAppId;
+            if (!targetAppId) {
+              showNotification?.(
+                tUi(
+                  "alert.missingAppIdConfigShort",
+                  "Missing AppID for this config.",
+                ),
+                "#f44336",
+              );
+              return;
+            }
+
+            const platform =
+              currentConfig?.platform ||
+              (await resolvePlatformForCurrentApp(targetAppId)) ||
+              null;
+            const steamAppIdHint =
+              currentConfig?.steamAppId || currentConfig?.steam_appid || "";
+            const fetchAppId = await resolveRemoteAppId(targetAppId, {
+              platform,
+              steamAppId: steamAppIdHint,
+            });
+            const rawCoverName = String(
+              getCoverSearchTerm(targetAppId) ||
+                currentConfig?.displayName ||
+                currentConfig?.name ||
+                "",
+            ).trim();
+            const fallbackName = stripCoverSuffix(rawCoverName) || rawCoverName;
+            if (fallbackName) rememberCoverName(targetAppId, fallbackName);
+
+            const normalizedPlatform = normalizeCoverPlatform(platform);
+            const steamSourceAllowed = shouldUseSteamCoverSources(
+              normalizedPlatform,
+              targetAppId,
+              fetchAppId,
+            );
+            const fallbackOnly =
+              isSteamGridOnlyPlatform(normalizedPlatform) ||
+              !steamSourceAllowed;
+            const steamGridSize = "600x900";
+            const context = {
+              targetAppId,
+              fetchAppId,
+              platform,
+              fallbackName,
+              steamGridSize,
+              fallbackOnly,
+              normalizedPlatform,
+              configName: selectedConfig,
+            };
+            const sources = buildCoverRedownloadSources(context);
+            if (!sources.length) {
+              logCover("warn", "cover:redownload:failed", {
+                targetAppId,
+                fetchAppId,
+                platform,
+                reason: "no-sources",
+              });
+              showNotification?.(
+                tUi(
+                  "cover.redownload.failed",
+                  "No cover source could provide an image.",
+                ),
+                "#f44336",
+              );
+              return;
+            }
+
+            const stateKey = getCoverRedownloadStateKey(
+              targetAppId,
+              platform,
+              fetchAppId,
+            );
+            const startIndex = readNextCoverRedownloadIndex(
+              stateKey,
+              sources.length,
+            );
+            logCover("info", "cover:redownload:start", {
+              targetAppId,
+              fetchAppId,
+              platform,
+              configName: selectedConfig,
+              startSource: sources[startIndex]?.id || null,
+              sourceCount: sources.length,
+            });
+
+            for (let offset = 0; offset < sources.length; offset += 1) {
+              const index = (startIndex + offset) % sources.length;
+              const source = sources[index];
+              try {
+                const ok = await source.run();
+                if (!ok) {
+                  logCover("warn", "cover:redownload:source-miss", {
+                    targetAppId,
+                    fetchAppId,
+                    platform,
+                    source: source.id,
+                  });
+                  continue;
+                }
+
+                writeLastCoverRedownloadIndex(stateKey, index);
+                logCover("info", "cover:redownload:source-hit", {
+                  targetAppId,
+                  fetchAppId,
+                  platform,
+                  source: source.id,
+                });
+                await refreshCoverAfterRedownload(
+                  targetAppId,
+                  platform,
+                  selectedConfig,
+                  {
+                    refreshEmbedded: options?.refreshEmbedded !== false,
+                  },
+                );
+                showNotification?.(
+                  tUiFmt(
+                    "cover.redownload.success",
+                    { source: getCoverRedownloadSourceLabel(source.id) },
+                    "Cover redownloaded from {source}.",
+                  ),
+                  "#4caf50",
+                );
+                return;
+              } catch (err) {
+                logCover("warn", "cover:redownload:source-miss", {
+                  targetAppId,
+                  fetchAppId,
+                  platform,
+                  source: source.id,
+                  error: err?.message || String(err),
+                });
+              }
+            }
+
+            writeLastCoverRedownloadIndex(
+              stateKey,
+              (startIndex + sources.length - 1) % sources.length,
+            );
+            logCover("warn", "cover:redownload:failed", {
+              targetAppId,
+              fetchAppId,
+              platform,
+              sourceCount: sources.length,
+            });
+            showNotification?.(
+              tUi(
+                "cover.redownload.failed",
+                "No cover source could provide an image.",
+              ),
+              "#f44336",
+            );
+          } finally {
+            if (controlButton) {
+              controlButton.disabled = previousDisabled;
+              await updateRedownloadCoverButtonState(
+                activeRedownloadAppId,
+                selectedConfig,
+              );
+            }
+          }
+        }
+        window.redownloadGameCoverForConfig = redownloadGameCoverForConfig;
+        window.redownloadGameCover = async function () {
+          await redownloadGameCoverForConfig("", {
+            button: redownloadCoverBtn,
+          });
         };
 
         // alt AppID
@@ -5156,7 +5939,130 @@
             return;
           }
 
-          await loadLocalCover(String(currentAppId));
+          await loadLocalCover(String(currentAppId), platform, {
+            configName: selectedConfig || "",
+          });
+          if (fallbackBox) fallbackBox.style.display = "none";
+          imgWrap.style.display = "flex";
+        };
+        window.chooseCustomCoverImage = async function () {
+          const selectedConfig = String(
+            document.getElementById("configList")?.value || "",
+          ).trim();
+          if (!selectedConfig) return;
+          const picked =
+            (await window.api.selectImageFile?.()) ||
+            (await window.api.selectFile?.());
+          if (!picked) return;
+          try {
+            const previewSrc = await resolveRenderableCustomCoverSrc(picked);
+            if (previewSrc) {
+              await setImg(previewSrc);
+            }
+          } catch {
+            // Ignore preview failures here; persist and reload through the normal cover pipeline.
+          }
+          const result = await window.api.setCustomCoverPath(
+            selectedConfig,
+            picked,
+          );
+          if (!result?.success) {
+            showNotification?.(
+              result?.error || "Failed to save custom cover image.",
+              "#f44336",
+            );
+            return;
+          }
+          customCoverDataUrlCache.delete(picked);
+          if (result?.coverPath) {
+            customCoverDataUrlCache.delete(String(result.coverPath));
+          }
+          const field = document.getElementById("customCoverPath");
+          if (field) {
+            field.value = String(result?.sourceCoverPath || picked || "").trim();
+          }
+          window.__clearDashboardCachesFor?.(selectedConfig);
+          const renderableCustomSrc = await resolveRenderableCustomCoverSrc(
+            String(result?.coverPath || picked || "").trim(),
+          );
+          try {
+            if (renderableCustomSrc) {
+              localStorage.setItem(
+                `${IMG_CACHE_PREFIX}${selectedConfig}`,
+                renderableCustomSrc,
+              );
+            } else {
+              localStorage.removeItem(`${IMG_CACHE_PREFIX}${selectedConfig}`);
+            }
+          } catch {}
+          const currentConfig = await window.api.getConfigByName(selectedConfig);
+          const currentAppId = String(
+            currentConfig?.appid || currentConfig?.appId || "",
+          ).trim();
+          const currentPlatform = currentConfig?.platform || null;
+          if (currentAppId) {
+            await loadLocalCover(currentAppId, currentPlatform, {
+              configName: selectedConfig,
+            });
+          }
+          if (window.__dashboardOpen) {
+            if (typeof buildDashboard === "function") {
+              buildDashboard().catch(() => {});
+            } else {
+              refreshDashboardImageByConfigName(selectedConfig).catch(() => {});
+            }
+          } else {
+            window.__dashboardNeedsRebuild = true;
+          }
+          if (fallbackBox) fallbackBox.style.display = "none";
+          imgWrap.style.display = "flex";
+        };
+        window.clearCustomCoverImage = async function () {
+          const selectedConfig = String(
+            document.getElementById("configList")?.value || "",
+          ).trim();
+          if (!selectedConfig) return;
+          const result = await window.api.setCustomCoverPath(selectedConfig, "");
+          if (!result?.success) {
+            showNotification?.(
+              result?.error || "Failed to clear custom cover image.",
+              "#f44336",
+            );
+            return;
+          }
+          const previousPath = String(
+            document.getElementById("customCoverPath")?.value || "",
+          ).trim();
+          if (previousPath) {
+            customCoverDataUrlCache.delete(previousPath);
+          }
+          const field = document.getElementById("customCoverPath");
+          if (field) field.value = "";
+          window.__clearDashboardCachesFor?.(selectedConfig);
+          try {
+            localStorage.removeItem(`${IMG_CACHE_PREFIX}${selectedConfig}`);
+          } catch {}
+          const currentConfig = await window.api.getConfigByName(selectedConfig);
+          const currentAppId = String(
+            currentConfig?.appid || currentConfig?.appId || "",
+          ).trim();
+          const currentPlatform = currentConfig?.platform || null;
+          if (currentAppId) {
+            await loadLocalCover(currentAppId, currentPlatform, {
+              configName: selectedConfig,
+            });
+          } else {
+            showFallbackLogo();
+          }
+          if (window.__dashboardOpen) {
+            if (typeof buildDashboard === "function") {
+              buildDashboard().catch(() => {});
+            } else {
+              refreshDashboardImageByConfigName(selectedConfig).catch(() => {});
+            }
+          } else {
+            window.__dashboardNeedsRebuild = true;
+          }
           if (fallbackBox) fallbackBox.style.display = "none";
           imgWrap.style.display = "flex";
         };
@@ -5181,9 +6087,22 @@
                 ? String(payload.platform)
                 : null;
             let selectedAppId = null;
+            let selectedConfig = "";
             try {
-              const selectedConfig =
-                document.getElementById("configList")?.value;
+              selectedConfig = String(
+                document.getElementById("configList")?.value || "",
+              ).trim();
+              const payloadConfigName =
+                typeof payload === "object" && payload?.configName
+                  ? String(payload.configName).trim()
+                  : "";
+              if (
+                payloadConfigName &&
+                selectedConfig &&
+                payloadConfigName !== selectedConfig
+              ) {
+                return;
+              }
               if (selectedConfig && window.api.getConfigByName) {
                 const cfg = await window.api.getConfigByName(selectedConfig);
                 selectedAppId = String(
@@ -5192,7 +6111,9 @@
               }
             } catch {}
             if (!selectedAppId || selectedAppId !== appid) return;
-            await loadLocalCover(appid, platformHint);
+            await loadLocalCover(appid, platformHint, {
+              configName: selectedConfig,
+            });
           });
 
           window.__imageListenerAttached = true;
@@ -7801,6 +8722,8 @@
             executable: null,
             arguments: "",
             process_name: "",
+            custom_cover_path: "",
+            custom_cover_source_path: "",
           };
         }
         const name = entry.name || entry.configName || "";
@@ -7815,6 +8738,8 @@
           executable: entry.executable || null,
           arguments: entry.arguments || "",
           process_name: entry.process_name || entry.processName || "",
+          custom_cover_path: entry.custom_cover_path || "",
+          custom_cover_source_path: entry.custom_cover_source_path || "",
         };
       }
 
@@ -8958,8 +9883,26 @@
         if (!input) return "Hidden";
         if (typeof input === "string") return input.trim() || "Hidden";
         if (typeof input === "object") {
+          const requestedLang = String(lang || "english").trim();
+          const requestedLower = requestedLang.toLowerCase();
+          if (
+            requestedLang &&
+            typeof input[requestedLang] === "string" &&
+            input[requestedLang].trim() !== ""
+          ) {
+            return input[requestedLang];
+          }
+          const caseInsensitiveKey = Object.keys(input).find((key) => {
+            return (
+              String(key || "").toLowerCase() === requestedLower &&
+              typeof input[key] === "string" &&
+              input[key].trim() !== ""
+            );
+          });
+          if (caseInsensitiveKey) {
+            return input[caseInsensitiveKey];
+          }
           return (
-            input[lang] ||
             input.english ||
             Object.values(input).find(
               (v) => typeof v === "string" && v.trim() !== "",
@@ -9054,6 +9997,7 @@
             requestSeq !== configChangeRequestSeq ||
             configList.value !== selectedConfig;
           if (!selectedConfig) {
+            window.__cancelEmbeddedCoverLoads?.();
             lastSelectedConfigMeta = null;
             updateBlacklistButtonState(null);
             const tableBody = document.querySelector("#achievementsTableBody");
@@ -9122,9 +10066,14 @@
             const resolvedName =
               configForUi.displayName || configForUi.name || configForUi.appid;
             rememberCoverName(configForUi.appid, resolvedName);
+            window.__cancelEmbeddedCoverLoads?.();
             window.__showFallbackLogo?.();
             window
-              .__applyEmbeddedGameImageForAppId(configForUi.appid)
+              .__applyEmbeddedGameImageForAppId(
+                configForUi.appid,
+                configForUi.platform || null,
+                { configName: selectedConfig },
+              )
               ?.catch(() => {});
           } else {
             window.__showFallbackLogo?.();
@@ -10184,6 +11133,12 @@
             updateSettingsSoundVolumeLabel();
           }
         }
+        if (prefs.progressPosition) {
+          const el = document.getElementById(
+            "settings-progressPositionDropdown",
+          );
+          if (el) el.value = prefs.progressPosition;
+        }
         const hiddenPlatPos = document.getElementById("platinumPositionValue");
         if (prefs.platinumPosition) {
           const el = document.getElementById(
@@ -10253,6 +11208,12 @@
             "settings-ignoreLeadingArticlesSortCheckbox",
           );
           if (cb) cb.checked = prefs?.ignoreLeadingArticlesSort !== false;
+        }
+        {
+          const cb = document.getElementById(
+            "settings-hideZeroCompletionGamesCheckbox",
+          );
+          if (cb) cb.checked = prefs?.hideZeroCompletionGames === true;
         }
         {
           const cb = document.getElementById(
@@ -10331,8 +11292,8 @@
           );
           if (!achievementLanguageManual) {
             await applyAchievementLanguage(storedUiLang, { manual: false });
-          } else if (languageSelect) {
-            languageSelect.value = storedAchLang;
+          } else {
+            await applyAchievementLanguage(storedAchLang, { manual: false });
           }
           renderSteamApiKeyStatusFromPrefs(prefs);
           applyShowBlacklistPreference(prefs?.showBlacklistedGames);
@@ -10382,6 +11343,12 @@
                 settingsDurationSlider.value = prefs.notificationDuration;
                 updateSettingsDurationLabel();
               }
+            }
+            if (prefs.progressPosition) {
+              const el = document.getElementById(
+                "settings-progressPositionDropdown",
+              );
+              if (el) el.value = prefs.progressPosition;
             }
             const hiddenPlatPos = document.getElementById(
               "platinumPositionValue",
@@ -10862,6 +11829,22 @@
           ignoreLeadingArticlesSortEl.addEventListener("change", async (e) => {
             await window.api.savePreferences({
               ignoreLeadingArticlesSort: e.target.checked,
+            });
+            await loadPreferencesCached().catch(() => {});
+            if (typeof applyDashboardSortAndFilter === "function") {
+              applyDashboardSortAndFilter();
+            }
+          });
+        }
+        const hideZeroCompletionGamesEl = document.getElementById(
+          "settings-hideZeroCompletionGamesCheckbox",
+        );
+        if (hideZeroCompletionGamesEl) {
+          hideZeroCompletionGamesEl.checked =
+            prefs?.hideZeroCompletionGames === true;
+          hideZeroCompletionGamesEl.addEventListener("change", async (e) => {
+            await window.api.savePreferences({
+              hideZeroCompletionGames: e.target.checked,
             });
             await loadPreferencesCached().catch(() => {});
             if (typeof applyDashboardSortAndFilter === "function") {
@@ -11898,6 +12881,12 @@
         });
 
       document
+        .getElementById("settings-progressPositionDropdown")
+        .addEventListener("change", (e) =>
+          window.api.savePreferences({ progressPosition: e.target.value }),
+        );
+
+      document
         .getElementById("settings-presetDropdown")
         .addEventListener("change", (e) =>
           window.api.savePreferences({ preset: e.target.value }),
@@ -11929,6 +12918,7 @@
 
       // Function to sync values between main UI and settings menu
       function syncSettingsToModal() {
+        const prefs = getCachedPreferences() || {};
         // Copy preset options
         const mainPresetDropdown = document.getElementById("presetDropdown");
         const settingsPresetDropdown = document.getElementById(
@@ -11940,7 +12930,6 @@
           if (mainPresetDropdown.value) {
             settingsPresetDropdown.value = mainPresetDropdown.value;
           }
-          const prefs = getCachedPreferences();
           const platinumPresetDropdown = document.getElementById(
             "settings-platinumPresetDropdown",
           );
@@ -11962,7 +12951,6 @@
           if (mainSoundSelect.value) {
             settingsSoundSelect.value = mainSoundSelect.value;
           }
-          const prefs = getCachedPreferences();
           const platinumSoundSelect = document.getElementById(
             "settings-platinumSoundSelect",
           );
@@ -11991,6 +12979,15 @@
             settingsPlatinumPositionDropdown.value = mainPositionDropdown.value;
           }
         }
+        const settingsProgressPositionDropdown = document.getElementById(
+          "settings-progressPositionDropdown",
+        );
+        if (settingsProgressPositionDropdown) {
+          settingsProgressPositionDropdown.value =
+            prefs.progressPosition ||
+            settingsProgressPositionDropdown.value ||
+            "bottom-left";
+        }
 
         // Sync scale slider
         const mainScaleSlider = document.getElementById("scaleSlider");
@@ -12003,7 +13000,6 @@
           updateSettingsScaleLabel();
         }
 
-        const prefs = getCachedPreferences();
         const settingsDurationSlider = document.getElementById(
           "settings-durationSlider",
         );
@@ -12188,6 +13184,9 @@
           ignoreLeadingArticlesSort: checkbox(
             "settings-ignoreLeadingArticlesSortCheckbox",
           ),
+          hideZeroCompletionGames: checkbox(
+            "settings-hideZeroCompletionGamesCheckbox",
+          ),
           overlayControllerSupportEnabled: checkbox(
             "settings-overlayControllerSupportCheckbox",
           ),
@@ -12232,6 +13231,10 @@
           getVal("settings-platinumPositionDropdown") ||
             getVal("platinumPositionValue"),
           base.platinumPosition || snapshot.position,
+        );
+        snapshot.progressPosition = pick(
+          getVal("settings-progressPositionDropdown"),
+          base.progressPosition || "bottom-left",
         );
         snapshot.platinumSound = pick(
           getVal("settings-platinumSoundSelect") ||
@@ -13772,9 +14775,11 @@
 
         const queueDashboardImageLoad = (img, src) => {
           if (!img || !src) return;
-          img.dataset.src = src;
+          const nextSrc = src;
+          img.dataset.src = nextSrc;
           if (!isDashboardBooting()) {
-            img.src = src;
+            if (img.src === nextSrc) return;
+            img.src = nextSrc;
             return;
           }
           if (dashImgQueued.has(img)) return;
@@ -13901,12 +14906,29 @@
           }
         };
 
-        const applyDashboardCardImage = (img, src) => {
+        let dashboardImageCacheBustSeq = 0;
+        const withDashboardImageCacheBuster = (src) => {
+          const safeSrc = String(src || "").trim();
+          if (!safeSrc || safeSrc === fallbackIcon || /^data:/i.test(safeSrc)) {
+            return safeSrc;
+          }
+          const baseSrc = safeSrc.replace(/[?&]_=dash-[^&#]*/g, "");
+          dashboardImageCacheBustSeq += 1;
+          const token = `dash-${Date.now()}-${dashboardImageCacheBustSeq}`;
+          return `${baseSrc}${baseSrc.includes("?") ? "&" : "?"}_=${token}`;
+        };
+
+        const applyDashboardCardImage = (img, src, options = {}) => {
           if (!img || !src) return;
-          img.dataset.src = src;
+          const forceReload = options?.forceReload === true;
+          const nextSrc = forceReload && /^file:/i.test(String(src || ""))
+            ? withDashboardImageCacheBuster(src)
+            : src;
+          img.dataset.src = nextSrc;
           ensureLazyObserver().observe(img);
           if (!isDashboardBooting()) {
-            img.src = src;
+            if (!forceReload && img.src === nextSrc) return;
+            img.src = nextSrc;
           }
         };
 
@@ -13934,9 +14956,23 @@
           const appid = String(task?.appid || "").trim();
           if (!appid) return false;
           const platform = normalizeDashboardImagePlatform(task?.platform);
+          const configName = String(task?.name || "").trim();
           const cacheKey = makeDashboardImageCacheKey(appid, platform);
           if (cacheKey && dashboardImageCache.has(cacheKey)) {
             return true;
+          }
+
+          if (configName) {
+            try {
+              const cfg = await getConfigCached(configName);
+              const customCoverPath = String(
+                cfg?.custom_cover_path || "",
+              ).trim();
+              if (customCoverPath) {
+                await refreshDashboardImageByConfigName(configName);
+                return true;
+              }
+            } catch {}
           }
 
           try {
@@ -14059,6 +15095,7 @@
         async function refreshDashboardImageByAppId(
           appid,
           platformHint = null,
+          options = {},
         ) {
           const id = String(appid || "").trim();
           if (!id || !gridEl) return;
@@ -14068,8 +15105,36 @@
           ).filter((card) => String(card?.dataset?.appid || "").trim() === id);
           if (!cards.length) return;
 
-          const cardsByPlatform = new Map();
+          const customCoverCards = [];
+          const defaultCoverCards = [];
           for (const card of cards) {
+            const configName = String(card?.dataset?.name || "").trim();
+            if (!configName) {
+              defaultCoverCards.push(card);
+              continue;
+            }
+            let cfg = null;
+            try {
+              cfg = await getConfigCached(configName);
+            } catch {
+              cfg = null;
+            }
+            const customCoverPath = String(cfg?.custom_cover_path || "").trim();
+            if (customCoverPath) {
+              customCoverCards.push({ card, configName });
+            } else {
+              defaultCoverCards.push(card);
+            }
+          }
+
+          for (const { configName } of customCoverCards) {
+            await refreshDashboardImageByConfigName(configName);
+          }
+
+          if (!defaultCoverCards.length) return;
+
+          const cardsByPlatform = new Map();
+          for (const card of defaultCoverCards) {
             const platform = normalizeDashboardImagePlatform(
               card?.dataset?.platform,
             );
@@ -14119,8 +15184,66 @@
             for (const card of platformCards) {
               const img = card.querySelector(".dash-thumb");
               if (!img) continue;
-              applyDashboardCardImage(img, imgSrc);
+              applyDashboardCardImage(img, imgSrc, {
+                forceReload: options?.forceReload === true,
+              });
             }
+          }
+        }
+
+        async function refreshDashboardImageByConfigName(
+          configName,
+          options = {},
+        ) {
+          const safeName = String(configName || "").trim();
+          if (!safeName || !gridEl || !window.api?.getConfigByName) return;
+          dashboardConfigCache.delete(safeName);
+          const cfg = await window.api.getConfigByName(safeName);
+          if (!cfg || cfg.__failed || cfg.__notFound) return;
+
+          const cards = Array.from(
+            gridEl.querySelectorAll(".dash-card"),
+          ).filter(
+            (card) => String(card?.dataset?.name || "").trim() === safeName,
+          );
+          if (!cards.length) return;
+
+          const appid = String(cfg?.appid || cfg?.appId || "").trim();
+          const platform = normalizeDashboardImagePlatform(cfg?.platform);
+          const customCoverPath = String(cfg?.custom_cover_path || "").trim();
+
+          let imgSrc = null;
+          if (customCoverPath) {
+            imgSrc = await (window.__resolveRenderableCustomCoverSrc?.(
+              customCoverPath,
+            ) || "");
+            if (appid) {
+              clearDashboardImageCacheByAppId(appid);
+              clearDashboardCoverEnsureState(appid, platform || null);
+            }
+          } else if (appid) {
+            await refreshDashboardImageByAppId(appid, platform || null, {
+              forceReload: options?.forceReload === true,
+            });
+            return;
+          } else {
+            imgSrc = fallbackIcon;
+          }
+
+          try {
+            if (imgSrc) {
+              localStorage.setItem(IMG_CACHE_PREFIX + safeName, imgSrc);
+            } else {
+              localStorage.removeItem(IMG_CACHE_PREFIX + safeName);
+            }
+          } catch {}
+
+          for (const card of cards) {
+            const img = card.querySelector(".dash-thumb");
+            if (!img) continue;
+            applyDashboardCardImage(img, imgSrc || fallbackIcon, {
+              forceReload: options?.forceReload === true,
+            });
           }
         }
 
@@ -14131,6 +15254,35 @@
             } catch {}
           }
           window.__dashboardImageListenerUnsub = window.api.onImageUpdate(async (payload) => {
+            const payloadConfigName =
+              typeof payload === "object" && payload?.configName
+                ? String(payload.configName).trim()
+                : "";
+            const isCustomCoverUpdate =
+              typeof payload === "object" &&
+              payload &&
+              Object.prototype.hasOwnProperty.call(payload, "custom");
+            if (
+              isCustomCoverUpdate &&
+              payloadConfigName &&
+              typeof buildDashboard === "function"
+            ) {
+              window.__clearDashboardCachesFor?.(payloadConfigName);
+              dashboardConfigCache.delete(payloadConfigName);
+              try {
+                localStorage.removeItem(IMG_CACHE_PREFIX + payloadConfigName);
+              } catch {}
+              if (window.__dashboardOpen) {
+                if (typeof buildDashboard === "function") {
+                  await buildDashboard();
+                } else {
+                  await refreshDashboardImageByConfigName(payloadConfigName);
+                }
+              } else {
+                window.__dashboardNeedsRebuild = true;
+              }
+              return;
+            }
             const appid =
               typeof payload === "object" && payload?.appid
                 ? String(payload.appid)
@@ -14303,6 +15455,12 @@
           if (!card) return false;
           if (hideBlacklisted && card.dataset.blacklisted === "1") {
             return false;
+          }
+          if (shouldHideZeroCompletionGamesInDashboard()) {
+            const pct = Number(card.dataset.pct || 0);
+            if (Number.isFinite(pct) && pct <= 0) {
+              return false;
+            }
           }
           if (platformFilter !== "all") {
             const cardPlatform = normalizeDashboardPlatformValue(
@@ -15128,6 +16286,9 @@
           const regenBtn = dashboardContextMenu.querySelector(
             '.dash-menu-item[data-action="regen"]',
           );
+          const redownloadCoverBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="redownload-cover"]',
+          );
           const steamBtn = dashboardContextMenu.querySelector(
             '.dash-menu-item[data-action="steam"]',
           );
@@ -15202,6 +16363,21 @@
             steamDbBtn.textContent = tUi("dashboardMenuSteamDb", "SteamDB");
             steamDbBtn.title = steamDbBtn.textContent;
           }
+          if (redownloadCoverBtn) {
+            const hasCustomCover = !!String(
+              target.customCoverPath || "",
+            ).trim();
+            redownloadCoverBtn.textContent = tUi(
+              "dashboardMenuRedownloadCover",
+              "Redownload Cover",
+            );
+            redownloadCoverBtn.title = hasCustomCover
+              ? tUi(
+                  "title.redownload-cover-btn.customBlocked",
+                  "Custom local image is active. Clear it to redownload the default cover.",
+                )
+              : redownloadCoverBtn.textContent;
+          }
           setMenuItemDisabled(
             ignoreBtn,
             scope?.mode === "selection"
@@ -15216,6 +16392,10 @@
           );
           setMenuItemDisabled(clearSelectionBtn, dashboardSelection.size === 0);
           setMenuItemDisabled(regenBtn, !target.appid);
+          setMenuItemDisabled(
+            redownloadCoverBtn,
+            !target.appid || !!String(target.customCoverPath || "").trim(),
+          );
           setMenuItemDisabled(steamBtn, !hasResolvedSteamTarget);
           setMenuItemDisabled(steamDbBtn, !hasResolvedSteamTarget);
         }
@@ -15281,6 +16461,7 @@
             displayName: card.dataset.display || card.dataset.name || "",
             appid: card.dataset.appid || "",
             platform: card.dataset.platform || "",
+            customCoverPath: card.dataset.customCoverPath || "",
             blacklisted: card.dataset.blacklisted === "1",
             el: card,
           };
@@ -15294,6 +16475,8 @@
             if (cfg.appid) dashboardContextTarget.appid = String(cfg.appid);
             dashboardContextTarget.platform = cfg.platform || "";
             dashboardContextTarget.steamAppId = cfg?.steamAppId || "";
+            dashboardContextTarget.customCoverPath =
+              cfg?.custom_cover_path || "";
             dashboardContextTarget.blacklisted = cfg.appid
               ? isAppIdInBlacklist(String(cfg.appid), cfg.platform || "")
               : target.blacklisted;
@@ -15719,6 +16902,9 @@
                 total: Number(stored?.total) || 0,
                 updated: Number(stored?.updated) || 0,
               };
+              const customCoverPath = String(
+                it.custom_cover_path || "",
+              ).trim();
               const imgCacheKey = IMG_CACHE_PREFIX + it.name;
               const cachedImg = localStorage.getItem(imgCacheKey);
 
@@ -15733,8 +16919,9 @@
                   ? isAppIdInBlacklist(it.appid, it.platform)
                   : false,
                 progress: normalized,
-                img: cachedImg || fallbackIcon,
-                hasCachedImg: Boolean(cachedImg),
+                custom_cover_path: customCoverPath,
+                img: customCoverPath ? fallbackIcon : cachedImg || fallbackIcon,
+                hasCachedImg: !customCoverPath && Boolean(cachedImg),
               };
             });
 
@@ -15768,6 +16955,11 @@
               if (cardData.platform) {
                 card.dataset.platform = String(cardData.platform);
               }
+              if (cardData.custom_cover_path) {
+                card.dataset.customCoverPath = String(
+                  cardData.custom_cover_path,
+                );
+              }
 
               const pill = document.createElement("div");
               pill.className = "dash-progresspill";
@@ -15782,9 +16974,10 @@
               img.loading = "lazy";
               img.decoding = "async";
               img.alt = cardData.displayName;
-              img.src = bootChunkMode ? fallbackIcon : cardData.img;
+              const initialImgSrc = cardData.img;
+              img.src = bootChunkMode ? fallbackIcon : initialImgSrc;
               if (cardData.img) {
-                img.dataset.src = cardData.img;
+                img.dataset.src = initialImgSrc;
               }
               attachDashboardCardImageErrorHandler(
                 img,
@@ -15906,16 +17099,44 @@
                     meta.data.platform = platform;
                     meta.element.dataset.platform = platform;
                   }
-                  const applyDashboardImg = (img, src) => {
+                  const applyDashboardImg = (img, src, options = {}) => {
                     if (!img || !src) return;
-                    img.dataset.src = src;
+                    const forceReload = options?.forceReload === true;
+                    const nextSrc = forceReload && /^file:/i.test(String(src || ""))
+                      ? withDashboardImageCacheBuster(src)
+                      : src;
+                    img.dataset.src = nextSrc;
                     ensureLazyObserver().observe(img);
                     if (!bootChunkMode) {
-                      img.src = src;
+                      if (!forceReload && img.src === nextSrc) return;
+                      img.src = nextSrc;
                     }
                   };
+                  const customCoverPath = String(
+                    cfg?.custom_cover_path || "",
+                  ).trim();
                   let imgSrc = null;
-                  if (appid) {
+                  if (customCoverPath) {
+                    imgSrc =
+                      (await window.__resolveRenderableCustomCoverSrc?.(
+                        customCoverPath,
+                      )) || null;
+                    if (imgSrc) {
+                      applyDashboardImg(meta.img, imgSrc);
+                      attachDashboardCardImageErrorHandler(
+                        meta.img,
+                        meta.element,
+                        it.name,
+                      );
+                    } else {
+                      applyDashboardImg(meta.img, fallbackIcon);
+                      attachDashboardCardImageErrorHandler(
+                        meta.img,
+                        meta.element,
+                        it.name,
+                      );
+                    }
+                  } else if (appid) {
                     const dashboardCacheKey = makeDashboardImageCacheKey(
                       appid,
                       normalizedPlatform,
@@ -15977,6 +17198,13 @@
                     const cardImg = meta.img;
                     attachDashboardCardImageErrorHandler(
                       cardImg,
+                      meta.element,
+                      it.name,
+                    );
+                  } else {
+                    applyDashboardImg(meta.img, fallbackIcon);
+                    attachDashboardCardImageErrorHandler(
+                      meta.img,
                       meta.element,
                       it.name,
                     );
@@ -16224,6 +17452,14 @@
             try {
               if (action === "edit") {
                 await window.openEditConfigModalByName?.(target.name);
+                return;
+              }
+              if (action === "redownload-cover") {
+                if (typeof window.redownloadGameCoverForConfig === "function") {
+                  await window.redownloadGameCoverForConfig(target.name, {
+                    refreshEmbedded: false,
+                  });
+                }
                 return;
               }
               if (action === "select") {
@@ -16540,6 +17776,7 @@
         }
         function clearDashboardCachesFor(cfgName) {
           if (!cfgName) return;
+          dashboardConfigCache.delete(cfgName);
           clearDashboardSavedCache(cfgName);
           clearDashboardSchemaCache(cfgName);
         }
@@ -16894,6 +18131,23 @@
             "settings-ignoreLeadingArticlesSortCheckbox",
           );
           return checkbox ? checkbox.checked !== false : true;
+        }
+
+        function shouldHideZeroCompletionGamesInDashboard() {
+          const prefs =
+            typeof getCachedPreferences === "function"
+              ? getCachedPreferences()
+              : {};
+          if (
+            prefs &&
+            Object.prototype.hasOwnProperty.call(prefs, "hideZeroCompletionGames")
+          ) {
+            return prefs.hideZeroCompletionGames === true;
+          }
+          const checkbox = document.getElementById(
+            "settings-hideZeroCompletionGamesCheckbox",
+          );
+          return checkbox ? checkbox.checked === true : false;
         }
 
         function normalizeDashboardTitleForSort(

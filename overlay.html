@@ -666,8 +666,26 @@
         if (!input) return hiddenFallback;
         if (typeof input === "string") return input.trim() || hiddenFallback;
         if (typeof input === "object") {
+          const requestedLang = String(lang || "english").trim();
+          const requestedLower = requestedLang.toLowerCase();
+          if (
+            requestedLang &&
+            typeof input[requestedLang] === "string" &&
+            input[requestedLang].trim() !== ""
+          ) {
+            return input[requestedLang];
+          }
+          const caseInsensitiveKey = Object.keys(input).find((key) => {
+            return (
+              String(key || "").toLowerCase() === requestedLower &&
+              typeof input[key] === "string" &&
+              input[key].trim() !== ""
+            );
+          });
+          if (caseInsensitiveKey) {
+            return input[caseInsensitiveKey];
+          }
           return (
-            input[lang] ||
             input.english ||
             Object.values(input).find(
               (v) => typeof v === "string" && v.trim() !== "",

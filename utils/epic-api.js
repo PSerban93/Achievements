@@ -18,6 +18,16 @@ function normalizeRows(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function createEpicApiError(message, meta = {}) {
+  const err = new Error(String(message || "Epic API error"));
+  if (meta && typeof meta === "object") {
+    for (const [key, value] of Object.entries(meta)) {
+      if (value !== undefined) err[key] = value;
+    }
+  }
+  return err;
+}
+
 function getEpicAuthHeader(options = {}) {
   const accessToken = String(options?.accessToken || "").trim();
   const tokenType = String(options?.tokenType || "bearer").trim() || "bearer";
@@ -47,25 +57,46 @@ async function epicGraphQL(query, variables = {}, options = {}) {
     "User-Agent": "EpicGamesLauncher",
     ...getEpicAuthHeader(options),
   };
-  const res = await axios.post(
-    EPIC_GRAPHQL_URL,
-    { query, variables },
-    {
-      timeout: timeoutMs,
-      headers,
-      responseType: "json",
-      validateStatus: (status) => status >= 200 && status < 500,
-    },
-  );
+  let res = null;
+  try {
+    res = await axios.post(
+      EPIC_GRAPHQL_URL,
+      { query, variables },
+      {
+        timeout: timeoutMs,
+        headers,
+        responseType: "json",
+        validateStatus: (status) => status >= 200 && status < 500,
+      },
+    );
+  } catch (err) {
+    throw createEpicApiError(err?.message || "Epic GraphQL request failed", {
+      status: Number(err?.response?.status || 0) || null,
+      code: err?.code || null,
+      endpoint: EPIC_GRAPHQL_URL,
+      response: err?.response?.data || null,
+      url: EPIC_GRAPHQL_URL,
+    });
+  }
   if (res.status >= 400) {
-    throw new Error(`Epic GraphQL ${res.status}`);
+    throw createEpicApiError(`Epic GraphQL ${res.status}`, {
+      status: res.status,
+      endpoint: EPIC_GRAPHQL_URL,
+      response: res?.data || null,
+      url: EPIC_GRAPHQL_URL,
+    });
   }
   if (Array.isArray(res?.data?.errors) && res.data.errors.length) {
     const message = res.data.errors
       .map((err) => err?.message)
       .filter(Boolean)
       .join("; ");
-    throw new Error(message || "Epic GraphQL error");
+    throw createEpicApiError(message || "Epic GraphQL error", {
+      status: res?.status || null,
+      endpoint: EPIC_GRAPHQL_URL,
+      response: res?.data || null,
+      url: EPIC_GRAPHQL_URL,
+    });
   }
   return res.data || {};
 }

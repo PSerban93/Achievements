@@ -1048,10 +1048,12 @@ body::-webkit-scrollbar {
 }
 
 .settings-content {
-  width: 600px;
-  height: 600px;
-  max-width: 90%;
-  max-height: 80vh;
+  width: min(960px, 92vw);
+  height: min(760px, 88vh);
+  max-width: 92vw;
+  max-height: 88vh;
+  min-width: 560px;
+  min-height: 520px;
   background-color: var(--dracula-background);
   border: 1px solid var(--dracula-purple);
   border-radius: 12px;
@@ -1068,6 +1070,24 @@ body::-webkit-scrollbar {
   z-index: 10006;
 }
 
+@media (max-width: 720px), (max-height: 700px) {
+  .settings-content {
+    width: 94vw;
+    height: 90vh;
+    min-width: 0;
+    min-height: 0;
+    padding: 18px;
+    gap: 16px;
+  }
+
+  .settings-tabs {
+    min-width: 108px;
+    width: 108px;
+    margin-right: 16px;
+    padding-right: 16px;
+  }
+}
+
 .settings-menu.hidden {
   opacity: 0;
   pointer-events: none;
@@ -1082,7 +1102,7 @@ body::-webkit-scrollbar {
   display: flex;
   flex-direction: column;
   min-width: 120px;
-  width: 120px;
+  /* width: 120px; */
   border-right: 1px solid var(--dracula-current-line);
   margin-right: 20px;
   padding-right: 20px;
@@ -1431,10 +1451,10 @@ body::-webkit-scrollbar {
   object-position: center;
 }
 
-#edit-btn {
+#edit-btn,
+#redownload-cover-btn {
   position: absolute;
   top: 10px;
-  right: 10px;
   background: rgba(255, 255, 255, 0.12);
   color: white;
   border: none;
@@ -1443,8 +1463,22 @@ body::-webkit-scrollbar {
   cursor: pointer;
 }
 
-#edit-btn:hover {
+#edit-btn {
+  right: 10px;
+}
+
+#redownload-cover-btn {
+  right: 48px;
+}
+
+#edit-btn:hover,
+#redownload-cover-btn:hover {
   background: rgba(255, 255, 255, 0.2);
+}
+
+#redownload-cover-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .progress-bar {
@@ -1975,7 +2009,7 @@ body.window-maximized .dashboard-grid {
 
 /* ——— Folders list  ——— */
 #foldersList {
-  max-height: 450px;
+  max-height: 590px;
   overflow: auto !important;
   display: flex;
   flex-direction: column;

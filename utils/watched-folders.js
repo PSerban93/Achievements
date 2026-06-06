@@ -47,6 +47,7 @@ const {
   resolveGogGalaxyProductByClientId,
   resolveGogOfficialGameplayDbForConfig,
 } = require("./gog-galaxy-local");
+const { normalizeProcessNameValue } = require("./process-name-utils");
 const {
   buildUbisoftOfficialSnapshot,
   listUbisoftOfficialSpoolEntries,
@@ -555,7 +556,7 @@ module.exports = function makeWatchedFolders({
             (normalizePlatform(meta?.platform) || "steam") === desiredPlatform,
         )
       : metas.slice();
-    if (!candidates.length) candidates = metas.slice();
+    if (!candidates.length && !desiredPlatform) candidates = metas.slice();
     if (normalizedPath) {
       const exact = candidates.find(
         (meta) => getMetaNormalizedSavePath(meta) === normalizedPath,
@@ -1411,6 +1412,8 @@ module.exports = function makeWatchedFolders({
                   skipPostIndex: true,
                   allowExistingVariant: task.allowExistingVariant === true,
                   __savePathOverride: task.__savePathOverride || null,
+                  __gogName: task.__gogName || null,
+                  __gogLaunchMetadata: task.__gogLaunchMetadata || null,
                   __gogClientId: task.__gogClientId || null,
                   __gogUserId: task.__gogUserId || null,
                   __gogGameplayDbPath: task.__gogGameplayDbPath || null,
@@ -4392,7 +4395,7 @@ module.exports = function makeWatchedFolders({
           (meta) => normalizePlatform(meta?.platform) === desiredPlatform,
         )
       : metas.slice();
-    if (!candidates.length) candidates = metas.slice();
+    if (!candidates.length && !desiredPlatform) candidates = metas.slice();
     if (normalizedPath) {
       const pathMatch = candidates.find(
         (meta) => getMetaNormalizedSavePath(meta) === normalizedPath,
@@ -6430,6 +6433,37 @@ module.exports = function makeWatchedFolders({
   async function findGogInfoAppId(root, maxDepth = 3, yieldIfNeeded) {
     const pattern = /^goggame-(\d+)\.info$/i;
     const found = [];
+    const normalizeGogTaskPath = (value) =>
+      typeof value === "string" ? value.trim() : "";
+    const pickGogInfoLaunchMetadata = (parsed, baseDir) => {
+      const tasks = Array.isArray(parsed?.playTasks) ? parsed.playTasks : [];
+      const ranked = tasks
+        .map((task, index) => {
+          const taskPath = normalizeGogTaskPath(task?.path);
+          if (!taskPath || !/\.exe$/i.test(taskPath)) return null;
+          let score = 100;
+          if (task?.isPrimary === true) score += 50;
+          if (String(task?.category || "").toLowerCase() === "game") score += 25;
+          if (String(task?.type || "").toLowerCase() === "filetask") score += 10;
+          return { task, index, score };
+        })
+        .filter(Boolean)
+        .sort((left, right) => right.score - left.score || left.index - right.index);
+      const selected = ranked[0]?.task || null;
+      const taskPath = normalizeGogTaskPath(selected?.path);
+      if (!taskPath) return null;
+      const executable = path.isAbsolute(taskPath)
+        ? taskPath
+        : path.join(baseDir, taskPath);
+      const processName = normalizeProcessNameValue(
+        path.win32.basename(taskPath.replace(/\//g, "\\")),
+      );
+      return {
+        executable,
+        arguments: "",
+        process_name: processName,
+      };
+    };
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
       let entries;
@@ -6459,6 +6493,7 @@ module.exports = function makeWatchedFolders({
         let fromJson = "";
         let rootFromJson = "";
         let parsedName = "";
+        let launchMetadata = null;
         try {
           const parsed = JSON.parse(raw);
           const val =
@@ -6480,6 +6515,7 @@ module.exports = function makeWatchedFolders({
           if (parsed?.name && typeof parsed.name === "string") {
             parsedName = parsed.name.trim();
           }
+          launchMetadata = pickGogInfoLaunchMetadata(parsed, path.dirname(file));
         } catch {
           /* ignore json parse */
         }
@@ -6493,6 +6529,7 @@ module.exports = function makeWatchedFolders({
             rootGameId: rootGameId || gameId,
             name: parsedName,
             file,
+            launchMetadata,
           });
         }
       } catch {
@@ -6509,6 +6546,7 @@ module.exports = function makeWatchedFolders({
       appid: baseEntry.rootGameId || baseEntry.gameId,
       baseDir: path.dirname(baseEntry.file),
       name: baseEntry.name || null,
+      launchMetadata: baseEntry.launchMetadata || null,
     };
   }
 
@@ -6722,6 +6760,9 @@ module.exports = function makeWatchedFolders({
         };
         if (opts.__gogName) {
           genOptions.preferredName = opts.__gogName;
+        }
+        if (opts.__gogLaunchMetadata) {
+          genOptions.launchMetadata = opts.__gogLaunchMetadata;
         }
         if (opts.__savePathOverride) {
           genOptions.savePathOverride = opts.__savePathOverride;
@@ -8741,6 +8782,7 @@ module.exports = function makeWatchedFolders({
                   normalizedPath,
                   __savePathOverride: saveRoot,
                   __gogName: gogInfoFound.name || null,
+                  __gogLaunchMetadata: gogInfoFound.launchMetadata || null,
                 });
                 if (normalizedPath) markPendingSavePath(gogId, normalizedPath);
               }
@@ -8899,6 +8941,7 @@ module.exports = function makeWatchedFolders({
               normalizedPath: normalizeObservedPath(saveRoot, gogId),
               __savePathOverride: saveRoot,
               __gogName: gogInfoFound.name || null,
+              __gogLaunchMetadata: gogInfoFound.launchMetadata || null,
             });
             markPendingSavePath(gogId, normalizeObservedPath(saveRoot, gogId));
           }

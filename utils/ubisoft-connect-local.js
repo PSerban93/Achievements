@@ -9,6 +9,7 @@ const {
   writeAchievementPercentagesSidecar,
 } = require("./achievement-rarity");
 const { createLogger } = require("./logger");
+const { normalizeProcessNameValue } = require("./process-name-utils");
 
 let electronApp = null;
 try {
@@ -115,6 +116,55 @@ function normalizeQuotedText(value) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   return raw.replace(/^"+|"+$/g, "").trim();
+}
+
+function extractRelativeExecutableNames(block) {
+  const candidates = [];
+  const seen = new Set();
+  const relativeRe = /^\s*relative:\s*([^\r\n]+)/gim;
+  let match = null;
+  while ((match = relativeRe.exec(String(block || "")))) {
+    const raw = normalizeQuotedText(match[1] || "");
+    if (!/\.exe$/i.test(raw)) continue;
+    const name = path.basename(raw.replace(/\//g, "\\"));
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push(name);
+  }
+  return candidates;
+}
+
+function scoreUbisoftProcessCandidate(name) {
+  const lower = String(name || "").toLowerCase();
+  if (!lower.endsWith(".exe")) return -100;
+  let score = 100;
+  if (/(updater|update|patch|launcher|setup|install|unins|uninstall)/i.test(lower)) {
+    score -= 80;
+  }
+  if (/(editor|benchmark|settings|config|crash|reporter|support|server)/i.test(lower)) {
+    score -= 45;
+  }
+  if (/(shipping|game|win64|x64|dx11|dx12)/i.test(lower)) {
+    score += 15;
+  }
+  return score;
+}
+
+function extractUbisoftProcessName(block) {
+  const candidates = extractRelativeExecutableNames(block);
+  if (!candidates.length) return "";
+  const ranked = candidates
+    .map((name, index) => ({
+      name,
+      index,
+      score: scoreUbisoftProcessCandidate(name),
+    }))
+    .filter((entry) => entry.score >= 70)
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+  if (!ranked.length) return "";
+  return normalizeProcessNameValue(ranked.map((entry) => entry.name));
 }
 
 function readUplaySteamMapping() {
@@ -572,6 +622,7 @@ function readUbisoftConfigurationsIndex(configurationsPath = DEFAULT_UBISOFT_CON
     const spaceId = normalizeQuotedText(
       block.match(/^\s*space_id:\s*([^\r\n]+)/m)?.[1] || "",
     );
+    const processName = extractUbisoftProcessName(block);
     blocks.push({
       achievementsSpec,
       normalizedAchievementsSpec: normalizeAchievementsSpec(achievementsSpec),
@@ -582,6 +633,7 @@ function readUbisoftConfigurationsIndex(configurationsPath = DEFAULT_UBISOFT_CON
       rootName,
       title: gameIdentifier || displayName || rootName || "",
       spaceId,
+      processName,
     });
   }
 
@@ -666,6 +718,7 @@ function resolveUbisoftAchievementsArchiveForAppId(appid, options = {}) {
     gameCode: best.metadata?.gameCode || "",
     achievementsSyncId: best.metadata?.achievementsSyncId || "",
     spaceId: best.metadata?.spaceId || "",
+    processName: best.metadata?.processName || "",
   };
 }
 
