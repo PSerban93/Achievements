@@ -8099,8 +8099,10 @@ ipcMain.handle(
             const nextProductId = synced.productId || productId || "";
             const delta = getEpicOfficialUnlockedDelta(cached, snapshot);
             const hadCachedSnapshot = Object.keys(cached || {}).length > 0;
-            const cachedEarnedCount = countEpicOfficialEarnedAchievements(cached);
-            const nextEarnedCount = countEpicOfficialEarnedAchievements(snapshot);
+            const cachedEarnedCount =
+              countEpicOfficialEarnedAchievements(cached);
+            const nextEarnedCount =
+              countEpicOfficialEarnedAchievements(snapshot);
             if (!hadCachedSnapshot && Number(synced.totalUnlocked || 0) > 0) {
               markEpicOfficialSilentSeed(
                 configName,
@@ -8125,8 +8127,7 @@ ipcMain.handle(
                   nextEarnedCount,
                   preservedEarnedCount:
                     preservedSnapshot.preservedEarnedCount || 0,
-                  reportedTotalUnlocked:
-                    Number(synced.totalUnlocked || 0) || 0,
+                  reportedTotalUnlocked: Number(synced.totalUnlocked || 0) || 0,
                 },
               );
             }
@@ -9844,7 +9845,7 @@ function createNotificationWindow(message) {
     width: aw,
     height: ah,
   } = screen.getPrimaryDisplay().workArea;
-  const gapX = Math.round(16 * scale);
+  const gapX = Math.round(0 * scale);
   const gapY = Math.round(0 * scale);
 
   let x = 0,
@@ -10059,11 +10060,7 @@ ipcMain.handle("checkLocalGameImage", async (_event, appid, platformArg) => {
   }
   for (const candidatePlatform of candidatePlatforms) {
     if (candidatePlatform === platform) continue;
-    const candidateDir = path.join(
-      baseDir,
-      candidatePlatform,
-      `${appid}`,
-    );
+    const candidateDir = path.join(baseDir, candidatePlatform, `${appid}`);
     const candidatePath = pickExistingCoverImagePath(candidateDir, appid);
     if (!candidatePath) continue;
     let resolvedPath = candidatePath;
@@ -10136,33 +10133,34 @@ ipcMain.handle("checkExecutableExists", async (_event, exePath) => {
 ipcMain.handle(
   "saveGameImage",
   async (_event, appid, buffer, platformArg, meta = {}) => {
-  const platform = normalizePlatform(platformArg) || getPlatformForAppId(appid);
-  const extension = getCoverExtensionFromMeta(meta);
-  ipcLogger.info("saveGameImage:request", {
-    appid,
-    platform,
-    extension,
-    sourceUrl: String(meta?.sourceUrl || meta?.url || "").trim() || null,
-    contentType:
-      String(meta?.contentType || meta?.mimeType || "").trim() || null,
-  });
-  try {
-    const imageDir = path.join(
-      app.getPath("userData"),
-      "images",
-      platform || "steam",
-      String(appid),
-    );
-    if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
-    const fullPath = path.join(imageDir, `${appid}${extension}`);
-    removeSiblingCoverImageFormats(imageDir, appid, fullPath);
-    fs.writeFileSync(fullPath, Buffer.from(buffer));
-    broadcastToAll("update-image", { appid: String(appid), platform });
-    return { success: true, path: fullPath };
-  } catch (err) {
-    notifyError(tUi("main.notify.image.saveFailed", { error: err.message }));
-    return { success: false, error: err.message };
-  }
+    const platform =
+      normalizePlatform(platformArg) || getPlatformForAppId(appid);
+    const extension = getCoverExtensionFromMeta(meta);
+    ipcLogger.info("saveGameImage:request", {
+      appid,
+      platform,
+      extension,
+      sourceUrl: String(meta?.sourceUrl || meta?.url || "").trim() || null,
+      contentType:
+        String(meta?.contentType || meta?.mimeType || "").trim() || null,
+    });
+    try {
+      const imageDir = path.join(
+        app.getPath("userData"),
+        "images",
+        platform || "steam",
+        String(appid),
+      );
+      if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
+      const fullPath = path.join(imageDir, `${appid}${extension}`);
+      removeSiblingCoverImageFormats(imageDir, appid, fullPath);
+      fs.writeFileSync(fullPath, Buffer.from(buffer));
+      broadcastToAll("update-image", { appid: String(appid), platform });
+      return { success: true, path: fullPath };
+    } catch (err) {
+      notifyError(tUi("main.notify.image.saveFailed", { error: err.message }));
+      return { success: false, error: err.message };
+    }
   },
 );
 
@@ -10364,7 +10362,10 @@ function pruneRecentAchievementNotificationKeys(now = Date.now()) {
 }
 
 function buildAchievementNotificationDedupeKey(notificationData = {}) {
-  const normalize = (value) => String(value || "").trim().toLowerCase();
+  const normalize = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase();
   return [
     normalize(notificationData.config_path || notificationData.configName),
     normalize(notificationData.displayName),
@@ -13507,13 +13508,19 @@ ipcMain.handle("config:set-custom-cover-path", async (_event, payload = {}) => {
       delete config.custom_cover_path;
       delete config.custom_cover_source_path;
     }
-    if (previousManagedCoverPath && previousManagedCoverPath !== config.custom_cover_path) {
+    if (
+      previousManagedCoverPath &&
+      previousManagedCoverPath !== config.custom_cover_path
+    ) {
       try {
         if (fs.existsSync(previousManagedCoverPath)) {
           fs.unlinkSync(previousManagedCoverPath);
         }
       } catch {}
-      removeManagedCustomCoverVariants(safeName, config.custom_cover_path || "");
+      removeManagedCustomCoverVariants(
+        safeName,
+        config.custom_cover_path || "",
+      );
     }
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
     notifyConfigsChanged();
@@ -13532,7 +13539,8 @@ ipcMain.handle("config:set-custom-cover-path", async (_event, payload = {}) => {
       success: true,
       configName: safeName,
       coverPath: String(config?.custom_cover_path || "").trim() || null,
-      sourceCoverPath: String(config?.custom_cover_source_path || "").trim() || null,
+      sourceCoverPath:
+        String(config?.custom_cover_source_path || "").trim() || null,
     };
   } catch (err) {
     ipcLogger.error("config:set-custom-cover-path:error", {
@@ -15669,12 +15677,17 @@ function preserveEpicOfficialEarnedStateFromCache(
     if (!cachedEntry || typeof cachedEntry !== "object") continue;
     if (cachedEntry.earned !== true) continue;
     const nextEntry = merged[key];
-    if (!nextEntry || typeof nextEntry !== "object" || nextEntry.earned !== true) {
+    if (
+      !nextEntry ||
+      typeof nextEntry !== "object" ||
+      nextEntry.earned !== true
+    ) {
       merged[key] = {
         ...(nextEntry && typeof nextEntry === "object" ? nextEntry : {}),
         ...cachedEntry,
         earned: true,
-        earned_time: Number(cachedEntry.earned_time || 0) || cachedEntry.earned_time || 0,
+        earned_time:
+          Number(cachedEntry.earned_time || 0) || cachedEntry.earned_time || 0,
       };
       changed = true;
       preservedEarnedCount += 1;
@@ -18393,9 +18406,7 @@ function detectImageMimeFromBuffer(buffer) {
     bytes.every((value, index) => buffer[offset + index] === value);
 
   if (hasPrefix([0xff, 0xd8, 0xff])) return "image/jpeg";
-  if (
-    hasPrefix([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-  ) {
+  if (hasPrefix([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) {
     return "image/png";
   }
   if (hasPrefix([0x47, 0x49, 0x46, 0x38])) return "image/gif";
@@ -18486,7 +18497,10 @@ function pickExistingCoverImagePath(baseDir, appid) {
 function removeSiblingCoverImageFormats(baseDir, appid, keepPath = "") {
   const keepResolved = String(keepPath || "").trim();
   for (const candidate of getCoverImageCandidatePaths(baseDir, appid)) {
-    if (keepResolved && path.resolve(candidate) === path.resolve(keepResolved)) {
+    if (
+      keepResolved &&
+      path.resolve(candidate) === path.resolve(keepResolved)
+    ) {
       continue;
     }
     try {
@@ -18507,7 +18521,9 @@ function isManagedCustomCoverPath(filePath) {
   try {
     const managedDir = path.resolve(getManagedCustomCoverDir());
     const target = path.resolve(safePath);
-    return target === managedDir || target.startsWith(`${managedDir}${path.sep}`);
+    return (
+      target === managedDir || target.startsWith(`${managedDir}${path.sep}`)
+    );
   } catch {
     return false;
   }
@@ -18520,7 +18536,10 @@ function removeManagedCustomCoverVariants(configName, keepPath = "") {
   const keepResolved = String(keepPath || "").trim();
   for (const extension of SUPPORTED_LOCAL_COVER_EXTENSIONS) {
     const candidate = path.join(dir, `${safeName}${extension}`);
-    if (keepResolved && path.resolve(candidate) === path.resolve(keepResolved)) {
+    if (
+      keepResolved &&
+      path.resolve(candidate) === path.resolve(keepResolved)
+    ) {
       continue;
     }
     try {

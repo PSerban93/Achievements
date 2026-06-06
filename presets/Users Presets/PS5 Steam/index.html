@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -28,7 +28,7 @@
     </style>
   </head>
   <body>
-    <meta width="820" height="170" />
+    <meta width="450" height="150" />
     <div class="ach">
       <div class="icon">
         <img src="" alt="Icon" />
@@ -70,12 +70,11 @@
           ) {
             titleInnerEl.textContent = notificationData.displayName;
             detailEl.textContent = notificationData.description;
-            document.querySelector(
-              ".icon img"
-            ).src = `file:///${notificationData.iconPath}`;
+            document.querySelector(".icon img").src =
+              `file:///${notificationData.iconPath}`;
             const scale = Math.max(
               0.01,
-              parseFloat(notificationData.scale || 1)
+              parseFloat(notificationData.scale || 1),
             );
             const container = document.querySelector(".ach");
             container?.style?.setProperty("--scale", String(scale));
@@ -89,16 +88,22 @@
           container?.style?.setProperty("--inDur", `${inDur}ms`);
           container?.style?.setProperty("--outDur", `${outDur}ms`);
           container?.style?.setProperty("--outDelay", `${outDelay}ms`);
-          container?.style?.setProperty("--timeline-scale", String(timelineScale));
+          container?.style?.setProperty(
+            "--timeline-scale",
+            String(timelineScale),
+          );
           container.classList.add("active");
           notifyScreenshotReady(inDur + 60);
 
           // Title marquee only if overflows
           requestAnimationFrame(() => {
-            try { titleInnerEl.getAnimations().forEach((a) => a.cancel()); } catch {}
+            try {
+              titleInnerEl.getAnimations().forEach((a) => a.cancel());
+            } catch {}
             titleEl.classList.remove("marquee");
             void titleEl.offsetWidth;
-            const overflowX = (titleInnerEl.scrollWidth || 0) - (titleEl.clientWidth || 0);
+            const overflowX =
+              (titleInnerEl.scrollWidth || 0) - (titleEl.clientWidth || 0);
             if (overflowX > 0) {
               const px = Math.ceil(overflowX + 24);
               titleEl.classList.add("marquee");
@@ -112,7 +117,7 @@
                   delay: 1200,
                   easing: "linear",
                   fill: "both",
-                }
+                },
               );
             }
           });
