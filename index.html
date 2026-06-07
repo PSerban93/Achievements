@@ -3770,7 +3770,9 @@
             title="Status filter"
             aria-label="Status filter"
           >
-            <span class="label">Status</span>
+            <span class="label" data-i18n="achievements.statusFilterLabel"
+              >Status</span
+            >
             <span id="achFilterStatusBtnState" class="state">All</span>
           </button>
           <button
@@ -3780,7 +3782,9 @@
             title="Sort by unlock date (old-new / new-old / off)"
             aria-label="Sort by unlock date"
           >
-            <span class="label">Date</span>
+            <span class="label" data-i18n="achievements.sortDateLabel"
+              >Date</span
+            >
             <span id="achSortTimeBtnDir" class="dir">·</span>
           </button>
           <button
@@ -3790,7 +3794,9 @@
             title="Sort by name (A-Z / Z-A / off)"
             aria-label="Sort by name"
           >
-            <span class="label">Name</span>
+            <span class="label" data-i18n="achievements.sortNameLabel"
+              >Name</span
+            >
             <span id="achSortNameBtnDir" class="dir">·</span>
           </button>
           <button
@@ -3800,7 +3806,9 @@
             title="Sort by rarity (rare-common / common-rare / off)"
             aria-label="Sort by rarity"
           >
-            <span class="label">Rarity</span>
+            <span class="label" data-i18n="achievements.raritySortLabel"
+              >Rarity</span
+            >
             <span id="achSortRarityBtnDir" class="dir">·</span>
           </button>
         </div>
@@ -6363,9 +6371,13 @@
         if (state === "off") return "·";
         if (sortType === "name") return state === "desc" ? "Z-A" : "A-Z";
         if (sortType === "time")
-          return state === "desc" ? "New-Old" : "Old-New";
+          return state === "desc"
+            ? tUi("achievements.sortDirectionNewOld", "New-Old")
+            : tUi("achievements.sortDirectionOldNew", "Old-New");
         if (sortType === "rarity")
-          return state === "desc" ? "Common-Rare" : "Rare-Common";
+          return state === "desc"
+            ? tUi("achievements.sortDirectionCommonRare", "Common-Rare")
+            : tUi("achievements.sortDirectionRareCommon", "Rare-Common");
         return "·";
       }
 
@@ -8592,6 +8604,9 @@
         bindSettingsProjectLinks();
         if (typeof updateSortIconsUI === "function") {
           updateSortIconsUI();
+        }
+        if (typeof updateAchievementsToolbarUi === "function") {
+          updateAchievementsToolbarUi();
         }
         if (typeof window.refreshFoldersList === "function") {
           window.refreshFoldersList();
