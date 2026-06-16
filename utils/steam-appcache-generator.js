@@ -7,8 +7,10 @@ const { sanitizeConfigName } = require("./playtime-store");
 const {
   parseKVBinary,
   extractSchemaAchievements,
+  extractGameName,
   extractUserStats,
   buildSnapshotFromAppcache,
+  normalizeAppcacheSchemaEntries,
   normalizeSteamIconUrl,
   pickPreferredUserBin,
 } = require("./steam-appcache");
@@ -461,6 +463,25 @@ async function download(url, dest, fetchImpl = global.fetch) {
   }
 }
 
+function applyProgressMetadata(target, source) {
+  if (!target || !source) return false;
+  let changed = false;
+  const fields = [
+    "progressStatName",
+    "progressStatId",
+    "progressMin",
+    "progressMax",
+  ];
+  for (const field of fields) {
+    if (source[field] == null || source[field] === "") continue;
+    if (target[field] !== source[field]) {
+      target[field] = source[field];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function writeSchemaFromEntries(appid, entries, schemaDir) {
   ensureDir(schemaDir);
   const imgDir = path.join(schemaDir, "img");
@@ -488,7 +509,7 @@ function writeSchemaFromEntries(appid, entries, schemaDir) {
       download(grayUrl, path.join(imgDir, file)).catch(() => {});
     }
     if (!grayRel) grayRel = iconRel;
-    rewritten.push({
+    const item = {
       name: e.api,
       hidden: e.hidden ? 1 : 0,
       displayName: e.displayName || { english: "" },
@@ -497,7 +518,13 @@ function writeSchemaFromEntries(appid, entries, schemaDir) {
       icon_gray: grayRel,
       statId: e.statId,
       bit: e.bit,
-    });
+    };
+    applyProgressMetadata(item, e);
+    rewritten.push(item);
+  }
+
+  if (!rewritten.length) {
+    throw new Error("steam-official:schema-empty");
   }
 
   fs.writeFileSync(
@@ -557,7 +584,7 @@ function updateSchemaFromAppcache(appid, entries, schemaDir) {
         download(grayUrl, path.join(schemaDir, grayRel)).catch(() => {});
       }
       if (!grayRel) grayRel = iconRel;
-      cur.push({
+      const item = {
         name: e.api,
         hidden: e.hidden ? 1 : 0,
         displayName: e.displayName || { english: "" },
@@ -566,8 +593,14 @@ function updateSchemaFromAppcache(appid, entries, schemaDir) {
         icon_gray: grayRel,
         statId: e.statId,
         bit: e.bit,
-      });
+      };
+      applyProgressMetadata(item, e);
+      cur.push(item);
       continue;
+    }
+    if (applyProgressMetadata(existing, e)) {
+      changed++;
+      updated = true;
     }
   }
   if (updated) {
@@ -619,6 +652,20 @@ async function generateConfigFromAppcacheBin(
   const appidMatch = path.basename(schemaBinPath).match(/UserGameStatsSchema_(\d+)\.bin/i);
   if (!appidMatch) return null;
   const appid = appidMatch[1];
+  const onGenerationProgress =
+    typeof options?.onGenerationProgress === "function"
+      ? options.onGenerationProgress
+      : null;
+  const emitProgress = (progress = {}) => {
+    if (!onGenerationProgress) return;
+    try {
+      onGenerationProgress({
+        appid,
+        itemName: String(progress.itemName || appid),
+        ...progress,
+      });
+    } catch {}
+  };
   const userBin = pickPreferredUserBin(
     statsDir,
     appid,
@@ -626,7 +673,22 @@ async function generateConfigFromAppcacheBin(
   );
   if (!userBin) return null;
 
+  emitProgress({
+    phase: "preparing",
+    percent: 12,
+  });
   const schemaKV = parseKVBinary(fs.readFileSync(schemaBinPath));
+  const schemaGameName = extractGameName(schemaKV.data);
+  const schemaDisplayName = schemaGameName
+    ? `${schemaGameName} (Steam)`
+    : "";
+  if (schemaDisplayName) {
+    emitProgress({
+      itemName: schemaDisplayName,
+      phase: "preparing",
+      percent: 16,
+    });
+  }
   const entries = extractSchemaAchievements(schemaKV.data);
   if (!entries.length) return null;
 
@@ -649,8 +711,30 @@ async function generateConfigFromAppcacheBin(
     }
   }
   if (!schemaEntries.length) {
+    emitProgress({
+      phase: "generatingSchema",
+      percent: 35,
+    });
     schemaEntries = writeSchemaFromEntries(appid, entries, schemaRoot);
     schemaUpdated = true;
+  } else {
+    const updateResult = updateSchemaFromAppcache(appid, entries, schemaRoot);
+    if (updateResult.entries.length) {
+      schemaEntries = updateResult.entries;
+    }
+    schemaUpdated = schemaUpdated || updateResult.updated;
+    if (updateResult.updated) {
+      emitProgress({
+        phase: "generatingSchema",
+        percent: 35,
+      });
+    }
+  }
+  if (schemaUpdated) {
+    emitProgress({
+      phase: "fetchSteamApi",
+      percent: 48,
+    });
   }
   const rarity = await writeSteamOfficialAchievementPercentages(
     schemaRoot,
@@ -658,20 +742,25 @@ async function generateConfigFromAppcacheBin(
     schemaEntries,
   );
 
+  emitProgress({
+    phase: "generatingSchema",
+    percent: 58,
+  });
   const userKV = parseKVBinary(fs.readFileSync(userBin));
   const userStats = extractUserStats(userKV.data);
   const snapshot = buildSnapshotFromAppcache(
-    (schemaEntries || []).map((e) => ({
-      api: e.name || e.api,
-      statId: e.statId,
-      bit: e.bit,
-    })),
+    normalizeAppcacheSchemaEntries(schemaEntries || []),
     userStats,
   );
 
   const storeName = await fetchSteamStoreName(appid);
-  const resolvedBase = storeName || String(appid || "");
+  const resolvedBase = storeName || schemaGameName || String(appid || "");
   const defaultCfgName = `${resolvedBase} (Steam)`;
+  emitProgress({
+    itemName: defaultCfgName,
+    phase: "writingConfig",
+    percent: 72,
+  });
   const existing = findExistingSteamOfficialConfig(configsDir, appid);
   const desiredFileBase = sanitizeFileName(defaultCfgName);
   const cfgPath = existing?.path
@@ -690,6 +779,7 @@ async function generateConfigFromAppcacheBin(
     process_name: "",
   };
   let created = true;
+  let configUpdated = false;
   if (existing || fs.existsSync(cfgPath)) {
     created = false;
     try {
@@ -700,13 +790,16 @@ async function generateConfigFromAppcacheBin(
         existingData.name = cfgName;
         dirty = true;
       }
-      if (existingData?.displayName == null) {
+      if (
+        existingData?.displayName == null ||
+        String(existingData?.displayName || "") === `${appid} (Steam)`
+      ) {
         existingData.displayName = defaultCfgName;
         dirty = true;
       }
       const existingDisplay = existingData?.displayName || existingData?.name || "";
-      if (storeName && typeof storeName === "string") {
-        const desiredDisplay = `${storeName} (Steam)`;
+      if (resolvedBase && resolvedBase !== String(appid)) {
+        const desiredDisplay = `${resolvedBase} (Steam)`;
         if (desiredDisplay && desiredDisplay !== existingDisplay) {
           existingData.displayName = desiredDisplay;
           dirty = true;
@@ -731,6 +824,11 @@ async function generateConfigFromAppcacheBin(
         dirty = true;
       }
       if (dirty) {
+        configUpdated = true;
+        emitProgress({
+          phase: "writingConfig",
+          percent: 82,
+        });
         fs.writeFileSync(cfgPath, JSON.stringify(existingData, null, 2));
       }
     } catch {}
@@ -739,11 +837,22 @@ async function generateConfigFromAppcacheBin(
       payload,
       await fetchSteamDbLaunchMetadata(appid)
     );
+    emitProgress({
+      phase: "writingConfig",
+      percent: 82,
+    });
     fs.writeFileSync(cfgPath, JSON.stringify(payload, null, 2));
     autoConfigLogger.info("steam-appcache:config:created", {
       appid,
       name: cfgName,
       filePath: cfgPath,
+    });
+  }
+
+  if (created || schemaUpdated || configUpdated) {
+    emitProgress({
+      phase: "finalizing",
+      percent: 95,
     });
   }
 
@@ -761,6 +870,7 @@ async function generateConfigFromAppcacheBin(
     save_path: statsDir,
     created,
     schemaUpdated,
+    configUpdated,
     snapshot: created || schemaUpdated ? snapshot : null,
     importedImages,
     rarity,

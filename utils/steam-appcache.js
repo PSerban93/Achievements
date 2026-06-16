@@ -155,12 +155,134 @@ function normalizeHidden(v) {
   return s === "1" || s === "true" || s === "yes" ? 1 : 0;
 }
 
+function toFiniteNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function toInteger(value) {
+  const n = toFiniteNumber(value);
+  return n != null && Number.isInteger(n) ? n : null;
+}
+
+function extractSchemaStatDefinitions(schemaRootObj) {
+  const byName = new Map();
+
+  function walk(node, pathArr) {
+    if (!node || typeof node !== "object") return;
+    if (
+      typeof node.name === "string" &&
+      node.name &&
+      !node.bits &&
+      String(node.type || "").toUpperCase() !== "ACHIEVEMENTS"
+    ) {
+      const statId = toInteger(pathArr[pathArr.length - 1]);
+      if (statId != null) {
+        byName.set(node.name, {
+          statId,
+          min: toFiniteNumber(node.min),
+          max: toFiniteNumber(node.max),
+        });
+      }
+    }
+    for (const [k, v] of Object.entries(node)) {
+      if (v && typeof v === "object") walk(v, pathArr.concat(k));
+    }
+  }
+
+  walk(schemaRootObj, ["root"]);
+  return byName;
+}
+
+function extractProgressMetadata(bitVal, statDefinitions) {
+  const progress = bitVal?.progress;
+  if (!progress || typeof progress !== "object") return null;
+  const valueNode =
+    progress.value && typeof progress.value === "object"
+      ? progress.value
+      : progress;
+  const operation = String(
+    valueNode.operation || progress.operation || "",
+  ).toLowerCase();
+  const progressStatName = String(
+    valueNode.operand1 || progress.operand1 || "",
+  ).trim();
+  if (operation !== "statvalue" || !progressStatName) return null;
+
+  const statInfo = statDefinitions.get(progressStatName) || {};
+  const progressStatId = toInteger(statInfo.statId);
+  const progressMin =
+    toFiniteNumber(progress.min_val) ??
+    toFiniteNumber(progress.min) ??
+    toFiniteNumber(statInfo.min) ??
+    0;
+  const progressMax =
+    toFiniteNumber(progress.max_val) ??
+    toFiniteNumber(progress.max) ??
+    toFiniteNumber(statInfo.max);
+  if (progressMax == null || progressMax <= 0) return null;
+
+  return {
+    progressOperation: operation,
+    progressStatName,
+    progressStatId,
+    progressMin,
+    progressMax,
+  };
+}
+
+function copyProgressFields(target, source) {
+  if (!target || !source) return target;
+  const progressStatName = String(
+    source.progressStatName ||
+      source.progress_stat_name ||
+      source.progress?.statName ||
+      source.progress?.stat ||
+      "",
+  ).trim();
+  const progressStatId = toInteger(
+    source.progressStatId ??
+      source.progress_stat_id ??
+      source.progress?.statId ??
+      source.progress?.stat_id,
+  );
+  const progressMin =
+    toFiniteNumber(
+      source.progressMin ?? source.progress_min ?? source.progress?.min,
+    ) ?? 0;
+  const progressMax = toFiniteNumber(
+    source.progressMax ?? source.progress_max ?? source.progress?.max,
+  );
+  if (!progressStatName && progressStatId == null) return target;
+  if (progressMax == null || progressMax <= 0) return target;
+  if (progressStatName) target.progressStatName = progressStatName;
+  if (progressStatId != null) target.progressStatId = progressStatId;
+  target.progressMin = progressMin;
+  target.progressMax = progressMax;
+  return target;
+}
+
 function extractSchemaAchievements(schemaRootObj) {
   const results = [];
+  const statDefinitions = extractSchemaStatDefinitions(schemaRootObj);
 
-  const pushEntry = ({ api, display, desc, icon, iconGray, hidden, statId, bit }) => {
+  const pushEntry = ({
+    api,
+    display,
+    desc,
+    icon,
+    iconGray,
+    hidden,
+    statId,
+    bit,
+    progress,
+  }) => {
     if (!api || statId == null || bit == null) return;
-    results.push({
+    const entry = {
       api: String(api),
       displayName: ensureLangObj(display || api),
       description: ensureLangObj(desc || ""),
@@ -169,7 +291,9 @@ function extractSchemaAchievements(schemaRootObj) {
       icon_gray: iconGray || icon,
       statId,
       bit,
-    });
+    };
+    copyProgressFields(entry, progress);
+    results.push(entry);
   };
 
   function walk(node, pathArr) {
@@ -195,6 +319,7 @@ function extractSchemaAchievements(schemaRootObj) {
           bitVal?.display?.icongray ||
           bitVal?.icon_gray;
         const hiddenVal = bitVal?.display?.hidden ?? bitVal?.hidden ?? node.hidden;
+        const progress = extractProgressMetadata(bitVal, statDefinitions);
         pushEntry({
           api: name || `stat${statId}_bit${bit}`,
           display,
@@ -204,6 +329,7 @@ function extractSchemaAchievements(schemaRootObj) {
           hidden: hiddenVal,
           statId: Number.isFinite(statId) ? statId : null,
           bit: Number.isFinite(bit) ? bit : null,
+          progress,
         });
       }
     }
@@ -239,6 +365,61 @@ function extractSchemaAchievements(schemaRootObj) {
   return dedup;
 }
 
+function normalizeSchemaEntry(entry) {
+  if (!entry || typeof entry !== "object") return null;
+  const api = entry.name || entry.api;
+  const statId = toInteger(entry.statId);
+  const bit = toInteger(entry.bit);
+  if (!api || statId == null || bit == null) return null;
+  const normalized = {
+    api: String(api),
+    statId,
+    bit,
+  };
+  copyProgressFields(normalized, entry);
+  return normalized;
+}
+
+function normalizeAppcacheSchemaEntries(schemaArr) {
+  if (!Array.isArray(schemaArr)) return [];
+  return schemaArr.map(normalizeSchemaEntry).filter(Boolean);
+}
+
+function hasProgressMetadata(entry) {
+  return (
+    entry &&
+    toInteger(entry.progressStatId) != null &&
+    toFiniteNumber(entry.progressMax) != null &&
+    toFiniteNumber(entry.progressMax) > 0
+  );
+}
+
+function enrichSchemaEntriesFromAppcacheSchema(schemaEntries, schemaRootObj) {
+  const entries = normalizeAppcacheSchemaEntries(schemaEntries);
+  if (!entries.length || !schemaRootObj) return entries;
+  const extracted = extractSchemaAchievements(schemaRootObj);
+  const byApi = new Map(extracted.map((entry) => [entry.api, entry]));
+  return entries.map((entry) => {
+    if (hasProgressMetadata(entry)) return entry;
+    const source = byApi.get(entry.api);
+    if (!source || !hasProgressMetadata(source)) return entry;
+    return copyProgressFields({ ...entry }, source);
+  });
+}
+
+function enrichSchemaEntriesFromAppcacheSchemaFile(schemaEntries, schemaBinPath) {
+  const entries = normalizeAppcacheSchemaEntries(schemaEntries);
+  if (!entries.length || !schemaBinPath || !fs.existsSync(schemaBinPath)) {
+    return entries;
+  }
+  try {
+    const schemaKV = parseKVBinary(fs.readFileSync(schemaBinPath));
+    return enrichSchemaEntriesFromAppcacheSchema(entries, schemaKV.data);
+  } catch {
+    return entries;
+  }
+}
+
 function buildSnapshotFromAppcache(schemaEntries, userStats) {
   const snap = {};
   for (const a of schemaEntries || []) {
@@ -248,10 +429,21 @@ function buildSnapshotFromAppcache(schemaEntries, userStats) {
     const ts = stat.times && Object.prototype.hasOwnProperty.call(stat.times, String(a.bit))
       ? stat.times[String(a.bit)]
       : null;
-    snap[a.api] = {
+    const item = {
       earned,
       earned_time: earned ? ts || 0 : 0,
     };
+    const progressStatId = toInteger(a.progressStatId);
+    const progressMax = toFiniteNumber(a.progressMax);
+    if (progressStatId != null && progressMax != null && progressMax > 0) {
+      const progressStat = userStats[String(progressStatId)] || {
+        data_u32: 0,
+      };
+      const rawProgress = progressStat.data_u32 >>> 0;
+      item.progress = Math.max(0, Math.min(rawProgress, progressMax));
+      item.max_progress = progressMax;
+    }
+    snap[a.api] = item;
   }
   return snap;
 }
@@ -341,6 +533,9 @@ function pickPreferredUserBin(statsDir, appid, preferredAccountId = "") {
 module.exports = {
   parseKVBinary,
   extractSchemaAchievements,
+  normalizeAppcacheSchemaEntries,
+  enrichSchemaEntriesFromAppcacheSchema,
+  enrichSchemaEntriesFromAppcacheSchemaFile,
   extractUserStats,
   buildSnapshotFromAppcache,
   normalizeSteamIconUrl,

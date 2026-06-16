@@ -1936,6 +1936,153 @@ function runAchievementsGenerator(
   });
 }
 
+function getUniqueSiblingPath(basePath) {
+  if (!fs.existsSync(basePath)) return basePath;
+  let suffix = 1;
+  let candidate = `${basePath}_${suffix}`;
+  while (fs.existsSync(candidate)) {
+    suffix += 1;
+    candidate = `${basePath}_${suffix}`;
+  }
+  return candidate;
+}
+
+function copyFolderOverwrite(srcDir, destDir) {
+  fs.mkdirSync(destDir, { recursive: true });
+  const entries = fs.readdirSync(srcDir, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = path.join(srcDir, entry.name);
+    const destPath = path.join(destDir, entry.name);
+    if (entry.isDirectory()) {
+      if (fs.existsSync(destPath) && !fs.statSync(destPath).isDirectory()) {
+        fs.unlinkSync(destPath);
+      }
+      copyFolderOverwrite(srcPath, destPath);
+    } else {
+      if (fs.existsSync(destPath) && fs.statSync(destPath).isDirectory()) {
+        fs.rmSync(destPath, { recursive: true, force: true });
+      }
+      fs.copyFileSync(srcPath, destPath);
+    }
+  }
+}
+
+function createSafeSchemaTempRoot(prefix, platform, appid = "") {
+  const safePrefix = String(prefix || "schema").replace(/[^\w.-]+/g, "_");
+  const safePlatform = String(platform || "steam").replace(/[^\w.-]+/g, "_");
+  const safeAppId = String(appid || "batch").replace(/[^\w.-]+/g, "_");
+  return path.join(
+    os.tmpdir(),
+    `ach_${safePrefix}_${safePlatform}_${safeAppId}_${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`,
+  );
+}
+
+function validateGeneratedSchemaDir(schemaDir) {
+  const achievementsPath = path.join(schemaDir, "achievements.json");
+  if (!fs.existsSync(achievementsPath)) {
+    return { ok: false, message: "Generated achievements.json is missing" };
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(achievementsPath, "utf8"));
+    if (!Array.isArray(parsed)) {
+      return {
+        ok: false,
+        message: "Generated achievements.json is not a valid list",
+      };
+    }
+    if (parsed.length === 0) {
+      return { ok: false, message: "Generated achievements.json is empty" };
+    }
+    return { ok: true, count: parsed.length };
+  } catch (err) {
+    return {
+      ok: false,
+      message: `Generated achievements.json is invalid: ${err?.message || err}`,
+    };
+  }
+}
+
+function replaceSchemaDirWithBackup(sourceDir, destDir) {
+  if (!fs.existsSync(sourceDir)) {
+    throw new Error("Generated schema directory is missing");
+  }
+  const parent = path.dirname(destDir);
+  const backupDir = getUniqueSiblingPath(
+    path.join(parent, `${path.basename(destDir)}.__backup_${Date.now()}`),
+  );
+  const hadExisting = fs.existsSync(destDir);
+  fs.mkdirSync(parent, { recursive: true });
+  try {
+    if (hadExisting) {
+      fs.renameSync(destDir, backupDir);
+      copyFolderOverwrite(backupDir, destDir);
+    }
+    copyFolderOverwrite(sourceDir, destDir);
+    if (hadExisting) fs.rmSync(backupDir, { recursive: true, force: true });
+  } catch (err) {
+    try {
+      if (fs.existsSync(destDir)) {
+        fs.rmSync(destDir, { recursive: true, force: true });
+      }
+    } catch {}
+    try {
+      if (hadExisting && fs.existsSync(backupDir)) {
+        fs.renameSync(backupDir, destDir);
+      }
+    } catch (restoreErr) {
+      autoConfigLogger.error("safe-schema:restore-failed", {
+        destDir,
+        backupDir,
+        error: restoreErr?.message || String(restoreErr),
+      });
+    }
+    throw err;
+  }
+}
+
+async function runAchievementsGeneratorSafe(
+  appid,
+  schemaBaseDir,
+  userDataDir,
+  opts = {},
+) {
+  const platform = normalizePlatform(opts.platform) || "steam";
+  const storagePlatform = getSchemaStoragePlatform(platform);
+  const tempRoot = createSafeSchemaTempRoot("schema", platform, appid);
+  const tempSchemaDir = path.join(tempRoot, storagePlatform, String(appid));
+  const destSchemaDir =
+    opts.destSchemaDir || path.join(schemaBaseDir, storagePlatform, String(appid));
+  try {
+    const result = await runAchievementsGenerator(appid, tempRoot, userDataDir, {
+      ...opts,
+      platform: opts.platform,
+    });
+    const validation = validateGeneratedSchemaDir(tempSchemaDir);
+    if (!validation.ok) {
+      autoConfigLogger.warn("safe-schema:invalid-output-kept-existing", {
+        appid,
+        platform,
+        tempSchemaDir,
+        reason: validation.message,
+      });
+      throw new Error(`${validation.message}. Existing schema was kept unchanged.`);
+    }
+    replaceSchemaDirWithBackup(tempSchemaDir, destSchemaDir);
+    return result;
+  } finally {
+    try {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    } catch (err) {
+      autoConfigLogger.warn("safe-schema:tmp-clean-failed", {
+        tempRoot,
+        error: err?.message || String(err),
+      });
+    }
+  }
+}
+
 function runAchievementsGeneratorBatch(
   appids,
   schemaBaseDir,
@@ -2598,13 +2745,14 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
           let lastError = null;
           for (const platformMode of attemptPlatforms) {
             try {
-              const generatorResult = await runAchievementsGenerator(
+              const generatorResult = await runAchievementsGeneratorSafe(
                 uplayId,
                 schemaBase,
                 userDataDir,
                 {
                   platform: platformMode,
                   langs: itemSchemaLanguages,
+                  destSchemaDir,
                   onProgress: (progress) => {
                     const childPercent = clampGenerationProgressPercent(
                       progress?.percent,
@@ -2743,6 +2891,13 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
         detail: "Updating existing config",
       });
       const schemaLaunchMetadata = await ensureSchema();
+      if (!fs.existsSync(effectiveAchievementsJson)) {
+        autoConfigLogger.warn("config:update-skip-schema-missing", {
+          appid,
+          path: effectiveAchievementsJson,
+        });
+        continue;
+      }
       try {
         const curr = JSON.parse(fs.readFileSync(filePath, "utf8"));
         let changed = false;
@@ -2864,6 +3019,13 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
     }
     // generate schema if missing
     const schemaLaunchMetadata = await ensureSchema();
+    if (!fs.existsSync(effectiveAchievementsJson)) {
+      autoConfigLogger.warn("config:create-skip-schema-missing", {
+        appid,
+        path: effectiveAchievementsJson,
+      });
+      continue;
+    }
     const gameData = {
       name: safeName,
       appid,
@@ -3209,7 +3371,8 @@ function pickGeneratedConfigForTask(entries, task = {}) {
     const platformCandidates = candidates.filter(
       (entry) => normalizePlatform(entry.platform) === desiredPlatform,
     );
-    if (platformCandidates.length) candidates = platformCandidates;
+    if (!platformCandidates.length) return null;
+    candidates = platformCandidates;
   }
   if (!candidates.length) return null;
   if (expectedSavePath) {
@@ -3362,15 +3525,18 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
           String(schemaParseProgressId || task.appid || "").trim(),
         );
       });
-      const batchResult = await runAchievementsGeneratorBatch(
-        appids,
-        schemaBase,
-        app.getPath("userData"),
-        {
-          platform,
-          langs: schemaLanguages,
-          schemaParseProgressIds,
-          onProgress: (progress = {}) => {
+      let batchResult = null;
+      const batchTempRoot = createSafeSchemaTempRoot("batch-schema", platform);
+      try {
+        batchResult = await runAchievementsGeneratorBatch(
+          appids,
+          batchTempRoot,
+          app.getPath("userData"),
+          {
+            platform,
+            langs: schemaLanguages,
+            schemaParseProgressIds,
+            onProgress: (progress = {}) => {
             const progressAppId = String(progress?.appid || "").trim();
             const fallbackBatchIndex =
               Number.isFinite(Number(progress?.current)) &&
@@ -3437,8 +3603,34 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
               total: progressTotal,
             });
           },
-        },
-      );
+          },
+        );
+        const storagePlatform = getSchemaStoragePlatform(platform);
+        for (const appid of appids) {
+          const sourceDir = path.join(batchTempRoot, storagePlatform, appid);
+          const destDir = path.join(schemaBase, storagePlatform, appid);
+          const validation = validateGeneratedSchemaDir(sourceDir);
+          if (!validation.ok) {
+            autoConfigLogger.warn("safe-schema:batch-invalid-output", {
+              appid,
+              platform,
+              sourceDir,
+              reason: validation.message,
+            });
+            continue;
+          }
+          replaceSchemaDirWithBackup(sourceDir, destDir);
+        }
+      } finally {
+        try {
+          fs.rmSync(batchTempRoot, { recursive: true, force: true });
+        } catch (err) {
+          autoConfigLogger.warn("safe-schema:batch-tmp-clean-failed", {
+            batchTempRoot,
+            error: err?.message || String(err),
+          });
+        }
+      }
       for (const appid of appids) {
         const current = taskOverrides.get(appid) || {};
         const task = normalizedTasks.find((entry) => entry.appid === appid) || null;
@@ -3569,10 +3761,15 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
       desiredPlatform === "steam" ||
       desiredPlatform === "uplay")
   ) {
+    const prefetchTempRoot = createSafeSchemaTempRoot(
+      "name-prefetch",
+      desiredPlatform || "steam",
+      appid,
+    );
     try {
       const generatorResult = await runAchievementsGenerator(
         appid,
-        path.join(outputDir, "schema"),
+        prefetchTempRoot,
         app.getPath("userData"),
         {
           platform: desiredPlatform || undefined,
@@ -3590,6 +3787,16 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
         platform: desiredPlatform || null,
         error: err?.message || String(err),
       });
+    } finally {
+      try {
+        fs.rmSync(prefetchTempRoot, { recursive: true, force: true });
+      } catch (err) {
+        autoConfigLogger.warn("generate-single:name-prefetch-tmp-clean-failed", {
+          appid,
+          tempRoot: prefetchTempRoot,
+          error: err?.message || String(err),
+        });
+      }
     }
   }
   const tmpRoot = path.join(
@@ -3644,21 +3851,6 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
       });
     }
   }
-  if (!targetFile && desiredPlatform) {
-    for (const f of files) {
-      try {
-        const full = path.join(outputDir, f);
-        const data = JSON.parse(fs.readFileSync(full, "utf8"));
-        const id = String(
-          data?.appid || data?.appId || data?.steamAppId || "",
-        ).trim();
-        if (id === appid) {
-          targetFile = full;
-          break;
-        }
-      } catch {}
-    }
-  }
   if ((opts.savePathOverride || opts.emu) && targetFile) {
     try {
       const data = JSON.parse(fs.readFileSync(targetFile, "utf8"));
@@ -3690,9 +3882,13 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
     });
   }
   if (!targetFile) {
-    autoConfigLogger.warn("generate-single:target-missing", { appid });
+    autoConfigLogger.warn("generate-single:target-missing", {
+      appid,
+      platform: desiredPlatform || null,
+    });
     return {
       appid,
+      platform: desiredPlatform || "steam",
       skipped: true,
       pendingSchema: false,
     };

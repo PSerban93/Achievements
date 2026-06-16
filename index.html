@@ -283,6 +283,43 @@
         display: block;
       }
 
+      .settings-guide-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        width: 100%;
+        padding: 10px 15px;
+        margin-bottom: 5px;
+        border: 1px solid rgba(189, 147, 249, 0.22);
+        border-radius: 6px;
+        background: rgba(68, 71, 90, 0.28);
+        color: var(--dracula-comment);
+        font-weight: 500;
+        text-align: left;
+        cursor: pointer;
+        transition:
+          color 0.2s ease,
+          border-color 0.2s ease,
+          background 0.2s ease;
+      }
+
+      .settings-guide-link:hover {
+        color: var(--dracula-foreground);
+        border-color: rgba(139, 233, 253, 0.5);
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .settings-guide-link:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px rgba(139, 233, 253, 0.28);
+      }
+
+      .settings-guide-link img {
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+      }
+
       .settings-version {
         margin-left: 10px;
         margin-right: 10px;
@@ -577,6 +614,16 @@
           >
             Platform Guide
           </button>
+          <button
+            id="settingsDocsLink"
+            class="settings-guide-link"
+            type="button"
+            aria-label="Configs Setup Guide"
+            title="Configs Setup Guide"
+          >
+            <img src="assets/icons/docs-info.svg" alt="" aria-hidden="true" />
+            <span data-i18n="settings.docsLink">Configs Setup Guide</span>
+          </button>
           <div
             class="settings-links"
             role="group"
@@ -592,19 +639,6 @@
             >
               <img
                 src="assets/icons/github-mark.svg"
-                alt=""
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              id="settingsDocsLink"
-              class="settings-link-btn"
-              type="button"
-              aria-label="Open setup and configuration guide"
-              title="Open setup and configuration guide"
-            >
-              <img
-                src="assets/icons/docs-info.svg"
                 alt=""
                 aria-hidden="true"
               />
@@ -7420,6 +7454,10 @@
         /latest\.yml/i,
         /builder-util-runtime/i,
         /electron-updater/i,
+        /\bnet::ERR_[A-Z0-9_]+\b/i,
+        /\bERR_(?:NETWORK_ACCESS_DENIED|INTERNET_DISCONNECTED|NAME_NOT_RESOLVED|CONNECTION_RESET|CONNECTION_REFUSED|CONNECTION_TIMED_OUT)\b/i,
+        /\bSimpleURLLoaderWrapper\b/i,
+        /node:electron\/js2c\/browser_init/i,
         /GitHubProvider\.getLatestVersion/i,
         /\bNsisUpdater\b/i,
         /\bAppUpdater\b/i,
@@ -8537,7 +8575,7 @@
         if (docsBtn) {
           const docsLabel = tUi(
             "settings.docsLink",
-            "Open setup and configuration guide",
+            "Configs Setup Guide",
           );
           docsBtn.title = docsLabel;
           docsBtn.setAttribute("aria-label", docsLabel);

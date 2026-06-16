@@ -29,6 +29,8 @@ const {
   parseKVBinary: parseSteamKv,
   extractUserStats,
   buildSnapshotFromAppcache,
+  normalizeAppcacheSchemaEntries,
+  enrichSchemaEntriesFromAppcacheSchemaFile,
   pickPreferredUserBin,
   parseUserBinName,
 } = require("./steam-appcache");
@@ -1476,6 +1478,7 @@ module.exports = function makeWatchedFolders({
     const id = `generation-batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const scope = total > 1 ? "batch" : "single";
     const deferStartUntilVisible = meta?.deferStartUntilVisible === true;
+    const usePhaseOnlyDetails = meta?.usePhaseOnlyDetails === true;
     const states = list.map((task, index) => ({
       index,
       appid: String(task?.appid || ""),
@@ -1551,10 +1554,11 @@ module.exports = function makeWatchedFolders({
           active.appid ||
           "",
         phase: progressOverridePhase || active.phase || "preparing",
-        detail:
-          progressOverrideDetail ||
-          active.detail ||
-          String(meta?.defaultDetail || "Preparing config generation"),
+        detail: usePhaseOnlyDetails
+          ? progressOverrideDetail || active.detail || ""
+          : progressOverrideDetail ||
+            active.detail ||
+            String(meta?.defaultDetail || "Preparing config generation"),
       };
     };
 
@@ -1583,12 +1587,14 @@ module.exports = function makeWatchedFolders({
         itemName: String(meta?.rootLabel || state.itemName || ""),
         phase: String(overrides.phase || state.phase || "preparing"),
         detail:
-          String(
-            overrides.detail ||
-              state.detail ||
-              meta?.defaultDetail ||
-              "Preparing config generation",
-          ) || "",
+          usePhaseOnlyDetails
+            ? String(overrides.detail || state.detail || "")
+            : String(
+                overrides.detail ||
+                  state.detail ||
+                  meta?.defaultDetail ||
+                  "Preparing config generation",
+              ) || "",
       });
     };
 
@@ -1718,9 +1724,18 @@ module.exports = function makeWatchedFolders({
         progressOverrideItemName = state.itemName || progressOverrideItemName;
         progressOverridePhase = state.phase || progressOverridePhase;
         progressOverrideDetail = state.detail || progressOverrideDetail;
-        if (result?.created === true) {
+        if (
+          result?.created === true ||
+          result?.schemaUpdated === true ||
+          result?.configUpdated === true
+        ) {
           state.phase = "completed";
-          state.detail = "Config created";
+          state.detail =
+            usePhaseOnlyDetails
+              ? ""
+              : result?.created === true
+                ? "Config created"
+                : "Config updated";
           state.finalState = "completed";
         } else if (result?.pendingSchema === true) {
           state.phase = "skipped";
@@ -1763,11 +1778,42 @@ module.exports = function makeWatchedFolders({
           }
         }
         const summary = currentState();
+        const completedCount = states.filter(
+          (entry) => entry.finalState === "completed",
+        ).length;
+        const failedCount = states.filter(
+          (entry) => entry.finalState === "failed",
+        ).length;
+        const skippedCount = states.filter(
+          (entry) => entry.finalState === "skipped",
+        ).length;
+        let finalStatus = status === "failed" ? "failed" : "success";
+        let finalPhase = finalStatus === "failed" ? "failed" : "completed";
+        let finalDetail =
+          finalStatus === "failed"
+            ? "Config generation failed"
+            : "Config generation completed";
+        let shouldOverrideDetail = false;
+        if (finalStatus !== "failed" && completedCount === 0) {
+          if (failedCount > 0) {
+            finalStatus = "failed";
+            finalPhase = "failed";
+            finalDetail = "Config generation failed";
+            shouldOverrideDetail = true;
+          } else if (skippedCount > 0) {
+            finalPhase = "skipped";
+            finalDetail = "Config generation skipped";
+            shouldOverrideDetail = true;
+          }
+        }
+        const outputDetail = shouldOverrideDetail
+          ? finalDetail
+          : String(detail || finalDetail);
         emit("generation:progress:end", {
-          status: status === "failed" ? "failed" : "success",
+          status: finalStatus,
           current: summary.total,
           total: summary.total,
-          percent: status === "failed" ? summary.percent : 100,
+          percent: finalStatus === "failed" ? summary.percent : 100,
           appid: summary.appid,
           itemName:
             String(
@@ -1776,14 +1822,11 @@ module.exports = function makeWatchedFolders({
                 meta?.fallbackItemName ||
                 "",
             ).trim() || "",
-          phase: status === "failed" ? "failed" : "completed",
+          phase: finalPhase,
           detail:
-            String(
-              detail ||
-                (status === "failed"
-                  ? "Config generation failed"
-                  : "Config generation completed"),
-            ) || "",
+            usePhaseOnlyDetails
+              ? String(detail || "")
+              : outputDetail || "",
         });
       },
     };
@@ -3472,7 +3515,7 @@ module.exports = function makeWatchedFolders({
     return direct;
   }
 
-  async function handleSteamOfficialBinEvent(info) {
+  async function handleSteamOfficialBinEvent(info, options = {}) {
     if (!info?.appid) return null;
     const appid = String(info.appid);
     const statsDir = info.statsDir || "";
@@ -3510,13 +3553,52 @@ module.exports = function makeWatchedFolders({
       return { pending: true, appid };
     }
 
-    const result = await generateConfigFromAppcacheBin(
-      statsDir,
-      schemaBinPath,
-      configsDir,
-      { preferredAccountId },
-    );
+    const progressTask = { appid, forcePlatform: "steam-official" };
+    const externalProgress =
+      typeof options?.onGenerationProgress === "function"
+        ? options.onGenerationProgress
+        : null;
+    const progressReporter = externalProgress
+      ? null
+      : createGenerationBatchReporter([progressTask], {
+          fallbackItemName: appid,
+          deferStartUntilVisible: true,
+          usePhaseOnlyDetails: true,
+        });
+    const onGenerationProgress = (progress = {}) => {
+      if (externalProgress) {
+        externalProgress(progress);
+        return;
+      }
+      progressReporter?.updateTask(progressTask, 0, progress);
+    };
+
+    let result = null;
+    try {
+      result = await generateConfigFromAppcacheBin(
+        statsDir,
+        schemaBinPath,
+        configsDir,
+        {
+          preferredAccountId,
+          onGenerationProgress,
+        },
+      );
+    } catch (err) {
+      progressReporter?.finish(
+        "failed",
+        err?.message || "",
+      );
+      throw err;
+    }
     if (!result) return null;
+    if (
+      progressReporter &&
+      (result.created || result.schemaUpdated || result.configUpdated)
+    ) {
+      progressReporter.settleTask(progressTask, 0, result);
+      progressReporter.finish("success", "");
+    }
     pendingSteamOfficial.delete(appid);
     await indexExistingConfigsSync();
     knownAppIds.add(appid);
@@ -4757,21 +4839,19 @@ module.exports = function makeWatchedFolders({
           schemaPath && fs.existsSync(schemaPath)
             ? readJsonSafe(schemaPath)
             : null;
-        const entries = Array.isArray(schemaArr)
-          ? schemaArr
-              .map((e) => ({
-                api: e?.name || e?.api,
-                statId: e?.statId,
-                bit: e?.bit,
-              }))
-              .filter(
-                (e) =>
-                  e.api &&
-                  Number.isInteger(e.statId) &&
-                  Number.isInteger(e.bit),
-              )
-          : [];
         const statsDir = meta.save_path || path.dirname(filePath);
+        let entries = normalizeAppcacheSchemaEntries(schemaArr);
+        const schemaBin =
+          statsDir && (meta.appid || appid)
+            ? path.join(
+                statsDir,
+                `UserGameStatsSchema_${meta.appid || appid}.bin`,
+              )
+            : "";
+        entries = enrichSchemaEntriesFromAppcacheSchemaFile(
+          entries,
+          schemaBin,
+        );
         let userBin = filePath;
         const base = path.basename(userBin || "").toLowerCase();
         if (!base.startsWith("usergamestats_") || !base.endsWith(".bin")) {
@@ -7476,21 +7556,19 @@ module.exports = function makeWatchedFolders({
               schemaPath && fs.existsSync(schemaPath)
                 ? readJsonSafe(schemaPath)
                 : null;
-            const entries = Array.isArray(schemaArr)
-              ? schemaArr
-                  .map((e) => ({
-                    api: e?.name || e?.api,
-                    statId: e?.statId,
-                    bit: e?.bit,
-                  }))
-                  .filter(
-                    (e) =>
-                      e.api &&
-                      Number.isInteger(e.statId) &&
-                      Number.isInteger(e.bit),
-                  )
-              : [];
             const statsDir = meta.save_path || path.dirname(fp);
+            let entries = normalizeAppcacheSchemaEntries(schemaArr);
+            const schemaBin =
+              statsDir && (meta.appid || appid)
+                ? path.join(
+                    statsDir,
+                    `UserGameStatsSchema_${meta.appid || appid}.bin`,
+                  )
+                : "";
+            entries = enrichSchemaEntriesFromAppcacheSchemaFile(
+              entries,
+              schemaBin,
+            );
             let userBin = fp;
             const base = path.basename(userBin || "").toLowerCase();
             if (!base.startsWith("usergamestats_") || !base.endsWith(".bin")) {
@@ -8411,9 +8489,31 @@ module.exports = function makeWatchedFolders({
           if (schemaBins.length) {
             const steamIds = new Set();
             let steamChanged = false;
-            const handleSchemaBin = async (bin) => {
+            let steamBatchFailed = false;
+            const steamTasks = schemaBins.map((bin, index) => {
               const schemaBinPath = path.join(steamScanBase, bin);
               const schemaInfo = parseSteamOfficialBinInfo(schemaBinPath);
+              return {
+                index,
+                bin,
+                appid: schemaInfo?.appid ? String(schemaInfo.appid) : "",
+                forcePlatform: "steam-official",
+                schemaBinPath,
+                schemaInfo,
+              };
+            });
+            const steamBatchProgress = createGenerationBatchReporter(
+              steamTasks,
+              {
+                rootLabel: path.basename(steamScanBase || "") || "",
+                fallbackItemName: path.basename(steamScanBase || "") || "",
+                deferStartUntilVisible: true,
+                usePhaseOnlyDetails: true,
+              },
+            );
+            const handleSchemaBin = async (task) => {
+              const schemaBinPath = task.schemaBinPath;
+              const schemaInfo = task.schemaInfo;
               const appidFromBin = schemaInfo?.appid
                 ? String(schemaInfo.appid)
                 : "";
@@ -8435,14 +8535,31 @@ module.exports = function makeWatchedFolders({
                 knownAppIds.add(appidFromBin);
                 return;
               }
-              const result = await generateConfigFromAppcacheBin(
-                steamScanBase,
-                schemaBinPath,
-                configsDir,
-                {
-                  preferredAccountId: getPreferredSteamOfficialAccountId(),
-                },
-              );
+              let result = null;
+              try {
+                result = await generateConfigFromAppcacheBin(
+                  steamScanBase,
+                  schemaBinPath,
+                  configsDir,
+                  {
+                    preferredAccountId: getPreferredSteamOfficialAccountId(),
+                    onGenerationProgress: (progress = {}) => {
+                      steamBatchProgress.updateTask(
+                        task,
+                        task.index,
+                        progress,
+                      );
+                    },
+                  },
+                );
+              } catch (err) {
+                steamBatchFailed = true;
+                steamBatchProgress.finish(
+                  "failed",
+                  err?.message || "",
+                );
+                throw err;
+              }
               if (!result || result.skipped) return;
               const resultAppId = String(result.appid);
               if (
@@ -8454,9 +8571,22 @@ module.exports = function makeWatchedFolders({
               ) {
                 return;
               }
+              if (
+                result.created ||
+                result.schemaUpdated ||
+                result.configUpdated
+              ) {
+                steamBatchProgress.settleTask(task, task.index, result);
+              }
               steamIds.add(resultAppId);
               knownAppIds.add(resultAppId);
-              if (result.created || result.schemaUpdated) steamChanged = true;
+              if (
+                result.created ||
+                result.schemaUpdated ||
+                result.configUpdated
+              ) {
+                steamChanged = true;
+              }
               if (
                 bootMode &&
                 (result.created || result.schemaUpdated) &&
@@ -8478,14 +8608,20 @@ module.exports = function makeWatchedFolders({
             };
             if (bootMode) {
               await runWithConcurrency(
-                schemaBins,
+                steamTasks,
                 BOOT_SCAN_CONCURRENCY,
                 handleSchemaBin,
               );
             } else {
-              for (const bin of schemaBins) {
-                await handleSchemaBin(bin);
+              for (const task of steamTasks) {
+                await handleSchemaBin(task);
               }
+            }
+            if (!steamBatchFailed) {
+              steamBatchProgress.finish(
+                "success",
+                "",
+              );
             }
             if (steamIds.size) {
               await indexExistingConfigsSync();

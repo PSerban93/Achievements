@@ -975,6 +975,10 @@ async function ensureUbisoftOfficialSchema(appid, schemaDir, options = {}) {
     });
   }
 
+  if (!rows.length) {
+    throw new Error("ubisoft-official:schema-empty");
+  }
+
   ensureDir(schemaDir);
   fs.writeFileSync(
     path.join(schemaDir, "achievements.json"),

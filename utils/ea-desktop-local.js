@@ -751,6 +751,10 @@ async function ensureEaOfficialSchema(appid, schemaDir, options = {}) {
     });
   }
 
+  if (!rows.length) {
+    throw new Error("ea-official:schema-empty");
+  }
+
   fs.writeFileSync(
     path.join(schemaDir, "achievements.json"),
     JSON.stringify(rows, null, 2),

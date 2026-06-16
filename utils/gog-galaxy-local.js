@@ -791,6 +791,9 @@ async function ensureGogOfficialSchema(productId, schemaDir, options = {}) {
     path.join(resolvedDir, "img"),
   );
   const schemaRows = buildGogOfficialSchemaRows(gameplay.achievements, iconMap);
+  if (!schemaRows.length) {
+    throw new Error("gog-official:schema-empty");
+  }
   const rarityEntries = buildGogOfficialRarityEntries(gameplay.achievements);
   const snapshot = buildGogOfficialSnapshot(gameplay.achievements);
   const achievementsPath = path.join(resolvedDir, "achievements.json");

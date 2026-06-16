@@ -2723,13 +2723,14 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
     ...ach,
     name: normalizeAchievementName(ach.name, strip),
   }));
-  await fs.writeFile(
-    path.join(outDir, "achievements.json"),
-    JSON.stringify(finalAchievements, null, 2),
-    "utf8",
-  );
-
   const count = finalAchievements.length;
+  if (count > 0) {
+    await fs.writeFile(
+      path.join(outDir, "achievements.json"),
+      JSON.stringify(finalAchievements, null, 2),
+      "utf8",
+    );
+  }
 
   if (
     count > 0 &&
