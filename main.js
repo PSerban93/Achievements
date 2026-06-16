@@ -10024,6 +10024,11 @@ function createNotificationWindow(message) {
       y = ay + ah - Math.floor(scaledHeight) - gapY;
       break;
 
+    case "middle-right":
+      x = ax + aw - scaledWidth - gapX;
+      y = ay + Math.floor((ah - scaledHeight) / 2);
+      break;
+
     case "top-left":
       x = ax + gapX;
       y = ay + gapY;
@@ -10032,6 +10037,11 @@ function createNotificationWindow(message) {
     case "bottom-left":
       x = ax + gapX;
       y = ay + ah - Math.floor(scaledHeight) - gapY;
+      break;
+
+    case "middle-left":
+      x = ax + gapX;
+      y = ay + Math.floor((ah - scaledHeight) / 2);
       break;
 
     case "center-bottom":
@@ -16699,6 +16709,10 @@ function showProgressNotification(data) {
       x = ax + aw - progressWidth - gapX;
       y = ay + ah - progressHeight - gapY;
       break;
+    case "middle-right":
+      x = ax + aw - progressWidth - gapX;
+      y = ay + Math.floor((ah - progressHeight) / 2);
+      break;
     case "top-left":
       x = ax + gapX;
       y = ay + gapY;
@@ -16706,6 +16720,10 @@ function showProgressNotification(data) {
     case "bottom-left":
       x = ax + gapX;
       y = ay + ah - progressHeight - gapY;
+      break;
+    case "middle-left":
+      x = ax + gapX;
+      y = ay + Math.floor((ah - progressHeight) / 2);
       break;
     case "center-bottom":
     default:
