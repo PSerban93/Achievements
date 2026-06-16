@@ -15226,12 +15226,19 @@
             }
 
             const cacheKey = makeDashboardImageCacheKey(id, platform);
+            let nextImgSrc = imgSrc;
             if (imgSrc) {
-              dashboardImageCache.set(cacheKey, imgSrc);
+              nextImgSrc =
+                options?.forceReload === true
+                  ? withDashboardImageCacheBuster(imgSrc)
+                  : imgSrc;
+              dashboardImageCache.set(cacheKey, nextImgSrc);
               clearDashboardCoverEnsureState(id, platform);
               for (const card of platformCards) {
                 const name = String(card?.dataset?.name || "").trim();
-                if (name) localStorage.setItem(IMG_CACHE_PREFIX + name, imgSrc);
+                if (name) {
+                  localStorage.setItem(IMG_CACHE_PREFIX + name, nextImgSrc);
+                }
               }
             } else {
               dashboardImageCache.delete(cacheKey);
@@ -15239,15 +15246,13 @@
                 const name = String(card?.dataset?.name || "").trim();
                 if (name) localStorage.removeItem(IMG_CACHE_PREFIX + name);
               }
-              imgSrc = fallbackIcon;
+              nextImgSrc = fallbackIcon;
             }
 
             for (const card of platformCards) {
               const img = card.querySelector(".dash-thumb");
               if (!img) continue;
-              applyDashboardCardImage(img, imgSrc, {
-                forceReload: options?.forceReload === true,
-              });
+              applyDashboardCardImage(img, nextImgSrc);
             }
           }
         }
@@ -15356,7 +15361,9 @@
                 ? String(payload.platform)
                 : null;
             clearDashboardCoverEnsureState(appid, platformHint);
-            await refreshDashboardImageByAppId(appid, platformHint);
+            await refreshDashboardImageByAppId(appid, platformHint, {
+              forceReload: true,
+            });
           });
           window.__dashboardImageListenerAttached = true;
         }
