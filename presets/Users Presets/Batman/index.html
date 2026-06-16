@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Batman</title>
+    <meta name="duration" content="5000" />
+    <meta width="500" height="185" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Rajdhani:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="bat-shell" id="shell">
+      <div class="banner" id="banner">
+        <img
+          class="bat-backdrop"
+          src="batman-shape-cropped.png"
+          alt=""
+          draggable="false"
+          aria-hidden="true"
+        />
+
+        <div class="content">
+          <div class="icon-frame">
+            <img class="icon" id="icon" src="" alt="Achievement icon" />
+          </div>
+
+          <div class="copy" id="copy">
+            <div class="title-wrap">
+              <div class="title" id="title"></div>
+            </div>
+            <div class="rule"></div>
+            <div class="desc-wrap">
+              <div class="desc" id="desc"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      (() => {
+        const metaDur = document.querySelector('meta[name="duration"]');
+        const baseTotal = Math.max(1, Number(metaDur?.content || 5000));
+        const shell = document.getElementById("shell");
+        const banner = document.getElementById("banner");
+        const iconEl = document.getElementById("icon");
+        const copyEl = document.getElementById("copy");
+        const titleEl = document.getElementById("title");
+        const descEl = document.getElementById("desc");
+        let closeTimer = null;
+        let notificationSeq = 0;
+
+        function clearCloseTimer() {
+          if (closeTimer) {
+            clearTimeout(closeTimer);
+            closeTimer = null;
+          }
+        }
+
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
+
+        function closeWindow() {
+          window.api?.closeNotificationWindow?.();
+          window.electronAPI?.closeNotificationWindow?.();
+        }
+
+        function toFileSrc(value) {
+          if (!value) return "";
+          const normalized = String(value).replace(/\\/g, "/");
+          return normalized.startsWith("file://")
+            ? normalized
+            : `file:///${normalized}`;
+        }
+
+        function safeText(value, fallback = "") {
+          const text = (value ?? "").toString().trim();
+          return text || fallback;
+        }
+
+        function applyScale(value) {
+          const numeric = parseFloat(value);
+          const safeScale =
+            Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
+          shell.style.setProperty("--scale", String(safeScale));
+        }
+
+        function preloadIcon(src, timeoutMs = 180) {
+          return new Promise((resolve) => {
+            if (!src) {
+              resolve("");
+              return;
+            }
+            let settled = false;
+            const done = () => {
+              if (settled) return;
+              settled = true;
+              resolve(src);
+            };
+            const img = new Image();
+            img.decoding = "async";
+            img.onload = done;
+            img.onerror = done;
+            const timer = setTimeout(done, timeoutMs);
+            img.onload = () => {
+              clearTimeout(timer);
+              done();
+            };
+            img.onerror = () => {
+              clearTimeout(timer);
+              done();
+            };
+            img.src = src;
+          });
+        }
+
+        function resetMarquee(container, inner) {
+          try {
+            inner.getAnimations().forEach((animation) => animation.cancel());
+          } catch {}
+          container.classList.remove("marquee");
+          void container.offsetWidth;
+        }
+
+        function applyMarquee(container, inner, options = {}) {
+          const {
+            minDuration = 3200,
+            speedDivisor = 52,
+            delay = 900,
+            extraPadding = 28,
+          } = options;
+
+          resetMarquee(container, inner);
+          const overflow = (inner.scrollWidth || 0) - (container.clientWidth || 0);
+          if (overflow > 2) {
+            const distance = Math.ceil(overflow + extraPadding);
+            container.classList.add("marquee");
+            inner.animate(
+              [
+                { transform: "translateX(0)" },
+                { transform: `translateX(-${distance}px)` },
+              ],
+              {
+                duration: Math.max(
+                  minDuration,
+                  Math.round(distance / speedDivisor) * 1000
+                ),
+                delay,
+                easing: "linear",
+                fill: "both",
+              }
+            );
+          }
+        }
+
+        function restartAnimation(totalMs) {
+          banner.classList.remove("active");
+          clearCloseTimer();
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              banner.classList.add("active");
+            });
+          });
+          closeTimer = setTimeout(() => {
+            banner.classList.remove("active");
+            closeWindow();
+          }, totalMs + 40);
+        }
+
+        function handleNotification(payload = {}) {
+          const seq = ++notificationSeq;
+          const total = Math.max(0, Number(metaDur?.content || baseTotal));
+          const timelineScale = Math.max(0.1, total / baseTotal);
+          const inDur = Math.max(180, Math.round(460 * timelineScale));
+          const outDur = Math.max(180, Math.round(460 * timelineScale));
+          const outDelay = Math.max(0, total - outDur);
+          const iconSrc = toFileSrc(payload?.iconPath || payload?.icon || "");
+          const titleText = safeText(
+            payload?.displayName || payload?.title,
+            "Achievement unlocked"
+          );
+          const descText = safeText(
+            payload?.description || payload?.desc,
+            "Unknown operation"
+          );
+
+          titleEl.textContent = titleText;
+          descEl.textContent = descText;
+          applyScale(payload?.scale);
+
+          banner.style.setProperty("--inDur", `${inDur}ms`);
+          banner.style.setProperty("--outDur", `${outDur}ms`);
+          banner.style.setProperty("--outDelay", `${outDelay}ms`);
+
+          preloadIcon(iconSrc).then((readySrc) => {
+            if (seq !== notificationSeq) return;
+            if (readySrc) {
+              iconEl.src = readySrc;
+            } else {
+              iconEl.removeAttribute("src");
+            }
+
+            restartAnimation(total);
+            notifyScreenshotReady(inDur + 120);
+
+            setTimeout(() => {
+              if (seq !== notificationSeq) return;
+              applyMarquee(titleEl.parentElement, titleEl, {
+                minDuration: 3400,
+                speedDivisor: 46,
+                delay: 1000,
+              });
+              applyMarquee(descEl.parentElement, descEl, {
+                minDuration: 3200,
+                speedDivisor: 44,
+                delay: 1080,
+              });
+            }, Math.max(0, inDur + 80));
+          });
+        }
+
+        banner.addEventListener("click", closeWindow);
+
+        if (window.api && typeof window.api.onNotification === "function") {
+          window.api.onNotification(handleNotification);
+        } else if (
+          window.electronAPI &&
+          typeof window.electronAPI.onNotification === "function"
+        ) {
+          window.electronAPI.onNotification(handleNotification);
+        }
+
+        applyScale(1);
+      })();
+    </script>
+  </body>
+</html>

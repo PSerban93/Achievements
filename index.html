@@ -549,8 +549,8 @@
     <div id="bootLoading" role="status" aria-live="polite">
       <div class="boot-loading-card">
         <div class="boot-spinner" aria-hidden="true"></div>
-        <div class="boot-loading-title">Booting…</div>
-        <div class="boot-loading-sub">Preparing achievements cache</div>
+        <div class="boot-loading-title" data-i18n="boot.loading.title">Booting…</div>
+        <div class="boot-loading-sub" data-i18n="boot.loading.sub">Preparing achievements cache</div>
       </div>
     </div>
 
@@ -10704,7 +10704,7 @@
 
           muteOption.value = "mute";
 
-          muteOption.textContent = "🔇 Mute";
+          muteOption.textContent = tUi("option.soundSelect.mute", "🔇 Mute");
 
           soundSelect.appendChild(muteOption);
 

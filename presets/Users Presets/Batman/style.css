@@ -1,0 +1,247 @@
+:root {
+  --scale: 1;
+  --inDur: 460ms;
+  --outDur: 460ms;
+  --outDelay: 4540ms;
+}
+
+.bat-shell {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 500px;
+  height: 150px;
+  transform: translate(-50%, -50%) scale(var(--scale, 1));
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.banner {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: auto;
+  transform: translateY(18px) scale(0.985);
+  transform-origin: center center;
+  will-change: transform, opacity, filter;
+}
+
+.banner.active {
+  animation:
+    banner-in var(--inDur) cubic-bezier(0.18, 0.78, 0.26, 1) forwards,
+    banner-out var(--outDur) ease-in var(--outDelay) forwards;
+}
+
+@keyframes banner-in {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+    filter: blur(1px);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes banner-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-12px) scale(0.99);
+    filter: blur(0.9px);
+  }
+}
+
+.bat-backdrop {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 100%;
+  height: auto;
+  max-width: none;
+  object-position: center center;
+  pointer-events: none;
+  user-select: none;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 5px 10px rgba(0, 0, 0, 0.22));
+}
+
+.content {
+  position: absolute;
+  left: 76px;
+  right: 76px;
+  top: 46px;
+  height: 56px;
+  display: block;
+}
+
+.icon-frame {
+  position: absolute;
+  left: 50%;
+  top: 47px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(244, 201, 73, 0.72);
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(255, 221, 120, 0.08) inset,
+    0 4px 10px rgba(0, 0, 0, 0.22);
+  transform: translateX(-50%);
+}
+
+.icon {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  transform: none;
+  filter: brightness(1.06) contrast(1.03);
+}
+
+.banner.active .icon-frame {
+  animation:
+    icon-in var(--inDur) cubic-bezier(0.2, 0.82, 0.24, 1.1) forwards,
+    icon-out var(--outDur) ease-in var(--outDelay) forwards;
+}
+
+@keyframes icon-in {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.72);
+  }
+  65% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(-50%) scale(1);
+  }
+}
+
+@keyframes icon-out {
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) scale(0.88);
+  }
+}
+
+.copy {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  min-width: 0;
+  width: 272px;
+  max-width: 272px;
+  opacity: 0;
+  transform: translate(-50%, 8px);
+  will-change: transform, opacity;
+  text-align: center;
+}
+
+.banner.active .copy {
+  animation: copy-in var(--inDur) ease-out forwards;
+}
+
+@keyframes copy-in {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.title-wrap,
+.desc-wrap {
+  overflow: hidden;
+  text-align: center;
+}
+
+.title-wrap {
+  height: 22px;
+}
+
+.desc-wrap {
+  margin-top: 2px;
+  height: 16px;
+}
+
+.title,
+.desc {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+  opacity: 1;
+  padding-right: 24px;
+}
+
+.title-wrap.marquee .title,
+.desc-wrap.marquee .desc {
+  text-overflow: clip;
+}
+
+.title {
+  font-family: "Rajdhani", "Segoe UI", sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.55px;
+  color: #fff5c4;
+  text-transform: uppercase;
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 0.18),
+    0 2px 6px rgba(0, 0, 0, 0.5);
+}
+
+.rule {
+  margin-top: 2px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 64%;
+  height: 2px;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(232, 187, 61, 0.16),
+      rgba(247, 208, 97, 0.95),
+      rgba(232, 187, 61, 0.16)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 236, 156, 0.07) 0 2px,
+      rgba(118, 88, 13, 0.04) 2px 5px
+    );
+  background-blend-mode: screen, normal;
+  box-shadow: inset 0 1px 0 rgba(255, 236, 158, 0.08);
+}
+
+.desc {
+  font-family: "Oswald", "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: #e6c452;
+  text-shadow:
+    0 0 1px rgba(255, 214, 82, 0.1),
+    0 1px 3px rgba(0, 0, 0, 0.64);
+}

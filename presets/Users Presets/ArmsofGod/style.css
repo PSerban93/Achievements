@@ -1,0 +1,319 @@
+:root {
+  --scale: 1;
+  --inDur: 520ms;
+  --outDur: 520ms;
+  --outDelay: 4480ms;
+  --timeline-scale: 1;
+}
+
+.hellblade-shell {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  width: 540px;
+  height: 154px;
+  transform: translate(-50%, -50%) scale(var(--scale, 1));
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.banner {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: auto;
+  transform: translateY(18px) scale(0.992);
+  transform-origin: center center;
+  will-change: transform, opacity, filter;
+}
+
+.banner.active {
+  animation:
+    banner-in var(--inDur) cubic-bezier(0.18, 0.78, 0.26, 1) forwards,
+    banner-out var(--outDur) ease-in var(--outDelay) forwards;
+}
+
+@keyframes banner-in {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.992);
+    filter: blur(0.8px);
+  }
+  65% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes banner-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.995);
+    filter: blur(0.8px);
+  }
+}
+
+.banner::before,
+.banner::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+.banner::before {
+  inset: 10px 14px;
+  background:
+    radial-gradient(circle at 18% 50%, rgba(78, 56, 29, 0.015), transparent 9%),
+    radial-gradient(circle at 82% 50%, rgba(84, 58, 31, 0.012), transparent 11%),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.003) 0 1px,
+      transparent 1px 10px
+    ),
+    linear-gradient(180deg, rgba(11, 9, 7, 0.985), rgba(6, 5, 4, 0.992));
+  clip-path: polygon(
+    1.2% 12%,
+    2.2% 7%,
+    9% 5.5%,
+    22% 6.2%,
+    40% 5.1%,
+    50% 4.7%,
+    60% 5.1%,
+    78% 6.2%,
+    91% 5.5%,
+    97.8% 7%,
+    98.8% 12%,
+    97.7% 29%,
+    98.6% 46%,
+    97.2% 61%,
+    97.9% 77%,
+    93% 90.5%,
+    82% 94%,
+    68% 93.1%,
+    50% 94%,
+    37% 92.6%,
+    21% 93.2%,
+    8% 91%,
+    2.2% 84%,
+    2.8% 68%,
+    2.1% 50%,
+    3% 34%,
+    2.2% 18%
+  );
+  opacity: 1;
+  box-shadow: 0 14px 24px rgba(0, 0, 0, 0.34);
+}
+
+.banner::after {
+  inset: 13px 17px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.004), transparent 26%, transparent 74%, rgba(255, 255, 255, 0.003)),
+    radial-gradient(circle at 50% 48%, rgba(96, 64, 28, 0.01), transparent 20%),
+    linear-gradient(180deg, rgba(10, 8, 7, 0.985), rgba(6, 5, 4, 0.99));
+  clip-path: polygon(
+    1.6% 13.2%,
+    3.3% 9.2%,
+    11.4% 7.9%,
+    24.5% 8.3%,
+    41.5% 7.2%,
+    50% 6.9%,
+    58.5% 7.2%,
+    75.5% 8.3%,
+    88.6% 7.9%,
+    96.7% 9.2%,
+    98.4% 13.2%,
+    95.6% 33.2%,
+    96.3% 52%,
+    95.2% 69.2%,
+    96% 88.2%,
+    88.4% 93.1%,
+    73.7% 91.7%,
+    57.8% 92.8%,
+    50% 91%,
+    41.2% 92.8%,
+    25.3% 92%,
+    10.8% 90.3%,
+    4% 85.5%,
+    4.6% 67%,
+    3.8% 45%,
+    4.7% 26%
+  );
+  opacity: 1;
+}
+
+.icon-frame {
+  position: absolute;
+  left: 42px;
+  top: 47px;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(32, 25, 18, 0.78);
+  border: 2px solid rgba(214, 190, 151, 0.92);
+  box-shadow: 0 0 0 1px rgba(255, 245, 226, 0.08) inset;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.icon {
+  width: 55px;
+  height: 55px;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  filter: brightness(1.1) contrast(1.05);
+  transform: translateY(1px) scale(0.9);
+}
+
+.banner.active .icon {
+  animation:
+    icon-in var(--inDur) cubic-bezier(0.2, 0.82, 0.24, 1.1) forwards,
+    icon-out var(--outDur) ease-in var(--outDelay) forwards;
+}
+
+@keyframes icon-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  65% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes icon-out {
+  100% {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+.copy {
+  position: absolute;
+  left: 118px;
+  right: 42px;
+  top: 42px;
+  height: 66px;
+  z-index: 2;
+  opacity: 0;
+  transform: translateY(7px);
+  will-change: transform, opacity;
+}
+
+.title-wrap,
+.desc-wrap {
+  overflow: hidden;
+}
+
+.title-wrap {
+  height: 31px;
+}
+
+.desc-wrap {
+  margin-top: 10px;
+  height: 24px;
+}
+
+.title,
+.desc {
+  display: inline-block;
+  white-space: nowrap;
+  will-change: transform;
+  opacity: 1;
+  padding-right: 24px;
+}
+
+.banner.active .copy {
+  animation: copy-in var(--inDur) ease-out forwards;
+}
+
+.title-wrap.marquee .title,
+.desc-wrap.marquee .desc {
+  text-overflow: clip;
+}
+
+.title {
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  color: #f3ebdb;
+  text-shadow:
+    0 0 1px rgba(255, 255, 255, 0.15),
+    0 1px 2px rgba(0, 0, 0, 0.65);
+}
+
+.rule {
+  margin-top: 7px;
+  width: 91%;
+  height: 3px;
+  opacity: 1;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(164, 96, 44, 0.22),
+      rgba(191, 117, 54, 0.88),
+      rgba(164, 96, 44, 0.22)
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(255, 235, 210, 0.06) 0 2px,
+      rgba(112, 63, 24, 0.04) 2px 5px
+    );
+  background-blend-mode: screen, normal;
+  box-shadow: inset 0 1px 0 rgba(255, 213, 164, 0.08);
+}
+
+.desc {
+  font-family: "Cinzel", Georgia, serif;
+  font-size: 19px;
+  font-weight: 500;
+  line-height: 1.1;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #c98a61;
+  text-shadow:
+    0 0 1px rgba(255, 214, 171, 0.12),
+    0 1px 2px rgba(0, 0, 0, 0.72);
+}
+
+@keyframes text-in {
+  0% {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes copy-in {
+  0% {
+    opacity: 0;
+    transform: translateY(7px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
