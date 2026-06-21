@@ -147,7 +147,7 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
 1. Install [Node.js](https://nodejs.org) and [Git](https://git-scm.com).
 2. Clone this repository:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/achievements.git
+   git clone https://github.com/PSerban93/achievements.git
    cd achievements
    ```
 3. Install dependencies:
