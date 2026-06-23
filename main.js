@@ -10116,6 +10116,7 @@ function createNotificationWindow(message) {
       displayName: message.displayName,
       description: message.description,
       iconPath: iconPathToSend,
+      headerPath: message.headerPath || "",
       scale,
       durationOverridden: !!message?.durationOverridden,
     });
@@ -10176,6 +10177,8 @@ ipcMain.on("show-notification", async (_event, achievement) => {
       description: descriptionText,
       icon: achievement.icon,
       icon_gray: achievement.icon_gray || achievement.icongray,
+      appid: achievement.appid || achievement.appId || null,
+      platform: normalizePlatform(achievement.platform) || null,
       config_path: achievement.config_path,
       preset: achievement.preset,
       position: achievement.position,
@@ -10630,6 +10633,8 @@ function queueAchievementNotification(achievement) {
     description: description || "",
     icon: achievement.icon,
     icon_gray: achievement.icon_gray || achievement.icongray,
+    appid: achievement.appid || achievement.appId || null,
+    platform: normalizePlatform(achievement.platform) || null,
     config_path: achievement.config_path,
     configName: achievement.configName || achievement.config_name || "",
     preset: resolvedPreset,
@@ -10669,6 +10674,35 @@ function queueAchievementNotification(achievement) {
   processNextNotification();
 }
 
+function resolveGameHeaderPathForNotification(achievement = {}) {
+  const appid = String(achievement.appid || achievement.appId || "").trim();
+  if (!appid) return "";
+  let platform = normalizePlatform(achievement.platform);
+  if (!platform) {
+    const configPath = String(achievement.config_path || "").trim();
+    if (configPath && fs.existsSync(configPath)) {
+      try {
+        const rawConfig = fs.readFileSync(configPath, "utf8");
+        const parsedConfig = JSON.parse(rawConfig);
+        platform = normalizePlatform(parsedConfig?.platform);
+      } catch {}
+    }
+  }
+  if (!platform) return "";
+  const headerPath = path.join(
+    app.getPath("userData"),
+    "images",
+    platform,
+    appid,
+    "header.jpg",
+  );
+  try {
+    return fs.existsSync(headerPath) ? headerPath : "";
+  } catch {
+    return "";
+  }
+}
+
 function processNextNotification() {
   if (isNotificationShowing || earnedNotificationQueue.length === 0) return;
 
@@ -10682,6 +10716,8 @@ function processNextNotification() {
     description: achievement.description,
     icon: achievement.icon,
     icon_gray: achievement.icon_gray,
+    appid: achievement.appid || achievement.appId || null,
+    platform: normalizePlatform(achievement.platform) || null,
     config_path: achievement.config_path,
     preset: achievement.preset,
     position: achievement.position,
@@ -10701,6 +10737,16 @@ function processNextNotification() {
     iconPathFinal = ICON_PATH;
   }
   notificationData.iconPath = iconPathFinal;
+  if (
+    ["game header", "game cover"].includes(
+      String(notificationData.preset || "").trim().toLowerCase(),
+    )
+  ) {
+    const headerPath = resolveGameHeaderPathForNotification(achievement);
+    if (headerPath) {
+      notificationData.headerPath = headerPath;
+    }
+  }
   notificationLogger.info("show-notification", {
     displayName: notificationData.displayName,
     preset: notificationData.preset || "default",
@@ -12190,6 +12236,8 @@ async function monitorAchievementsFile(filePath) {
               description,
               icon: achievementConfig.icon,
               icon_gray: achievementConfig.icon_gray,
+              appid: currentAppId || null,
+              platform: currentPlatform || null,
               config_path: selectedConfigPath,
               preset: selectedPreset,
               position: selectedPosition,
@@ -12303,6 +12351,8 @@ async function monitorAchievementsFile(filePath) {
             icon: achievementConfig.icon,
             icon_gray:
               achievementConfig.icon_gray || achievementConfig.icongray,
+            appid: currentAppId || null,
+            platform: currentPlatform || null,
             config_path: selectedConfigPath,
             preset: selectedPreset,
             position: selectedPosition,
@@ -15907,6 +15957,8 @@ function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
       description: achievementConfig.description,
       icon: achievementConfig.icon,
       icon_gray: achievementConfig.icon_gray || achievementConfig.icongray,
+      appid: config?.appid || currentAppId || null,
+      platform: normalizePlatform(config?.platform) || null,
       config_path: config?.config_path || selectedConfigPath || "",
       preset: selectedPreset,
       position: selectedPosition,

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Clean Header</title>
+    <meta name="duration" content="5000" />
+    <meta width="520" height="132" />
+    <link rel="stylesheet" href="style.css" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+      }
+
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform-origin: center center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="ach">
+      <div class="ach-inner">
+        <div class="bg-layer">
+          <img class="bg-image-focus" src="" alt="" aria-hidden="true" />
+          <div class="bg-overlay"></div>
+          <div class="bg-vignette"></div>
+        </div>
+        <div class="icon"><img src="" alt="Icon" /></div>
+        <div class="text_wrap">
+          <p class="title"><span class="title-inner"></span></p>
+          <span class="detail"></span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      window.addEventListener("DOMContentLoaded", () => {
+        const metaDur = document.querySelector('meta[name="duration"]');
+        const baseTotal = Math.max(1, Number(metaDur?.content || 5000));
+
+        async function computeDirFromWindowPosition() {
+          try {
+            const wa = (await window.api?.getDisplayWorkArea?.()) || {};
+            const wx = Number.isFinite(window.screenX)
+              ? window.screenX
+              : Number.isFinite(window.screenLeft)
+              ? window.screenLeft
+              : 0;
+            const wy = Number.isFinite(window.screenY)
+              ? window.screenY
+              : Number.isFinite(window.screenTop)
+              ? window.screenTop
+              : 0;
+            const ww = window.outerWidth || window.innerWidth || 0;
+            const wh = window.outerHeight || window.innerHeight || 0;
+            const centerX = wx + ww / 2;
+            const centerY = wy + wh / 2;
+            const waWidth = wa.width || window.screen?.availWidth || 1920;
+            const waHeight = wa.height || window.screen?.availHeight || 1080;
+            const midX = waWidth / 2;
+            const midY = waHeight / 2;
+            const nearCenterX =
+              Math.abs(centerX - midX) <= Math.max(24, ww * 0.05);
+            const h = nearCenterX
+              ? "center"
+              : centerX < midX
+              ? "left"
+              : "right";
+            const v = centerY < midY ? "top" : "bottom";
+            return { h, v };
+          } catch {
+            return { h: "right", v: "bottom" };
+          }
+        }
+
+        function setDirectionByPosition(ach, posString) {
+          const raw = String(posString || "")
+            .trim()
+            .toLowerCase();
+          const tokens = raw
+            .replace(/[^a-z]+/g, " ")
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean);
+
+          const hasLeft = tokens.includes("left") || tokens.includes("l");
+          const hasRight = tokens.includes("right") || tokens.includes("r");
+          const hasTop = tokens.includes("top") || tokens.includes("t");
+          const hasBottom = tokens.includes("bottom") || tokens.includes("b");
+
+          const atLeft = hasLeft && !hasRight;
+          const atRight = hasRight && !hasLeft;
+          const fromTop = hasTop && !hasBottom;
+
+          ach.className = "ach";
+          ach.classList.add(fromTop ? "from-top" : "from-bottom");
+          ach.classList.add(
+            atLeft ? "at-left" : atRight ? "at-right" : "at-center"
+          );
+
+          const inner = ach.querySelector(".ach-inner");
+          if (inner) {
+            inner.classList.remove("side-left", "side-right");
+            if (atLeft) inner.classList.add("side-left");
+            if (atRight || (!atLeft && !atRight)) {
+              inner.classList.add("side-right");
+            }
+          }
+        }
+
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
+
+        function startAnimation(ach, inner, placement, totalMs) {
+          inner.style.animation = "none";
+          ach.style.animation = "none";
+          inner.classList.remove("active", "side-left", "side-right");
+
+          const scale = Math.max(0.1, totalMs / baseTotal);
+          const inDur = Math.max(120, Math.round(300 * scale));
+          const outDur = Math.max(120, Math.round(300 * scale));
+          const outDelayMs = Math.max(0, Number(totalMs) - outDur);
+
+          ach.style.setProperty("--outDelay", `${outDelayMs}ms`);
+
+          if (placement?.h === "left" || placement?.h === "right") {
+            void inner.offsetWidth;
+            inner.style.opacity = "1";
+            if (placement.h === "right") {
+              inner.style.animation = `chSlideInRight ${inDur}ms ease-out forwards, chSlideOutRight ${outDur}ms ease-in ${outDelayMs}ms forwards`;
+            } else {
+              inner.style.animation = `chSlideInLeft ${inDur}ms ease-out forwards, chSlideOutLeft ${outDur}ms ease-in ${outDelayMs}ms forwards`;
+            }
+          } else {
+            void ach.offsetWidth;
+            ach.style.opacity = "1";
+            inner.style.opacity = "1";
+            if (placement?.v === "top") {
+              ach.style.animation = `chSlideInTop ${inDur}ms ease-out forwards, chSlideOutTop ${outDur}ms ease-in ${outDelayMs}ms forwards`;
+            } else {
+              ach.style.animation = `chSlideInBottom ${inDur}ms ease-out forwards, chSlideOutBottom ${outDur}ms ease-in ${outDelayMs}ms forwards`;
+            }
+          }
+
+          const closeAfter = outDelayMs + outDur + Math.round(80 * scale);
+          notifyScreenshotReady(inDur + Math.round(60 * scale));
+          setTimeout(() => {
+            window.api?.closeNotificationWindow?.();
+          }, closeAfter);
+        }
+
+        function toAssetSrc(value) {
+          if (!value) return "";
+          const normalized = String(value).replace(/\\/g, "/");
+          return normalized.startsWith("file://")
+            ? normalized
+            : `file:///${normalized}`;
+        }
+
+        function setBackgroundImage(bgFocusEl, payload) {
+          const candidate =
+            payload?.headerPath ||
+            payload?.headerUrl ||
+            payload?.backgroundPath ||
+            payload?.backgroundUrl ||
+            "";
+          const src = toAssetSrc(candidate);
+          if (!bgFocusEl) return;
+          if (src) {
+            bgFocusEl.src = src;
+            bgFocusEl.classList.add("has-image");
+          } else {
+            bgFocusEl.removeAttribute("src");
+            bgFocusEl.classList.remove("has-image");
+          }
+        }
+
+        window.api?.onNotification?.(async (payload) => {
+          const ach = document.querySelector(".ach");
+          const inner = document.querySelector(".ach-inner");
+          const titleEl = document.querySelector(".title");
+          const titleInnerEl = document.querySelector(".title-inner");
+          const detailEl = document.querySelector(".detail");
+          const iconEl = document.querySelector(".icon img");
+          const bgImageFocusEl = document.querySelector(".bg-image-focus");
+
+          titleInnerEl.textContent = String(payload?.displayName || "");
+          detailEl.textContent = String(payload?.description || "");
+
+          if (payload?.iconPath) {
+            iconEl.src = toAssetSrc(payload.iconPath);
+          } else {
+            iconEl.removeAttribute("src");
+          }
+
+          setBackgroundImage(bgImageFocusEl, payload);
+
+          const scale = Math.max(0.01, Number(payload?.scale || 1));
+          ach.style.setProperty("--scale", String(scale));
+
+          const posValue = (
+            payload?.position ??
+            payload?.presetPosition ??
+            payload?.pos ??
+            payload?.corner ??
+            ""
+          ).toString();
+          setDirectionByPosition(ach, posValue);
+
+          const placement = await computeDirFromWindowPosition();
+          const total = Math.max(0, Number(metaDur?.content || baseTotal));
+
+          requestAnimationFrame(() => {
+            void inner.offsetWidth;
+            requestAnimationFrame(() =>
+              startAnimation(ach, inner, placement, total)
+            );
+          });
+
+          requestAnimationFrame(() => {
+            try {
+              titleInnerEl.getAnimations().forEach((a) => a.cancel());
+            } catch {}
+            titleEl.classList.remove("marquee");
+            void titleEl.offsetWidth;
+            const overflowX =
+              (titleInnerEl.scrollWidth || 0) - (titleEl.clientWidth || 0);
+            if (overflowX > 0) {
+              const px = Math.ceil(overflowX + 24);
+              titleEl.classList.add("marquee");
+              titleInnerEl.animate(
+                [
+                  { transform: "translateX(0)" },
+                  { transform: `translateX(-${px}px)` },
+                ],
+                {
+                  duration: Math.max(3000, Math.round(px / 50) * 1000),
+                  delay: 1200,
+                  easing: "linear",
+                  fill: "both",
+                }
+              );
+            }
+          });
+        });
+      });
+    </script>
+  </body>
+</html>
