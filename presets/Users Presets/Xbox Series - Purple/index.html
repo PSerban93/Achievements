@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="style.css" />
     <title>Popup Animation</title>
-    <meta name="duration" content="10000" />
+    <meta name="duration" content="11000" />
     <style>
       html,
       body {
@@ -28,7 +28,7 @@
     </style>
   </head>
   <body>
-    <meta width="600" height="160" />
+    <meta width="700" height="160" />
     <div class="ach">
       <div class="achievement-banner animated">
         <div class="achievement-loader"></div>
@@ -55,9 +55,14 @@
         const detailEl = document.querySelector(".detail");
         const iconEl = document.querySelector(".icon img");
         const durationMeta = document.querySelector('meta[name="duration"]');
+        const frameMeta = document.querySelector("meta[width][height]");
         const baseTotal = Math.max(1, Number(durationMeta?.content || 10000));
-        const extendedModeThreshold = 7000;
-        const manualVisualBaseTotal = 8400;
+        const baseFrameWidth = Math.max(
+          0,
+          Number(frameMeta?.getAttribute("width")) || 0
+        );
+        const SCALE_WIDTH_CLAMP_THRESHOLD = 1.26;
+        const HORIZONTAL_SAFE_MARGIN_PX = 24;
         const getCloseDelay = () =>
           Math.max(0, Number(durationMeta?.content || 10000));
         let closeDelay = getCloseDelay();
@@ -118,112 +123,6 @@
           const safeScale =
             Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
           container.style.setProperty("--scale", String(safeScale));
-        };
-
-        const configureManualTimeline = (totalMs) => {
-          const safeTotal = Math.max(1, Number(totalMs) || manualVisualBaseTotal);
-          const toMs = (value) => `${Math.max(0, Math.round(value))}ms`;
-          const textDelayExtension = Math.max(
-            0,
-            safeTotal - extendedModeThreshold
-          );
-          const bannerDelay = 1000;
-          const bannerIn = 1500;
-          const bannerOut = 1000;
-          const bannerOutDelay = 5000 + textDelayExtension;
-          const iconDelay = 1000;
-          const iconIn = 450;
-          const iconOut = 450;
-          const iconOutDelay = 5050 + textDelayExtension;
-          const trophyDelay = 1000;
-          const trophyIn = 400;
-          const trophyOut = 400;
-          const trophyOutDelay = 4600 + textDelayExtension;
-          const loaderTimings = [
-            { delay: 0, in: 700, out: 700, outDelay: 6300 + textDelayExtension },
-            { delay: 100, in: 650, out: 650, outDelay: 5950 + textDelayExtension },
-            { delay: 250, in: 600, out: 600, outDelay: 5650 + textDelayExtension },
-            { delay: 500, in: 550, out: 550, outDelay: 5450 + textDelayExtension },
-            { delay: 750, in: 500, out: 500, outDelay: 5250 + textDelayExtension },
-          ];
-          const titleDelay = 1400;
-          const titleIn = 1600;
-          const titleOut = 600;
-          const detailGap = 100;
-          const detailIn = 900;
-          const detailOut = 1000;
-          const availableTextHold = Math.max(
-            0,
-            safeTotal -
-              (titleDelay +
-                titleIn +
-                titleOut +
-                detailGap +
-                detailIn +
-                detailOut)
-          );
-          const titleHold = Math.round(availableTextHold * 0.4);
-          const detailHold = availableTextHold - titleHold;
-          const titleOutDelay = titleDelay + titleIn + titleHold;
-          const detailDelay = titleOutDelay + titleOut + detailGap;
-          const detailOutDelay = detailDelay + detailIn + detailHold;
-
-          container.classList.add("manual-duration");
-          document.documentElement.style.setProperty("--timeline-scale", "1");
-          container.style.setProperty("--manual-banner-delay", toMs(bannerDelay));
-          container.style.setProperty("--manual-banner-in", toMs(bannerIn));
-          container.style.setProperty("--manual-banner-out", toMs(bannerOut));
-          container.style.setProperty(
-            "--manual-banner-out-delay",
-            toMs(bannerOutDelay)
-          );
-          container.style.setProperty("--manual-icon-delay", toMs(iconDelay));
-          container.style.setProperty("--manual-icon-in", toMs(iconIn));
-          container.style.setProperty("--manual-icon-out", toMs(iconOut));
-          container.style.setProperty(
-            "--manual-icon-out-delay",
-            toMs(iconOutDelay)
-          );
-          container.style.setProperty("--manual-trophy-delay", toMs(trophyDelay));
-          container.style.setProperty("--manual-trophy-in", toMs(trophyIn));
-          container.style.setProperty("--manual-trophy-out", toMs(trophyOut));
-          container.style.setProperty(
-            "--manual-trophy-out-delay",
-            toMs(trophyOutDelay)
-          );
-          loaderTimings.forEach((loader, index) => {
-            const varIndex = index + 1;
-            container.style.setProperty(
-              `--manual-loader-${varIndex}-delay`,
-              toMs(loader.delay)
-            );
-            container.style.setProperty(
-              `--manual-loader-${varIndex}-in`,
-              toMs(loader.in)
-            );
-            container.style.setProperty(
-              `--manual-loader-${varIndex}-out`,
-              toMs(loader.out)
-            );
-            container.style.setProperty(
-              `--manual-loader-${varIndex}-out-delay`,
-              toMs(loader.outDelay)
-            );
-          });
-          container.style.setProperty("--manual-title-delay", toMs(titleDelay));
-          container.style.setProperty("--manual-title-in", toMs(titleIn));
-          container.style.setProperty("--manual-title-out", toMs(titleOut));
-          container.style.setProperty(
-            "--manual-title-out-delay",
-            toMs(titleOutDelay)
-          );
-          container.style.setProperty("--manual-detail-delay", toMs(detailDelay));
-          container.style.setProperty("--manual-detail-in", toMs(detailIn));
-          container.style.setProperty("--manual-detail-out", toMs(detailOut));
-          container.style.setProperty(
-            "--manual-detail-out-delay",
-            toMs(detailOutDelay)
-          );
         };
 
         const resetAnimations = (elements) => {
@@ -427,7 +326,35 @@
           const constructedWidth = Math.ceil(offsetLeft + textWidth + padding);
 
           const baseWidth = Math.max(autoWidth, constructedWidth, collapsedPx);
-          const finalWidth = Math.max(baseWidth + 4, collapsedPx);
+          const requestedWidth = Math.max(baseWidth + 4, collapsedPx);
+          const currentScale = Math.max(
+            0.1,
+            parseFloat(styles.getPropertyValue("--scale")) || 1
+          );
+          const viewportWidth =
+            window.innerWidth || document.documentElement.clientWidth || 0;
+          const scaledWindowLimit =
+            viewportWidth > 0
+              ? Math.max(
+                  collapsedPx,
+                  Math.floor(viewportWidth / currentScale) -
+                    HORIZONTAL_SAFE_MARGIN_PX * 2
+                )
+              : baseFrameWidth;
+          const maxExpandedWidth =
+            currentScale > SCALE_WIDTH_CLAMP_THRESHOLD
+              ? Math.max(
+                  collapsedPx,
+                  Math.min(
+                    baseFrameWidth || requestedWidth,
+                    scaledWindowLimit || requestedWidth
+                  )
+                )
+              : Infinity;
+          const finalWidth = Math.max(
+            Math.min(requestedWidth, maxExpandedWidth),
+            collapsedPx
+          );
           container.style.setProperty("--ach-width", `${finalWidth}px`);
         };
 
@@ -468,19 +395,11 @@
           }
 
           const total = getCloseDelay();
-          const useExtendedHoldMode = total > extendedModeThreshold;
-          const timelineScale = useExtendedHoldMode
-            ? 1
-            : Math.max(0.1, total / baseTotal);
-          if (useExtendedHoldMode) {
-            configureManualTimeline(total);
-          } else {
-            container.classList.remove("manual-duration");
-            document.documentElement.style.setProperty(
-              "--timeline-scale",
-              timelineScale.toFixed(4)
-            );
-          }
+          const scale = Math.max(0.1, total / baseTotal);
+          document.documentElement.style.setProperty(
+            "--timeline-scale",
+            scale.toFixed(4)
+          );
           applyScale(notificationData.scale);
           applyAnchoringFromPosition(
             notificationData.position ??
@@ -512,9 +431,7 @@
             });
             updateContainerWidth();
             restartAnimation();
-            notifyScreenshotReady(
-              Math.max(700, Math.round(2600 * timelineScale))
-            );
+            notifyScreenshotReady(Math.max(700, Math.round(2600 * scale)));
             scheduleClose();
           });
         };

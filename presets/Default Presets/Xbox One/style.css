@@ -332,3 +332,326 @@ body {
   100% {
   }
 }
+
+.ach.manual-duration .achievement-banner.animated {
+  animation:
+    mainManualEnterFrames linear var(--manual-banner-in, 1500ms)
+      var(--manual-banner-delay, 1000ms) forwards,
+    mainManualExitFrames linear var(--manual-banner-out, 1000ms)
+      var(--manual-banner-out-delay, 9000ms) forwards;
+}
+
+.ach.manual-duration .achievement-loader {
+  animation-fill-mode: forwards;
+}
+
+.ach.manual-duration .achievement-loader:nth-of-type(1) {
+  animation:
+    loaderManualEnterFrames ease-out var(--manual-loader-1-in, 700ms)
+      var(--manual-loader-1-delay, 0ms) forwards,
+    loaderManualExitFrames ease-in var(--manual-loader-1-out, 700ms)
+      var(--manual-loader-1-out-delay, 6300ms) forwards;
+}
+
+.ach.manual-duration .achievement-loader:nth-of-type(2) {
+  animation:
+    loaderManualEnterFrames ease-out var(--manual-loader-2-in, 650ms)
+      var(--manual-loader-2-delay, 100ms) forwards,
+    loaderManualExitFrames ease-in var(--manual-loader-2-out, 650ms)
+      var(--manual-loader-2-out-delay, 5950ms) forwards;
+}
+
+.ach.manual-duration .achievement-loader:nth-of-type(3) {
+  animation:
+    loaderManualEnterFrames ease-out var(--manual-loader-3-in, 600ms)
+      var(--manual-loader-3-delay, 250ms) forwards,
+    loaderManualExitFrames ease-in var(--manual-loader-3-out, 600ms)
+      var(--manual-loader-3-out-delay, 5650ms) forwards;
+}
+
+.ach.manual-duration .achievement-loader:nth-of-type(4) {
+  animation:
+    loaderManualEnterFrames ease-out var(--manual-loader-4-in, 550ms)
+      var(--manual-loader-4-delay, 500ms) forwards,
+    loaderManualExitFrames ease-in var(--manual-loader-4-out, 550ms)
+      var(--manual-loader-4-out-delay, 5450ms) forwards;
+}
+
+.ach.manual-duration .achievement-loader:nth-of-type(5) {
+  animation:
+    loaderManualEnterFrames ease-out var(--manual-loader-5-in, 500ms)
+      var(--manual-loader-5-delay, 750ms) forwards,
+    loaderManualExitFrames ease-in var(--manual-loader-5-out, 500ms)
+      var(--manual-loader-5-out-delay, 5250ms) forwards;
+}
+
+.ach.manual-duration .achievement-trophy {
+  animation:
+    trophyManualEnterFrames ease-out var(--manual-trophy-in, 400ms)
+      var(--manual-trophy-delay, 1000ms) forwards,
+    trophyManualExitFrames ease-out var(--manual-trophy-out, 400ms)
+      var(--manual-trophy-out-delay, 4600ms) forwards;
+}
+
+.ach.manual-duration .icon img {
+  animation:
+    iconManualEnterFrames ease-out var(--manual-icon-in, 450ms)
+      var(--manual-icon-delay, 1000ms) forwards,
+    iconManualExitFrames ease-in var(--manual-icon-out, 450ms)
+      var(--manual-icon-out-delay, 5050ms) forwards;
+}
+
+.ach.manual-duration .achievement-banner .text_wrap .title {
+  animation:
+    achievementNameHoldInFrames linear var(--manual-title-in, 1600ms)
+      var(--manual-title-delay, 1400ms) forwards,
+    achievementNameHoldOutFrames linear var(--manual-title-out, 600ms)
+      var(--manual-title-out-delay, 8400ms) forwards;
+}
+
+.ach.manual-duration .achievement-banner .text_wrap .detail {
+  animation:
+    achievementTextHoldInFrames linear var(--manual-detail-in, 1200ms)
+      var(--manual-detail-delay, 2400ms) forwards,
+    achievementTextHoldOutFrames linear var(--manual-detail-out, 1000ms)
+      var(--manual-detail-out-delay, 9000ms) forwards;
+}
+
+@keyframes mainManualEnterFrames {
+  0% {
+    width: 100px;
+    height: 100px;
+    left: calc(50% - 50px);
+    background-color: transparent;
+  }
+  33.3333% {
+    background-color: #107c10;
+  }
+  50% {
+    width: 100px;
+    height: 100px;
+    left: calc(50% - 50px);
+  }
+  100% {
+    width: 450px;
+    height: 100px;
+    left: calc(50% - 225px);
+    background-color: #107c10;
+  }
+}
+
+@keyframes mainManualExitFrames {
+  0% {
+    width: 450px;
+    height: 100px;
+    left: calc(50% - 225px);
+    background-color: #107c10;
+  }
+  50% {
+    width: 100px;
+    height: 100px;
+    left: calc(50% - 50px);
+    background-color: #107c10;
+  }
+  75% {
+    background-color: transparent;
+  }
+  100% {
+    width: 100px;
+    height: 100px;
+    left: calc(50% - 50px);
+    background-color: transparent;
+  }
+}
+
+@keyframes loaderManualEnterFrames {
+  0% {
+    transform: scaleX(0) scaleY(0);
+    opacity: 0;
+  }
+  100% {
+    transform: scaleX(1) scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes loaderManualExitFrames {
+  0% {
+    transform: scaleX(1) scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(0) scaleY(0);
+    opacity: 0;
+  }
+}
+
+@keyframes iconManualEnterFrames {
+  0% {
+    transform: scaleX(0) scaleY(0);
+    opacity: 0;
+  }
+  100% {
+    transform: scaleX(1) scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes iconManualExitFrames {
+  0% {
+    transform: scaleX(1) scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleX(0) scaleY(0);
+    opacity: 0;
+  }
+}
+
+@keyframes trophyManualEnterFrames {
+  0% {
+    background-color: transparent !important;
+    transform: scaleX(0) scaleY(0);
+  }
+  50% {
+    background-color: transparent !important;
+    transform: scaleX(1.2) scaleY(1.2);
+  }
+  100% {
+    background-color: transparent !important;
+    transform: scaleX(1) scaleY(1);
+  }
+}
+
+@keyframes trophyManualExitFrames {
+  0% {
+    background-color: transparent !important;
+    transform: scaleX(1) scaleY(1);
+  }
+  50% {
+    background-color: transparent !important;
+    transform: scaleX(1.2) scaleY(1.2);
+  }
+  100% {
+    background-color: transparent !important;
+    transform: scaleX(0) scaleY(0);
+  }
+}
+
+@keyframes achievementTextHoldInFrames {
+  0% {
+    opacity: 0;
+    transform: translate(25px, 120px);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(25px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate(25px, 0);
+  }
+}
+
+@keyframes achievementTextHoldOutFrames {
+  0% {
+    opacity: 1;
+    transform: translate(25px, 0);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(300px, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(300px, 0);
+  }
+}
+
+@keyframes achievementTextExtendedFrames {
+  0% {
+    opacity: 0;
+    transform: translate(25px, 120px);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(25px, 0);
+  }
+  65% {
+    opacity: 1;
+    transform: translate(25px, 0);
+  }
+  82% {
+    opacity: 1;
+    transform: translate(300px, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(300px, 0);
+  }
+}
+
+@keyframes achievementNameHoldInFrames {
+  0% {
+    opacity: 0;
+    transform: translateX(300px);
+  }
+  12.5% {
+    opacity: 0.5;
+    transform: translateX(100px);
+  }
+  62.5% {
+    opacity: 0.8;
+    transform: translateX(30px);
+  }
+  75% {
+    opacity: 0.8;
+    transform: translateX(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(30px);
+  }
+}
+
+@keyframes achievementNameHoldOutFrames {
+  0% {
+    opacity: 1;
+    transform: translateX(30px);
+  }
+  50% {
+    opacity: 1;
+    transform: translate(30px, -50px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(30px, -100px);
+  }
+}
+
+@keyframes achievementNameExtendedFrames {
+  0% {
+    opacity: 0;
+    transform: translateX(300px);
+  }
+  10% {
+    opacity: 0.5;
+    transform: translateX(100px);
+  }
+  45% {
+    opacity: 0.8;
+    transform: translateX(30px);
+  }
+  80% {
+    opacity: 1;
+    transform: translateX(30px);
+  }
+  90% {
+    opacity: 1;
+    transform: translate(30px, -50px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(30px, -100px);
+  }
+}

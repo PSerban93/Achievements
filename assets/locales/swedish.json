@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Sökprestationer",
   "title.dashboardPlatformFilterBtn": "Filtrera efter plattform",
   "option.soundSelect.mute": "🔇 Stum",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Skala för speltidsavisering",
+  "label.settings-playtimeScaleSlider": "Skala:"
 }

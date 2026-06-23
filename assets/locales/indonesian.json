@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Cari prestasi",
   "title.dashboardPlatformFilterBtn": "Filter berdasarkan platform",
   "option.soundSelect.mute": "🔇 Bisu",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Skala Notifikasi Waktu Putar",
+  "label.settings-playtimeScaleSlider": "Skala:"
 }

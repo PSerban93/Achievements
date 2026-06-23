@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Search achievements",
   "title.dashboardPlatformFilterBtn": "Filter by platform",
   "option.soundSelect.mute": "🔇 Mute",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Playtime Notification Scale",
+  "label.settings-playtimeScaleSlider": "Scale:"
 }

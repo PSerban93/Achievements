@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "업적 검색",
   "title.dashboardPlatformFilterBtn": "플랫폼별로 필터링",
   "option.soundSelect.mute": "🔇 무음",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "플레이타임 알림 크기",
+  "label.settings-playtimeScaleSlider": "크기:"
 }

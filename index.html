@@ -1040,6 +1040,37 @@
                     <option value="middle-left">Middle Left</option>
                   </select>
                 </div>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-playtimeNotificationScaleTitle"
+                  data-i18n="settings-playtimeNotificationScaleTitle"
+                  style="margin-top: 10px"
+                >
+                  Playtime Notification Scale
+                </h4>
+                <div class="settings-slider">
+                  <label
+                    for="settings-playtimeScaleSlider"
+                    >Scale:
+                    <span id="settings-playtimeScaleValue">1.0</span></label
+                  >
+                  <div class="slider-control">
+                    <input
+                      type="range"
+                      id="settings-playtimeScaleSlider"
+                      min="0.01"
+                      max="2.0"
+                      step="0.01"
+                      value="1.0"
+                    />
+                    <span
+                      class="value"
+                      id="settings-playtimeScaleValueDisplay"
+                      >100%</span
+                    >
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -10377,6 +10408,7 @@
             logUiEvent("info", "ui:blacklist-config:confirm", {
               configName: selectedConfig,
               appid: targetAppId,
+              platform: targetPlatform,
               remove: removeMode,
               confirmed,
             });
@@ -10387,11 +10419,13 @@
             logUiEvent("info", "ui:blacklist-config:ipc-start", {
               configName: selectedConfig,
               appid: targetAppId,
+              platform: targetPlatform,
               remove: removeMode,
             });
             const response = await window.api.blacklistConfig({
               configName: selectedConfig,
               appid: targetAppId,
+              platform: targetPlatform,
               remove: removeMode,
             });
             logUiEvent(
@@ -10400,6 +10434,7 @@
               {
                 configName: selectedConfig,
                 appid: targetAppId,
+                platform: targetPlatform,
                 remove: removeMode,
                 success: response?.success === true,
                 error: response?.error || null,
@@ -11176,6 +11211,16 @@
             updateSettingsScaleLabel();
           }
         }
+        if (prefs.playtimeNotificationScale !== undefined) {
+          const settingsPlaytimeScaleSlider = document.getElementById(
+            "settings-playtimeScaleSlider",
+          );
+          if (settingsPlaytimeScaleSlider) {
+            settingsPlaytimeScaleSlider.value =
+              prefs.playtimeNotificationScale ?? 1;
+            updateSettingsPlaytimeScaleLabel();
+          }
+        }
         if (prefs.notificationDuration !== undefined) {
           const settingsDurationSlider = document.getElementById(
             "settings-durationSlider",
@@ -11394,6 +11439,16 @@
               if (settingsScaleSlider) {
                 settingsScaleSlider.value = prefs.notificationScale;
                 updateSettingsScaleLabel();
+              }
+            }
+            if (prefs.playtimeNotificationScale !== undefined) {
+              const settingsPlaytimeScaleSlider = document.getElementById(
+                "settings-playtimeScaleSlider",
+              );
+              if (settingsPlaytimeScaleSlider) {
+                settingsPlaytimeScaleSlider.value =
+                  prefs.playtimeNotificationScale ?? 1;
+                updateSettingsPlaytimeScaleLabel();
               }
             }
             if (prefs.notificationDuration !== undefined) {
@@ -12783,6 +12838,15 @@
       const settingsScaleValueDisplay = document.getElementById(
         "settings-scaleValueDisplay",
       );
+      const settingsPlaytimeScaleSlider = document.getElementById(
+        "settings-playtimeScaleSlider",
+      );
+      const settingsPlaytimeScaleValue = document.getElementById(
+        "settings-playtimeScaleValue",
+      );
+      const settingsPlaytimeScaleValueDisplay = document.getElementById(
+        "settings-playtimeScaleValueDisplay",
+      );
       const settingsDurationSlider = document.getElementById(
         "settings-durationSlider",
       );
@@ -12808,6 +12872,22 @@
         settingsScaleValue.textContent = value.toFixed(2);
         settingsScaleValueDisplay.textContent = `${percentage}%`;
         settingsScaleSlider.style.background = `linear-gradient(to right, var(--dracula-cyan) 0%, var(--dracula-cyan) ${percentage}%, #ccc ${percentage}%, #ccc 100%)`;
+      }
+
+      function updateSettingsPlaytimeScaleLabel() {
+        if (
+          !settingsPlaytimeScaleSlider ||
+          !settingsPlaytimeScaleValue ||
+          !settingsPlaytimeScaleValueDisplay
+        ) {
+          return;
+        }
+        const value = parseFloat(settingsPlaytimeScaleSlider.value);
+        const safeValue = Number.isFinite(value) && value > 0 ? value : 1;
+        const percentage = Math.round(safeValue * 100);
+        settingsPlaytimeScaleValue.textContent = safeValue.toFixed(2);
+        settingsPlaytimeScaleValueDisplay.textContent = `${percentage}%`;
+        settingsPlaytimeScaleSlider.style.background = `linear-gradient(to right, var(--dracula-cyan) 0%, var(--dracula-cyan) ${percentage}%, #ccc ${percentage}%, #ccc 100%)`;
       }
 
       function updateSettingsDurationLabel() {
@@ -12836,6 +12916,7 @@
 
       updateSettingsDurationLabel();
       updateSettingsSoundVolumeLabel();
+      updateSettingsPlaytimeScaleLabel();
 
       function renderSteamApiKeyStatus(masked) {
         const inputEl = document.getElementById("settings-steamApiKeyInput");
@@ -12876,6 +12957,13 @@
         updateSettingsScaleLabel();
         window.api.savePreferences({
           notificationScale: settingsScaleSlider.value,
+        });
+      });
+
+      settingsPlaytimeScaleSlider?.addEventListener("input", () => {
+        updateSettingsPlaytimeScaleLabel();
+        window.api.savePreferences({
+          playtimeNotificationScale: settingsPlaytimeScaleSlider.value,
         });
       });
 
@@ -13061,6 +13149,17 @@
           updateSettingsScaleLabel();
         }
 
+        const settingsPlaytimeScaleSlider = document.getElementById(
+          "settings-playtimeScaleSlider",
+        );
+        if (settingsPlaytimeScaleSlider) {
+          settingsPlaytimeScaleSlider.value =
+            prefs.playtimeNotificationScale ??
+            settingsPlaytimeScaleSlider.value ??
+            1;
+          updateSettingsPlaytimeScaleLabel();
+        }
+
         const settingsDurationSlider = document.getElementById(
           "settings-durationSlider",
         );
@@ -13193,6 +13292,9 @@
         const getVal = (id) => byId(id)?.value || "";
         const zoomValue = parseFloat(getVal("app-zoom-dropdown"));
         const settingsScale = parseFloat(getVal("settings-scaleSlider"));
+        const settingsPlaytimeScale = parseFloat(
+          getVal("settings-playtimeScaleSlider"),
+        );
         const settingsDuration = parseFloat(getVal("settings-durationSlider"));
         const settingsSoundVolume = parseInt(
           getVal("settings-soundVolumeSlider"),
@@ -13227,6 +13329,9 @@
           notificationScale: Number.isFinite(settingsScale)
             ? settingsScale
             : base.notificationScale || 1,
+          playtimeNotificationScale: Number.isFinite(settingsPlaytimeScale)
+            ? settingsPlaytimeScale
+            : base.playtimeNotificationScale || 1,
           notificationDuration: Number.isFinite(settingsDuration)
             ? settingsDuration
             : base.notificationDuration || 0,
@@ -20538,6 +20643,9 @@
         };
 
         // ---- Command helpers
+        const MOUSE_FORWARD_HISTORY_LIMIT = 24;
+        const mouseForwardHistory = [];
+
         function toggleSettings() {
           const settingsMenu = byId("settingsMenu");
           if (!settingsMenu) return;
@@ -20551,6 +20659,103 @@
         function toggleDashboard() {
           if (window.__dashboardOpen) window.closeDashboard?.();
           else window.openDashboard?.();
+        }
+        function pushMouseForwardAction(action) {
+          if (!action) return;
+          mouseForwardHistory.push(action);
+          if (mouseForwardHistory.length > MOUSE_FORWARD_HISTORY_LIMIT) {
+            mouseForwardHistory.shift();
+          }
+        }
+        function popMouseForwardAction() {
+          return mouseForwardHistory.pop() || null;
+        }
+        function selectConfigByName(configName) {
+          const configList = byId("configList");
+          if (!configList || !configName) return false;
+          const exists = Array.from(configList.options || []).some(
+            (option) => option.value === configName,
+          );
+          if (!exists) return false;
+          configList.value = configName;
+          configList.dispatchEvent(new Event("change", { bubbles: true }));
+          return true;
+        }
+        function getMouseForwardActionForBack() {
+          const overlay = getActiveOverlaySafe();
+          if (overlay === "onboarding" || overlay === "confirm") return null;
+          if (overlay === "settings") {
+            const mode = (window.__settingsMode ?? __settingsMode) || "tabs";
+            const activeTabId = document
+              .querySelector(".settings-tab.active")
+              ?.getAttribute("data-tab");
+            return mode === "section"
+              ? {
+                  type: "settings-section",
+                  tabId: activeTabId || "",
+                }
+              : {
+                  type: "settings",
+                  tabId: activeTabId || "",
+                };
+          }
+          if (overlay === "dashboard") {
+            return { type: "dashboard" };
+          }
+          if (overlay === "config") {
+            const editingName =
+              typeof editingConfigName === "string" ? editingConfigName : "";
+            return {
+              type: editingName ? "edit-config" : "create-config",
+              configName: editingName,
+            };
+          }
+          const configList = byId("configList");
+          if (configList && configList.value) {
+            return { type: "config-select", configName: configList.value };
+          }
+          return null;
+        }
+        function mouseBackOrClose() {
+          pushMouseForwardAction(getMouseForwardActionForBack());
+          route(A.BACK);
+        }
+        function mouseForward() {
+          const action = popMouseForwardAction();
+          if (!action) return;
+          const overlay = getActiveOverlaySafe();
+          if (overlay === "onboarding" || overlay === "confirm") return;
+
+          if (action.type === "dashboard") {
+            window.openDashboard?.();
+            return;
+          }
+          if (action.type === "settings" || action.type === "settings-section") {
+            window.openSettingsModal?.() || byId("settingsBtn")?.click();
+            if (action.tabId) {
+              const tab = document.querySelector(
+                `.settings-tab[data-tab="${CSS.escape(action.tabId)}"]`,
+              );
+              tab?.click();
+            }
+            if (action.type === "settings-section") {
+              setTimeout(() => window.settingsEnterSectionMode?.(), 0);
+            }
+            return;
+          }
+          if (action.type === "config-select") {
+            selectConfigByName(action.configName);
+            return;
+          }
+          if (action.type === "edit-config") {
+            if (action.configName) {
+              void openEditConfigModalByName(action.configName);
+            }
+            return;
+          }
+          if (action.type === "create-config") {
+            openConfig();
+          }
         }
         function backOrClose() {
           const overlay = getActiveOverlaySafe();
@@ -20661,6 +20866,53 @@
             t.dispatchEvent(new Event("input"));
           }
         }
+
+        function shouldIgnoreMouseNavigation(event) {
+          const target = event?.target;
+          if (!target) return false;
+          if (event.defaultPrevented) return true;
+          if (target.closest?.("#bootOnboardingModal, #appConfirmModal")) {
+            return true;
+          }
+          if (
+            target.closest?.("input, textarea, select, [contenteditable='true']")
+          ) {
+            return true;
+          }
+          return false;
+        }
+
+        let lastMouseNavigation = { button: -1, time: 0 };
+
+        function handleMouseNavigation(event) {
+          if (event.button !== 3 && event.button !== 4) return;
+          if (shouldIgnoreMouseNavigation(event)) return;
+          const now =
+            typeof event.timeStamp === "number" ? event.timeStamp : Date.now();
+          if (
+            lastMouseNavigation.button === event.button &&
+            now - lastMouseNavigation.time < 250
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          lastMouseNavigation = { button: event.button, time: now };
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.button === 3) {
+            mouseBackOrClose();
+          } else {
+            mouseForward();
+          }
+        }
+
+        document.addEventListener("mouseup", handleMouseNavigation, {
+          capture: true,
+        });
+        document.addEventListener("auxclick", handleMouseNavigation, {
+          capture: true,
+        });
 
         // ---- Action router
         function route(action) {

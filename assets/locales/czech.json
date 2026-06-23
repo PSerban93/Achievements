@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Úspěchy hledání",
   "title.dashboardPlatformFilterBtn": "Filtrujte podle platformy",
   "option.soundSelect.mute": "🔇 Ztlumit",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Stupnice oznámení doby přehrávání",
+  "label.settings-playtimeScaleSlider": "Měřítko:"
 }

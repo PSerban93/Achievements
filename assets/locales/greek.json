@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Επιτεύγματα αναζήτησης",
   "title.dashboardPlatformFilterBtn": "Φιλτράρισμα ανά πλατφόρμα",
   "option.soundSelect.mute": "🔇 Βουβός",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Κλίμακα ειδοποιήσεων χρόνου αναπαραγωγής",
+  "label.settings-playtimeScaleSlider": "Κλίμακα:"
 }

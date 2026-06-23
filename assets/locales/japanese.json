@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "検索実績",
   "title.dashboardPlatformFilterBtn": "プラットフォームごとにフィルタリングする",
   "option.soundSelect.mute": "🔇 ミュート",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "プレイタイム通知スケール",
+  "label.settings-playtimeScaleSlider": "規模："
 }

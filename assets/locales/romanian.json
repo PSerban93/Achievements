@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Cauta achievement-uri",
   "title.dashboardPlatformFilterBtn": "Filtreaza dupa platforma",
   "option.soundSelect.mute": "🔇 Dezactiveaza sunetul",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Scala notificarii de timp de joc",
+  "label.settings-playtimeScaleSlider": "Scala:"
 }

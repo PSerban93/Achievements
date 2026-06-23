@@ -9,6 +9,17 @@
         --displaytime: 6s;
         --scale: 1;
         --roundness: 16px;
+        --card-width: calc(460px * var(--scale));
+        --header-height: calc(220px * var(--scale));
+        --banner-bg: rgba(20, 22, 28, 0.92);
+        --banner-text: #ffffff;
+        --banner-muted: rgba(255, 255, 255, 0.9);
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
       }
 
       body {
@@ -18,12 +29,12 @@
         font-family: "Segoe UI", system-ui, sans-serif;
         overflow: hidden;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         justify-content: center;
       }
 
       .playtime-container {
-        width: 460px;
+        width: var(--card-width);
         border-radius: var(--roundness);
         overflow: hidden;
         background: rgba(20, 22, 28, 0.92);
@@ -36,17 +47,23 @@
 
       .header-img {
         width: 100%;
-        height: 220px;
+        height: var(--header-height);
         object-fit: cover;
+        image-rendering: auto;
       }
 
       .info-bar {
         display: flex;
-        gap: 16px;
-        padding: 16px;
+        gap: calc(16px * var(--scale));
+        padding: calc(16px * var(--scale));
         align-items: center;
         justify-content: center;
         text-align: center;
+        background: var(--banner-bg);
+        color: var(--banner-text);
+        transition:
+          background-color 180ms ease,
+          color 180ms ease;
       }
 
       .text-content {
@@ -58,25 +75,25 @@
 
       .title {
         font-weight: 700;
-        font-size: 18px;
-        margin-bottom: 4px;
+        font-size: calc(18px * var(--scale));
+        margin-bottom: calc(4px * var(--scale));
       }
 
       .desc {
-        font-size: 14px;
-        opacity: 0.9;
+        font-size: calc(14px * var(--scale));
+        color: var(--banner-muted);
       }
 
       @keyframes play-in {
         to {
-          transform: scale(var(--scale)) translateY(0);
+          transform: scale(1) translateY(0);
           opacity: 1;
         }
       }
 
       @keyframes play-hold {
         to {
-          transform: scale(var(--scale)) translateY(0);
+          transform: scale(1) translateY(0);
           opacity: 1;
         }
       }
@@ -136,6 +153,235 @@
 
         let holdTimer = null;
         let closed = false;
+        let colorToken = 0;
+
+        function resetBannerColor() {
+          document.documentElement.style.setProperty(
+            "--banner-bg",
+            "rgba(20, 22, 28, 0.92)",
+          );
+          document.documentElement.style.setProperty("--banner-text", "#fff");
+          document.documentElement.style.setProperty(
+            "--banner-muted",
+            "rgba(255, 255, 255, 0.9)",
+          );
+        }
+
+        function luminance(r, g, b) {
+          const channels = [r, g, b].map((value) => {
+            const normalized = value / 255;
+            return normalized <= 0.03928
+              ? normalized / 12.92
+              : Math.pow((normalized + 0.055) / 1.055, 2.4);
+          });
+          return (
+            0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+          );
+        }
+
+        function mixChannel(value, target, amount) {
+          return Math.round(value * (1 - amount) + target * amount);
+        }
+
+        function rgbToHsl(r, g, b) {
+          r /= 255;
+          g /= 255;
+          b /= 255;
+          const max = Math.max(r, g, b);
+          const min = Math.min(r, g, b);
+          let h = 0;
+          let s = 0;
+          const l = (max + min) / 2;
+          if (max !== min) {
+            const delta = max - min;
+            s = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+            switch (max) {
+              case r:
+                h = (g - b) / delta + (g < b ? 6 : 0);
+                break;
+              case g:
+                h = (b - r) / delta + 2;
+                break;
+              default:
+                h = (r - g) / delta + 4;
+                break;
+            }
+            h /= 6;
+          }
+          return { h, s, l };
+        }
+
+        function hueToRgb(p, q, t) {
+          if (t < 0) t += 1;
+          if (t > 1) t -= 1;
+          if (t < 1 / 6) return p + (q - p) * 6 * t;
+          if (t < 1 / 2) return q;
+          if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+          return p;
+        }
+
+        function hslToRgb(h, s, l) {
+          let r;
+          let g;
+          let b;
+          if (s === 0) {
+            r = g = b = l;
+          } else {
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            r = hueToRgb(p, q, h + 1 / 3);
+            g = hueToRgb(p, q, h);
+            b = hueToRgb(p, q, h - 1 / 3);
+          }
+          return [
+            Math.round(r * 255),
+            Math.round(g * 255),
+            Math.round(b * 255),
+          ];
+        }
+
+        function pickBannerColor(data) {
+          const buckets = Array.from({ length: 24 }, () => ({
+            weight: 0,
+            h: 0,
+            s: 0,
+            l: 0,
+          }));
+          let fallbackR = 0;
+          let fallbackG = 0;
+          let fallbackB = 0;
+          let fallbackWeight = 0;
+
+          for (let i = 0; i < data.length; i += 4) {
+            const alpha = data[i + 3] / 255;
+            if (alpha <= 0) continue;
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            const { h, s, l } = rgbToHsl(r, g, b);
+            const alphaWeight = alpha * Math.max(0.2, 1 - Math.abs(l - 0.46));
+            fallbackR += r * alphaWeight;
+            fallbackG += g * alphaWeight;
+            fallbackB += b * alphaWeight;
+            fallbackWeight += alphaWeight;
+
+            if (s < 0.18 || l < 0.08 || l > 0.88) continue;
+            const vibrantWeight =
+              alpha * Math.pow(s, 1.8) * (1 - Math.abs(l - 0.48) * 0.9);
+            if (vibrantWeight <= 0) continue;
+            const bucket =
+              buckets[Math.floor(h * buckets.length) % buckets.length];
+            bucket.weight += vibrantWeight;
+            bucket.h += h * vibrantWeight;
+            bucket.s += s * vibrantWeight;
+            bucket.l += l * vibrantWeight;
+          }
+
+          let best = null;
+          for (const bucket of buckets) {
+            if (!best || bucket.weight > best.weight) best = bucket;
+          }
+          if (best && best.weight > 0) {
+            const h = best.h / best.weight;
+            const s = Math.max(0.42, Math.min(0.78, best.s / best.weight));
+            const l = Math.max(0.22, Math.min(0.46, best.l / best.weight));
+            const [r, g, b] = hslToRgb(h, s, l);
+            return { r, g, b };
+          }
+
+          if (fallbackWeight > 0) {
+            let r = Math.round(fallbackR / fallbackWeight);
+            let g = Math.round(fallbackG / fallbackWeight);
+            let b = Math.round(fallbackB / fallbackWeight);
+            const hsl = rgbToHsl(r, g, b);
+            if (hsl.s < 0.24) {
+              hsl.s = 0.24;
+              hsl.l = Math.max(0.22, Math.min(0.42, hsl.l));
+              [r, g, b] = hslToRgb(hsl.h, hsl.s, hsl.l);
+            }
+            return { r, g, b };
+          }
+
+          return null;
+        }
+
+        function applyBannerColor(r, g, b) {
+          let lum = luminance(r, g, b);
+          if (lum > 0.45) {
+            const amount = Math.min(0.55, (lum - 0.45) * 1.25 + 0.2);
+            r = mixChannel(r, 0, amount);
+            g = mixChannel(g, 0, amount);
+            b = mixChannel(b, 0, amount);
+            lum = luminance(r, g, b);
+          }
+          if (lum < 0.08) {
+            const amount = 0.18;
+            r = mixChannel(r, 255, amount);
+            g = mixChannel(g, 255, amount);
+            b = mixChannel(b, 255, amount);
+            lum = luminance(r, g, b);
+          }
+
+          const text = lum > 0.32 ? "#10131a" : "#ffffff";
+          const muted =
+            lum > 0.32 ? "rgba(16, 19, 26, 0.78)" : "rgba(255, 255, 255, 0.88)";
+          document.documentElement.style.setProperty(
+            "--banner-bg",
+            `rgba(${r}, ${g}, ${b}, 0.30)`,
+          );
+          document.documentElement.style.setProperty("--banner-text", text);
+          document.documentElement.style.setProperty("--banner-muted", muted);
+        }
+
+        function updateBannerColorFromImage(img) {
+          const token = ++colorToken;
+          resetBannerColor();
+          if (!img?.currentSrc && !img?.src) return;
+
+          const run = () => {
+            if (token !== colorToken) return;
+            try {
+              const width = 32;
+              const height = 14;
+              const canvas = document.createElement("canvas");
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext("2d", {
+                willReadFrequently: true,
+              });
+              if (!ctx) return;
+              const sourceHeight = img.naturalHeight || img.height || 1;
+              const sampleY = Math.floor(sourceHeight * 0.58);
+              const sampleHeight = Math.max(1, sourceHeight - sampleY);
+              ctx.drawImage(
+                img,
+                0,
+                sampleY,
+                img.naturalWidth || img.width || 1,
+                sampleHeight,
+                0,
+                0,
+                width,
+                height,
+              );
+              const { data } = ctx.getImageData(0, 0, width, height);
+              const picked = pickBannerColor(data);
+              if (!picked) return;
+              applyBannerColor(picked.r, picked.g, picked.b);
+            } catch {
+              resetBannerColor();
+            }
+          };
+
+          if (img.complete && img.naturalWidth > 0) {
+            requestAnimationFrame(run);
+            return;
+          }
+          img.addEventListener("load", () => requestAnimationFrame(run), {
+            once: true,
+          });
+          img.addEventListener("error", resetBannerColor, { once: true });
+        }
 
         function restart(cls) {
           box.classList.remove("playtime-in", "playtime-out");
@@ -165,6 +411,7 @@
           title.textContent = d.displayName || "Unknown Game";
           desc.textContent = d.description || "Start Playtime!";
           header.src = d.headerUrl || "";
+          updateBannerColorFromImage(header);
           if (d.scale)
             document.documentElement.style.setProperty("--scale", d.scale);
 

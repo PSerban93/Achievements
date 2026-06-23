@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Haku saavutukset",
   "title.dashboardPlatformFilterBtn": "Suodata alustan mukaan",
   "option.soundSelect.mute": "🔇 Mykistä",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Toistoajan ilmoitusasteikko",
+  "label.settings-playtimeScaleSlider": "Mittakaava:"
 }

@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Търсене на постижения",
   "title.dashboardPlatformFilterBtn": "Филтрирайте по платформа",
   "option.soundSelect.mute": "🔇 Без звук",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Скала за уведомяване за времето за игра",
+  "label.settings-playtimeScaleSlider": "Мащаб:"
 }

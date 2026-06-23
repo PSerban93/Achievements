@@ -1080,6 +1080,7 @@ const DEFAULT_PREFERENCES = {
   soundVolume: 100,
   preset: "default",
   notificationScale: 1,
+  playtimeNotificationScale: 1,
   notificationDuration: 0,
   position: "center-bottom",
   language: "english",
@@ -9002,9 +9003,13 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
   });
 
   try {
-    if (!resolvedAppId && configPath && fs.existsSync(configPath)) {
+    if (
+      configPath &&
+      fs.existsSync(configPath) &&
+      (!resolvedAppId || !resolvedPlatform)
+    ) {
       const parsed = JSON.parse(fs.readFileSync(configPath, "utf8"));
-      if (parsed?.appid) resolvedAppId = String(parsed.appid);
+      if (!resolvedAppId && parsed?.appid) resolvedAppId = String(parsed.appid);
       if (!resolvedPlatform && parsed?.platform) {
         resolvedPlatform = normalizeBlacklistPlatformValue(parsed.platform);
       }
@@ -10112,6 +10117,7 @@ function createNotificationWindow(message) {
       description: message.description,
       iconPath: iconPathToSend,
       scale,
+      durationOverridden: !!message?.durationOverridden,
     });
   });
 
@@ -10714,6 +10720,7 @@ function processNextNotification() {
   const duration =
     overrideDurationMs || getPresetAnimationDuration(presetFolder);
   notificationData.durationMs = duration;
+  notificationData.durationOverridden = overrideDurationMs > 0;
   const notificationWindow = createNotificationWindow(notificationData);
   const notificationWebContentsId = notificationWindow.webContents.id;
 
@@ -16839,14 +16846,21 @@ function normalizePlayPayload(raw) {
     : p.phase === "stop"
       ? 2000
       : 0;
-  return { ...p, displayName, description, scale: 1, holdMs };
+  const scale = normalizeNotificationScale(p.scale).scale;
+  return { ...p, displayName, description, scale, holdMs };
+}
+
+function getPlaytimeNotificationScale(prefs = {}) {
+  return normalizeNotificationScale(prefs.playtimeNotificationScale ?? 1).scale;
 }
 
 ipcMain.on("show-playtime", (_event, playData) => {
+  let prefsSnapshot = {};
   try {
     const cur = fs.existsSync(preferencesPath)
       ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
       : {};
+    prefsSnapshot = cur && typeof cur === "object" ? cur : {};
     if (cur.disablePlaytime === true || global.disablePlaytime === true) {
       if (playtimeWindow && !playtimeWindow.isDestroyed())
         playtimeWindow.close();
@@ -16856,7 +16870,10 @@ ipcMain.on("show-playtime", (_event, playData) => {
     if (global.disablePlaytime === true) return;
   }
 
-  const normalized = normalizePlayPayload(playData);
+  const normalized = normalizePlayPayload({
+    ...(playData || {}),
+    scale: getPlaytimeNotificationScale(prefsSnapshot),
+  });
   if (isDuplicatePlay(normalized)) return;
   createPlaytimeWindow(normalized);
 });
@@ -16915,12 +16932,25 @@ function createPlaytimeWindow(playData = {}) {
   } = require("electron").screen.getPrimaryDisplay().workArea;
   const winWidth = 460;
   const winHeight = 340;
-  const x = Math.floor(ax + (aw - winWidth) / 2),
+  let playtimeScale = 1;
+  try {
+    const prefs = fs.existsSync(preferencesPath)
+      ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
+      : {};
+    playtimeScale = getPlaytimeNotificationScale(prefs);
+  } catch {}
+  const scaledWinWidth = Math.ceil(
+    winWidth * (playtimeScale > 1 ? playtimeScale : 1),
+  );
+  const scaledWinHeight = Math.ceil(
+    winHeight * (playtimeScale > 1 ? playtimeScale : 1),
+  );
+  const x = Math.floor(ax + (aw - scaledWinWidth) / 2),
     y = Math.floor(ay + 40);
 
   playtimeWindow = new BrowserWindow({
-    width: winWidth,
-    height: winHeight,
+    width: scaledWinWidth,
+    height: scaledWinHeight,
     x,
     y,
     frame: false,
@@ -16940,7 +16970,9 @@ function createPlaytimeWindow(playData = {}) {
     },
   });
   windowLogger.info("create-playtime-window:browserwindow-created", {
-    size: { width: winWidth, height: winHeight },
+    size: { width: scaledWinWidth, height: scaledWinHeight },
+    baseSize: { width: winWidth, height: winHeight },
+    scale: playtimeScale,
     position: { x, y },
   });
   playtimeWindow.setIgnoreMouseEvents(true, { forward: true });
@@ -16955,7 +16987,7 @@ function createPlaytimeWindow(playData = {}) {
       const prefs = fs.existsSync(preferencesPath)
         ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
         : {};
-      const scale = normalizeNotificationScale(prefs.notificationScale).scale;
+      const scale = getPlaytimeNotificationScale(prefs);
       const source = pendingPlayData ?? playData;
       const payload = normalizePlayPayload({ ...source, phase, scale });
 

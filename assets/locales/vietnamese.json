@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Tìm thành tựu",
   "title.dashboardPlatformFilterBtn": "Lọc theo nền tảng",
   "option.soundSelect.mute": "🔇 Tắt tiếng",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Tỷ lệ thông báo thời gian chơi",
+  "label.settings-playtimeScaleSlider": "Tỷ lệ:"
 }

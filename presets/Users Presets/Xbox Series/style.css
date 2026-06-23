@@ -1,0 +1,354 @@
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  margin: 0;
+  background: transparent;
+  color: #fff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --scale: 1;
+  --ach-width: 700px;
+  --ach-collapsed-width: 100px;
+  --timeline-scale: 1;
+  --ach-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --ach-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --rare-glow: 0 0 40px rgba(16, 124, 16, 0.85), 0 0 15px rgba(16, 124, 16, 0.4);
+}
+
+.ach {
+  position: fixed;
+  left: 50%;
+  right: auto;
+  bottom: 0px;
+  top: auto;
+  width: var(--ach-collapsed-width, 100px);
+  height: 160px;
+  transform: translate(-50%, var(--translate-y, 0)) scale(var(--scale, 1));
+  transform-origin: center bottom;
+  pointer-events: none;
+  animation: containerAnimationFrames linear calc(10s * var(--timeline-scale));
+  animation-delay: calc(0.5s * var(--timeline-scale));
+  animation-fill-mode: forwards;
+}
+
+.ach::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100px;
+  border-radius: 50px;
+  box-shadow: var(--rare-glow);
+  pointer-events: none;
+  z-index: 1;
+  opacity: 0;
+  transform-origin: center center;
+  animation: glowAnimationFrames linear calc(10s * var(--timeline-scale));
+  animation-delay: calc(0.5s * var(--timeline-scale));
+  animation-fill-mode: forwards;
+}
+
+.achievement-banner {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100px;
+  border-radius: 50px;
+  background-color: transparent;
+  overflow: hidden;
+  z-index: 3;
+}
+
+.achievement-banner.animated {
+  animation: mainAnimationFrames linear calc(10s * var(--timeline-scale));
+  animation-delay: calc(0.5s * var(--timeline-scale));
+  animation-iteration-count: 1;
+  transform-origin: 50% 50%;
+  animation-fill-mode: forwards;
+}
+
+.achievement-banner.animated.achievement-banner-big {
+  background-color: #107c10;
+}
+
+.achievement-banner .achievement-content::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 200%;
+  height: 100%;
+  background: linear-gradient(
+    115deg,
+    rgba(255, 255, 255, 0) 30%,
+    rgba(255, 255, 255, 0.03) 42%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.03) 58%,
+    rgba(255, 255, 255, 0) 70%
+  );
+  z-index: 6;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateX(-60%);
+  animation: shimmerAnimationFrames linear calc(10s * var(--timeline-scale));
+  animation-delay: calc(0.5s * var(--timeline-scale));
+  animation-fill-mode: forwards;
+}
+
+.achievement-loader {
+  width: 100px;
+  height: 100px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 50px;
+  z-index: 10;
+  transform: scale(0);
+  transform-origin: 50% 50%;
+}
+
+.achievement-loader:nth-of-type(1) {
+  background-color: #139d13;
+  animation: loader1Anim ease-out calc(10s * var(--timeline-scale)) forwards;
+  animation-delay: calc(0.5s * var(--timeline-scale));
+}
+.achievement-loader:nth-of-type(2) {
+  background-color: #107c10;
+  animation: loader2Anim ease-out calc(10s * var(--timeline-scale)) forwards;
+  animation-delay: calc(0.5s * var(--timeline-scale));
+}
+.achievement-loader:nth-of-type(3) {
+  background-color: #139d13;
+  animation: loader3Anim ease-out calc(10s * var(--timeline-scale)) forwards;
+  animation-delay: calc(0.5s * var(--timeline-scale));
+}
+.achievement-loader:nth-of-type(4) {
+  background-color: #107c10;
+  animation: loader4Anim ease-out calc(10s * var(--timeline-scale)) forwards;
+  animation-delay: calc(0.5s * var(--timeline-scale));
+}
+.achievement-loader:nth-of-type(5) {
+  background-color: #139d13;
+  animation: loader5Anim ease-out calc(10s * var(--timeline-scale)) forwards;
+  animation-delay: calc(0.5s * var(--timeline-scale));
+}
+
+.achievement-content {
+  position: relative;
+  width: 400%;
+  height: 100%;
+  z-index: 15;
+}
+
+.icon img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  margin-top: 10px;
+  margin-left: 10px;
+  z-index: 11;
+  animation: iconFrames ease-out calc(10s * var(--timeline-scale)) forwards;
+  animation-delay: calc(0.5s * var(--timeline-scale));
+}
+
+.achievement-trophy {
+  background-color: transparent !important;
+  animation: xboxLogoAnimationFrames ease-out calc(10s * var(--timeline-scale));
+  animation-delay: calc(0.5s * var(--timeline-scale));
+  color: #fff;
+  position: relative;
+  z-index: 12;
+}
+
+.achievement-trophy:before {
+  font-size: 3em;
+  top: 32px;
+  left: 20px;
+  position: absolute;
+}
+
+.ach .text_wrap {
+  position: absolute;
+  width: calc(var(--ach-width, 700px) - 130px);
+  height: 100px;
+  top: 0;
+  left: 110px;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.ach .text_wrap .title, 
+.ach .text_wrap .detail {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0;
+  text-align: center;
+  opacity: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ach .text_wrap .title {
+  font-size: 25px;
+  font-weight: 600;
+  animation: titleAnim var(--ach-ease) calc(10s * var(--timeline-scale));
+  animation-delay: calc(0.5s * var(--timeline-scale));
+  animation-fill-mode: forwards;
+}
+
+.ach .text_wrap .detail {
+  font-size: 22px;
+  font-weight: 500;
+  color: #ffffff;
+  white-space: normal;
+  animation: detailAnim var(--ach-ease) calc(10s * var(--timeline-scale));
+  animation-delay: calc(0.5s * var(--timeline-scale));
+  animation-fill-mode: forwards;
+}
+
+@keyframes loader1Anim {
+  0% { transform: scale(0); }
+  4% { transform: scale(1); }
+  96% { transform: scale(1); animation-timing-function: ease-in; }
+  100% { transform: scale(0); }
+}
+
+@keyframes loader2Anim {
+  0% { transform: scale(0); }
+  2% { transform: scale(0); }
+  6% { transform: scale(1); }
+  94% { transform: scale(1); animation-timing-function: ease-in; }
+  98% { transform: scale(0); }
+  100% { transform: scale(0); }
+}
+
+@keyframes loader3Anim {
+  0% { transform: scale(0); }
+  4% { transform: scale(0); }
+  8% { transform: scale(1); }
+  92% { transform: scale(1); animation-timing-function: ease-in; }
+  96% { transform: scale(0); }
+  100% { transform: scale(0); }
+}
+
+@keyframes loader4Anim {
+  0% { transform: scale(0); }
+  6% { transform: scale(0); }
+  10% { transform: scale(1); }
+  90% { transform: scale(1); animation-timing-function: ease-in; }
+  94% { transform: scale(0); }
+  100% { transform: scale(0); }
+}
+
+@keyframes loader5Anim {
+  0% { transform: scale(0); }
+  8% { transform: scale(0); }
+  12% { transform: scale(1); }
+  88% { transform: scale(1); animation-timing-function: ease-in; }
+  92% { transform: scale(0); }
+  100% { transform: scale(0); }
+}
+
+@keyframes titleAnim {
+  0% { opacity: 0; transform: translateY(20px); }
+  20% { opacity: 0; transform: translateY(20px); } 
+  25% { opacity: 1; transform: translateY(0); }
+  45% { opacity: 1; transform: translateY(0); }
+  50% { opacity: 0; transform: translateY(-20px); }
+  100% { opacity: 0; transform: translateY(-20px); }
+}
+
+@keyframes detailAnim {
+  0% { opacity: 0; transform: translateY(20px); }
+  45% { opacity: 0; transform: translateY(20px); }
+  50% { opacity: 1; transform: translateY(0); } 
+  75% { opacity: 1; transform: translateY(0); }
+  80% { opacity: 0; transform: translateY(-20px); }
+  100% { opacity: 0; transform: translateY(-20px); }
+}
+
+@keyframes iconFrames {
+  0% { transform: scale(0); opacity: 0; }
+  8% { transform: scale(0); opacity: 0; }
+  12% { transform: scale(1); opacity: 1; }
+  88% { transform: scale(1); opacity: 1; animation-timing-function: ease-in; } 
+  92% { transform: scale(0); opacity: 0; } 
+  100% { transform: scale(0); opacity: 0; }
+}
+
+@keyframes xboxLogoAnimationFrames {
+  0% { transform: scale(0); }
+  8% { transform: scale(0); }
+  12% { transform: scale(1.2); }
+  14% { transform: scale(1); }
+  88% { transform: scale(1); animation-timing-function: ease-in; }
+  92% { transform: scale(0); } 
+  100% { transform: scale(0); }
+}
+
+@keyframes containerAnimationFrames {
+  0% { width: 100px; }
+  12% { width: 100px; animation-timing-function: var(--ach-ease); }
+  20% { width: var(--ach-width, 700px); } 
+  80% { width: var(--ach-width, 700px); animation-timing-function: var(--ach-ease); } 
+  88% { width: 100px; } 
+  100% { width: 100px; }
+}
+
+@keyframes mainAnimationFrames {
+  0% { background-color: transparent; box-shadow: none; }
+  11.9% { background-color: transparent; box-shadow: none; }
+  12% { background-color: #107c10; box-shadow: var(--ach-shadow); }
+  88% { background-color: #107c10; box-shadow: var(--ach-shadow); }
+  88.1% { background-color: transparent; box-shadow: none; }
+  100% { background-color: transparent; box-shadow: none; }
+}
+
+@keyframes glowAnimationFrames {
+  0% { opacity: 0; transform: scale(1); }
+  11.9% { opacity: 0; transform: scale(1); }
+  12% { opacity: 1; transform: scale(1); }
+  88% { opacity: 1; transform: scale(1); } 
+  96% { opacity: 0; transform: scale(0); } 
+  100% { opacity: 0; transform: scale(0); }
+}
+
+@keyframes shimmerAnimationFrames {
+  0%, 18% { 
+    transform: translateX(-60%); 
+    opacity: 0; 
+  }
+  22% { 
+    opacity: 0.3; 
+  }
+  75% { 
+    transform: translateX(110%); 
+    opacity: 0.3; 
+  }
+  78%, 100% { 
+    transform: translateX(110%); 
+    opacity: 0; 
+  }
+}

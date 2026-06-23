@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "ค้นหาความสำเร็จ",
   "title.dashboardPlatformFilterBtn": "กรองตามแพลตฟอร์ม",
   "option.soundSelect.mute": "🔇 ปิดเสียง",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "ขนาดการแจ้งเตือนเวลาเล่น",
+  "label.settings-playtimeScaleSlider": "ขนาด:"
 }

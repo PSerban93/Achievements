@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "搜索成就",
   "title.dashboardPlatformFilterBtn": "按平台过滤",
   "option.soundSelect.mute": "🔇 沉默的",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "游戏时间通知缩放",
+  "label.settings-playtimeScaleSlider": "缩放:"
 }

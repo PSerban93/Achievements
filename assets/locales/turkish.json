@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Achievement ara",
   "title.dashboardPlatformFilterBtn": "Platforma göre filtrele",
   "option.soundSelect.mute": "🔇 Sessize al",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Oynama süresi bildirimi ölçeği",
+  "label.settings-playtimeScaleSlider": "Ölçek:"
 }

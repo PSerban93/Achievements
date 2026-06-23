@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "إنجازات البحث",
   "title.dashboardPlatformFilterBtn": "التصفية حسب المنصة",
   "option.soundSelect.mute": "🔇 صامت",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "مقياس إشعارات وقت اللعب",
+  "label.settings-playtimeScaleSlider": "حجم:"
 }

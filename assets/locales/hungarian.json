@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Keresési eredmények",
   "title.dashboardPlatformFilterBtn": "Szűrés platform szerint",
   "option.soundSelect.mute": "🔇 Néma",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Playtime Notification Scale",
+  "label.settings-playtimeScaleSlider": "Skála:"
 }

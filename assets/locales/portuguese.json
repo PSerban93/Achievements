@@ -868,5 +868,7 @@
   "aria.achievementsSearchToggle": "Pesquisar conquistas",
   "title.dashboardPlatformFilterBtn": "Filtrar por plataforma",
   "option.soundSelect.mute": "🔇 Mudo",
-  "shortcutsOverlayControllerShortcutValue": "Select + Start"
+  "shortcutsOverlayControllerShortcutValue": "Select + Start",
+  "settings-playtimeNotificationScaleTitle": "Escala da notificação de tempo de jogo",
+  "label.settings-playtimeScaleSlider": "Escala:"
 }
