@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -6,7 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="style.css" />
     <title>Popup Animation</title>
-        <meta name="duration" content="11500" />
+    <meta name="duration" content="11500" />
     <style>
       html,
       body {
@@ -38,7 +38,7 @@
         <div class="achievement-loader"></div>
         <div class="achievement-trophy xbox-icon xbox-logo"></div>
         <div class="achievement-content">
-        <img src="image.png" class="laurel-wreath" alt="Laurel Wreath" />
+          <img src="image.png" class="laurel-wreath" alt="Laurel Wreath" />
           <div class="icon">
             <img src="" alt="Icon" />
           </div>
@@ -60,7 +60,7 @@
         const baseTotal = Math.max(1, Number(durationMeta?.content || 10000));
         const baseFrameWidth = Math.max(
           0,
-          Number(frameMeta?.getAttribute("width")) || 0
+          Number(frameMeta?.getAttribute("width")) || 0,
         );
         const SCALE_WIDTH_CLAMP_THRESHOLD = 1.26;
         const HORIZONTAL_SAFE_MARGIN_PX = 24;
@@ -74,7 +74,7 @@
 
         let closeTimer = null;
         const MARGIN_X = 0;
-        const MARGIN_BOTTOM = 0;
+        const MARGIN_BOTTOM = 10;
         const MARGIN_TOP = 0;
         const TOP_TRANSLATE_ADJUST_PX = -50;
         function notifyScreenshotReady(delayMs = 0) {
@@ -141,8 +141,8 @@
 
         const restartAnimation = () => {
           const animatedNodes = container.querySelectorAll(
-  ".achievement-banner, .achievement-loader, .achievement-trophy, .icon img, .laurel-wreath, .achievement-banner .title, .achievement-banner .detail"
-);
+            ".achievement-banner, .achievement-loader, .achievement-trophy, .icon img, .laurel-wreath, .achievement-banner .title, .achievement-banner .detail",
+          );
           resetAnimations(Array.from(animatedNodes));
         };
 
@@ -173,7 +173,7 @@
             speedDivisor = 50,
             delay = 1200,
             extraPadding = 24,
-          }
+          },
         ) => {
           if (!element) return false;
           try {
@@ -200,8 +200,8 @@
             const distance = Math.ceil(
               Math.max(
                 0,
-                (innerSpan.scrollWidth || 0) - (element.clientWidth || 0)
-              ) + extraPadding
+                (innerSpan.scrollWidth || 0) - (element.clientWidth || 0),
+              ) + extraPadding,
             );
             innerSpan.animate(
               [
@@ -211,12 +211,12 @@
               {
                 duration: Math.max(
                   minDuration,
-                  Math.round(distance / speedDivisor) * 1000
+                  Math.round(distance / speedDivisor) * 1000,
                 ),
                 delay,
                 easing: "linear",
                 fill: "both",
-              }
+              },
             );
             return true;
           }
@@ -259,7 +259,7 @@
           container.style.setProperty("--origin-y", fromTop ? "top" : "bottom");
           container.style.setProperty(
             "--translate-y",
-            fromTop ? `${TOP_TRANSLATE_ADJUST_PX}px` : "0px"
+            fromTop ? `${TOP_TRANSLATE_ADJUST_PX}px` : "0px",
           );
 
           if (atLeft) {
@@ -330,7 +330,7 @@
           const requestedWidth = Math.max(baseWidth + 4, collapsedPx);
           const currentScale = Math.max(
             0.1,
-            parseFloat(styles.getPropertyValue("--scale")) || 1
+            parseFloat(styles.getPropertyValue("--scale")) || 1,
           );
           const viewportWidth =
             window.innerWidth || document.documentElement.clientWidth || 0;
@@ -339,7 +339,7 @@
               ? Math.max(
                   collapsedPx,
                   Math.floor(viewportWidth / currentScale) -
-                    HORIZONTAL_SAFE_MARGIN_PX * 2
+                    HORIZONTAL_SAFE_MARGIN_PX * 2,
                 )
               : baseFrameWidth;
           const maxExpandedWidth =
@@ -348,13 +348,13 @@
                   collapsedPx,
                   Math.min(
                     baseFrameWidth || requestedWidth,
-                    scaledWindowLimit || requestedWidth
-                  )
+                    scaledWindowLimit || requestedWidth,
+                  ),
                 )
               : Infinity;
           const finalWidth = Math.max(
             Math.min(requestedWidth, maxExpandedWidth),
-            collapsedPx
+            collapsedPx,
           );
           container.style.setProperty("--ach-width", `${finalWidth}px`);
         };
@@ -399,7 +399,7 @@
           const scale = Math.max(0.1, total / baseTotal);
           document.documentElement.style.setProperty(
             "--timeline-scale",
-            scale.toFixed(4)
+            scale.toFixed(4),
           );
           applyScale(notificationData.scale);
           applyAnchoringFromPosition(
@@ -407,7 +407,7 @@
               notificationData.presetPosition ??
               notificationData.pos ??
               notificationData.corner ??
-              ""
+              "",
           );
 
           requestAnimationFrame(() => {
