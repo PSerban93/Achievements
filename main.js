@@ -17128,6 +17128,53 @@ ipcMain.on("set-disable-playtime", (_event, value) => {
 let playtimeWindow = null;
 let playtimeAlreadyClosing = false;
 let pendingPlayData = null;
+let lastTestPlaytimeHeaderPath = "";
+
+function getRandomTestPlaytimeHeaderUrl() {
+  const imagesRoot = path.join(app.getPath("userData"), "images");
+  const headers = [];
+  const pendingDirs = [imagesRoot];
+
+  while (pendingDirs.length) {
+    const currentDir = pendingDirs.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirs.push(entryPath);
+        continue;
+      }
+      if (!entry.isFile() || entry.name.toLowerCase() !== "header.jpg") {
+        continue;
+      }
+      try {
+        if (fs.statSync(entryPath).size > 0) headers.push(entryPath);
+      } catch {}
+    }
+  }
+
+  let selectedPath = "";
+  if (headers.length) {
+    const candidates =
+      headers.length > 1
+        ? headers.filter((item) => item !== lastTestPlaytimeHeaderPath)
+        : headers;
+    selectedPath = candidates[crypto.randomInt(candidates.length)];
+    lastTestPlaytimeHeaderPath = selectedPath;
+  } else {
+    selectedPath = path.join(
+      app.getAppPath(),
+      "assets",
+      "achievements-logo.png",
+    );
+  }
+  return require("url").pathToFileURL(selectedPath).toString();
+}
 
 let __lastPlaySig = null,
   __lastPlayAt = 0;
@@ -17188,20 +17235,36 @@ ipcMain.on("show-playtime", (_event, playData) => {
   createPlaytimeWindow(normalized);
 });
 
+ipcMain.on("show-test-playtime-notification", () => {
+  createPlaytimeWindow({
+    phase: "start",
+    displayName: "Achievements",
+    description: tUi("playtime.descStart", {}, "Playtime starting!"),
+    headerUrl: getRandomTestPlaytimeHeaderUrl(),
+    isTestPlaytime: true,
+  });
+});
+
 function createPlaytimeWindow(playData = {}) {
   windowLogger.info("create-playtime-window:start", {
     displayName: playData?.displayName || playData?.name || null,
     phase: playData?.phase || "start",
   });
   const phase = playData.phase || "start";
+  const isTestPlaytime = playData.isTestPlaytime === true;
 
   try {
     const cur = fs.existsSync(preferencesPath)
       ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
       : {};
-    if (cur.disablePlaytime === true || global.disablePlaytime === true) return;
+    if (
+      !isTestPlaytime &&
+      (cur.disablePlaytime === true || global.disablePlaytime === true)
+    ) {
+      return;
+    }
   } catch (e) {
-    if (global.disablePlaytime === true) return;
+    if (!isTestPlaytime && global.disablePlaytime === true) return;
   }
 
   if (playtimeWindow && !playtimeWindow.isDestroyed()) {

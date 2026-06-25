@@ -1168,6 +1168,14 @@
                     >
                   </div>
                 </div>
+                <button
+                  id="settings-testPlaytimeNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testPlaytimeNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test Playtime Notification
+                </button>
               </div>
             </div>
           </div>
@@ -13026,6 +13034,12 @@
             sound,
             scale,
           });
+        });
+
+      document
+        .getElementById("settings-testPlaytimeNotificationBtn")
+        .addEventListener("click", function () {
+          window.api.showTestPlaytimeNotification();
         });
 
       // Settings scale slider
