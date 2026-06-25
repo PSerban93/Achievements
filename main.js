@@ -84,6 +84,7 @@ const {
   writeAchievementPercentagesSidecar,
   readAchievementPercentagesMap,
   mergeRarityIntoAchievements,
+  normalizeRarityPercent,
 } = require("./utils/achievement-rarity");
 const { ensureGogAccessToken } = require("./utils/gog-auth");
 const {
@@ -1095,7 +1096,11 @@ const DEFAULT_PREFERENCES = {
   disableHardwareAcceleration: true,
   disableUpdate: false,
   disablePlaytime: false,
+  showNotificationRarityPercentage: true,
   progressPosition: "bottom-left",
+  rareSound: "mute",
+  rarePreset: "default",
+  rarePosition: "center-bottom",
   platinumSound: "mute",
   platinumPreset: "default",
   platinumPosition: "center-bottom",
@@ -6831,7 +6836,7 @@ ipcMain.handle("get-sound-files", () => {
   if (!fs.existsSync(userSoundsFolder)) return [];
   const files = fs
     .readdirSync(userSoundsFolder)
-    .filter((file) => file.endsWith(".wav"));
+    .filter((file) => file.toLowerCase().endsWith(".wav"));
   return files;
 });
 
@@ -9468,6 +9473,65 @@ function getUserPreferredSound() {
   }
 }
 
+const RANDOM_SOUND_VALUE = "random";
+let lastRandomAchievementSound = "";
+let lastRandomRareSound = "";
+let lastRandomPlatinumSound = "";
+let lastRandomTestSound = "";
+
+function getAvailableNotificationSounds() {
+  try {
+    if (!fs.existsSync(userSoundsFolder)) return [];
+    return fs
+      .readdirSync(userSoundsFolder, { withFileTypes: true })
+      .filter(
+        (entry) =>
+          entry.isFile() && entry.name.toLowerCase().endsWith(".wav"),
+      )
+      .map((entry) => entry.name);
+  } catch (err) {
+    notificationLogger.warn("sound:random-list-failed", {
+      error: err?.message || String(err),
+    });
+    return [];
+  }
+}
+
+function resolveNotificationSound(sound, options = {}) {
+  const requested = String(sound || "mute").trim() || "mute";
+  if (requested !== RANDOM_SOUND_VALUE) return requested;
+
+  const isPlatinum = options.isPlatinum === true;
+  const isRare = options.isRare === true;
+  const isTest = options.isTest === true;
+  const sounds = getAvailableNotificationSounds();
+  if (!sounds.length) return "mute";
+
+  const previous = isTest
+    ? lastRandomTestSound
+    : isPlatinum
+      ? lastRandomPlatinumSound
+      : isRare
+        ? lastRandomRareSound
+        : lastRandomAchievementSound;
+  const candidates =
+    sounds.length > 1
+      ? sounds.filter((candidate) => candidate !== previous)
+      : sounds;
+  const selected = candidates[crypto.randomInt(candidates.length)];
+
+  if (isTest) {
+    lastRandomTestSound = selected;
+  } else if (isPlatinum) {
+    lastRandomPlatinumSound = selected;
+  } else if (isRare) {
+    lastRandomRareSound = selected;
+  } else {
+    lastRandomAchievementSound = selected;
+  }
+  return selected;
+}
+
 let tray = null;
 let trayMenuWindow = null;
 let isQuitting = false;
@@ -10117,6 +10181,10 @@ function createNotificationWindow(message) {
       description: message.description,
       iconPath: iconPathToSend,
       headerPath: message.headerPath || "",
+      rarityPct: message.rarityPct,
+      isRare: message.isRare === true,
+      showRarityPercentage: message.showRarityPercentage === true,
+      preset: message.preset || preset,
       scale,
       durationOverridden: !!message?.durationOverridden,
     });
@@ -10173,6 +10241,7 @@ ipcMain.on("show-notification", async (_event, achievement) => {
 
   if (displayName && descriptionText) {
     const notificationData = {
+      name: achievement.name || achievement.api || "",
       displayName,
       description: descriptionText,
       icon: achievement.icon,
@@ -10180,9 +10249,13 @@ ipcMain.on("show-notification", async (_event, achievement) => {
       appid: achievement.appid || achievement.appId || null,
       platform: normalizePlatform(achievement.platform) || null,
       config_path: achievement.config_path,
+      configName:
+        achievement.configName || achievement.config_name || configName || "",
       preset: achievement.preset,
       position: achievement.position,
       sound: achievement.sound,
+      rarityPct: achievement.rarityPct,
+      raritySource: achievement.raritySource,
     };
 
     queueAchievementNotification(notificationData);
@@ -10600,8 +10673,151 @@ function armPendingNotificationScreenshot(
   pendingNotificationScreenshots.set(webContentsId, state);
 }
 
+function normalizeNotificationRarityPercent(value) {
+  const normalized = normalizeRarityPercent(value);
+  if (normalized !== null) return normalized;
+  if (typeof value !== "string") return null;
+  const match = value.replace(",", ".").trim().match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  return normalizeRarityPercent(Number(match[0]));
+}
+
+function resolveNotificationRarityFromPayload(achievement = {}) {
+  const rarityObject =
+    achievement?.rarity && typeof achievement.rarity === "object"
+      ? achievement.rarity
+      : null;
+  const candidates = [
+    rarityObject?.pct,
+    rarityObject?.percent,
+    rarityObject?.value,
+    achievement?.rarityPct,
+    achievement?.rarity_percent,
+    achievement?.unlockRate,
+    achievement?.unlock_rate,
+    achievement?.globalPercent,
+    achievement?.global_percent,
+    achievement?.percent,
+    typeof achievement?.rarity === "number" ||
+    typeof achievement?.rarity === "string"
+      ? achievement.rarity
+      : null,
+  ];
+  for (const candidate of candidates) {
+    const normalized = normalizeNotificationRarityPercent(candidate);
+    if (normalized !== null) return normalized;
+  }
+  return null;
+}
+
+function getNotificationAchievementKeys(achievement = {}) {
+  const candidates = [
+    achievement?.name,
+    achievement?.api,
+    achievement?.achievementName,
+    achievement?.achievement_name,
+    achievement?.achievementKey,
+    achievement?.achievement_key,
+    achievement?.key,
+  ];
+  const keys = [];
+  for (const candidate of candidates) {
+    const key = String(candidate ?? "").trim();
+    if (!key || keys.includes(key)) continue;
+    keys.push(key);
+  }
+  return keys;
+}
+
+function getNotificationRaritySidecarPaths(achievement = {}) {
+  const candidates = [];
+  const add = (candidate) => {
+    const normalized = String(candidate || "").trim();
+    if (!normalized || candidates.includes(normalized)) return;
+    candidates.push(normalized);
+  };
+  const configPath = String(
+    achievement?.config_path || achievement?.configPath || "",
+  ).trim();
+  const appid = String(achievement?.appid || achievement?.appId || "").trim();
+
+  if (configPath) {
+    const baseDir =
+      path.extname(configPath).toLowerCase() === ".json"
+        ? path.dirname(configPath)
+        : configPath;
+    add(path.join(baseDir, "achievementpercentages.json"));
+    add(path.join(baseDir, "steam_settings", "achievementpercentages.json"));
+    if (appid) {
+      add(path.join(baseDir, appid, "achievementpercentages.json"));
+    }
+  }
+
+  const configName =
+    achievement?.configName ||
+    achievement?.config_name ||
+    achievement?.config ||
+    "";
+  const config = configName ? readConfigForAchievementCache(configName) : null;
+  if (config) {
+    const schemaPath = resolveAchievementsSchemaPath(config);
+    if (schemaPath) {
+      add(path.join(path.dirname(schemaPath), "achievementpercentages.json"));
+    }
+  }
+  return candidates;
+}
+
+function resolveNotificationRarity(achievement = {}) {
+  const direct = resolveNotificationRarityFromPayload(achievement);
+  if (direct !== null) {
+    return {
+      percent: direct,
+      source: String(achievement?.raritySource || "").trim() || null,
+    };
+  }
+
+  const keys = getNotificationAchievementKeys(achievement);
+  if (!keys.length) return { percent: null, source: null };
+  for (const sidecarPath of getNotificationRaritySidecarPaths(achievement)) {
+    try {
+      const rarityInfo = readAchievementPercentagesMap(sidecarPath);
+      if (!(rarityInfo?.map instanceof Map) || !rarityInfo.map.size) continue;
+      const lowerMap = new Map(
+        Array.from(rarityInfo.map.entries()).map(([name, percent]) => [
+          String(name).toLowerCase(),
+          percent,
+        ]),
+      );
+      for (const key of keys) {
+        const percent =
+          rarityInfo.map.get(key) ?? lowerMap.get(key.toLowerCase()) ?? null;
+        const normalized = normalizeNotificationRarityPercent(percent);
+        if (normalized === null) continue;
+        return {
+          percent: normalized,
+          source: rarityInfo.source || null,
+        };
+      }
+    } catch (err) {
+      notificationLogger.warn("notification:rarity-read-failed", {
+        sidecarPath,
+        error: err?.message || String(err),
+      });
+    }
+  }
+  return { percent: null, source: null };
+}
+
 function queueAchievementNotification(achievement) {
   const prefs = cachedPreferences || {};
+  const isPlatinum = achievement.__isPlatinum === true;
+  const isTest = achievement.isTest === true;
+  const rarity = isPlatinum || isTest
+    ? { percent: null, source: null }
+    : resolveNotificationRarity(achievement);
+  const isRare =
+    rarity.percent !== null && rarity.percent >= 0 && rarity.percent <= 10;
   const preferredScale =
     achievement.scale != null
       ? achievement.scale
@@ -10614,15 +10830,24 @@ function queueAchievementNotification(achievement) {
   const displayName = getSafeLocalizedText(achievement.displayName, lang);
   const description = getSafeLocalizedText(achievement.description, lang);
 
-  const resolvedPreset =
+  const normalPreset =
     achievement.preset || selectedPreset || prefs.preset || "default";
-  const resolvedPosition =
+  const normalPosition =
     achievement.position ||
     selectedPosition ||
     prefs.position ||
     "center-bottom";
-  const resolvedSound =
+  const normalSound =
     achievement.sound || selectedSound || prefs.sound || "mute";
+  const resolvedPreset = isRare
+    ? prefs.rarePreset || normalPreset
+    : normalPreset;
+  const resolvedPosition = isRare
+    ? prefs.rarePosition || normalPosition
+    : normalPosition;
+  const requestedSound = isRare
+    ? prefs.rareSound || normalSound
+    : normalSound;
   const resolvedSkipScreenshot =
     achievement.skipScreenshot === true
       ? true
@@ -10637,15 +10862,19 @@ function queueAchievementNotification(achievement) {
     platform: normalizePlatform(achievement.platform) || null,
     config_path: achievement.config_path,
     configName: achievement.configName || achievement.config_name || "",
+    name: getNotificationAchievementKeys(achievement)[0] || "",
+    rarityPct: rarity.percent,
+    raritySource: rarity.source,
+    isRare,
+    showRarityPercentage: prefs.showNotificationRarityPercentage !== false,
     preset: resolvedPreset,
     position: resolvedPosition,
-    sound: resolvedSound,
+    sound: requestedSound,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: resolvedSkipScreenshot,
-    isTest: !!achievement.isTest,
+    isTest,
   };
 
-  const isPlatinum = achievement.__isPlatinum === true;
   if (!notificationData.isTest && !isPlatinum) {
     const now = Date.now();
     pruneRecentAchievementNotificationKeys(now);
@@ -10660,8 +10889,17 @@ function queueAchievementNotification(achievement) {
     recentAchievementNotificationKeys.set(dedupeKey, now);
   }
 
+  notificationData.sound = resolveNotificationSound(requestedSound, {
+    isPlatinum,
+    isRare,
+    isTest: notificationData.isTest,
+  });
+
   notificationLogger.info("queue-achievement", {
     displayName: notificationData.displayName,
+    name: notificationData.name || null,
+    rarityPct: notificationData.rarityPct,
+    rare: notificationData.isRare,
     preset: notificationData.preset || "default",
     position: notificationData.position || "center-bottom",
     config: notificationData.config_path || null,
@@ -10712,6 +10950,7 @@ function processNextNotification() {
   const lang = selectedLanguage || "english";
 
   const notificationData = {
+    name: achievement.name || "",
     displayName: achievement.displayName,
     description: achievement.description,
     icon: achievement.icon,
@@ -10719,6 +10958,12 @@ function processNextNotification() {
     appid: achievement.appid || achievement.appId || null,
     platform: normalizePlatform(achievement.platform) || null,
     config_path: achievement.config_path,
+    configName: achievement.configName || "",
+    rarityPct: achievement.rarityPct,
+    raritySource: achievement.raritySource || null,
+    isRare: achievement.isRare === true,
+    showRarityPercentage:
+      cachedPreferences.showNotificationRarityPercentage !== false,
     preset: achievement.preset,
     position: achievement.position,
     sound: achievement.sound,
@@ -10751,6 +10996,7 @@ function processNextNotification() {
     displayName: notificationData.displayName,
     preset: notificationData.preset || "default",
     position: notificationData.position || "center-bottom",
+    showRarityPercentage: notificationData.showRarityPercentage,
     config: notificationData.config_path || null,
     iconResolved: iconPathFinal,
   });
@@ -12232,6 +12478,7 @@ async function monitorAchievementsFile(filePath) {
 
           if (achievementConfig) {
             queueAchievementNotification({
+              name: achievementConfig.name || key,
               displayName,
               description,
               icon: achievementConfig.icon,
@@ -12239,6 +12486,9 @@ async function monitorAchievementsFile(filePath) {
               appid: currentAppId || null,
               platform: currentPlatform || null,
               config_path: selectedConfigPath,
+              configName,
+              rarityPct: achievementConfig.rarityPct,
+              raritySource: achievementConfig.raritySource,
               preset: selectedPreset,
               position: selectedPosition,
               sound: selectedSound || "mute",
@@ -12335,6 +12585,7 @@ async function monitorAchievementsFile(filePath) {
         }
         if (achievementConfig) {
           const notificationData = {
+            name: achievementConfig.name || key,
             displayName:
               typeof achievementConfig.displayName === "object"
                 ? achievementConfig.displayName[lang] ||
@@ -12354,6 +12605,9 @@ async function monitorAchievementsFile(filePath) {
             appid: currentAppId || null,
             platform: currentPlatform || null,
             config_path: selectedConfigPath,
+            configName,
+            rarityPct: achievementConfig.rarityPct,
+            raritySource: achievementConfig.raritySource,
             preset: selectedPreset,
             position: selectedPosition,
             sound: getUserPreferredSound() || "mute",
@@ -15953,6 +16207,7 @@ function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
     const achievementConfig = schemaMap.get(String(key || "").trim());
     if (!achievementConfig) continue;
     queueAchievementNotification({
+      name: achievementConfig.name || achievementConfig.api || key,
       displayName: achievementConfig.displayName,
       description: achievementConfig.description,
       icon: achievementConfig.icon,
@@ -15960,6 +16215,9 @@ function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
       appid: config?.appid || currentAppId || null,
       platform: normalizePlatform(config?.platform) || null,
       config_path: config?.config_path || selectedConfigPath || "",
+      configName: config?.name || "",
+      rarityPct: achievementConfig.rarityPct,
+      raritySource: achievementConfig.raritySource,
       preset: selectedPreset,
       position: selectedPosition,
       sound: getUserPreferredSound() || "mute",

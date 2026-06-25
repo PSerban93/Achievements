@@ -11,6 +11,8 @@ body {
 
 :root {
   --scale: 1;
+  --side-gap: 12px;
+  --top-gap: 12px;
   --plate-bg: rgba(12, 16, 24, 0.9);
   --plate-edge: rgba(255, 255, 255, 0.08);
 }
@@ -29,24 +31,29 @@ body {
 }
 
 .ach.at-left {
-  left: 0;
+  left: var(--side-gap);
   right: auto;
   --tx: 0;
   transform-origin: left center;
 }
 
 .ach.at-right {
-  right: 0;
+  right: var(--side-gap);
   left: auto;
   --tx: 0;
   transform-origin: right center;
 }
 
+.ach.at-left .ach-inner,
+.ach.at-right .ach-inner {
+  width: calc(520px - (var(--side-gap) * 2));
+}
+
 .ach.from-top {
-  top: 0;
+  top: var(--top-gap);
   bottom: auto;
   transform-origin: center top;
-  --offsetY: -8px;
+  --offsetY: 0;
 }
 
 .ach.from-bottom {
@@ -54,6 +61,22 @@ body {
   top: auto;
   transform-origin: center bottom;
   --offsetY: 0;
+}
+
+.ach.at-left.from-top {
+  transform-origin: left top;
+}
+
+.ach.at-left.from-bottom {
+  transform-origin: left bottom;
+}
+
+.ach.at-right.from-top {
+  transform-origin: right top;
+}
+
+.ach.at-right.from-bottom {
+  transform-origin: right bottom;
 }
 
 .ach-inner {

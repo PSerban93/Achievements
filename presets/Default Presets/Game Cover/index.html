@@ -223,9 +223,12 @@
             payload?.corner ??
             ""
           ).toString();
-          setDirectionByPosition(ach, posValue);
 
           const placement = await computeDirFromWindowPosition();
+          const effectivePosition =
+            posValue.trim() ||
+            `${placement?.v || "bottom"}-${placement?.h || "right"}`;
+          setDirectionByPosition(ach, effectivePosition);
           const total = Math.max(0, Number(metaDur?.content || baseTotal));
 
           requestAnimationFrame(() => {

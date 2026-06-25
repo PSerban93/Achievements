@@ -14,6 +14,421 @@ function subscribeIpc(channel, callback, mapArgs = (_event, data) => [data]) {
   return () => ipcRenderer.removeListener(channel, handler);
 }
 
+const RARITY_BORDER_STYLE_ID = "achievements-rarity-border-style";
+const RARITY_PERCENTAGE_ID = "achievements-rarity-percentage";
+const RARITY_BORDER_CLASSES = [
+  "achievements-rarity-border-gold",
+  "achievements-rarity-border-silver",
+  "achievements-rarity-border-bronze",
+];
+let rarityBorderObserver = null;
+let rarityBorderTimer = null;
+let rarityPercentageFrame = null;
+let rarityPercentageElement = null;
+
+function parseNotificationRarityPercent(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.min(100, Math.max(0, value));
+  }
+  if (typeof value !== "string") return null;
+  const match = value.replace(",", ".").trim().match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  const parsed = Number(match[0]);
+  return Number.isFinite(parsed)
+    ? Math.min(100, Math.max(0, parsed))
+    : null;
+}
+
+function getNotificationRarityTier(value) {
+  const percent = parseNotificationRarityPercent(value);
+  if (percent === null || percent > 10) return "";
+  if (percent <= 1) return "gold";
+  if (percent <= 5) return "silver";
+  return "bronze";
+}
+
+function isLaz0rboxNotificationPreset(data = {}) {
+  const presetName = String(data?.preset || "")
+    .trim()
+    .toLowerCase();
+  if (presetName === "laz0rbox") return true;
+  try {
+    const pathname = decodeURIComponent(window.location.pathname || "")
+      .replace(/\\/g, "/")
+      .toLowerCase();
+    return pathname.includes("/laz0rbox/");
+  } catch {
+    return false;
+  }
+}
+
+function normalizeComparableAssetUrl(value) {
+  if (!value) return "";
+  try {
+    return new URL(String(value), window.location.href).href
+      .replace(/\\/g, "/")
+      .toLowerCase();
+  } catch {
+    return String(value).replace(/\\/g, "/").toLowerCase();
+  }
+}
+
+function getAssetBasename(value) {
+  const normalized = normalizeComparableAssetUrl(value).split(/[?#]/, 1)[0];
+  return normalized.split("/").pop() || "";
+}
+
+function ensureRarityBorderStyles() {
+  if (!document?.head || document.getElementById(RARITY_BORDER_STYLE_ID)) {
+    return;
+  }
+  const style = document.createElement("style");
+  style.id = RARITY_BORDER_STYLE_ID;
+  style.textContent = `
+    .achievements-rarity-border-gold {
+      box-sizing: border-box !important;
+      border: 2px solid #f9c74f !important;
+      box-shadow:
+        0 0 0 1px rgba(249, 199, 79, 0.55),
+        0 0 14px rgba(249, 199, 79, 0.78) !important;
+    }
+    .achievements-rarity-border-silver {
+      box-sizing: border-box !important;
+      border: 2px solid #c7d0d9 !important;
+      box-shadow:
+        0 0 0 1px rgba(199, 208, 217, 0.55),
+        0 0 12px rgba(199, 208, 217, 0.68) !important;
+    }
+    .achievements-rarity-border-bronze {
+      box-sizing: border-box !important;
+      border: 2px solid #cd7f32 !important;
+      box-shadow:
+        0 0 0 1px rgba(205, 127, 50, 0.55),
+        0 0 12px rgba(205, 127, 50, 0.68) !important;
+    }
+    #${RARITY_PERCENTAGE_ID} {
+      position: fixed;
+      z-index: 2147483647;
+      min-width: var(--notification-rarity-min-width, 34px);
+      padding:
+        var(--notification-rarity-padding-y, 2px)
+        var(--notification-rarity-padding-x, 7px);
+      box-sizing: border-box;
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      border-radius: 999px;
+      background: rgba(10, 13, 18, 0.82);
+      color: #ffffff;
+      font-family: "Segoe UI", sans-serif;
+      font-size: var(--notification-rarity-font-size, 14px);
+      font-weight: 700;
+      line-height: 1.25;
+      opacity: 0;
+      visibility: hidden;
+      text-align: center;
+      white-space: nowrap;
+      pointer-events: none;
+      transform: translateX(-50%);
+      text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+    }
+    #${RARITY_PERCENTAGE_ID}.achievements-rarity-percentage-gold {
+      border-color: rgba(249, 199, 79, 0.88);
+      color: #ffe08a;
+    }
+    #${RARITY_PERCENTAGE_ID}.achievements-rarity-percentage-silver {
+      border-color: rgba(199, 208, 217, 0.88);
+      color: #edf3f8;
+    }
+    #${RARITY_PERCENTAGE_ID}.achievements-rarity-percentage-bronze {
+      border-color: rgba(205, 127, 50, 0.88);
+      color: #efb475;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function clearNotificationRarityBorder() {
+  if (rarityBorderObserver) {
+    rarityBorderObserver.disconnect();
+    rarityBorderObserver = null;
+  }
+  if (rarityBorderTimer) {
+    clearTimeout(rarityBorderTimer);
+    rarityBorderTimer = null;
+  }
+  if (rarityPercentageFrame !== null) {
+    cancelAnimationFrame(rarityPercentageFrame);
+    rarityPercentageFrame = null;
+  }
+  rarityPercentageElement?.remove();
+  rarityPercentageElement = null;
+  try {
+    document
+      .querySelectorAll(RARITY_BORDER_CLASSES.map((name) => `.${name}`).join(","))
+      .forEach((element) => element.classList.remove(...RARITY_BORDER_CLASSES));
+  } catch {}
+}
+
+function formatNotificationRarityPercent(value) {
+  const percent = parseNotificationRarityPercent(value);
+  if (percent === null) return "";
+  const formatted = Number.isInteger(percent)
+    ? String(percent)
+    : percent.toFixed(2).replace(/\.?0+$/, "");
+  return `${formatted}%`;
+}
+
+function normalizeNotificationRarityScale(value) {
+  const scale = Number(value);
+  return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function getNotificationPresetName(data = {}) {
+  const explicit = String(data?.preset || "")
+    .trim()
+    .toLowerCase();
+  if (explicit) return explicit;
+  try {
+    const pathname = decodeURIComponent(window.location.pathname || "")
+      .replace(/\\/g, "/")
+      .toLowerCase();
+    const parts = pathname.split("/").filter(Boolean);
+    return parts.length > 1 ? parts[parts.length - 2] : "";
+  } catch {
+    return "";
+  }
+}
+
+function getElementVisualOpacity(element) {
+  let opacity = 1;
+  let current = element;
+  while (current instanceof Element) {
+    const style = window.getComputedStyle(current);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse"
+    ) {
+      return 0;
+    }
+    const currentOpacity = Number.parseFloat(style.opacity);
+    if (Number.isFinite(currentOpacity)) opacity *= currentOpacity;
+    if (opacity < 0.01) return 0;
+    current = current.parentElement;
+  }
+  return opacity;
+}
+
+function isXbox360ExitSpinActive(icon, presetName) {
+  if (presetName !== "xbox 360") return false;
+  const container = icon.closest(".ach");
+  if (!container) return false;
+  try {
+    const exitAnimation = container.getAnimations().find((animation) =>
+      String(animation.animationName || "")
+        .toLowerCase()
+        .includes("open-close-banner"),
+    );
+    const progress = exitAnimation?.effect?.getComputedTiming?.().progress;
+    if (Number.isFinite(progress) && progress >= 0.9) return true;
+  } catch {}
+  try {
+    const transform = window.getComputedStyle(container).transform;
+    const match = String(transform).match(
+      /^matrix\(([-+\d.e]+),\s*([-+\d.e]+),/,
+    );
+    if (!match) return false;
+    const angle = Math.abs(
+      (Math.atan2(Number(match[2]), Number(match[1])) * 180) / Math.PI,
+    );
+    return angle > 3 && Math.abs(angle - 360) > 3;
+  } catch {
+    return false;
+  }
+}
+
+function isNotificationIconVisuallyReady(icon, rect, scale, presetName) {
+  const centerX = rect.left + rect.width / 2;
+  const centerY = rect.top + rect.height / 2;
+  if (
+    !icon.complete ||
+    icon.naturalWidth <= 0 ||
+    icon.naturalHeight <= 0 ||
+    rect.width < 8 * scale ||
+    rect.height < 8 * scale ||
+    centerX <= 0 ||
+    centerX >= window.innerWidth ||
+    centerY <= 0 ||
+    centerY >= window.innerHeight
+  ) {
+    return false;
+  }
+  if (getElementVisualOpacity(icon) < 0.35) return false;
+  return !isXbox360ExitSpinActive(icon, presetName);
+}
+
+function attachNotificationRarityPercentage(
+  icon,
+  percent,
+  tier,
+  scaleValue,
+  presetName,
+) {
+  const scale = normalizeNotificationRarityScale(scaleValue);
+  const badge = document.createElement("div");
+  badge.id = RARITY_PERCENTAGE_ID;
+  badge.textContent = formatNotificationRarityPercent(percent);
+  badge.style.setProperty(
+    "--notification-rarity-min-width",
+    `${34 * scale}px`,
+  );
+  badge.style.setProperty(
+    "--notification-rarity-padding-y",
+    `${2 * scale}px`,
+  );
+  badge.style.setProperty(
+    "--notification-rarity-padding-x",
+    `${7 * scale}px`,
+  );
+  badge.style.setProperty(
+    "--notification-rarity-font-size",
+    `${14 * scale}px`,
+  );
+  if (tier) {
+    badge.classList.add(`achievements-rarity-percentage-${tier}`);
+  }
+  document.documentElement.appendChild(badge);
+  rarityPercentageElement = badge;
+
+  const position = () => {
+    if (!icon.isConnected || !badge.isConnected) {
+      rarityPercentageFrame = null;
+      return;
+    }
+    const rect = icon.getBoundingClientRect();
+    const isVisible = isNotificationIconVisuallyReady(
+      icon,
+      rect,
+      scale,
+      presetName,
+    );
+    badge.style.opacity = isVisible ? "1" : "0";
+    badge.style.visibility = isVisible ? "visible" : "hidden";
+    if (!isVisible) {
+      rarityPercentageFrame = requestAnimationFrame(position);
+      return;
+    }
+    const badgeHeight = badge.offsetHeight || 18 * scale;
+    const centerX = rect.left + rect.width / 2;
+    badge.style.left = `${centerX}px`;
+    badge.style.top = `${Math.min(
+      rect.bottom + 4 * scale,
+      Math.max(0, window.innerHeight - badgeHeight - 2 * scale),
+    )}px`;
+    rarityPercentageFrame = requestAnimationFrame(position);
+  };
+  position();
+}
+
+function findMatchingNotificationIcon(iconPath) {
+  const expectedUrl = normalizeComparableAssetUrl(iconPath);
+  const expectedBasename = getAssetBasename(iconPath);
+  if (!expectedUrl || !expectedBasename) return null;
+  const selectors = [
+    ".icon img",
+    "img.achievement-icon",
+    ".achievement-icon img",
+    "#icon",
+    ".ani_icon img",
+    ".icon-frame img",
+  ];
+  const candidates = Array.from(
+    document.querySelectorAll(selectors.join(",")),
+  ).filter((element) => element instanceof HTMLImageElement);
+
+  return (
+    candidates.find((element) => {
+      const currentUrl = normalizeComparableAssetUrl(
+        element.currentSrc || element.src || element.getAttribute("src"),
+      );
+      if (!currentUrl) return false;
+      return (
+        currentUrl === expectedUrl ||
+        getAssetBasename(currentUrl) === expectedBasename
+      );
+    }) || null
+  );
+}
+
+function applyNotificationRarityBorder(data = {}) {
+  clearNotificationRarityBorder();
+  const percent = parseNotificationRarityPercent(data?.rarityPct);
+  const tier = getNotificationRarityTier(data?.rarityPct);
+  const showPercentage =
+    data?.showRarityPercentage === true && percent !== null;
+  const showBorder = !!tier && data?.isRare === true;
+  if (
+    (!showBorder && !showPercentage) ||
+    isLaz0rboxNotificationPreset(data)
+  ) {
+    return;
+  }
+  const iconPath = data?.iconPath || data?.icon || "";
+  if (!iconPath) return;
+  const presetName = getNotificationPresetName(data);
+  ensureRarityBorderStyles();
+
+  const apply = () => {
+    const icon = findMatchingNotificationIcon(iconPath);
+    if (!icon) return false;
+    if (showBorder) {
+      icon.classList.remove(...RARITY_BORDER_CLASSES);
+      icon.classList.add(`achievements-rarity-border-${tier}`);
+    }
+    if (showPercentage && !rarityPercentageElement) {
+      attachNotificationRarityPercentage(
+        icon,
+        percent,
+        tier,
+        data?.scale,
+        presetName,
+      );
+    }
+    return true;
+  };
+
+  if (apply()) return;
+  rarityBorderObserver = new MutationObserver(() => {
+    if (!apply()) return;
+    rarityBorderObserver?.disconnect();
+    rarityBorderObserver = null;
+  });
+  const observe = () => {
+    if (!document.documentElement) return;
+    rarityBorderObserver?.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["src"],
+    });
+  };
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", observe, { once: true });
+  } else {
+    observe();
+  }
+  rarityBorderTimer = setTimeout(() => {
+    rarityBorderObserver?.disconnect();
+    rarityBorderObserver = null;
+    rarityBorderTimer = null;
+  }, 2000);
+}
+
+ipcRenderer.on("show-notification", (_event, data) => {
+  applyNotificationRarityBorder(data);
+});
+
 contextBridge.exposeInMainWorld("api", {
   // Config management
   saveConfig: (config) => ipcRenderer.invoke("saveConfig", config),

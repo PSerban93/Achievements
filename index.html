@@ -882,6 +882,19 @@
                   >
                 </div>
 
+                <div class="checkbox-control">
+                  <input
+                    type="checkbox"
+                    id="settings-showNotificationRarityPercentageCheckbox"
+                    checked
+                  />
+                  <label
+                    for="settings-showNotificationRarityPercentageCheckbox"
+                    data-i18n="label.settings-showNotificationRarityPercentageCheckbox"
+                    >Show Rarity Percentage</label
+                  >
+                </div>
+
                 <hr style="margin: 18px 0 14px" />
                 <h4 id="settings-achievementNotificationTitle">
                   Achievement Notification
@@ -979,6 +992,90 @@
                 <div class="settings-control">
                   <label for="settings-soundSelect">Achievement Sound:</label>
                   <select id="settings-soundSelect"></select>
+                </div>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-rareTitle"
+                  data-i18n="settings-rareTitle"
+                  style="margin-top: 10px"
+                >
+                  Rare Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-rarePositionDropdown"
+                    data-i18n="label.settings-rarePositionDropdown"
+                    >Rare Achievement Position:</label
+                  >
+                  <select id="settings-rarePositionDropdown">
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
+                  </select>
+                </div>
+
+                <div class="settings-control">
+                  <label
+                    for="settings-rarePresetDropdown"
+                    data-i18n="label.settings-rarePresetDropdown"
+                    >Rare Achievement Preset:</label
+                  >
+                  <select id="settings-rarePresetDropdown"></select>
+                </div>
+
+                <div class="settings-control">
+                  <label
+                    for="settings-rareSoundSelect"
+                    data-i18n="label.settings-rareSoundSelect"
+                    >Rare Achievement Sound:</label
+                  >
+                  <select id="settings-rareSoundSelect"></select>
                 </div>
 
                 <hr style="margin: 18px 0 14px" />
@@ -3948,6 +4045,9 @@
       </select>
       <select id="presetDropdown"></select>
       <select id="soundSelect"></select>
+      <input type="hidden" id="rarePresetValue" />
+      <input type="hidden" id="rarePositionValue" />
+      <input type="hidden" id="rareSoundValue" />
       <input type="hidden" id="platinumPresetValue" />
       <input type="hidden" id="platinumPositionValue" />
       <input type="hidden" id="platinumSoundValue" />
@@ -10743,6 +10843,17 @@
 
           soundSelect.appendChild(muteOption);
 
+          const randomOption = document.createElement("option");
+
+          randomOption.value = "random";
+
+          randomOption.textContent = tUi(
+            "option.soundSelect.random",
+            "Randomize",
+          );
+
+          soundSelect.appendChild(randomOption);
+
           sounds.forEach((sound) => {
             const option = document.createElement("option");
 
@@ -10957,6 +11068,7 @@
       let activePreviewAudio = null;
       let activePlaybackAudio = null;
       let activePreviewSelectId = "settings-soundSelect";
+      const lastRandomPreviewSoundBySelect = new Map();
 
       function stopManagedAudio(audio) {
         if (!audio) return;
@@ -10984,15 +11096,44 @@
         stopPlaybackSound();
       }
 
+      function resolvePreviewSound(fileName, sourceSelectId) {
+        if (fileName !== "random") return fileName;
+        const select =
+          document.getElementById(sourceSelectId) ||
+          document.getElementById("settings-soundSelect");
+        const sounds = Array.from(select?.options || [])
+          .map((option) => option.value)
+          .filter(
+            (value) => value && value !== "mute" && value !== "random",
+          );
+        if (!sounds.length) return "mute";
+
+        const key = sourceSelectId || "settings-soundSelect";
+        const previous = lastRandomPreviewSoundBySelect.get(key) || "";
+        const candidates =
+          sounds.length > 1
+            ? sounds.filter((candidate) => candidate !== previous)
+            : sounds;
+        const selected =
+          candidates[Math.floor(Math.random() * candidates.length)];
+        lastRandomPreviewSoundBySelect.set(key, selected);
+        return selected;
+      }
+
       async function playPreviewSound(fileName, sourceSelectId) {
         if (sourceSelectId) {
           activePreviewSelectId = sourceSelectId;
         }
         stopUiAudioPlayback();
-        if (!fileName || fileName === "mute") return;
+        const resolvedFileName = resolvePreviewSound(
+          fileName,
+          sourceSelectId,
+        );
+        if (!resolvedFileName || resolvedFileName === "mute") return;
 
         try {
-          const fullPath = await window.api.getSoundFullPath(fileName);
+          const fullPath =
+            await window.api.getSoundFullPath(resolvedFileName);
           activePreviewAudio = new Audio(fullPath);
           const volume = await getSoundVolumeValue();
           playAudioWithVolume(
@@ -11166,6 +11307,59 @@
         }
       }
 
+      function applyRareNotificationPreferences(prefs = {}) {
+        const rarePosition =
+          prefs.rarePosition || prefs.position || "center-bottom";
+        const rarePreset = prefs.rarePreset || prefs.preset || "default";
+        const rareSound = prefs.rareSound || prefs.sound || "mute";
+
+        const positionSelect = document.getElementById(
+          "settings-rarePositionDropdown",
+        );
+        if (positionSelect) positionSelect.value = rarePosition;
+
+        const presetSelect = document.getElementById(
+          "settings-rarePresetDropdown",
+        );
+        if (
+          presetSelect &&
+          Array.from(presetSelect.options).some(
+            (option) => option.value === rarePreset,
+          )
+        ) {
+          presetSelect.value = rarePreset;
+        }
+
+        const soundSelect = document.getElementById(
+          "settings-rareSoundSelect",
+        );
+        if (
+          soundSelect &&
+          Array.from(soundSelect.options).some(
+            (option) => option.value === rareSound,
+          )
+        ) {
+          soundSelect.value = rareSound;
+        }
+
+        const hiddenPosition = document.getElementById("rarePositionValue");
+        const hiddenPreset = document.getElementById("rarePresetValue");
+        const hiddenSound = document.getElementById("rareSoundValue");
+        if (hiddenPosition) hiddenPosition.value = rarePosition;
+        if (hiddenPreset) hiddenPreset.value = rarePreset;
+        if (hiddenSound) hiddenSound.value = rareSound;
+      }
+
+      function applyNotificationTogglePreferences(prefs = {}) {
+        const rarityPercentageCheckbox = document.getElementById(
+          "settings-showNotificationRarityPercentageCheckbox",
+        );
+        if (rarityPercentageCheckbox) {
+          rarityPercentageCheckbox.checked =
+            prefs.showNotificationRarityPercentage !== false;
+        }
+      }
+
       async function loadPreferences() {
         const prefs = await loadPreferencesFromDisk();
         renderSteamApiKeyStatusFromPrefs(prefs);
@@ -11245,6 +11439,8 @@
           );
           if (el) el.value = prefs.progressPosition;
         }
+        applyRareNotificationPreferences(prefs);
+        applyNotificationTogglePreferences(prefs);
         const hiddenPlatPos = document.getElementById("platinumPositionValue");
         if (prefs.platinumPosition) {
           const el = document.getElementById(
@@ -11466,6 +11662,8 @@
               );
               if (el) el.value = prefs.progressPosition;
             }
+            applyRareNotificationPreferences(prefs);
+            applyNotificationTogglePreferences(prefs);
             const hiddenPlatPos = document.getElementById(
               "platinumPositionValue",
             );
@@ -13016,10 +13214,26 @@
         });
 
       document
+        .getElementById("settings-showNotificationRarityPercentageCheckbox")
+        .addEventListener("change", async (e) => {
+          await window.api.savePreferences({
+            showNotificationRarityPercentage: e.target.checked,
+          });
+        });
+
+      document
         .getElementById("settings-positionDropdown")
         .addEventListener("change", (e) =>
           window.api.savePreferences({ position: e.target.value }),
         );
+
+      document
+        .getElementById("settings-rarePositionDropdown")
+        .addEventListener("change", (e) => {
+          const hidden = document.getElementById("rarePositionValue");
+          if (hidden) hidden.value = e.target.value;
+          window.api.savePreferences({ rarePosition: e.target.value });
+        });
 
       document
         .getElementById("settings-platinumPositionDropdown")
@@ -13042,6 +13256,14 @@
         );
 
       document
+        .getElementById("settings-rarePresetDropdown")
+        .addEventListener("change", (e) => {
+          const hidden = document.getElementById("rarePresetValue");
+          if (hidden) hidden.value = e.target.value;
+          window.api.savePreferences({ rarePreset: e.target.value });
+        });
+
+      document
         .getElementById("settings-platinumPresetDropdown")
         .addEventListener("change", (e) => {
           const hidden = document.getElementById("platinumPresetValue");
@@ -13054,6 +13276,15 @@
         .addEventListener("change", (e) => {
           window.api.savePreferences({ sound: e.target.value });
           playPreviewSound(e.target.value, "settings-soundSelect");
+        });
+
+      document
+        .getElementById("settings-rareSoundSelect")
+        .addEventListener("change", (e) => {
+          const hidden = document.getElementById("rareSoundValue");
+          if (hidden) hidden.value = e.target.value;
+          window.api.savePreferences({ rareSound: e.target.value });
+          playPreviewSound(e.target.value, "settings-rareSoundSelect");
         });
 
       document
@@ -13079,6 +13310,14 @@
           if (mainPresetDropdown.value) {
             settingsPresetDropdown.value = mainPresetDropdown.value;
           }
+          const rarePresetDropdown = document.getElementById(
+            "settings-rarePresetDropdown",
+          );
+          if (rarePresetDropdown) {
+            rarePresetDropdown.innerHTML = mainPresetDropdown.innerHTML;
+            rarePresetDropdown.value =
+              prefs.rarePreset || rarePresetDropdown.value || "default";
+          }
           const platinumPresetDropdown = document.getElementById(
             "settings-platinumPresetDropdown",
           );
@@ -13100,6 +13339,14 @@
           if (mainSoundSelect.value) {
             settingsSoundSelect.value = mainSoundSelect.value;
           }
+          const rareSoundSelect = document.getElementById(
+            "settings-rareSoundSelect",
+          );
+          if (rareSoundSelect) {
+            rareSoundSelect.innerHTML = mainSoundSelect.innerHTML;
+            rareSoundSelect.value =
+              prefs.rareSound || rareSoundSelect.value || "mute";
+          }
           const platinumSoundSelect = document.getElementById(
             "settings-platinumSoundSelect",
           );
@@ -13119,6 +13366,15 @@
 
         if (mainPositionDropdown && settingsPositionDropdown) {
           settingsPositionDropdown.value = mainPositionDropdown.value;
+        }
+        const settingsRarePositionDropdown = document.getElementById(
+          "settings-rarePositionDropdown",
+        );
+        if (settingsRarePositionDropdown) {
+          settingsRarePositionDropdown.value =
+            prefs.rarePosition ||
+            settingsRarePositionDropdown.value ||
+            "center-bottom";
         }
         const settingsPlatinumPositionDropdown = document.getElementById(
           "settings-platinumPositionDropdown",
@@ -13341,6 +13597,9 @@
           disableProgress: checkbox("settings-disableProgressCheckbox"),
           disablePlaytime: checkbox("settings-disablePlaytimeCheckbox"),
           disablePlatinum: checkbox("settings-disablePlatinumCheckbox"),
+          showNotificationRarityPercentage: checkbox(
+            "settings-showNotificationRarityPercentageCheckbox",
+          ),
           lumaPlayWatcherEnabled: checkbox(
             "settings-enableLumaPlayWatcherCheckbox",
           ),
@@ -13388,6 +13647,21 @@
           language: pick(getVal("languageSelect"), base.language || undefined),
         };
 
+        snapshot.rarePreset = pick(
+          getVal("settings-rarePresetDropdown") ||
+            getVal("rarePresetValue"),
+          base.rarePreset || snapshot.preset,
+        );
+        snapshot.rarePosition = pick(
+          getVal("settings-rarePositionDropdown") ||
+            getVal("rarePositionValue"),
+          base.rarePosition || snapshot.position,
+        );
+        snapshot.rareSound = pick(
+          getVal("settings-rareSoundSelect") ||
+            getVal("rareSoundValue"),
+          base.rareSound || snapshot.sound,
+        );
         snapshot.platinumPreset = pick(
           getVal("settings-platinumPresetDropdown") ||
             getVal("platinumPresetValue"),
