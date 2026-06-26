@@ -10183,6 +10183,7 @@ function createNotificationWindow(message) {
       headerPath: message.headerPath || "",
       rarityPct: message.rarityPct,
       isRare: message.isRare === true,
+      isPlatinum: message.isPlatinum === true,
       showRarityPercentage: message.showRarityPercentage === true,
       preset: message.preset || preset,
       scale,
@@ -10441,8 +10442,100 @@ ipcMain.on("show-test-notification", (event, options) => {
   queueAchievementNotification(notificationData);
 });
 
+function getRandomTestRareRarity() {
+  const tiers = [
+    { name: "gold", min: 0.01, max: 1 },
+    { name: "silver", min: 1.01, max: 5 },
+    { name: "bronze", min: 5.01, max: 10 },
+  ];
+  const tier = tiers[crypto.randomInt(tiers.length)];
+  const percent =
+    Math.round((tier.min + Math.random() * (tier.max - tier.min)) * 100) / 100;
+  return { tier: tier.name, percent };
+}
+
+ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
+  const prefs = cachedPreferences || {};
+  const baseDir = app.isPackaged ? process.resourcesPath : __dirname;
+  const rarity = getRandomTestRareRarity();
+  const tierLabel =
+    rarity.tier.charAt(0).toUpperCase() + rarity.tier.slice(1);
+
+  queueAchievementNotification({
+    name: `TEST_RARE_NOTIFICATION_${rarity.tier.toUpperCase()}`,
+    displayName: `${tierLabel} Rare Test`,
+    description: `Random ${tierLabel.toLowerCase()} rarity test notification (${rarity.percent}%)`,
+    icon: ICON_PNG_PATH,
+    icon_gray: ICON_PNG_PATH,
+    config_path: baseDir,
+    rarityPct: rarity.percent,
+    raritySource: "test",
+    preset: options.preset || prefs.rarePreset || prefs.preset || "default",
+    position:
+      options.position ||
+      prefs.rarePosition ||
+      prefs.position ||
+      "center-bottom",
+    sound: options.sound || prefs.rareSound || prefs.sound || "mute",
+    scale: parseFloat(
+      options.scale != null
+        ? options.scale
+        : prefs.notificationScale != null
+          ? prefs.notificationScale
+          : 1,
+    ),
+    skipScreenshot: true,
+    isTest: true,
+    isTestRare: true,
+  });
+});
+
 // Add new IPC handler for Platinum Achievement
 const platinumDedup = new Set();
+
+ipcMain.on("show-test-platinum-notification", (_event, options = {}) => {
+  const prefs = cachedPreferences || {};
+  const baseDir = app.isPackaged ? process.resourcesPath : __dirname;
+
+  queueAchievementNotification({
+    name: "TEST_PLATINUM_NOTIFICATION",
+    displayName: tUi(
+      "main.notify.platinumCompleteTitle",
+      {},
+      "100% Completed",
+    ),
+    description: tUi(
+      "main.notify.platinumCompleteDescription",
+      {},
+      "You've unlocked all achievements!",
+    ),
+    icon: ICON_PNG_PATH,
+    icon_gray: ICON_PNG_PATH,
+    config_path: baseDir,
+    preset:
+      options.preset ||
+      prefs.platinumPreset ||
+      prefs.preset ||
+      "default",
+    position:
+      options.position ||
+      prefs.platinumPosition ||
+      prefs.position ||
+      "center-bottom",
+    sound: options.sound || prefs.platinumSound || prefs.sound || "mute",
+    scale: parseFloat(
+      options.scale != null
+        ? options.scale
+        : prefs.notificationScale != null
+          ? prefs.notificationScale
+          : 1,
+    ),
+    skipScreenshot: true,
+    isTest: true,
+    isPlatinum: true,
+    __isPlatinum: true,
+  });
+});
 
 function markConfigPlatinumFlag(configName) {
   const safe = configName ? sanitizeConfigName(configName) : "";
@@ -10811,9 +10904,11 @@ function resolveNotificationRarity(achievement = {}) {
 
 function queueAchievementNotification(achievement) {
   const prefs = cachedPreferences || {};
-  const isPlatinum = achievement.__isPlatinum === true;
+  const isPlatinum =
+    achievement.isPlatinum === true || achievement.__isPlatinum === true;
   const isTest = achievement.isTest === true;
-  const rarity = isPlatinum || isTest
+  const isTestRare = achievement.isTestRare === true;
+  const rarity = isPlatinum || (isTest && !isTestRare)
     ? { percent: null, source: null }
     : resolveNotificationRarity(achievement);
   const isRare =
@@ -10872,6 +10967,7 @@ function queueAchievementNotification(achievement) {
     sound: requestedSound,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: resolvedSkipScreenshot,
+    isPlatinum,
     isTest,
   };
 
@@ -10900,6 +10996,7 @@ function queueAchievementNotification(achievement) {
     name: notificationData.name || null,
     rarityPct: notificationData.rarityPct,
     rare: notificationData.isRare,
+    platinum: notificationData.isPlatinum === true,
     preset: notificationData.preset || "default",
     position: notificationData.position || "center-bottom",
     config: notificationData.config_path || null,
@@ -10941,6 +11038,21 @@ function resolveGameHeaderPathForNotification(achievement = {}) {
   }
 }
 
+function resolveGameCoverHeaderPathForNotification(
+  achievement = {},
+  { useRandomTestImage = false, useFallbackImage = true } = {},
+) {
+  if (useRandomTestImage) {
+    return getRandomLocalHeaderImagePath({
+      fallbackToDefault: useFallbackImage,
+    });
+  }
+
+  const headerPath = resolveGameHeaderPathForNotification(achievement);
+  if (headerPath) return headerPath;
+  return useFallbackImage ? getNotificationFallbackHeaderPath() : "";
+}
+
 function processNextNotification() {
   if (isNotificationShowing || earnedNotificationQueue.length === 0) return;
 
@@ -10969,8 +11081,14 @@ function processNextNotification() {
     sound: achievement.sound,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: !!achievement.skipScreenshot,
+    isPlatinum:
+      achievement.isPlatinum === true || achievement.__isPlatinum === true,
     isTest: !!achievement.isTest,
   };
+
+  const preset = achievement.preset || "default";
+  const { presetFolder } = resolveNotificationPresetFolder(preset);
+  const normalizedPreset = String(preset || "").trim().toLowerCase();
 
   const iconCandidate = notificationData.icon || notificationData.icon_gray;
   let iconPathFinal = resolveIconAbsolutePath(
@@ -10978,15 +11096,33 @@ function processNextNotification() {
     iconCandidate,
   );
 
+  if (
+    notificationData.isPlatinum &&
+    ["xbox series platinum - purple", "xbox series platinum"].includes(
+      normalizedPreset,
+    )
+  ) {
+    const diamondIconPath = path.join(presetFolder, "diamond.gif");
+    try {
+      if (fs.existsSync(diamondIconPath)) {
+        iconPathFinal = diamondIconPath;
+      }
+    } catch {}
+  }
+
   if (!iconPathFinal) {
     iconPathFinal = ICON_PATH;
   }
   notificationData.iconPath = iconPathFinal;
-  if (
-    ["game header", "game cover"].includes(
-      String(notificationData.preset || "").trim().toLowerCase(),
-    )
-  ) {
+  if (normalizedPreset === "game cover") {
+    const headerPath = resolveGameCoverHeaderPathForNotification(achievement, {
+      useRandomTestImage: notificationData.isTest === true,
+      useFallbackImage: true,
+    });
+    if (headerPath) {
+      notificationData.headerPath = headerPath;
+    }
+  } else if (normalizedPreset === "game header") {
     const headerPath = resolveGameHeaderPathForNotification(achievement);
     if (headerPath) {
       notificationData.headerPath = headerPath;
@@ -11000,9 +11136,6 @@ function processNextNotification() {
     config: notificationData.config_path || null,
     iconResolved: iconPathFinal,
   });
-
-  const preset = achievement.preset || "default";
-  const { presetFolder } = resolveNotificationPresetFolder(preset);
 
   const overrideDurationSec = Number(cachedPreferences?.notificationDuration);
   const overrideDurationMs =
@@ -11133,19 +11266,28 @@ function queuePlatinumAfterCurrent(notificationData) {
 }
 
 function queueProgressNotification(data) {
-  if (global.disableProgress) return;
-  if (isProgressMutedByPrefs(cachedPreferences, data)) {
+  const isTestProgress = data?.isTestProgress === true;
+  if (!isTestProgress && global.disableProgress) return;
+  if (!isTestProgress && isProgressMutedByPrefs(cachedPreferences, data)) {
     notificationLogger.info("queue-progress:muted", {
       displayName: data?.displayName || "",
       config: data?.config_path || null,
     });
     return;
   }
+  const scale =
+    data?.scale != null
+      ? normalizeNotificationScale(data.scale).scale
+      : normalizeNotificationScale(
+          cachedPreferences?.notificationScale ?? 1,
+        ).scale;
+  data = { ...(data || {}), scale };
   notificationLogger.info("queue-progress", {
     displayName: data?.displayName || "",
     progress: data?.progress ?? null,
     max: data?.max_progress ?? null,
     config: data?.config_path || null,
+    scale,
   });
   progressNotificationQueue.push(data);
   processNextProgressNotification();
@@ -16962,9 +17104,13 @@ app.on("will-quit", () => {
 });
 
 function showProgressNotification(data) {
+  const scale = normalizeNotificationScale(
+    data?.scale ?? cachedPreferences?.notificationScale ?? 1,
+  ).scale;
   windowLogger.info("create-progress-window:start", {
     displayName: data?.displayName || "",
     config: data?.config_path || null,
+    scale,
   });
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const progressHtmlPath = resolveProgressTemplatePath();
@@ -17002,6 +17148,15 @@ function showProgressNotification(data) {
     width: aw,
     height: ah,
   } = screen.getPrimaryDisplay().workArea;
+  const scaledProgressWidth = Math.ceil(
+    progressWidth * (scale > 1 ? scale : 1),
+  );
+  const scaledProgressContentHeight = Math.ceil(
+    progressHeight * (scale > 1 ? scale : 1),
+  );
+  const progressAnimationPaddingY = Math.ceil(36 * (scale > 1 ? scale : 1));
+  const scaledProgressHeight =
+    scaledProgressContentHeight + progressAnimationPaddingY;
   const position =
     String(
       data?.position ||
@@ -17011,46 +17166,63 @@ function showProgressNotification(data) {
     ).trim() || "bottom-left";
   const gapX = 20;
   const gapY = 10;
+  const centeredPaddingOffsetY = Math.floor(progressAnimationPaddingY / 2);
   let x = ax + gapX;
-  let y = Math.max(0, ay + ah - progressHeight + gapY);
+  let y =
+    ay + ah - scaledProgressContentHeight - gapY - centeredPaddingOffsetY;
   switch (position) {
     case "center-top":
-      x = ax + Math.floor((aw - progressWidth) / 2);
-      y = ay + gapY;
+      x = ax + Math.floor((aw - scaledProgressWidth) / 2);
+      y = ay + gapY - centeredPaddingOffsetY;
       break;
     case "top-right":
-      x = ax + aw - progressWidth - gapX;
-      y = ay + gapY;
+      x = ax + aw - scaledProgressWidth - gapX;
+      y = ay + gapY - centeredPaddingOffsetY;
       break;
     case "bottom-right":
-      x = ax + aw - progressWidth - gapX;
-      y = ay + ah - progressHeight - gapY;
+      x = ax + aw - scaledProgressWidth - gapX;
+      y =
+        ay +
+        ah -
+        scaledProgressContentHeight -
+        gapY -
+        centeredPaddingOffsetY;
       break;
     case "middle-right":
-      x = ax + aw - progressWidth - gapX;
-      y = ay + Math.floor((ah - progressHeight) / 2);
+      x = ax + aw - scaledProgressWidth - gapX;
+      y = ay + Math.floor((ah - scaledProgressHeight) / 2);
       break;
     case "top-left":
       x = ax + gapX;
-      y = ay + gapY;
+      y = ay + gapY - centeredPaddingOffsetY;
       break;
     case "bottom-left":
       x = ax + gapX;
-      y = ay + ah - progressHeight - gapY;
+      y =
+        ay +
+        ah -
+        scaledProgressContentHeight -
+        gapY -
+        centeredPaddingOffsetY;
       break;
     case "middle-left":
       x = ax + gapX;
-      y = ay + Math.floor((ah - progressHeight) / 2);
+      y = ay + Math.floor((ah - scaledProgressHeight) / 2);
       break;
     case "center-bottom":
     default:
-      x = ax + Math.floor((aw - progressWidth) / 2);
-      y = ay + ah - progressHeight - gapY;
+      x = ax + Math.floor((aw - scaledProgressWidth) / 2);
+      y =
+        ay +
+        ah -
+        scaledProgressContentHeight -
+        gapY -
+        centeredPaddingOffsetY;
       break;
   }
   const progressWindow = new BrowserWindow({
-    width: progressWidth,
-    height: progressHeight,
+    width: scaledProgressWidth,
+    height: scaledProgressHeight,
     x,
     y,
     transparent: true,
@@ -17076,10 +17248,17 @@ function showProgressNotification(data) {
   progressWindow.setFocusable(false);
   progressWindow.loadFile(progressHtmlPath);
   windowLogger.info("create-progress-window:browserwindow-created", {
-    size: { width: progressWidth, height: progressHeight },
+    size: { width: scaledProgressWidth, height: scaledProgressHeight },
+    baseSize: { width: progressWidth, height: progressHeight },
+    contentSize: {
+      width: scaledProgressWidth,
+      height: scaledProgressContentHeight,
+    },
+    animationPaddingY: progressAnimationPaddingY,
     position: { x, y },
     durationMs: progressDurationMs,
     progressHtmlPath,
+    scale,
   });
 
   progressWindow.once("ready-to-show", () => {
@@ -17091,7 +17270,7 @@ function showProgressNotification(data) {
     });
     windowLogger.info("create-progress-window:ready-to-show");
     progressWindow.show();
-    progressWindow.webContents.send("show-progress", data);
+    progressWindow.webContents.send("show-progress", { ...data, scale });
   });
 
   setTimeout(() => {
@@ -17128,9 +17307,22 @@ ipcMain.on("set-disable-playtime", (_event, value) => {
 let playtimeWindow = null;
 let playtimeAlreadyClosing = false;
 let pendingPlayData = null;
-let lastTestPlaytimeHeaderPath = "";
+let lastRandomNotificationHeaderPath = "";
 
-function getRandomTestPlaytimeHeaderUrl() {
+function getNotificationFallbackHeaderPath() {
+  const candidates = [
+    path.join(app.getAppPath(), "assets", "achievements-wallpaper.png"),
+    path.join(app.getAppPath(), "assets", "achievements-logo.png"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {}
+  }
+  return candidates[0];
+}
+
+function getRandomLocalHeaderImagePath({ fallbackToDefault = true } = {}) {
   const imagesRoot = path.join(app.getPath("userData"), "images");
   const headers = [];
   const pendingDirs = [imagesRoot];
@@ -17162,18 +17354,24 @@ function getRandomTestPlaytimeHeaderUrl() {
   if (headers.length) {
     const candidates =
       headers.length > 1
-        ? headers.filter((item) => item !== lastTestPlaytimeHeaderPath)
+        ? headers.filter((item) => item !== lastRandomNotificationHeaderPath)
         : headers;
     selectedPath = candidates[crypto.randomInt(candidates.length)];
-    lastTestPlaytimeHeaderPath = selectedPath;
-  } else {
-    selectedPath = path.join(
-      app.getAppPath(),
-      "assets",
-      "achievements-logo.png",
-    );
+    lastRandomNotificationHeaderPath = selectedPath;
+  } else if (fallbackToDefault) {
+    selectedPath = getNotificationFallbackHeaderPath();
   }
-  return require("url").pathToFileURL(selectedPath).toString();
+
+  return selectedPath;
+}
+
+function getRandomTestPlaytimeHeaderUrl() {
+  const selectedPath = getRandomLocalHeaderImagePath({
+    fallbackToDefault: true,
+  });
+  return selectedPath
+    ? require("url").pathToFileURL(selectedPath).toString()
+    : "";
 }
 
 let __lastPlaySig = null,
@@ -17233,6 +17431,33 @@ ipcMain.on("show-playtime", (_event, playData) => {
   });
   if (isDuplicatePlay(normalized)) return;
   createPlaytimeWindow(normalized);
+});
+
+ipcMain.on("show-test-progress-notification", (_event, options = {}) => {
+  const maxProgress = 50;
+  const progress = crypto.randomInt(1, maxProgress + 1);
+  const position =
+    String(
+      options?.position ||
+        cachedPreferences?.progressPosition ||
+        DEFAULT_PREFERENCES.progressPosition ||
+        "bottom-left",
+    ).trim() || "bottom-left";
+
+  queueProgressNotification({
+    name: "TEST_PROGRESS_NOTIFICATION",
+    displayName: tUi(
+      "progress.testAchievementName",
+      {},
+      "Test Progress",
+    ),
+    progress,
+    max_progress: maxProgress,
+    position,
+    icon: "",
+    config_path: "",
+    isTestProgress: true,
+  });
 });
 
 ipcMain.on("show-test-playtime-notification", () => {

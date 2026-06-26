@@ -11,14 +11,27 @@
         --transition-in: 280ms;
         --transition-out: 240ms;
         --displaytime: 5000ms;
-        --scale: 0.95;
+        --user-scale: 1;
+        --profile-scale: 0.95;
+        --effective-scale: 0.95;
+        --exit-scale: 0.855;
         --roundness: 8px;
         --slide-in: 30px;
         --slide-out: -26px;
         --progress-max-width: 350px;
         --progress-bar-color: lime;
+        --progress-gap: 15px;
+        --progress-padding-y: 10px;
+        --progress-padding-x: 20px;
+        --progress-icon-size: 64px;
+        --progress-title-size: 16px;
+        --progress-text-gap: 6px;
+        --progress-bar-height: 8px;
+        --progress-bar-radius: 4px;
+        --progress-bar-margin-top: 5px;
       }
 
+      html,
       body {
         margin: 0;
         padding: 0;
@@ -26,24 +39,28 @@
         height: 100%;
         overflow: hidden;
         background: transparent;
+      }
+
+      body {
         font-family: Arial, sans-serif;
         display: flex;
-        align-items: flex-start;
-        justify-content: flex-start;
+        align-items: center;
+        justify-content: center;
       }
 
       .progress-notification {
         display: inline-flex;
         align-items: center;
-        gap: 15px;
+        gap: var(--progress-gap);
         width: fit-content;
         max-width: min(var(--progress-max-width), calc(100vw - 8px));
         box-sizing: border-box;
         background: rgba(0, 0, 0, 0.75);
         border-radius: var(--roundness);
-        padding: 10px 20px;
+        padding: var(--progress-padding-y) var(--progress-padding-x);
         color: white;
         transform: scale(0) translateY(var(--slide-in));
+        transform-origin: center center;
         opacity: 0;
       }
 
@@ -60,7 +77,7 @@
       .progress-notification.is-short {
         --transition-in: 220ms;
         --transition-out: 200ms;
-        --scale: 0.97;
+        --profile-scale: 0.97;
         --slide-in: 20px;
         --slide-out: -16px;
       }
@@ -68,7 +85,7 @@
       .progress-notification.is-medium {
         --transition-in: 280ms;
         --transition-out: 240ms;
-        --scale: 0.95;
+        --profile-scale: 0.95;
         --slide-in: 28px;
         --slide-out: -24px;
       }
@@ -76,7 +93,7 @@
       .progress-notification.is-long {
         --transition-in: 340ms;
         --transition-out: 280ms;
-        --scale: 0.93;
+        --profile-scale: 0.93;
         --slide-in: 36px;
         --slide-out: -30px;
       }
@@ -88,7 +105,7 @@
 
       @keyframes ach-in {
         to {
-          transform: scale(var(--scale)) translateY(0);
+          transform: scale(var(--effective-scale)) translateY(0);
           opacity: 1;
         }
       }
@@ -96,13 +113,13 @@
       @keyframes ach-hold {
         to {
           opacity: 1;
-          transform: scale(var(--scale)) translateY(0);
+          transform: scale(var(--effective-scale)) translateY(0);
         }
       }
 
       @keyframes ach-out {
         to {
-          transform: scale(calc(var(--scale) * 0.9)) translateY(var(--slide-out));
+          transform: scale(var(--exit-scale)) translateY(var(--slide-out));
           opacity: 0;
         }
       }
@@ -112,20 +129,20 @@
       }
 
       .progress-icon img {
-        width: 64px;
-        height: 64px;
+        width: var(--progress-icon-size);
+        height: var(--progress-icon-size);
       }
 
       .progress-text {
         min-width: 0;
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: var(--progress-text-gap);
       }
 
       .title {
         margin: 0;
-        font-size: 16px;
+        font-size: var(--progress-title-size);
         line-height: 1.25;
         white-space: normal;
         overflow-wrap: anywhere;
@@ -143,11 +160,11 @@
 
       .progress-bar {
         width: 100%;
-        height: 8px;
-        border-radius: 4px;
+        height: var(--progress-bar-height);
+        border-radius: var(--progress-bar-radius);
         background: #444;
         overflow: hidden;
-        margin-top: 5px;
+        margin-top: var(--progress-bar-margin-top);
       }
 
       .progress-fill {
@@ -186,10 +203,27 @@
             ? parsedMaxWidth
             : 350;
         docEl.style.setProperty("--displaytime", `${totalDurationMs}ms`);
-        docEl.style.setProperty("--progress-max-width", `${maxWidth}px`);
 
         const PROFILE_CLASSES = ["is-short", "is-medium", "is-long", "is-complete"];
         let closeTimer = null;
+
+        const applyUserScaleLayout = (scale) => {
+          const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+          docEl.style.setProperty("--user-scale", String(safeScale));
+          docEl.style.setProperty("--progress-max-width", `${maxWidth * safeScale}px`);
+          docEl.style.setProperty("--progress-gap", `${15 * safeScale}px`);
+          docEl.style.setProperty("--progress-padding-y", `${10 * safeScale}px`);
+          docEl.style.setProperty("--progress-padding-x", `${20 * safeScale}px`);
+          docEl.style.setProperty("--progress-icon-size", `${64 * safeScale}px`);
+          docEl.style.setProperty("--progress-title-size", `${16 * safeScale}px`);
+          docEl.style.setProperty("--progress-text-gap", `${6 * safeScale}px`);
+          docEl.style.setProperty("--progress-bar-height", `${8 * safeScale}px`);
+          docEl.style.setProperty("--progress-bar-radius", `${4 * safeScale}px`);
+          docEl.style.setProperty(
+            "--progress-bar-margin-top",
+            `${5 * safeScale}px`,
+          );
+        };
 
         const scheduleClose = (delayMs) => {
           if (closeTimer) clearTimeout(closeTimer);
@@ -199,10 +233,26 @@
           }, delayMs);
         };
 
-        const applyProgressProfile = (text, pct) => {
+        const getProgressProfileScale = (toneClass) => {
+          switch (toneClass) {
+            case "is-short":
+              return 0.97;
+            case "is-long":
+              return 0.93;
+            case "is-medium":
+            default:
+              return 0.95;
+          }
+        };
+
+        const applyProgressProfile = (text, pct, userScale) => {
           if (!container) return;
           const len = String(text || "").trim().length;
           const toneClass = len > 74 ? "is-long" : len > 40 ? "is-medium" : "is-short";
+          const profileScale = getProgressProfileScale(toneClass);
+          applyUserScaleLayout(userScale);
+          docEl.style.setProperty("--effective-scale", String(profileScale));
+          docEl.style.setProperty("--exit-scale", String(profileScale * 0.9));
           container.classList.remove(...PROFILE_CLASSES, "is-active");
           container.classList.add(toneClass);
           if (pct >= 100) container.classList.add("is-complete");
@@ -240,12 +290,15 @@
 
             const cur = Number(data.progress ?? 0);
             const max = Number(data.max_progress ?? 0);
+            const rawScale = Number(data.scale ?? 1);
+            const scale =
+              Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
             const pct =
               max > 0 ? Math.min(100, Math.round((cur / max) * 100)) : 0;
 
             const title = `${name}: ${cur}/${max}`;
             titleEl.textContent = title;
-            applyProgressProfile(title, pct);
+            applyProgressProfile(title, pct, scale);
             await resolveAchievementIcon(imgEl, data.config_path, data.icon);
             fill.style.width = `${pct}%`;
             scheduleClose(totalDurationMs);

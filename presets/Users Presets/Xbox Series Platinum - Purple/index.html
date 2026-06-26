@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="style.css" />
+    <title>Popup Animation</title>
+    <meta name="duration" content="11500" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      body {
+        transform-origin: center center;
+      }
+    </style>
+  </head>
+  <body>
+    <meta width="750" height="200" />
+    <div class="ach">
+      <div class="achievement-banner animated">
+        <div class="achievement-loader"></div>
+        <div class="achievement-loader"></div>
+        <div class="achievement-loader"></div>
+        <div class="achievement-loader"></div>
+        <div class="achievement-loader"></div>
+        <div class="achievement-trophy xbox-icon xbox-logo"></div>
+        <div class="gif-icon">
+          <img src="" data-base-src="./giphy.gif" alt="Animated Icon" />
+        </div>
+        <div class="achievement-content">
+          <img src="image.png" class="laurel-wreath" alt="Laurel Wreath" />
+          <div class="icon">
+            <img src="" alt="Icon" />
+          </div>
+          <div class="text_wrap">
+            <p class="title"></p>
+            <span class="detail"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.addEventListener("DOMContentLoaded", () => {
+        const container = document.querySelector(".ach");
+        const titleEl = document.querySelector(".title");
+        const detailEl = document.querySelector(".detail");
+        const iconEl = document.querySelector(".icon img");
+        const gifEl = document.querySelector(".gif-icon img");
+        const durationMeta = document.querySelector('meta[name="duration"]');
+        const frameMeta = document.querySelector("meta[width][height]");
+        const baseTotal = Math.max(1, Number(durationMeta?.content || 10000));
+        const GIF_PLAYBACK_MS = 2010;
+        const GIF_REVEAL_DELAY_BASE_MS = 2900;
+        const GIF_HIDE_DURATION_MS = 260;
+        const TIMELINE_ANIMATION_BASE_MS = 10000;
+        const TIMELINE_ANIMATION_DELAY_MS = 500;
+        const BANNER_RETRACT_START_RATIO = 0.8;
+        const GIF_FADEOUT_LEAD_MS = 180;
+        const baseFrameWidth = Math.max(
+          0,
+          Number(frameMeta?.getAttribute("width")) || 0,
+        );
+        const SCALE_WIDTH_CLAMP_THRESHOLD = 1.26;
+        const HORIZONTAL_SAFE_MARGIN_PX = 24;
+        const getCloseDelay = () =>
+          Math.max(0, Number(durationMeta?.content || 10000));
+        let closeDelay = getCloseDelay();
+
+        if (!container || !titleEl || !detailEl || !iconEl || !gifEl) {
+          return;
+        }
+
+        let closeTimer = null;
+        let gifStartTimer = null;
+        let gifHideTimer = null;
+        const MARGIN_X = 0;
+        const MARGIN_BOTTOM = 10;
+        const MARGIN_TOP = 0;
+        const TOP_TRANSLATE_ADJUST_PX = -50;
+        function notifyScreenshotReady(delayMs = 0) {
+          const safeDelay = Math.max(0, Number(delayMs) || 0);
+          setTimeout(() => {
+            requestAnimationFrame(() => {
+              requestAnimationFrame(() => {
+                window.api?.notificationRenderReady?.();
+              });
+            });
+          }, safeDelay);
+        }
+        const rootFontSize =
+          parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+
+        const toPx = (value, contextFontSize = rootFontSize) => {
+          if (!value) return 0;
+          const trimmed = String(value).trim();
+          if (!trimmed) return 0;
+          if (trimmed.endsWith("px")) return parseFloat(trimmed);
+          if (trimmed.endsWith("em")) {
+            return parseFloat(trimmed) * contextFontSize;
+          }
+          if (trimmed.endsWith("rem")) {
+            return parseFloat(trimmed) * rootFontSize;
+          }
+          return parseFloat(trimmed) || 0;
+        };
+
+        const closeWindow = () => {
+          window.api?.closeNotificationWindow?.();
+          window.electronAPI?.closeNotificationWindow?.();
+        };
+
+        const scheduleClose = () => {
+          if (closeTimer) {
+            clearTimeout(closeTimer);
+          }
+          closeTimer = setTimeout(() => {
+            closeWindow();
+            closeTimer = null;
+          }, closeDelay);
+        };
+
+        const clearGifTimers = () => {
+          if (gifStartTimer) {
+            clearTimeout(gifStartTimer);
+            gifStartTimer = null;
+          }
+          if (gifHideTimer) {
+            clearTimeout(gifHideTimer);
+            gifHideTimer = null;
+          }
+        };
+
+        const resetGifState = () => {
+          clearGifTimers();
+          try {
+            gifEl.getAnimations().forEach((a) => a.cancel());
+          } catch {}
+          gifEl.style.opacity = "0";
+          gifEl.style.transform = "scale(0)";
+        };
+
+        const restartGifPlayback = () => {
+          const baseSrc = String(gifEl.dataset.baseSrc || "./giphy.gif");
+          const normalized = baseSrc.startsWith("file://")
+            ? baseSrc
+            : new URL(baseSrc, window.location.href).toString();
+          gifEl.removeAttribute("src");
+          requestAnimationFrame(() => {
+            gifEl.src = `${normalized}${normalized.includes("?") ? "&" : "?"}t=${Date.now()}`;
+          });
+        };
+
+        const scheduleGifPlayback = (scale) => {
+          resetGifState();
+          const safeScale = Math.max(0.1, Number(scale) || 1);
+          const revealDelay = Math.max(
+            0,
+            Math.round(GIF_REVEAL_DELAY_BASE_MS * safeScale),
+          );
+          const playbackMs = Math.max(
+            0,
+            Math.round(GIF_PLAYBACK_MS * safeScale),
+          );
+          const hideDuration = Math.max(
+            120,
+            Math.round(GIF_HIDE_DURATION_MS * safeScale),
+          );
+          const retractStartDelay = Math.max(
+            revealDelay + playbackMs,
+            Math.round(
+              (TIMELINE_ANIMATION_DELAY_MS +
+                TIMELINE_ANIMATION_BASE_MS * BANNER_RETRACT_START_RATIO) *
+                safeScale,
+            ) -
+              hideDuration -
+              Math.round(GIF_FADEOUT_LEAD_MS * safeScale),
+          );
+
+          gifStartTimer = setTimeout(() => {
+            restartGifPlayback();
+            gifEl.animate(
+              [
+                { transform: "scale(0)", opacity: 0 },
+                { transform: "scale(1)", opacity: 1 },
+              ],
+              {
+                duration: hideDuration,
+                easing: "ease-out",
+                fill: "forwards",
+              },
+            );
+            gifStartTimer = null;
+          }, revealDelay);
+
+          gifHideTimer = setTimeout(() => {
+            gifEl.animate(
+              [
+                { transform: "scale(1)", opacity: 1 },
+                { transform: "scale(0)", opacity: 0 },
+              ],
+              {
+                duration: hideDuration,
+                easing: "ease-in",
+                fill: "forwards",
+              },
+            );
+            gifHideTimer = null;
+          }, retractStartDelay);
+        };
+
+        const applyScale = (value) => {
+          const numeric = parseFloat(value);
+          const safeScale =
+            Number.isFinite(numeric) && numeric > 0 ? numeric : 1;
+          container.style.setProperty("--scale", String(safeScale));
+        };
+
+        const toLocalAssetSrc = (relativePath, { bustCache = false } = {}) => {
+          const normalized = String(relativePath || "").trim();
+          if (!normalized) return "";
+          const suffix = bustCache
+            ? `${normalized.includes("?") ? "&" : "?"}t=${Date.now()}`
+            : "";
+          return `${normalized}${suffix}`;
+        };
+
+        const resetAnimations = (elements) => {
+          elements.forEach((el) => {
+            if (!el) return;
+            el.style.animation = "none";
+            el.style.webkitAnimation = "none";
+            el.style.mozAnimation = "none";
+            void el.offsetWidth;
+            el.style.animation = "";
+            el.style.webkitAnimation = "";
+            el.style.mozAnimation = "";
+          });
+        };
+
+        const restartAnimation = () => {
+          const animatedNodes = container.querySelectorAll(
+            ".achievement-banner, .achievement-loader, .achievement-trophy, .icon img, .gif-icon img, .laurel-wreath, .achievement-banner .title, .achievement-banner .detail",
+          );
+          resetAnimations(Array.from(animatedNodes));
+        };
+
+        const restoreMarqueeSource = (element, innerClass) => {
+          if (!element) return;
+          try {
+            element.getAnimations().forEach((a) => a.cancel());
+          } catch {}
+          const existing = element.querySelector(`.${innerClass}`);
+          if (existing) {
+            try {
+              existing.getAnimations().forEach((a) => a.cancel());
+            } catch {}
+            const text = existing.textContent || "";
+            existing.remove();
+            element.textContent = text;
+          }
+          element.classList.remove("marquee");
+        };
+
+        const applyMarqueeIfOverflow = (
+          element,
+          {
+            innerClass,
+            overflowXThreshold = 0,
+            overflowYThreshold = 0,
+            minDuration = 3000,
+            speedDivisor = 50,
+            delay = 1200,
+            extraPadding = 24,
+          },
+        ) => {
+          if (!element) return false;
+          try {
+            element.getAnimations().forEach((a) => a.cancel());
+          } catch {}
+          element.classList.remove("marquee");
+          void element.offsetWidth;
+          const overflowX =
+            (element.scrollWidth || 0) - (element.clientWidth || 0);
+          const overflowY =
+            (element.scrollHeight || 0) - (element.clientHeight || 0);
+          if (
+            overflowX > overflowXThreshold ||
+            overflowY > overflowYThreshold
+          ) {
+            const text = element.textContent || "";
+            const innerSpan = document.createElement("span");
+            innerSpan.className = innerClass;
+            innerSpan.textContent = text;
+            element.textContent = "";
+            element.appendChild(innerSpan);
+            element.classList.add("marquee");
+            void element.offsetWidth;
+            const distance = Math.ceil(
+              Math.max(
+                0,
+                (innerSpan.scrollWidth || 0) - (element.clientWidth || 0),
+              ) + extraPadding,
+            );
+            innerSpan.animate(
+              [
+                { transform: "translateX(0)" },
+                { transform: `translateX(-${distance}px)` },
+              ],
+              {
+                duration: Math.max(
+                  minDuration,
+                  Math.round(distance / speedDivisor) * 1000,
+                ),
+                delay,
+                easing: "linear",
+                fill: "both",
+              },
+            );
+            return true;
+          }
+          return false;
+        };
+
+        const computeFromTopFallback = () => {
+          try {
+            const y = (window.screenY ?? window.screenTop ?? 0) | 0;
+            const sh = (screen.availHeight || screen.height || 1080) | 0;
+            const wh = (window.outerHeight || window.innerHeight || 0) | 0;
+            const centerY = y + wh / 2;
+            return centerY < sh / 2;
+          } catch {
+            return false;
+          }
+        };
+
+        const applyAnchoringFromPosition = (posRaw) => {
+          const raw = String(posRaw || "").toLowerCase();
+          const tokens = raw
+            .replace(/[^a-z]+/g, " ")
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean);
+
+          let fromTop = tokens.includes("top") || tokens.includes("t");
+          let fromBottom = tokens.includes("bottom") || tokens.includes("b");
+          if (!fromTop && !fromBottom) {
+            fromTop = computeFromTopFallback();
+            fromBottom = !fromTop;
+          }
+
+          const atLeft = tokens.includes("left") || tokens.includes("l");
+          const atRight = tokens.includes("right") || tokens.includes("r");
+          const atCenter = !atLeft && !atRight;
+
+          container.style.top = fromTop ? `${MARGIN_TOP}px` : "auto";
+          container.style.bottom = fromTop ? "auto" : `${MARGIN_BOTTOM}px`;
+          container.style.setProperty("--origin-y", fromTop ? "top" : "bottom");
+          container.style.setProperty(
+            "--translate-y",
+            fromTop ? `${TOP_TRANSLATE_ADJUST_PX}px` : "0px",
+          );
+
+          if (atLeft) {
+            container.style.left = `${MARGIN_X}px`;
+            container.style.right = "auto";
+            container.style.setProperty("--translate-x", "0%");
+            container.style.setProperty("--origin-x", "left");
+          } else if (atRight) {
+            container.style.right = `${MARGIN_X}px`;
+            container.style.left = "auto";
+            container.style.setProperty("--translate-x", "0%");
+            container.style.setProperty("--origin-x", "right");
+          } else {
+            container.style.left = "50%";
+            container.style.right = "auto";
+            container.style.setProperty("--translate-x", "-50%");
+            container.style.setProperty("--origin-x", "center");
+          }
+        };
+
+        const updateContainerWidth = () => {
+          const previousInlineWidth = container.style.width;
+          container.style.width = "auto";
+          const autoWidth = Math.ceil(container.getBoundingClientRect().width);
+          container.style.width = previousInlineWidth;
+
+          const styles = getComputedStyle(container);
+          const fontSize = parseFloat(styles.fontSize) || 16;
+          const collapsedRaw = (
+            styles.getPropertyValue("--ach-collapsed-width") || ""
+          ).trim();
+          const collapsedPx = Math.max(0, toPx(collapsedRaw, fontSize));
+
+          const textWrap = container.querySelector(".text_wrap");
+          const gifIcon = container.querySelector(".gif-icon");
+          let textWidth = 0;
+          let offsetLeft = 0;
+          let trailingVisualWidth = 0;
+          if (textWrap) {
+            const twStyles = getComputedStyle(textWrap);
+            const originalPosition = textWrap.style.position;
+            const originalWidth = textWrap.style.width;
+            const originalLeft = textWrap.style.left;
+            const originalRight = textWrap.style.right;
+            const originalTop = textWrap.style.top;
+
+            textWrap.style.position = "static";
+            textWrap.style.width = "auto";
+            textWrap.style.left = "auto";
+            textWrap.style.right = "auto";
+            textWrap.style.top = "auto";
+
+            textWidth = Math.ceil(textWrap.getBoundingClientRect().width);
+
+            textWrap.style.position = originalPosition;
+            textWrap.style.width = originalWidth;
+            textWrap.style.left = originalLeft;
+            textWrap.style.right = originalRight;
+            textWrap.style.top = originalTop;
+
+            offsetLeft = toPx(twStyles.left, fontSize);
+          }
+          if (gifIcon) {
+            const gifRect = gifIcon.getBoundingClientRect();
+            const gifStyles = getComputedStyle(gifIcon);
+            const gifWidth = Math.ceil(gifRect.width || toPx(gifStyles.width, fontSize));
+            const rightOffset = Math.max(0, toPx(gifStyles.right, fontSize));
+            trailingVisualWidth = gifWidth + rightOffset;
+          }
+
+          const padding =
+            (parseFloat(styles.paddingLeft) || 0) +
+            (parseFloat(styles.paddingRight) || 0);
+          const constructedWidth = Math.ceil(
+            offsetLeft + textWidth + trailingVisualWidth + padding,
+          );
+
+          const baseWidth = Math.max(autoWidth, constructedWidth, collapsedPx);
+          const requestedWidth = Math.max(baseWidth + 4, collapsedPx);
+          const currentScale = Math.max(
+            0.1,
+            parseFloat(styles.getPropertyValue("--scale")) || 1,
+          );
+          const viewportWidth =
+            window.innerWidth || document.documentElement.clientWidth || 0;
+          const scaledWindowLimit =
+            viewportWidth > 0
+              ? Math.max(
+                  collapsedPx,
+                  Math.floor(viewportWidth / currentScale) -
+                    HORIZONTAL_SAFE_MARGIN_PX * 2,
+                )
+              : baseFrameWidth;
+          const maxExpandedWidth =
+            currentScale > SCALE_WIDTH_CLAMP_THRESHOLD
+              ? Math.max(
+                  collapsedPx,
+                  Math.min(
+                    baseFrameWidth || requestedWidth,
+                    scaledWindowLimit || requestedWidth,
+                  ),
+                )
+              : Infinity;
+          const finalWidth = Math.max(
+            Math.min(requestedWidth, maxExpandedWidth),
+            collapsedPx,
+          );
+          container.style.setProperty("--ach-width", `${finalWidth}px`);
+        };
+
+        const subscribe = (handler) => {
+          if (window.api && typeof window.api.onNotification === "function") {
+            window.api.onNotification(handler);
+            return true;
+          }
+          if (
+            window.electronAPI &&
+            typeof window.electronAPI.onNotification === "function"
+          ) {
+            window.electronAPI.onNotification(handler);
+            return true;
+          }
+          return false;
+        };
+
+        const onNotification = (notificationData = {}) => {
+          restoreMarqueeSource(titleEl, "title-inner");
+          restoreMarqueeSource(detailEl, "detail-inner");
+
+          titleEl.textContent =
+            notificationData.displayName != null
+              ? String(notificationData.displayName)
+              : "";
+          detailEl.textContent =
+            notificationData.description != null
+              ? String(notificationData.description)
+              : "";
+
+          const rawIcon = notificationData.iconPath || notificationData.icon;
+          const resolvedNotificationIcon = rawIcon
+            ? (() => {
+                const normalized = String(rawIcon).replace(/\\/g, "/");
+                return normalized.startsWith("file://")
+                  ? normalized
+                  : `file:///${normalized}`;
+              })()
+            : "";
+          const platinumDiamondIcon = toLocalAssetSrc("./diamond.gif", {
+            bustCache: true,
+          });
+
+          iconEl.onerror = () => {
+            iconEl.onerror = null;
+            if (
+              notificationData.isPlatinum === true &&
+              resolvedNotificationIcon &&
+              iconEl.src !== resolvedNotificationIcon
+            ) {
+              iconEl.src = resolvedNotificationIcon;
+            }
+          };
+
+          if (notificationData.isPlatinum === true) {
+            iconEl.removeAttribute("src");
+            iconEl.src = platinumDiamondIcon;
+          } else if (resolvedNotificationIcon) {
+            iconEl.src = resolvedNotificationIcon;
+          }
+
+          const total = getCloseDelay();
+          const scale = Math.max(0.1, total / baseTotal);
+          document.documentElement.style.setProperty(
+            "--timeline-scale",
+            scale.toFixed(4),
+          );
+          applyScale(notificationData.scale);
+          applyAnchoringFromPosition(
+            notificationData.position ??
+              notificationData.presetPosition ??
+              notificationData.pos ??
+              notificationData.corner ??
+              "",
+          );
+
+          requestAnimationFrame(() => {
+            closeDelay = total;
+            applyMarqueeIfOverflow(titleEl, {
+              innerClass: "title-inner",
+              overflowXThreshold: 2,
+              overflowYThreshold: 1,
+              minDuration: 3000,
+              speedDivisor: 50,
+              delay: 1200,
+              extraPadding: 24,
+            });
+            applyMarqueeIfOverflow(detailEl, {
+              innerClass: "detail-inner",
+              overflowXThreshold: 2,
+              overflowYThreshold: 1,
+              minDuration: 4000,
+              speedDivisor: 40,
+              delay: 1400,
+              extraPadding: 24,
+            });
+            updateContainerWidth();
+            restartAnimation();
+            scheduleGifPlayback(scale);
+            notifyScreenshotReady(
+              Math.max(
+                700,
+                Math.round(2600 * scale),
+                Math.round((GIF_REVEAL_DELAY_BASE_MS + GIF_PLAYBACK_MS) * scale),
+              ),
+            );
+            scheduleClose();
+          });
+        };
+
+        applyScale(1);
+        applyAnchoringFromPosition("");
+
+        if (!subscribe(onNotification)) {
+          applyScale(1);
+        }
+      });
+    </script>
+  </body>
+</html>

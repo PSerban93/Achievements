@@ -496,6 +496,12 @@ contextBridge.exposeInMainWorld("api", {
   showNotification: (data) => ipcRenderer.send("show-notification", data),
   showTestNotification: (options) =>
     ipcRenderer.send("show-test-notification", options),
+  showTestRareNotification: (options) =>
+    ipcRenderer.send("show-test-rare-notification", options),
+  showTestPlatinumNotification: (options) =>
+    ipcRenderer.send("show-test-platinum-notification", options),
+  showTestProgressNotification: (options) =>
+    ipcRenderer.send("show-test-progress-notification", options),
   showTestPlaytimeNotification: () =>
     ipcRenderer.send("show-test-playtime-notification"),
   queueAchievementNotification: (data) =>

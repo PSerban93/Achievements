@@ -838,16 +838,6 @@
           >
             <div style="padding: 0 60px">
               <div class="settings-section">
-                <h4 id="settings-testingTitle">Achievement Testing</h4>
-                <button
-                  id="settings-testAchievementBtn"
-                  class="settings-test-button"
-                  style="width: 100%; margin: 10px 0; padding: 10px"
-                >
-                  Test Achievement
-                </button>
-
-                <hr style="margin: 18px 0 14px" />
                 <h4 id="settings-notificationTogglesTitle">
                   Notification Toggles
                 </h4>
@@ -896,8 +886,11 @@
                 </div>
 
                 <hr style="margin: 18px 0 14px" />
-                <h4 id="settings-achievementNotificationTitle">
-                  Achievement Notification
+                <h4
+                  id="settings-notificationTimingTitle"
+                  data-i18n="settings-notificationTimingTitle"
+                >
+                  Notification Scale & Timing
                 </h4>
 
                 <div class="settings-slider">
@@ -966,6 +959,11 @@
                   </div>
                 </div>
 
+                <hr style="margin: 18px 0 14px" />
+                <h4 id="settings-achievementNotificationTitle">
+                  Achievement Notification
+                </h4>
+
                 <div class="settings-control">
                   <label for="settings-positionDropdown"
                     >Achievement Position:</label
@@ -993,6 +991,14 @@
                   <label for="settings-soundSelect">Achievement Sound:</label>
                   <select id="settings-soundSelect"></select>
                 </div>
+                <button
+                  id="settings-testAchievementBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testAchievementBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test Achievement
+                </button>
 
                 <hr style="margin: 18px 0 14px" />
                 <h4
@@ -1077,6 +1083,14 @@
                   >
                   <select id="settings-rareSoundSelect"></select>
                 </div>
+                <button
+                  id="settings-testRareNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testRareNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test Rare Notification
+                </button>
 
                 <hr style="margin: 18px 0 14px" />
                 <h4 id="settings-platinumTitle" style="margin-top: 10px">
@@ -1111,6 +1125,14 @@
                   >
                   <select id="settings-platinumSoundSelect"></select>
                 </div>
+                <button
+                  id="settings-testPlatinumNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testPlatinumNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test Platinum Notification
+                </button>
 
                 <hr style="margin: 18px 0 14px" />
                 <h4
@@ -1137,6 +1159,14 @@
                     <option value="middle-left">Middle Left</option>
                   </select>
                 </div>
+                <button
+                  id="settings-testProgressNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testProgressNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test Progress Notification
+                </button>
 
                 <hr style="margin: 18px 0 14px" />
                 <h4
@@ -13040,6 +13070,65 @@
         .getElementById("settings-testPlaytimeNotificationBtn")
         .addEventListener("click", function () {
           window.api.showTestPlaytimeNotification();
+        });
+
+      document
+        .getElementById("settings-testProgressNotificationBtn")
+        .addEventListener("click", function () {
+          const position =
+            document.getElementById("settings-progressPositionDropdown")
+              ?.value || "bottom-left";
+          window.api.showTestProgressNotification({ position });
+        });
+
+      document
+        .getElementById("settings-testRareNotificationBtn")
+        .addEventListener("click", function () {
+          const preset =
+            document.getElementById("settings-rarePresetDropdown")?.value ||
+            "default";
+          const position =
+            document.getElementById("settings-rarePositionDropdown")?.value ||
+            "center-bottom";
+          const sound =
+            document.getElementById("settings-rareSoundSelect")?.value ||
+            "mute";
+          const scale = parseFloat(
+            document.getElementById("settings-scaleSlider")?.value || 1,
+          );
+
+          stopUiAudioPlayback();
+          window.api.showTestRareNotification({
+            preset,
+            position,
+            sound,
+            scale,
+          });
+        });
+
+      document
+        .getElementById("settings-testPlatinumNotificationBtn")
+        .addEventListener("click", function () {
+          const preset =
+            document.getElementById("settings-platinumPresetDropdown")?.value ||
+            "default";
+          const position =
+            document.getElementById("settings-platinumPositionDropdown")
+              ?.value || "center-bottom";
+          const sound =
+            document.getElementById("settings-platinumSoundSelect")?.value ||
+            "mute";
+          const scale = parseFloat(
+            document.getElementById("settings-scaleSlider")?.value || 1,
+          );
+
+          stopUiAudioPlayback();
+          window.api.showTestPlatinumNotification({
+            preset,
+            position,
+            sound,
+            scale,
+          });
         });
 
       // Settings scale slider
