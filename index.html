@@ -12949,6 +12949,7 @@
         document.addEventListener("keydown", escGateWhileSettings, {
           capture: true,
         });
+        void syncEpicOfficialAccountStatus();
       }
 
       if (window.api?.on) {
@@ -13039,6 +13040,12 @@
 
           // Enter section mode after switching tabs
           window.settingsEnterSectionMode();
+
+          if (tabId === "advanced") {
+            setTimeout(() => {
+              void syncEpicOfficialAccountStatus();
+            }, 0);
+          }
         });
       });
 
