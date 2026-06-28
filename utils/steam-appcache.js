@@ -16,6 +16,19 @@ function addKey(obj, key, value) {
   } else obj[key] = value;
 }
 
+function recordKeyType(obj, key, type) {
+  if (!obj || !key) return;
+  if (!Object.prototype.hasOwnProperty.call(obj, "__kvTypes")) {
+    Object.defineProperty(obj, "__kvTypes", {
+      value: {},
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+  }
+  obj.__kvTypes[key] = type;
+}
+
 function parseNodeChildren(buf, offset) {
   let off = offset;
   const obj = {};
@@ -35,6 +48,7 @@ function parseNodeChildren(buf, offset) {
     if (type === 0x01) {
       const v = readCString(buf, off);
       addKey(obj, key, v.s);
+      recordKeyType(obj, key, "string");
       off = v.next;
       continue;
     }
@@ -42,18 +56,21 @@ function parseNodeChildren(buf, offset) {
       const v = buf.readInt32LE(off);
       off += 4;
       addKey(obj, key, v);
+      recordKeyType(obj, key, "int32");
       continue;
     }
     if (type === 0x03) {
       const v = buf.readFloatLE(off);
       off += 4;
       addKey(obj, key, v);
+      recordKeyType(obj, key, "float");
       continue;
     }
     if (type === 0x07) {
       const v = buf.readBigUInt64LE(off);
       off += 8;
       addKey(obj, key, v.toString());
+      recordKeyType(obj, key, "uint64");
       continue;
     }
     throw new Error(`Unsupported KV type 0x${type.toString(16)} (key="${key}")`);
@@ -106,6 +123,7 @@ function extractUserStats(rootObj) {
     if (Object.prototype.hasOwnProperty.call(node, "data") && typeof node.data === "number") {
       const statId = String(pathArr[pathArr.length - 1]);
       const data_u32 = node.data >>> 0;
+      const data_type = node.__kvTypes?.data || "";
       const times = {};
       const tn = findTimes(node);
       if (tn && typeof tn === "object") {
@@ -114,7 +132,7 @@ function extractUserStats(rootObj) {
           if (ts != null) times[String(k)] = ts;
         }
       }
-      stats[statId] = { data_u32, times };
+      stats[statId] = { data_u32, data_value: node.data, data_type, times };
     }
     for (const [k, v] of Object.entries(node)) {
       if (v && typeof v === "object") walk(v, pathArr.concat(k));
@@ -169,6 +187,14 @@ function toInteger(value) {
   return n != null && Number.isInteger(n) ? n : null;
 }
 
+function normalizeProgressStatType(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return "";
+  if (raw === "FLOAT" || raw === "FLOAT32") return "FLOAT";
+  if (raw === "INT" || raw === "INTEGER" || raw === "UINT32") return "INT";
+  return raw;
+}
+
 function extractSchemaStatDefinitions(schemaRootObj) {
   const byName = new Map();
 
@@ -186,6 +212,7 @@ function extractSchemaStatDefinitions(schemaRootObj) {
           statId,
           min: toFiniteNumber(node.min),
           max: toFiniteNumber(node.max),
+          type: normalizeProgressStatType(node.type),
         });
       }
     }
@@ -230,6 +257,7 @@ function extractProgressMetadata(bitVal, statDefinitions) {
     progressOperation: operation,
     progressStatName,
     progressStatId,
+    progressStatType: statInfo.type || "",
     progressMin,
     progressMax,
   };
@@ -257,10 +285,18 @@ function copyProgressFields(target, source) {
   const progressMax = toFiniteNumber(
     source.progressMax ?? source.progress_max ?? source.progress?.max,
   );
+  const progressStatType = normalizeProgressStatType(
+    source.progressStatType ??
+      source.progress_stat_type ??
+      source.progress?.statType ??
+      source.progress?.stat_type ??
+      source.progress?.type,
+  );
   if (!progressStatName && progressStatId == null) return target;
   if (progressMax == null || progressMax <= 0) return target;
   if (progressStatName) target.progressStatName = progressStatName;
   if (progressStatId != null) target.progressStatId = progressStatId;
+  if (progressStatType) target.progressStatType = progressStatType;
   target.progressMin = progressMin;
   target.progressMax = progressMax;
   return target;
@@ -394,14 +430,22 @@ function hasProgressMetadata(entry) {
   );
 }
 
+function needsProgressMetadataEnrichment(entry, source) {
+  if (!hasProgressMetadata(entry)) return true;
+  if (!source || !hasProgressMetadata(source)) return false;
+  const sourceType = normalizeProgressStatType(source.progressStatType);
+  const entryType = normalizeProgressStatType(entry.progressStatType);
+  return !!sourceType && sourceType !== entryType;
+}
+
 function enrichSchemaEntriesFromAppcacheSchema(schemaEntries, schemaRootObj) {
   const entries = normalizeAppcacheSchemaEntries(schemaEntries);
   if (!entries.length || !schemaRootObj) return entries;
   const extracted = extractSchemaAchievements(schemaRootObj);
   const byApi = new Map(extracted.map((entry) => [entry.api, entry]));
   return entries.map((entry) => {
-    if (hasProgressMetadata(entry)) return entry;
     const source = byApi.get(entry.api);
+    if (!needsProgressMetadataEnrichment(entry, source)) return entry;
     if (!source || !hasProgressMetadata(source)) return entry;
     return copyProgressFields({ ...entry }, source);
   });
@@ -422,6 +466,27 @@ function enrichSchemaEntriesFromAppcacheSchemaFile(schemaEntries, schemaBinPath)
 
 function buildSnapshotFromAppcache(schemaEntries, userStats) {
   const snap = {};
+
+  function decodeProgressValue(stat, statType) {
+    if (!stat || typeof stat !== "object") return 0;
+    const normalizedType = normalizeProgressStatType(statType);
+    const value = stat.data_value;
+    if (
+      normalizedType === "FLOAT" &&
+      typeof value === "number" &&
+      Number.isFinite(value) &&
+      (stat.data_type === "float" || !Number.isInteger(value))
+    ) {
+      return value;
+    }
+    const raw = stat.data_u32 >>> 0;
+    if (normalizedType !== "FLOAT") return raw;
+    const buf = Buffer.allocUnsafe(4);
+    buf.writeUInt32LE(raw, 0);
+    const decoded = buf.readFloatLE(0);
+    return Number.isFinite(decoded) ? decoded : 0;
+  }
+
   for (const a of schemaEntries || []) {
     const stat = userStats[String(a.statId)] || { data_u32: 0, times: {} };
     const data = stat.data_u32 >>> 0;
@@ -439,7 +504,10 @@ function buildSnapshotFromAppcache(schemaEntries, userStats) {
       const progressStat = userStats[String(progressStatId)] || {
         data_u32: 0,
       };
-      const rawProgress = progressStat.data_u32 >>> 0;
+      const rawProgress = decodeProgressValue(
+        progressStat,
+        a.progressStatType,
+      );
       item.progress = Math.max(0, Math.min(rawProgress, progressMax));
       item.max_progress = progressMax;
     }

@@ -469,6 +469,7 @@ function applyProgressMetadata(target, source) {
   const fields = [
     "progressStatName",
     "progressStatId",
+    "progressStatType",
     "progressMin",
     "progressMax",
   ];
