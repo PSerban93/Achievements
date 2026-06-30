@@ -7185,7 +7185,7 @@
           if (effectiveProgress.show) {
             const progWrap = document.createElement("div");
             progWrap.className = "achievement-progress";
-            progWrap.textContent = `${progressLabel}: ${effectiveProgress.progress} / ${effectiveProgress.max}`;
+            progWrap.textContent = `${progressLabel}: ${formatAchievementProgressValue(effectiveProgress.progress, effectiveProgress.isFloat)} / ${formatAchievementProgressValue(effectiveProgress.max, effectiveProgress.isFloat)}`;
             const bar = document.createElement("div");
             bar.className = "progress-bar";
             const fill = document.createElement("div");
@@ -10156,6 +10156,7 @@
             progress: null,
             max: hasMax ? rawMax : null,
             percent: null,
+            isFloat: saved?.progress_is_float === true,
           };
         }
 
@@ -10165,6 +10166,7 @@
             progress: rawMax,
             max: rawMax,
             percent: 100,
+            isFloat: saved?.progress_is_float === true,
           };
         }
 
@@ -10173,7 +10175,14 @@
           progress: rawProgress,
           max: rawMax,
           percent: Math.min(100, Math.round((rawProgress / rawMax) * 100)),
+          isFloat: saved?.progress_is_float === true,
         };
+      }
+
+      function formatAchievementProgressValue(value, isFloat = false) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return isFloat ? "0.00" : "0";
+        return isFloat && !Number.isInteger(n) ? n.toFixed(2) : String(n);
       }
 
       window.addEventListener("DOMContentLoaded", async () => {
@@ -20272,6 +20281,7 @@
                     icon,
                     progress: state.progress,
                     max_progress: state.max_progress,
+                    progress_is_float: state.progress_is_float || undefined,
                     config_path: achData.config_path,
                     configName: cfg,
                   });

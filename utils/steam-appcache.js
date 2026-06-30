@@ -467,6 +467,12 @@ function enrichSchemaEntriesFromAppcacheSchemaFile(schemaEntries, schemaBinPath)
 function buildSnapshotFromAppcache(schemaEntries, userStats) {
   const snap = {};
 
+  function roundProgressNumber(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return 0;
+    return Math.round(n * 100) / 100;
+  }
+
   function decodeProgressValue(stat, statType) {
     if (!stat || typeof stat !== "object") return 0;
     const normalizedType = normalizeProgressStatType(statType);
@@ -508,8 +514,16 @@ function buildSnapshotFromAppcache(schemaEntries, userStats) {
         progressStat,
         a.progressStatType,
       );
-      item.progress = Math.max(0, Math.min(rawProgress, progressMax));
-      item.max_progress = progressMax;
+      const isFloatProgress =
+        normalizeProgressStatType(a.progressStatType) === "FLOAT";
+      const clampedProgress = Math.max(0, Math.min(rawProgress, progressMax));
+      item.progress = isFloatProgress
+        ? roundProgressNumber(clampedProgress)
+        : clampedProgress;
+      item.max_progress = isFloatProgress
+        ? roundProgressNumber(progressMax)
+        : progressMax;
+      if (isFloatProgress) item.progress_is_float = true;
     }
     snap[a.api] = item;
   }

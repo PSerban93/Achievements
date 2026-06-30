@@ -129,5 +129,11 @@
     "glob": {
       "minimatch": ">=10.2.1"
     }
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "electron@40.10.5": true,
+    "koffi@2.16.2": true,
+    "uiohook-napi@1.5.5": true
   }
 }

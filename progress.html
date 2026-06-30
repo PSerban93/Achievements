@@ -264,6 +264,13 @@
           window.i18nUi && typeof window.i18nUi.getString === "function"
             ? window.i18nUi.getString(key, fallback)
             : fallback;
+
+        const formatProgressValue = (value, isFloat = false) => {
+          const n = Number(value);
+          if (!Number.isFinite(n)) return isFloat ? "0.00" : "0";
+          return isFloat && !Number.isInteger(n) ? n.toFixed(2) : String(n);
+        };
+
         async function resolveAchievementIcon(imgEl, cfgPath, rel) {
           try {
             const url = await window.api.resolveIconUrl(cfgPath, rel);
@@ -295,8 +302,9 @@
               Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
             const pct =
               max > 0 ? Math.min(100, Math.round((cur / max) * 100)) : 0;
+            const isFloatProgress = data.progress_is_float === true;
 
-            const title = `${name}: ${cur}/${max}`;
+            const title = `${name}: ${formatProgressValue(cur, isFloatProgress)}/${formatProgressValue(max, isFloatProgress)}`;
             titleEl.textContent = title;
             applyProgressProfile(title, pct, scale);
             await resolveAchievementIcon(imgEl, data.config_path, data.icon);

@@ -463,6 +463,68 @@ async function download(url, dest, fetchImpl = global.fetch) {
   }
 }
 
+function queueSteamOfficialImageDownload(queue, appid, url, dest, label) {
+  if (!url || !dest) return;
+  const key = path.normalize(dest).toLowerCase();
+  if (queue.has(key)) return;
+  if (fs.existsSync(dest)) return;
+  queue.set(key, {
+    url,
+    dest,
+    label,
+  });
+}
+
+async function waitForSteamOfficialImageDownloads(appid, queue, context) {
+  const downloads = Array.from(queue.values());
+  if (!downloads.length) {
+    return { requested: 0, downloaded: 0, failed: 0 };
+  }
+  let downloaded = 0;
+  let failed = 0;
+  let nextIndex = 0;
+  const concurrency = 12;
+  async function worker() {
+    while (nextIndex < downloads.length) {
+      const item = downloads[nextIndex++];
+      let ok = false;
+      let error = "";
+      try {
+        ok = await download(item.url, item.dest);
+      } catch (err) {
+        error = err?.message || String(err);
+        ok = false;
+      }
+      if (ok && fs.existsSync(item.dest)) {
+        downloaded++;
+        continue;
+      }
+      failed++;
+      schemaLogger.warn("steam-appcache:image-download-failed", {
+        appid: String(appid),
+        context,
+        label: item.label || "",
+        url: item.url,
+        dest: item.dest,
+        error,
+      });
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, downloads.length) }, () =>
+      worker(),
+    ),
+  );
+  schemaLogger.info("steam-appcache:images:downloaded", {
+    appid: String(appid),
+    context,
+    requested: downloads.length,
+    downloaded,
+    failed,
+  });
+  return { requested: downloads.length, downloaded, failed };
+}
+
 function applyProgressMetadata(target, source) {
   if (!target || !source) return false;
   let changed = false;
@@ -483,12 +545,13 @@ function applyProgressMetadata(target, source) {
   return changed;
 }
 
-function writeSchemaFromEntries(appid, entries, schemaDir) {
+async function writeSchemaFromEntries(appid, entries, schemaDir) {
   ensureDir(schemaDir);
   const imgDir = path.join(schemaDir, "img");
   ensureDir(imgDir);
 
   const rewritten = [];
+  const imageDownloads = new Map();
   for (const e of entries) {
     const baseName = e.icon
       ? path.basename(String(e.icon)).replace(/\.[^.]+$/, "")
@@ -501,13 +564,25 @@ function writeSchemaFromEntries(appid, entries, schemaDir) {
       const ext = path.extname(new URL(iconUrl).pathname) || ".jpg";
       const file = `${baseName}${ext}`;
       iconRel = `img/${file}`;
-      download(iconUrl, path.join(imgDir, file)).catch(() => {});
+      queueSteamOfficialImageDownload(
+        imageDownloads,
+        appid,
+        iconUrl,
+        path.join(imgDir, file),
+        `${e.api}:icon`,
+      );
     }
     if (grayUrl) {
       const ext = path.extname(new URL(grayUrl).pathname) || ".jpg";
       const file = `${baseName}_gray${ext}`;
       grayRel = `img/${file}`;
-      download(grayUrl, path.join(imgDir, file)).catch(() => {});
+      queueSteamOfficialImageDownload(
+        imageDownloads,
+        appid,
+        grayUrl,
+        path.join(imgDir, file),
+        `${e.api}:icon_gray`,
+      );
     }
     if (!grayRel) grayRel = iconRel;
     const item = {
@@ -528,6 +603,12 @@ function writeSchemaFromEntries(appid, entries, schemaDir) {
     throw new Error("steam-official:schema-empty");
   }
 
+  await waitForSteamOfficialImageDownloads(
+    appid,
+    imageDownloads,
+    "write-schema",
+  );
+
   fs.writeFileSync(
     path.join(schemaDir, "achievements.json"),
     JSON.stringify(rewritten, null, 2),
@@ -541,7 +622,7 @@ function writeSchemaFromEntries(appid, entries, schemaDir) {
   return rewritten;
 }
 
-function updateSchemaFromAppcache(appid, entries, schemaDir) {
+async function updateSchemaFromAppcache(appid, entries, schemaDir) {
   const schemaPath = path.join(schemaDir, "achievements.json");
   if (!fs.existsSync(schemaPath))
     return { updated: false, added: 0, changed: 0, entries: [] };
@@ -559,30 +640,44 @@ function updateSchemaFromAppcache(appid, entries, schemaDir) {
   let updated = false;
   let added = 0;
   let changed = 0;
+  let repairedImages = 0;
+  const imageDownloads = new Map();
 
   for (const e of entries) {
+    const baseName = e.icon
+      ? path.basename(String(e.icon)).replace(/\.[^.]+$/, "")
+      : String(e.api);
+    const iconUrl = normalizeSteamIconUrl(appid, e.icon || "");
+    const grayUrl = normalizeSteamIconUrl(appid, e.icon_gray || e.icon || "");
     const existing = byName.get(e.api);
     if (!existing) {
       added++;
       updated = true;
-      const baseName = e.icon
-        ? path.basename(String(e.icon)).replace(/\.[^.]+$/, "")
-        : String(e.api);
       let iconRel = "";
       let grayRel = "";
-      const iconUrl = normalizeSteamIconUrl(appid, e.icon || "");
-      const grayUrl = normalizeSteamIconUrl(appid, e.icon_gray || e.icon || "");
       if (iconUrl) {
         const ext = path.extname(new URL(iconUrl).pathname) || ".jpg";
         const file = `${baseName}${ext}`;
         iconRel = `img/${file}`;
-        download(iconUrl, path.join(schemaDir, iconRel)).catch(() => {});
+        queueSteamOfficialImageDownload(
+          imageDownloads,
+          appid,
+          iconUrl,
+          path.join(schemaDir, iconRel),
+          `${e.api}:icon`,
+        );
       }
       if (grayUrl) {
         const ext = path.extname(new URL(grayUrl).pathname) || ".jpg";
         const file = `${baseName}_gray${ext}`;
         grayRel = `img/${file}`;
-        download(grayUrl, path.join(schemaDir, grayRel)).catch(() => {});
+        queueSteamOfficialImageDownload(
+          imageDownloads,
+          appid,
+          grayUrl,
+          path.join(schemaDir, grayRel),
+          `${e.api}:icon_gray`,
+        );
       }
       if (!grayRel) grayRel = iconRel;
       const item = {
@@ -599,15 +694,60 @@ function updateSchemaFromAppcache(appid, entries, schemaDir) {
       cur.push(item);
       continue;
     }
+    if (!existing.icon && iconUrl) {
+      const ext = path.extname(new URL(iconUrl).pathname) || ".jpg";
+      existing.icon = `img/${baseName}${ext}`;
+      changed++;
+      updated = true;
+    }
+    if (!existing.icon_gray && grayUrl) {
+      const ext = path.extname(new URL(grayUrl).pathname) || ".jpg";
+      existing.icon_gray = `img/${baseName}_gray${ext}`;
+      changed++;
+      updated = true;
+    }
+    if (existing.icon && iconUrl) {
+      const iconPath = path.join(schemaDir, existing.icon);
+      if (!fs.existsSync(iconPath)) {
+        repairedImages++;
+        queueSteamOfficialImageDownload(
+          imageDownloads,
+          appid,
+          iconUrl,
+          iconPath,
+          `${e.api}:icon`,
+        );
+      }
+    }
+    if (existing.icon_gray && grayUrl) {
+      const grayPath = path.join(schemaDir, existing.icon_gray);
+      if (!fs.existsSync(grayPath)) {
+        repairedImages++;
+        queueSteamOfficialImageDownload(
+          imageDownloads,
+          appid,
+          grayUrl,
+          grayPath,
+          `${e.api}:icon_gray`,
+        );
+      }
+    }
     if (applyProgressMetadata(existing, e)) {
       changed++;
       updated = true;
     }
   }
+  const imageResult = await waitForSteamOfficialImageDownloads(
+    appid,
+    imageDownloads,
+    "update-schema",
+  );
+  const imagesUpdated = imageResult.downloaded > 0;
   if (updated) {
     fs.writeFileSync(schemaPath, JSON.stringify(cur, null, 2), "utf8");
   }
-  const hasSchemaChanges = updated || added > 0 || changed > 0;
+  const hasSchemaChanges =
+    updated || added > 0 || changed > 0 || imageResult.requested > 0;
   if (hasSchemaChanges) {
     schemaLogger.info("steam-appcache:schema:updated", {
       appid: String(appid),
@@ -615,11 +755,14 @@ function updateSchemaFromAppcache(appid, entries, schemaDir) {
       updated,
       added,
       changed,
+      imagesUpdated,
+      repairedImages,
+      imageDownloads: imageResult,
       total: cur.length,
       incoming: entries.length,
     });
   }
-  return { updated, added, changed, entries: cur };
+  return { updated, added, changed, imagesUpdated, entries: cur };
 }
 
 function findExistingSteamOfficialConfig(configsDir, appid) {
@@ -716,15 +859,20 @@ async function generateConfigFromAppcacheBin(
       phase: "generatingSchema",
       percent: 35,
     });
-    schemaEntries = writeSchemaFromEntries(appid, entries, schemaRoot);
+    schemaEntries = await writeSchemaFromEntries(appid, entries, schemaRoot);
     schemaUpdated = true;
   } else {
-    const updateResult = updateSchemaFromAppcache(appid, entries, schemaRoot);
+    const updateResult = await updateSchemaFromAppcache(
+      appid,
+      entries,
+      schemaRoot,
+    );
     if (updateResult.entries.length) {
       schemaEntries = updateResult.entries;
     }
-    schemaUpdated = schemaUpdated || updateResult.updated;
-    if (updateResult.updated) {
+    schemaUpdated =
+      schemaUpdated || updateResult.updated || updateResult.imagesUpdated;
+    if (updateResult.updated || updateResult.imagesUpdated) {
       emitProgress({
         phase: "generatingSchema",
         percent: 35,

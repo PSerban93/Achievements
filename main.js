@@ -10268,6 +10268,7 @@ ipcMain.on("show-notification", async (_event, achievement) => {
         earned: true,
         progress: achievement.progress || undefined,
         max_progress: achievement.max_progress || undefined,
+        progress_is_float: achievement.progress_is_float || undefined,
         earned_time: Date.now(),
       };
       if (selectedConfig) {
@@ -11963,6 +11964,7 @@ function savePreviousAchievements(
       "earned_time",
       "max_progress",
       "progress",
+      "progress_is_float",
     ]);
     for (const key of keys) {
       const entry = effectiveData?.[key];
@@ -11984,6 +11986,9 @@ function savePreviousAchievements(
       }
       if (Object.prototype.hasOwnProperty.call(entry, "progress")) {
         normalized.progress = entry.progress;
+      }
+      if (Object.prototype.hasOwnProperty.call(entry, "progress_is_float")) {
+        normalized.progress_is_float = entry.progress_is_float;
       }
       for (const [k, v] of Object.entries(entry)) {
         if (known.has(k)) continue;
@@ -12644,6 +12649,7 @@ async function monitorAchievementsFile(filePath) {
               earned_time: current.earned_time || Date.now(),
               progress: current.progress,
               max_progress: current.max_progress,
+              progress_is_float: current.progress_is_float || undefined,
             };
           }
         });
@@ -12688,6 +12694,7 @@ async function monitorAchievementsFile(filePath) {
               icon: achievementConfig.icon,
               progress: cur.progress,
               max_progress: cur.max_progress,
+              progress_is_float: cur.progress_is_float || undefined,
               config_path: selectedConfigPath,
               configName,
             });
@@ -12801,6 +12808,7 @@ async function monitorAchievementsFile(filePath) {
               icon: achievementConfig.icon,
               progress: current.progress,
               max_progress: current.max_progress,
+              progress_is_float: current.progress_is_float || undefined,
               config_path: selectedConfigPath,
               configName,
             });
