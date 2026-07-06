@@ -27,7 +27,7 @@ body.tray-menu-body {
   font-size: 14px;
   font-weight: 600;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   margin: 0;
 }
 

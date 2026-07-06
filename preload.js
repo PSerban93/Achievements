@@ -721,10 +721,12 @@ contextBridge.exposeInMainWorld("electron", {
         "set-language",
         "load-overlay-data",
         "overlay-controller-runtime-state",
+        "overlay-preferences-updated",
         "show-notification",
         "zoom-factor-changed",
         "request-current-config",
         "tray:language-changed",
+        "tray:theme-changed",
       ];
       if (validChannels.includes(channel)) {
         ipcRenderer.on(channel, (event, ...args) => func(...args));

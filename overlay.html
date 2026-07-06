@@ -92,20 +92,169 @@
       })();
     </script>
     <style>
-      /* Dracula Theme Color Variables */
-      :root {
-        --dracula-background: #282a36;
-        --dracula-current-line: #44475a;
-        --dracula-foreground: #f8f8f2;
-        --dracula-comment: #6272a4;
-        --dracula-cyan: #8be9fd;
-        --dracula-green: #50fa7b;
-        --dracula-orange: #ffb86c;
-        --dracula-pink: #ff79c6;
-        --dracula-purple: #bd93f9;
-        --dracula-red: #ff5555;
-        --dracula-yellow: #f1fa8c;
+      :root,
+      :root[data-theme="dracula"] {
+        --app-bg: #282a36;
+        --app-surface: #44475a;
+        --app-text: #f8f8f2;
+        --app-muted: #6272a4;
+        --app-accent: #bd93f9;
+        --app-accent-2: #8be9fd;
+        --app-success: #50fa7b;
+        --app-warning: #ffb86c;
+        --app-attention: #f1fa8c;
+        --app-danger: #ff5555;
+        --app-pink: #ff79c6;
+        --app-overlay-bg: rgba(40, 42, 54, 0.85);
+        --app-overlay-bg-strong: rgba(40, 42, 54, 0.88);
+        --app-overlay-surface: rgba(68, 71, 90, 0.8);
+        --app-overlay-surface-soft: rgba(68, 71, 90, 0.6);
+        --app-overlay-hover: rgba(68, 71, 90, 0.4);
+        --dracula-background: var(--app-bg);
+        --dracula-current-line: var(--app-surface);
+        --dracula-foreground: var(--app-text);
+        --dracula-comment: var(--app-muted);
+        --dracula-cyan: var(--app-accent-2);
+        --dracula-green: var(--app-success);
+        --dracula-orange: var(--app-warning);
+        --dracula-pink: var(--app-pink);
+        --dracula-purple: var(--app-accent);
+        --dracula-red: var(--app-danger);
+        --dracula-yellow: var(--app-attention);
         --scrollbar-size: 8px;
+      }
+
+      :root[data-theme="dark"] {
+        --app-bg: #111318;
+        --app-surface: #242833;
+        --app-text: #eef2f8;
+        --app-muted: #8d98aa;
+        --app-accent: #7c9cff;
+        --app-accent-2: #63d7ff;
+        --app-success: #54d68a;
+        --app-warning: #f2b84b;
+        --app-attention: #f4dc62;
+        --app-danger: #ff6b6b;
+        --app-pink: #ff77c8;
+        --app-overlay-bg: rgba(17, 19, 24, 0.9);
+        --app-overlay-bg-strong: rgba(17, 19, 24, 0.94);
+        --app-overlay-surface: rgba(36, 40, 51, 0.86);
+        --app-overlay-surface-soft: rgba(36, 40, 51, 0.68);
+        --app-overlay-hover: rgba(124, 156, 255, 0.12);
+      }
+
+      :root[data-theme="light"] {
+        --app-bg: #f5f7fb;
+        --app-surface: #ffffff;
+        --app-text: #1d2430;
+        --app-muted: #647084;
+        --app-accent: #5b5bd6;
+        --app-accent-2: #087ea4;
+        --app-success: #208a4f;
+        --app-warning: #b96500;
+        --app-attention: #8a6a00;
+        --app-danger: #c83d4b;
+        --app-pink: #b23a8e;
+        --app-overlay-bg: rgba(255, 255, 255, 0.92);
+        --app-overlay-bg-strong: rgba(255, 255, 255, 0.96);
+        --app-overlay-surface: rgba(238, 242, 248, 0.92);
+        --app-overlay-surface-soft: rgba(238, 242, 248, 0.76);
+        --app-overlay-hover: rgba(91, 91, 214, 0.1);
+      }
+
+      :root[data-theme="oled"] {
+        --app-bg: #000000;
+        --app-surface: #101014;
+        --app-text: #f4f7fb;
+        --app-muted: #8f9aad;
+        --app-accent: #bd93f9;
+        --app-accent-2: #8be9fd;
+        --app-success: #50fa7b;
+        --app-warning: #ffb86c;
+        --app-attention: #f1fa8c;
+        --app-danger: #ff5555;
+        --app-pink: #ff79c6;
+        --app-overlay-bg: rgba(0, 0, 0, 0.92);
+        --app-overlay-bg-strong: rgba(0, 0, 0, 0.96);
+        --app-overlay-surface: rgba(16, 16, 20, 0.92);
+        --app-overlay-surface-soft: rgba(16, 16, 20, 0.76);
+        --app-overlay-hover: rgba(255, 255, 255, 0.07);
+      }
+
+      :root[data-theme="metro"] {
+        --app-bg: #f3f3f3;
+        --app-surface: #ffffff;
+        --app-text: #1a1a1a;
+        --app-muted: #5f5f5f;
+        --app-accent: #0078d4;
+        --app-accent-2: #0078d4;
+        --app-success: #107c10;
+        --app-warning: #ffb900;
+        --app-attention: #8a6d00;
+        --app-danger: #d13438;
+        --app-pink: #c239b3;
+        --app-overlay-bg: rgba(255, 255, 255, 0.94);
+        --app-overlay-bg-strong: rgba(255, 255, 255, 0.97);
+        --app-overlay-surface: rgba(243, 243, 243, 0.94);
+        --app-overlay-surface-soft: rgba(243, 243, 243, 0.78);
+        --app-overlay-hover: rgba(0, 120, 212, 0.1);
+      }
+
+      :root[data-theme="metro-dark"] {
+        --app-bg: #202020;
+        --app-surface: #2b2b2b;
+        --app-text: #f3f3f3;
+        --app-muted: #c8c8c8;
+        --app-accent: #0078d4;
+        --app-accent-2: #4cc2ff;
+        --app-success: #6ccb5f;
+        --app-warning: #ffb900;
+        --app-attention: #ffd966;
+        --app-danger: #ff5f5f;
+        --app-pink: #d778d6;
+        --app-overlay-bg: rgba(32, 32, 32, 0.94);
+        --app-overlay-bg-strong: rgba(23, 23, 23, 0.96);
+        --app-overlay-surface: rgba(43, 43, 43, 0.94);
+        --app-overlay-surface-soft: rgba(58, 58, 58, 0.78);
+        --app-overlay-hover: rgba(0, 120, 212, 0.18);
+      }
+
+      :root[data-theme="aero"] {
+        --app-bg: #c9e4f8;
+        --app-surface: rgba(235, 247, 255, 0.78);
+        --app-text: #102033;
+        --app-muted: #4e657d;
+        --app-accent: #2d7dd2;
+        --app-accent-2: #00a2e8;
+        --app-success: #2f8f4e;
+        --app-warning: #c47a00;
+        --app-attention: #8f6c00;
+        --app-danger: #b63a45;
+        --app-pink: #a64d9f;
+        --app-overlay-bg: rgba(226, 243, 255, 0.78);
+        --app-overlay-bg-strong: rgba(205, 229, 247, 0.86);
+        --app-overlay-surface: rgba(255, 255, 255, 0.7);
+        --app-overlay-surface-soft: rgba(218, 236, 250, 0.64);
+        --app-overlay-hover: rgba(91, 173, 235, 0.28);
+      }
+
+      :root[data-theme="aero-dark"] {
+        --app-bg: #142230;
+        --app-surface: rgba(35, 55, 74, 0.88);
+        --app-text: #eef7ff;
+        --app-muted: #b6c8d8;
+        --app-accent: #65b7ff;
+        --app-accent-2: #7ee6ff;
+        --app-success: #6fd18b;
+        --app-warning: #f4b861;
+        --app-attention: #f1d46b;
+        --app-danger: #ff7b86;
+        --app-pink: #e184d8;
+        --app-overlay-bg: rgba(23, 39, 55, 0.94);
+        --app-overlay-bg-strong: rgba(14, 26, 39, 0.96);
+        --app-overlay-surface: rgba(31, 50, 68, 0.9);
+        --app-overlay-surface-soft: rgba(10, 23, 35, 0.66);
+        --app-overlay-hover: rgba(91, 173, 235, 0.22);
       }
 
       html,
@@ -160,7 +309,7 @@
         scrollbar-width: thin;
         -ms-overflow-style: none;
         scrollbar-color: var(--dracula-purple) var(--dracula-background);
-        background-color: rgba(40, 42, 54, 0.85);
+        background-color: var(--app-overlay-bg);
         border-radius: 0 0 12px 12px;
         /* box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
         backdrop-filter: blur(8px); */
@@ -191,7 +340,7 @@
       .overlay-top {
         flex: 0 0 auto;
         z-index: 10;
-        background: rgba(40, 42, 54, 0.88);
+        background: var(--app-overlay-bg-strong);
         /* backdrop-filter: blur(8px); */
         pointer-events: auto;
         border-radius: 12px 12px 0 0;
@@ -202,7 +351,7 @@
       }
 
       .overlay-header {
-        background-color: rgba(68, 71, 90, 0.8);
+        background-color: var(--app-overlay-surface);
         padding: 12px 16px;
         display: flex;
         justify-content: space-between;
@@ -222,7 +371,7 @@
       }
 
       .overlay-stats {
-        background-color: rgba(68, 71, 90, 0.6);
+        background-color: var(--app-overlay-surface-soft);
         padding: 10px 16px;
         display: flex;
         justify-content: space-between;
@@ -299,7 +448,7 @@
       }
 
       .achievement-item:hover {
-        background-color: rgba(68, 71, 90, 0.4);
+        background-color: var(--app-overlay-hover);
       }
 
       .achievement-icon {
@@ -474,6 +623,14 @@
         timeSort: "achTable:timeSort",
         raritySort: "achTable:raritySort",
       };
+      const APP_THEME_VALUES = new Set(["dracula", "dark", "light", "oled", "metro", "metro-dark", "aero", "aero-dark"]);
+      function normalizeAppTheme(value) {
+        const theme = String(value || "").trim().toLowerCase();
+        return APP_THEME_VALUES.has(theme) ? theme : "dracula";
+      }
+      function applyAppTheme(value) {
+        document.documentElement.dataset.theme = normalizeAppTheme(value);
+      }
       const overlayAchievementTableViewState = {
         status: "all",
         nameSort: "off",
@@ -578,13 +735,17 @@
         if (overlayPrefsLoaded && overlayPrefs) return overlayPrefs;
         try {
           overlayPrefs = await window.api.loadPreferences?.();
+          applyAppTheme(overlayPrefs?.appTheme);
           overlayPrefsLoaded = true;
         } catch (e) {
           overlayPrefs = null;
           overlayPrefsLoaded = false;
+          applyAppTheme(null);
         }
         return overlayPrefs || {};
       }
+      loadOverlayPrefs().catch(() => {});
+
       let currentConfigName = null;
       let currentDataHash = null;
       let isLoading = false;
@@ -1306,6 +1467,14 @@
 
       window.api.on("overlay-preferences-updated", (payload) => {
         if (!payload || typeof payload !== "object") return;
+        if (Object.prototype.hasOwnProperty.call(payload, "appTheme")) {
+          overlayPrefs = {
+            ...(overlayPrefs || {}),
+            appTheme: normalizeAppTheme(payload.appTheme),
+          };
+          overlayPrefsLoaded = true;
+          applyAppTheme(overlayPrefs.appTheme);
+        }
         if (
           Object.prototype.hasOwnProperty.call(payload, "showHiddenDescription")
         ) {

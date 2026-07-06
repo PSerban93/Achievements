@@ -143,7 +143,7 @@
       }
 
       .ach-icon {
-        border-radius: 6px;
+        border-radius: var(--app-radius-md);
         border: 1px solid #44475a;
         transition:
           box-shadow 0.2s ease,
@@ -194,9 +194,9 @@
 
       .status-rarity {
         margin-top: 4px;
-        color: #8be9fd;
+        color: var(--app-accent);
         font-size: 12px;
-        font-weight: 600;
+        font-weight: 700;
       }
 
       .locked {
@@ -212,7 +212,7 @@
       .progress-bar {
         height: 5px;
         background-color: #44475a;
-        border-radius: 3px;
+        border-radius: var(--app-radius-xs);
         overflow: hidden;
         margin-top: 4px;
         width: 50%;
@@ -221,7 +221,7 @@
       .progress-fill {
         height: 100%;
         background-color: #50fa7b;
-        border-radius: 3px;
+        border-radius: var(--app-radius-xs);
         transition: width 0.3s ease;
       }
 
@@ -248,9 +248,9 @@
         width: 42px;
         height: 42px;
         border: 1px solid rgba(189, 147, 249, 0.4);
-        border-radius: 10px;
+        border-radius: var(--app-radius-lg);
         background: rgba(68, 71, 90, 0.55);
-        color: #f8f8f2;
+        color: var(--app-text);
         cursor: pointer;
         transition:
           transform 0.15s ease,
@@ -291,7 +291,7 @@
         padding: 10px 15px;
         margin-bottom: 5px;
         border: 1px solid rgba(189, 147, 249, 0.22);
-        border-radius: 6px;
+        border-radius: var(--app-radius-md);
         background: rgba(68, 71, 90, 0.28);
         color: var(--dracula-comment);
         font-weight: 500;
@@ -306,7 +306,7 @@
       .settings-guide-link:hover {
         color: var(--dracula-foreground);
         border-color: rgba(139, 233, 253, 0.5);
-        background: rgba(255, 255, 255, 0.05);
+        background: var(--app-hover-bg);
       }
 
       .settings-guide-link:focus-visible {
@@ -324,7 +324,7 @@
         margin-left: 10px;
         margin-right: 10px;
         margin-bottom: 6px;
-        color: rgba(248, 248, 242, 0.78);
+        color: var(--app-muted);
         font-size: 12px;
       }
 
@@ -339,7 +339,7 @@
         border: 1px solid var(--dracula-purple, #6272a4);
         background: transparent;
         color: var(--dracula-purple, #bd93f9);
-        border-radius: 8px;
+        border-radius: var(--app-radius-md);
         cursor: pointer;
         transition:
           background 0.15s,
@@ -355,7 +355,7 @@
 
       .sort-btn.active {
         background: rgba(189, 147, 249, 0.15);
-        color: white;
+        color: var(--app-text);
         border-color: var(--dracula-cyan, #8be9fd);
       }
 
@@ -383,7 +383,7 @@
         transform: translateX(-50%) translateY(18px);
         width: min(560px, calc(100vw - 32px));
         padding: 14px 16px 12px;
-        border-radius: 14px;
+        border-radius: var(--app-radius-panel);
         border: 1px solid rgba(189, 147, 249, 0.55);
         background: linear-gradient(
           180deg,
@@ -393,7 +393,7 @@
         box-shadow:
           0 10px 24px rgba(0, 0, 0, 0.32),
           0 0 0 1px rgba(139, 233, 253, 0.08);
-        color: #f8f8f2;
+        color: var(--app-text);
         z-index: 10001;
         opacity: 0;
         pointer-events: none;
@@ -441,14 +441,14 @@
         text-align: right;
         font-size: 13px;
         font-weight: 700;
-        color: #f8f8f2;
+        color: var(--app-text);
       }
 
       .generation-progress-item {
         margin-top: 4px;
         font-size: 13px;
         font-weight: 600;
-        color: #f8f8f2;
+        color: var(--app-text);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -474,14 +474,14 @@
 
       .generation-progress-count {
         flex: 0 0 auto;
-        color: #f8f8f2;
+        color: var(--app-text);
       }
 
       .generation-progress-bar {
         margin-top: 10px;
         width: 100%;
         height: 9px;
-        border-radius: 999px;
+        border-radius: var(--app-radius-pill);
         overflow: hidden;
         background: rgba(68, 71, 90, 0.9);
         box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
@@ -678,6 +678,33 @@
                 <div class="settings-control">
                   <label for="appLanguageSelect">App Language:</label>
                   <select id="appLanguageSelect"></select>
+                </div>
+              </div>
+              <hr style="margin: 18px 0 14px" />
+              <div class="settings-section">
+                <h4 id="settings-appThemeTitle">App Theme</h4>
+                <div class="settings-control">
+                  <label for="appThemeSelect" id="label.appThemeSelect"
+                    >App Theme:</label
+                  >
+                  <select id="appThemeSelect">
+                    <option value="dracula" id="option.appTheme.dracula">
+                      Dracula
+                    </option>
+                    <option value="dark" id="option.appTheme.dark">Dark</option>
+                    <option value="light" id="option.appTheme.light">
+                      Light
+                    </option>
+                    <option value="oled" id="option.appTheme.oled">OLED</option>
+                    <option value="metro" id="option.appTheme.metro">Metro</option>
+                    <option value="metro-dark" id="option.appTheme.metroDark">
+                      Metro Dark
+                    </option>
+                    <option value="aero" id="option.appTheme.aero">Aero</option>
+                    <option value="aero-dark" id="option.appTheme.aeroDark">
+                      Aero Dark
+                    </option>
+                  </select>
                 </div>
               </div>
               <hr style="margin: 18px 0 14px" />
@@ -3480,14 +3507,14 @@
               z-index: 10;
             "
           >
-            <label id="achStatsText" style="color: white; font-weight: bold"
+            <label id="achStatsText" style="color: var(--app-text); font-weight: bold"
               >Progress: 0 / 0</label
             >
             <div
               style="
                 width: 100%;
                 background: #ccc;
-                border-radius: 8px;
+                border-radius: var(--app-radius-md);
                 height: 12px;
                 margin-top: -10px;
                 position: relative;
@@ -3500,7 +3527,7 @@
                   width: 0%;
                   height: 100%;
                   background: #4caf50;
-                  border-radius: 8px;
+                  border-radius: var(--app-radius-md);
                   transition: width 0.3s;
                 "
               ></div>
@@ -3511,7 +3538,7 @@
                   right: 5px;
                   top: -22px;
                   font-size: 12px;
-                  color: white;
+                  color: var(--app-text);
                   font-weight: bold;
                 "
                 >0%</span
@@ -3522,7 +3549,7 @@
               style="
                 margin-top: 6px;
                 font-size: 12px;
-                color: #ffffff;
+                color: var(--app-text);
                 font-weight: bold;
               "
             >
@@ -3533,7 +3560,7 @@
               style="
                 margin-top: 2px;
                 font-size: 12px;
-                color: #ffffff;
+                color: var(--app-text);
                 font-weight: bold;
               "
             >
@@ -3736,10 +3763,10 @@
                         id="saveBtn"
                         style="
                           background-color: #4caf50;
-                          color: white;
+                          color: var(--app-text);
                           border: none;
                           padding: 10px 24px;
-                          border-radius: 6px;
+                          border-radius: var(--app-radius-md);
                           font-weight: bold;
                           width: auto;
                         "
@@ -3750,10 +3777,10 @@
                         id="regenSchemaBtn"
                         style="
                           background-color: #2196f3;
-                          color: white;
+                          color: var(--app-text);
                           border: none;
                           padding: 10px 24px;
-                          border-radius: 6px;
+                          border-radius: var(--app-radius-md);
                           font-weight: bold;
                           width: auto;
                           display: none;
@@ -3886,7 +3913,7 @@
                   flex-direction: column;
                   align-items: center;
                   padding: 20px;
-                  color: white;
+                  color: var(--app-text);
                 "
               >
                 <p id="altAppIdPromptText">
@@ -4447,6 +4474,40 @@
 
       window.__preferencesCache = window.__preferencesCache || null;
       window.__preferencesLoadPromise = null;
+      const APP_THEME_VALUES = new Set(["dracula", "dark", "light", "oled", "metro", "metro-dark", "aero", "aero-dark"]);
+      const normalizeAppTheme = (value) => {
+        const theme = String(value || "").trim().toLowerCase();
+        return APP_THEME_VALUES.has(theme) ? theme : "dracula";
+      };
+      function applyAppTheme(value) {
+        const theme = normalizeAppTheme(value);
+        document.documentElement.dataset.theme = theme;
+        const select = document.getElementById("appThemeSelect");
+        if (select) select.value = theme;
+        return theme;
+      }
+      function refreshAppThemeText() {
+        const title = document.getElementById("settings-appThemeTitle");
+        const label = document.getElementById("label.appThemeSelect");
+        const dracula = document.getElementById("option.appTheme.dracula");
+        const dark = document.getElementById("option.appTheme.dark");
+        const light = document.getElementById("option.appTheme.light");
+        const oled = document.getElementById("option.appTheme.oled");
+        const metro = document.getElementById("option.appTheme.metro");
+        const metroDark = document.getElementById("option.appTheme.metroDark");
+        const aero = document.getElementById("option.appTheme.aero");
+        const aeroDark = document.getElementById("option.appTheme.aeroDark");
+        if (title) title.textContent = tUi("settings-appThemeTitle", "App Theme");
+        if (label) label.textContent = tUi("label.appThemeSelect", "App Theme:");
+        if (dracula) dracula.textContent = tUi("option.appTheme.dracula", "Dracula");
+        if (dark) dark.textContent = tUi("option.appTheme.dark", "Dark");
+        if (light) light.textContent = tUi("option.appTheme.light", "Light");
+        if (oled) oled.textContent = tUi("option.appTheme.oled", "OLED");
+        if (metro) metro.textContent = tUi("option.appTheme.metro", "Metro");
+        if (metroDark) metroDark.textContent = tUi("option.appTheme.metroDark", "Metro Dark");
+        if (aero) aero.textContent = tUi("option.appTheme.aero", "Aero");
+        if (aeroDark) aeroDark.textContent = tUi("option.appTheme.aeroDark", "Aero Dark");
+      }
       const tUiFmt = (key, params = {}, fallback) => {
         let text = tUi(key, fallback);
         if (!params || typeof params !== "object") return text;
@@ -4601,6 +4662,9 @@
             };
             delete merged.steamApiKeyMasked;
             window.__preferencesCache = merged;
+            if (Object.prototype.hasOwnProperty.call(pending, "appTheme")) {
+              applyAppTheme(pending.appTheme);
+            }
           } catch (err) {
             console.warn(
               tUi(
@@ -8491,6 +8555,7 @@
 
       const languageSelect = document.getElementById("languageSelect");
       const appLanguageSelect = document.getElementById("appLanguageSelect");
+      const appThemeSelect = document.getElementById("appThemeSelect");
       let uiLanguage = "english";
       let achievementLanguageManual = false;
       let syncingAchievementLanguage = false;
@@ -8814,6 +8879,7 @@
         syncAppLanguageOptions();
         await syncSteamOfficialAccountDropdown(getCachedPreferences());
         if (appLanguageSelect) appLanguageSelect.value = uiLanguage;
+        refreshAppThemeText();
         renderSchemaLanguageSelection(getCachedPreferences());
         bindSchemaLanguageSelectionEvents();
         bindSettingsProjectLinks();
@@ -8896,6 +8962,13 @@
           if (!achievementLanguageManual) {
             await applyAchievementLanguage(selectedLang, { manual: false });
           }
+        });
+      }
+
+      if (appThemeSelect) {
+        appThemeSelect.addEventListener("change", async (e) => {
+          const selectedTheme = applyAppTheme(e.target.value);
+          await window.api.savePreferences({ appTheme: selectedTheme });
         });
       }
 
@@ -11627,6 +11700,7 @@
         try {
           await loadPreferencesCached();
           const prefs = getCachedPreferences();
+          applyAppTheme(prefs.appTheme);
           const storedUiLang = normalizeLangValue(
             prefs.uiLanguage || prefs.language || "english",
           );
@@ -13418,6 +13492,7 @@
       // Function to sync values between main UI and settings menu
       function syncSettingsToModal() {
         const prefs = getCachedPreferences() || {};
+        applyAppTheme(prefs.appTheme);
         // Copy preset options
         const mainPresetDropdown = document.getElementById("presetDropdown");
         const settingsPresetDropdown = document.getElementById(
@@ -13743,6 +13818,7 @@
           overlayControllerControlModeBinding:
             getOverlayControllerControlModeBindingFromPrefs(base),
           schemaLanguages: getSchemaLanguageSelectionFromUi(),
+          appTheme: normalizeAppTheme(getVal("appThemeSelect") || base.appTheme),
           startMaximized: checkbox("settings-startMaximizedCheckbox"),
           startInTray: checkbox("settings-startInTrayCheckbox"),
           closeToTray: checkbox("settings-closeToTrayCheckbox"),

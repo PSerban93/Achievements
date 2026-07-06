@@ -1,4 +1,13 @@
 (() => {
+  const APP_THEME_VALUES = new Set(["dracula", "dark", "light", "oled", "metro", "metro-dark", "aero", "aero-dark"]);
+  const normalizeAppTheme = (value) => {
+    const theme = String(value || "").trim().toLowerCase();
+    return APP_THEME_VALUES.has(theme) ? theme : "dracula";
+  };
+  const applyAppTheme = (value) => {
+    document.documentElement.dataset.theme = normalizeAppTheme(value);
+  };
+
   const sendAction = (action) => {
     if (window.api && typeof window.api.trayAction === "function") {
       window.api.trayAction(action);
@@ -50,6 +59,18 @@
         window.i18nUi.setUiLanguage(data.language);
       }
     });
+    window.api.on("tray:theme-changed", (data) => {
+      applyAppTheme(data?.appTheme);
+    });
+  }
+
+  if (window.api && typeof window.api.loadPreferences === "function") {
+    window.api
+      .loadPreferences()
+      .then((prefs) => applyAppTheme(prefs?.appTheme))
+      .catch(() => applyAppTheme(null));
+  } else {
+    applyAppTheme(null);
   }
 
   refreshResumeStartupState().catch(() => {});
