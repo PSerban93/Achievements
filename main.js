@@ -50,6 +50,7 @@ const {
   configsDir,
   cacheDir,
 } = require("./utils/paths");
+const { normalizeAppTheme } = require("./utils/app-theme");
 const { ensureSchemaParseRuntimeReady } = require("./utils/steam-schema-parse");
 const { startPlaytimeLogWatcher } = require("./utils/playtime-log-watcher");
 const { parseGpdFile, buildSnapshotFromGpd } = require("./utils/xenia-gpd");
@@ -1131,12 +1132,6 @@ const DEFAULT_PREFERENCES = {
   steamOfficialSteamId: "",
   epicOfficialAccountId: "",
 };
-
-const APP_THEME_VALUES = new Set(["dracula", "dark", "light", "oled", "metro", "metro-dark", "aero", "aero-dark"]);
-function normalizeAppTheme(value) {
-  const theme = String(value || "").trim().toLowerCase();
-  return APP_THEME_VALUES.has(theme) ? theme : "dracula";
-}
 
 const UI_LOCALE_DIR = path.join(__dirname, "assets", "locales");
 const uiLocaleCache = new Map();

@@ -25,6 +25,7 @@
       type="font/woff2"
       crossorigin
     />
+    <script src="utils/app-theme.js"></script>
     <script>
       (() => {
         let readyMarked = false;
@@ -623,12 +624,17 @@
         timeSort: "achTable:timeSort",
         raritySort: "achTable:raritySort",
       };
-      const APP_THEME_VALUES = new Set(["dracula", "dark", "light", "oled", "metro", "metro-dark", "aero", "aero-dark"]);
       function normalizeAppTheme(value) {
-        const theme = String(value || "").trim().toLowerCase();
-        return APP_THEME_VALUES.has(theme) ? theme : "dracula";
+        if (window.AppTheme?.normalizeAppTheme) {
+          return window.AppTheme.normalizeAppTheme(value);
+        }
+        return "dracula";
       }
       function applyAppTheme(value) {
+        if (window.AppTheme?.applyAppThemeToDocument) {
+          window.AppTheme.applyAppThemeToDocument(value);
+          return;
+        }
         document.documentElement.dataset.theme = normalizeAppTheme(value);
       }
       const overlayAchievementTableViewState = {

@@ -492,6 +492,7 @@
   "settings-appScaleTitle": "Měřítko aplikace",
   "settings-appThemeTitle": "Motiv aplikace",
   "label.appThemeSelect": "Motiv aplikace:",
+  "settings-appThemePerformanceHint": "If Aero, Aero Dark, or other visual themes feel slow, turn off the Disable Hardware Acceleration option in Advanced > Rendering and restart the app.",
   "option.appTheme.dracula": "Dracula",
   "option.appTheme.dark": "Tmavý",
   "option.appTheme.light": "Světlý",

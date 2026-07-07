@@ -492,6 +492,7 @@
   "settings-appScaleTitle": "Мащаб на приложението",
   "settings-appThemeTitle": "Тема на приложението",
   "label.appThemeSelect": "Тема на приложението:",
+  "settings-appThemePerformanceHint": "If Aero, Aero Dark, or other visual themes feel slow, turn off the Disable Hardware Acceleration option in Advanced > Rendering and restart the app.",
   "option.appTheme.dracula": "Dracula",
   "option.appTheme.dark": "Тъмна",
   "option.appTheme.light": "Светла",

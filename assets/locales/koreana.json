@@ -492,6 +492,7 @@
   "settings-appScaleTitle": "앱 화면 배율",
   "settings-appThemeTitle": "앱 테마",
   "label.appThemeSelect": "앱 테마:",
+  "settings-appThemePerformanceHint": "If Aero, Aero Dark, or other visual themes feel slow, turn off the Disable Hardware Acceleration option in Advanced > Rendering and restart the app.",
   "option.appTheme.dracula": "Dracula",
   "option.appTheme.dark": "어둡게",
   "option.appTheme.light": "밝게",

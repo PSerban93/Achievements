@@ -492,6 +492,7 @@
   "settings-appScaleTitle": "Scara aplicatiei",
   "settings-appThemeTitle": "Tema aplicatiei",
   "label.appThemeSelect": "Tema aplicatiei:",
+  "settings-appThemePerformanceHint": "Daca Aero, Aero Dark sau alte teme vizuale merg greu, dezactiveaza optiunea Disable Hardware Acceleration din Advanced > Rendering si reporneste aplicatia.",
   "option.appTheme.dracula": "Dracula",
   "option.appTheme.dark": "Intunecata",
   "option.appTheme.light": "Luminoasa",

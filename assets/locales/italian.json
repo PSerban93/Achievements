@@ -492,6 +492,7 @@
   "settings-appScaleTitle": "Scala dell'app",
   "settings-appThemeTitle": "Tema app",
   "label.appThemeSelect": "Tema app:",
+  "settings-appThemePerformanceHint": "If Aero, Aero Dark, or other visual themes feel slow, turn off the Disable Hardware Acceleration option in Advanced > Rendering and restart the app.",
   "option.appTheme.dracula": "Dracula",
   "option.appTheme.dark": "Scuro",
   "option.appTheme.light": "Chiaro",

@@ -28,6 +28,41 @@
       type="font/woff2"
       crossorigin
     />
+    <script src="utils/app-theme.js"></script>
+    <script>
+      (() => {
+        const applyTheme = (value) => {
+          const theme = window.AppTheme?.applyAppThemeToDocument
+            ? window.AppTheme.applyAppThemeToDocument(value)
+            : "dracula";
+          try {
+            localStorage.setItem("appTheme", theme);
+          } catch {}
+          return theme;
+        };
+        const applyHardwareAccelerationPreference = (value) => {
+          if (window.AppTheme?.applyHardwareAccelerationPreferenceToDocument) {
+            window.AppTheme.applyHardwareAccelerationPreferenceToDocument(value);
+          }
+        };
+        applyHardwareAccelerationPreference(true);
+        try {
+          const cachedTheme = localStorage.getItem("appTheme");
+          if (cachedTheme) applyTheme(cachedTheme);
+        } catch {}
+        if (window.api && typeof window.api.loadPreferences === "function") {
+          window.api
+            .loadPreferences()
+            .then((prefs) => {
+              applyTheme(prefs?.appTheme);
+              applyHardwareAccelerationPreference(
+                prefs?.disableHardwareAcceleration,
+              );
+            })
+            .catch(() => {});
+        }
+      })();
+    </script>
     <script>
       (() => {
         let readyMarked = false;
@@ -144,7 +179,7 @@
 
       .ach-icon {
         border-radius: var(--app-radius-md);
-        border: 1px solid #44475a;
+        border: 1px solid var(--app-border-subtle);
         transition:
           box-shadow 0.2s ease,
           border-color 0.2s ease;
@@ -211,7 +246,7 @@
 
       .progress-bar {
         height: 5px;
-        background-color: #44475a;
+        background-color: var(--app-surface);
         border-radius: var(--app-radius-xs);
         overflow: hidden;
         margin-top: 4px;
@@ -261,9 +296,9 @@
 
       .settings-link-btn:hover {
         transform: translateY(-1px);
-        border-color: rgba(139, 233, 253, 0.65);
-        background: rgba(80, 85, 112, 0.72);
-        color: #8be9fd;
+        border-color: color-mix(in srgb, var(--app-accent-2) 65%, transparent);
+        background: var(--app-hover-bg);
+        color: var(--app-accent-2);
       }
 
       .settings-link-btn:focus-visible {
@@ -705,6 +740,15 @@
                       Aero Dark
                     </option>
                   </select>
+                </div>
+                <div
+                  id="settings-appThemePerformanceHint"
+                  class="hint"
+                  style="margin-top: -8px"
+                >
+                  If Aero, Aero Dark, or other visual themes feel slow, turn off
+                  the Disable Hardware Acceleration option in Advanced &gt;
+                  Rendering and restart the app.
                 </div>
               </div>
               <hr style="margin: 18px 0 14px" />
@@ -3513,7 +3557,7 @@
             <div
               style="
                 width: 100%;
-                background: #ccc;
+                background: var(--app-border-subtle);
                 border-radius: var(--app-radius-md);
                 height: 12px;
                 margin-top: -10px;
@@ -4474,21 +4518,39 @@
 
       window.__preferencesCache = window.__preferencesCache || null;
       window.__preferencesLoadPromise = null;
-      const APP_THEME_VALUES = new Set(["dracula", "dark", "light", "oled", "metro", "metro-dark", "aero", "aero-dark"]);
       const normalizeAppTheme = (value) => {
-        const theme = String(value || "").trim().toLowerCase();
-        return APP_THEME_VALUES.has(theme) ? theme : "dracula";
+        if (window.AppTheme?.normalizeAppTheme) {
+          return window.AppTheme.normalizeAppTheme(value);
+        }
+        return "dracula";
       };
       function applyAppTheme(value) {
-        const theme = normalizeAppTheme(value);
-        document.documentElement.dataset.theme = theme;
+        const theme = window.AppTheme?.applyAppThemeToDocument
+          ? window.AppTheme.applyAppThemeToDocument(value)
+          : normalizeAppTheme(value);
+        try {
+          localStorage.setItem("appTheme", theme);
+        } catch {}
         const select = document.getElementById("appThemeSelect");
         if (select) select.value = theme;
         return theme;
       }
+      function applyHardwareAccelerationPreference(value) {
+        if (window.AppTheme?.applyHardwareAccelerationPreferenceToDocument) {
+          return window.AppTheme.applyHardwareAccelerationPreferenceToDocument(
+            value,
+          );
+        }
+        const disabled = value !== false;
+        document.documentElement.dataset.hardwareAcceleration = disabled
+          ? "off"
+          : "on";
+        return disabled ? "off" : "on";
+      }
       function refreshAppThemeText() {
         const title = document.getElementById("settings-appThemeTitle");
         const label = document.getElementById("label.appThemeSelect");
+        const hint = document.getElementById("settings-appThemePerformanceHint");
         const dracula = document.getElementById("option.appTheme.dracula");
         const dark = document.getElementById("option.appTheme.dark");
         const light = document.getElementById("option.appTheme.light");
@@ -4499,6 +4561,12 @@
         const aeroDark = document.getElementById("option.appTheme.aeroDark");
         if (title) title.textContent = tUi("settings-appThemeTitle", "App Theme");
         if (label) label.textContent = tUi("label.appThemeSelect", "App Theme:");
+        if (hint) {
+          hint.textContent = tUi(
+            "settings-appThemePerformanceHint",
+            "If Aero, Aero Dark, or other visual themes feel slow, turn off the Disable Hardware Acceleration option in Advanced > Rendering and restart the app.",
+          );
+        }
         if (dracula) dracula.textContent = tUi("option.appTheme.dracula", "Dracula");
         if (dark) dark.textContent = tUi("option.appTheme.dark", "Dark");
         if (light) light.textContent = tUi("option.appTheme.light", "Light");
@@ -4665,6 +4733,16 @@
             if (Object.prototype.hasOwnProperty.call(pending, "appTheme")) {
               applyAppTheme(pending.appTheme);
             }
+            if (
+              Object.prototype.hasOwnProperty.call(
+                pending,
+                "disableHardwareAcceleration",
+              )
+            ) {
+              applyHardwareAccelerationPreference(
+                pending.disableHardwareAcceleration,
+              );
+            }
           } catch (err) {
             console.warn(
               tUi(
@@ -4676,6 +4754,15 @@
           }
           return result;
         };
+      }
+
+      if (!window.__appThemeEventBound && window.api?.on) {
+        window.__appThemeEventBound = true;
+        window.api.on("tray:theme-changed", (data) => {
+          if (data && Object.prototype.hasOwnProperty.call(data, "appTheme")) {
+            applyAppTheme(data.appTheme);
+          }
+        });
       }
 
       function patchApiWithCacheRefresh(target, method) {
@@ -7947,9 +8034,9 @@
       function updateScaleLabel() {
         const value = parseFloat(scaleSlider.value);
         scaleValue.textContent = `${Math.round(value * 100)}%`;
-        scaleSlider.style.background = `linear-gradient(to right, #007bff 0%, #007bff ${
+        scaleSlider.style.background = `linear-gradient(to right, var(--app-accent-2) 0%, var(--app-accent-2) ${
           value * 100
-        }%, #ccc ${value * 100}%, #ccc 100%)`;
+        }%, var(--app-border-subtle) ${value * 100}%, var(--app-border-subtle) 100%)`;
       }
       scaleSlider.addEventListener("input", () => {
         updateScaleLabel();
@@ -11701,6 +11788,9 @@
           await loadPreferencesCached();
           const prefs = getCachedPreferences();
           applyAppTheme(prefs.appTheme);
+          applyHardwareAccelerationPreference(
+            prefs?.disableHardwareAcceleration,
+          );
           const storedUiLang = normalizeLangValue(
             prefs.uiLanguage || prefs.language || "english",
           );
@@ -12332,6 +12422,7 @@
               ? true
               : !!prefs.disableHardwareAcceleration;
           hwAccelEl.addEventListener("change", async (e) => {
+            applyHardwareAccelerationPreference(e.target.checked);
             await window.api.savePreferences({
               disableHardwareAcceleration: e.target.checked,
             });
@@ -13262,7 +13353,7 @@
         const percentage = Math.round(value * 100);
         settingsScaleValue.textContent = value.toFixed(2);
         settingsScaleValueDisplay.textContent = `${percentage}%`;
-        settingsScaleSlider.style.background = `linear-gradient(to right, var(--dracula-cyan) 0%, var(--dracula-cyan) ${percentage}%, #ccc ${percentage}%, #ccc 100%)`;
+        settingsScaleSlider.style.background = `linear-gradient(to right, var(--app-accent-2) 0%, var(--app-accent-2) ${percentage}%, var(--app-border-subtle) ${percentage}%, var(--app-border-subtle) 100%)`;
       }
 
       function updateSettingsPlaytimeScaleLabel() {
@@ -13278,7 +13369,7 @@
         const percentage = Math.round(safeValue * 100);
         settingsPlaytimeScaleValue.textContent = safeValue.toFixed(2);
         settingsPlaytimeScaleValueDisplay.textContent = `${percentage}%`;
-        settingsPlaytimeScaleSlider.style.background = `linear-gradient(to right, var(--dracula-cyan) 0%, var(--dracula-cyan) ${percentage}%, #ccc ${percentage}%, #ccc 100%)`;
+        settingsPlaytimeScaleSlider.style.background = `linear-gradient(to right, var(--app-accent-2) 0%, var(--app-accent-2) ${percentage}%, var(--app-border-subtle) ${percentage}%, var(--app-border-subtle) 100%)`;
       }
 
       function updateSettingsDurationLabel() {
@@ -13286,14 +13377,14 @@
         if (!Number.isFinite(value) || value <= 0) {
           settingsDurationValue.textContent = "Auto";
           settingsDurationValueDisplay.textContent = "Auto";
-          settingsDurationSlider.style.background = `linear-gradient(to right, var(--dracula-cyan) 0%, #ccc 0%, #ccc 100%)`;
+          settingsDurationSlider.style.background = `linear-gradient(to right, var(--app-accent-2) 0%, var(--app-border-subtle) 0%, var(--app-border-subtle) 100%)`;
           return;
         }
         const seconds = Math.max(0.5, value);
         settingsDurationValue.textContent = `${seconds.toFixed(1)}s`;
         settingsDurationValueDisplay.textContent = `${seconds.toFixed(1)}s`;
         const percentage = Math.round((seconds / 10) * 100);
-        settingsDurationSlider.style.background = `linear-gradient(to right, var(--dracula-cyan) 0%, var(--dracula-cyan) ${percentage}%, #ccc ${percentage}%, #ccc 100%)`;
+        settingsDurationSlider.style.background = `linear-gradient(to right, var(--app-accent-2) 0%, var(--app-accent-2) ${percentage}%, var(--app-border-subtle) ${percentage}%, var(--app-border-subtle) 100%)`;
       }
 
       function updateSettingsSoundVolumeLabel() {
@@ -13302,7 +13393,7 @@
         settingsSoundVolumeValue.textContent = `${percent}%`;
         settingsSoundVolumeValueDisplay.textContent = `${percent}%`;
         const percentage = Math.round((percent / 200) * 100);
-        settingsSoundVolumeSlider.style.background = `linear-gradient(to right, var(--dracula-cyan) 0%, var(--dracula-cyan) ${percentage}%, #ccc ${percentage}%, #ccc 100%)`;
+        settingsSoundVolumeSlider.style.background = `linear-gradient(to right, var(--app-accent-2) 0%, var(--app-accent-2) ${percentage}%, var(--app-border-subtle) ${percentage}%, var(--app-border-subtle) 100%)`;
       }
 
       updateSettingsDurationLabel();
@@ -13493,6 +13584,7 @@
       function syncSettingsToModal() {
         const prefs = getCachedPreferences() || {};
         applyAppTheme(prefs.appTheme);
+        applyHardwareAccelerationPreference(prefs?.disableHardwareAcceleration);
         // Copy preset options
         const mainPresetDropdown = document.getElementById("presetDropdown");
         const settingsPresetDropdown = document.getElementById(

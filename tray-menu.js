@@ -1,12 +1,26 @@
 (() => {
-  const APP_THEME_VALUES = new Set(["dracula", "dark", "light", "oled", "metro", "metro-dark", "aero", "aero-dark"]);
   const normalizeAppTheme = (value) => {
-    const theme = String(value || "").trim().toLowerCase();
-    return APP_THEME_VALUES.has(theme) ? theme : "dracula";
+    if (window.AppTheme?.normalizeAppTheme) {
+      return window.AppTheme.normalizeAppTheme(value);
+    }
+    return "dracula";
   };
   const applyAppTheme = (value) => {
+    if (window.AppTheme?.applyAppThemeToDocument) {
+      window.AppTheme.applyAppThemeToDocument(value);
+      return;
+    }
     document.documentElement.dataset.theme = normalizeAppTheme(value);
   };
+  const applyHardwareAccelerationPreference = (value) => {
+    if (window.AppTheme?.applyHardwareAccelerationPreferenceToDocument) {
+      window.AppTheme.applyHardwareAccelerationPreferenceToDocument(value);
+      return;
+    }
+    document.documentElement.dataset.hardwareAcceleration =
+      value === false ? "on" : "off";
+  };
+  applyHardwareAccelerationPreference(true);
 
   const sendAction = (action) => {
     if (window.api && typeof window.api.trayAction === "function") {
@@ -67,7 +81,12 @@
   if (window.api && typeof window.api.loadPreferences === "function") {
     window.api
       .loadPreferences()
-      .then((prefs) => applyAppTheme(prefs?.appTheme))
+      .then((prefs) => {
+        applyAppTheme(prefs?.appTheme);
+        applyHardwareAccelerationPreference(
+          prefs?.disableHardwareAcceleration,
+        );
+      })
       .catch(() => applyAppTheme(null));
   } else {
     applyAppTheme(null);
