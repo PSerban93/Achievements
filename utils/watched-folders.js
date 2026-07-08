@@ -996,6 +996,8 @@ module.exports = function makeWatchedFolders({
   function pickExistingSeedTargetForMeta(meta, candidates) {
     const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
     if (!list.length) return "";
+    const isXenia = isXeniaMeta(meta);
+    const appid = String(meta?.appid || "").trim();
 
     let bestTarget = "";
     let bestScore = 0;
@@ -1007,6 +1009,9 @@ module.exports = function makeWatchedFolders({
         continue;
       }
       if (!stat?.isFile?.()) continue;
+      if (isXenia && !isExpectedXeniaGpdFile(meta, appid, candidate)) {
+        continue;
+      }
 
       const score = scoreMetaForPath(meta, candidate);
       if (score > bestScore) {
@@ -2756,6 +2761,19 @@ module.exports = function makeWatchedFolders({
     return normalizePlatform(meta?.platform) === "xenia";
   }
 
+  function getExpectedXeniaGpdBaseName(meta, appid) {
+    const id = String(meta?.appid || appid || "").trim().toLowerCase();
+    return id ? `${id}.gpd` : "";
+  }
+
+  function isExpectedXeniaGpdFile(meta, appid, filePath) {
+    if (!filePath) return false;
+    const base = path.basename(filePath).toLowerCase();
+    if (!base.endsWith(".gpd")) return false;
+    const expected = getExpectedXeniaGpdBaseName(meta, appid);
+    return expected ? base === expected : true;
+  }
+
   function isRpcs3Meta(meta) {
     return normalizePlatform(meta?.platform) === "rpcs3";
   }
@@ -3249,14 +3267,28 @@ module.exports = function makeWatchedFolders({
   function resolveGpdPathForMeta(meta) {
     if (!meta) return "";
     const direct = typeof meta.gpd_path === "string" ? meta.gpd_path : "";
-    if (direct && fs.existsSync(direct)) return direct;
+    const expectedBase = getExpectedXeniaGpdBaseName(meta);
+    if (
+      direct &&
+      fs.existsSync(direct) &&
+      (!expectedBase || path.basename(direct).toLowerCase() === expectedBase)
+    ) {
+      return direct;
+    }
     const base = meta.save_path || "";
     const appid = String(meta.appid || "").trim();
     if (base && appid) {
       const candidate = path.join(base, `${appid}.gpd`);
       if (fs.existsSync(candidate)) return candidate;
+      try {
+        const files = fs.readdirSync(base);
+        const found = files.find(
+          (f) => f.toLowerCase() === `${appid.toLowerCase()}.gpd`,
+        );
+        if (found) return path.join(base, found);
+      } catch {}
     }
-    if (base) {
+    if (base && !appid) {
       try {
         const files = fs.readdirSync(base);
         const found = files.find((f) => f.toLowerCase().endsWith(".gpd"));
@@ -4666,7 +4698,7 @@ module.exports = function makeWatchedFolders({
     if (isLumaPlay) {
       // Registry-backed source; no file suffix checks.
     } else if (isXenia) {
-      if (!base.endsWith(".gpd")) return;
+      if (!isExpectedXeniaGpdFile(meta, appid, filePath)) return;
     } else if (isRpcs3) {
       if (base !== "tropusr.dat") return;
     } else if (isPs4) {
@@ -5387,12 +5419,33 @@ module.exports = function makeWatchedFolders({
   function runInitialSeedForMeta(id, meta, candidates, options = {}) {
     const suppressInitialNotify = options.suppressInitialNotify === true;
     const bornInBoot = options.bornInBoot === true;
+    const xeniaTargetBeforeSeed = isXeniaMeta(meta)
+      ? pickExistingSeedTargetForMeta(meta, candidates)
+      : "";
+    let xeniaCachedBeforeSeed = null;
+    if (xeniaTargetBeforeSeed && typeof getCachedSnapshot === "function") {
+      try {
+        const cached = getCachedSnapshot(
+          meta?.name || id,
+          meta?.platform || null,
+          {
+            appid: id,
+            filePath: xeniaTargetBeforeSeed,
+            savePath: xeniaTargetBeforeSeed || meta?.save_path || null,
+          },
+        );
+        if (cached && typeof cached === "object" && !Array.isArray(cached)) {
+          xeniaCachedBeforeSeed = cached;
+        }
+      } catch {}
+    }
     seedInitialSnapshot(id, meta, candidates, true, {
       suppressInitialNotify,
       bornInBoot,
     });
     if (pendingInitialNotify.has(meta.name)) {
-      const existingTarget = pickExistingSeedTargetForMeta(meta, candidates);
+      const existingTarget =
+        xeniaTargetBeforeSeed || pickExistingSeedTargetForMeta(meta, candidates);
       pendingInitialNotify.delete(meta.name);
       if (existingTarget) {
         const fromUnblock = justUnblocked.has(id);
@@ -5405,10 +5458,24 @@ module.exports = function makeWatchedFolders({
               target: existingTarget,
             });
             const doEval = async (retryFlag = false) => {
+              const isXeniaInitialNotify = isXeniaMeta(preferredMeta);
+              if (isXeniaInitialNotify && xeniaCachedBeforeSeed) {
+                lastSnapshot.set(
+                  makeSnapshotKey(preferredMeta, id, {
+                    filePath: existingTarget,
+                    savePath: existingTarget,
+                  }),
+                  xeniaCachedBeforeSeed,
+                );
+              }
               const evalOpts = {
                 initial: true,
                 retry: retryFlag,
-                forceEmptyPrev: fromUnblock ? false : true,
+                forceEmptyPrev: fromUnblock
+                  ? false
+                  : isXeniaInitialNotify
+                    ? !xeniaCachedBeforeSeed
+                    : true,
                 preserveUnblockAutoSelectSuppression: fromUnblock,
               };
               const result = await evaluateFile(
@@ -5848,6 +5915,9 @@ module.exports = function makeWatchedFolders({
 
     const locateAndPersistSavePath = () => {
       const isXenia = isXeniaMeta(meta);
+      const expectedXeniaGpd = isXenia
+        ? getExpectedXeniaGpdBaseName(meta, appid)
+        : "";
       const names = [
         "achievements.ini",
         "achievements.json",
@@ -5864,7 +5934,10 @@ module.exports = function makeWatchedFolders({
           for (const ent of entries) {
             if (
               ent.isFile() &&
-              ((isXenia && ent.name.toLowerCase().endsWith(".gpd")) ||
+              ((isXenia &&
+                ent.name.toLowerCase().endsWith(".gpd") &&
+                (!expectedXeniaGpd ||
+                  ent.name.toLowerCase() === expectedXeniaGpd)) ||
                 (!isXenia && targetLc.includes(ent.name.toLowerCase())))
             ) {
               return path.join(dir, ent.name);
@@ -5966,6 +6039,8 @@ module.exports = function makeWatchedFolders({
               return;
             }
           }
+        } else if (isXeniaMeta(meta)) {
+          if (!isExpectedXeniaGpdFile(meta, appid, filePath)) return;
         } else if (isGogOfficialMeta(meta)) {
           const normFile = path.normalize(filePath).toLowerCase();
           const resolved = resolveGogOfficialGameplayDbForConfig(meta);
@@ -7435,6 +7510,9 @@ module.exports = function makeWatchedFolders({
 
     for (const fp of orderedCandidates) {
       if (!fp || !fs.existsSync(fp)) continue;
+      if (isXeniaMeta(meta) && !isExpectedXeniaGpdFile(meta, appid, fp)) {
+        continue;
+      }
       try {
         const cacheSavePathForFp =
           isPs4Meta(meta) && isPs4ProgressXmlPath(fp)
