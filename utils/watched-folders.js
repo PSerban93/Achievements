@@ -67,8 +67,23 @@ const GAMEPLAY_DB_WAL_NAME = `${GAMEPLAY_DB_NAME}-wal`;
 const GAMEPLAY_DB_SHM_NAME = `${GAMEPLAY_DB_NAME}-shm`;
 
 const watcherLogger = createLogger("watcher");
+function getInvalidAutoAppIdReason(name) {
+  const value = String(name || "").trim();
+  if (!value) return "empty";
+  if (!/^[0-9a-fA-F]+$/.test(value)) return "";
+  if (value.length === 1) return "single-character-id";
+  if (/^0+$/.test(value)) return "zero-only-id";
+  if (/^0{4,}/.test(value)) return "leading-zero-padding";
+  return "";
+}
+
+function isIgnoredAutoAppId(name) {
+  return !!getInvalidAutoAppIdReason(name);
+}
+
 function isAppIdName(name) {
-  return /^[0-9a-fA-F]+$/.test(String(name || ""));
+  const value = String(name || "").trim();
+  return /^[0-9a-fA-F]+$/.test(value) && !isIgnoredAutoAppId(value);
 }
 const STRICT_ROOT_PROFILES = [
   {
@@ -2460,26 +2475,37 @@ module.exports = function makeWatchedFolders({
     const userFolders = Array.isArray(prefs.watchedFolders)
       ? prefs.watchedFolders
       : [];
+    const userBlockedFolders = Array.isArray(prefs.blockedWatchedFolders)
+      ? prefs.blockedWatchedFolders
+      : [];
     const blocked = getBlockedFoldersSet();
 
     const seen = new Map();
-    [...DEFAULT_WATCH_ROOTS, ...userFolders].filter(Boolean).forEach((dir) => {
-      const real = normalizePrefPath(dir);
-      if (!real || seen.has(real)) return;
-      const exists = (() => {
-        try {
-          return fs.existsSync(real);
-        } catch {
-          return false;
-        }
-      })();
-      seen.set(real, {
-        path: real,
-        blocked: blocked.has(real),
-        exists,
-        isDefault: DEFAULT_WATCH_SET.has(real),
+    [
+      ...DEFAULT_WATCH_ROOTS,
+      ...userFolders,
+      ...userBlockedFolders
+        .map(normalizePrefPath)
+        .filter((dir) => dir && !DEFAULT_BLOCKED_SET.has(dir)),
+    ]
+      .filter(Boolean)
+      .forEach((dir) => {
+        const real = normalizePrefPath(dir);
+        if (!real || seen.has(real)) return;
+        const exists = (() => {
+          try {
+            return fs.existsSync(real);
+          } catch {
+            return false;
+          }
+        })();
+        seen.set(real, {
+          path: real,
+          blocked: blocked.has(real),
+          exists,
+          isDefault: DEFAULT_WATCH_SET.has(real),
+        });
       });
-    });
     return Array.from(seen.values());
   }
 
@@ -6863,6 +6889,16 @@ module.exports = function makeWatchedFolders({
   async function generateOneAppId(appid, appDir, opts = {}) {
     appid = String(appid);
     const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
+    const invalidAutoAppIdReason = getInvalidAutoAppIdReason(appid);
+    if (invalidAutoAppIdReason) {
+      watcherLogger.info("watcher:generate-skipped-invalid-appid", {
+        appid,
+        platform: desiredPlatform || null,
+        path: appDir || null,
+        reason: invalidAutoAppIdReason,
+      });
+      return { created: false, reason: "invalid-appid" };
+    }
     const externalProgressHandler =
       typeof opts.onGenerationProgress === "function"
         ? opts.onGenerationProgress
@@ -10219,6 +10255,15 @@ module.exports = function makeWatchedFolders({
         const looksPs4 =
           /^cusa\d+/i.test(base) || base.toLowerCase() === "trophy00";
         const looksRpcs3 = /^npwr\d+/i.test(base);
+        const invalidAutoAppIdReason = getInvalidAutoAppIdReason(base);
+        if (invalidAutoAppIdReason && !looksPs4 && !looksRpcs3) {
+          watcherLogger.info("watcher:addDir-skip-invalid-appid", {
+            appid: String(base),
+            path: dir,
+            reason: invalidAutoAppIdReason,
+          });
+          return;
+        }
         if (!isAppIdName(base) && !looksPs4 && !looksRpcs3) return;
 
         // PS4/RPCS3: let the dedicated scan handle it (avoid generateConfigForAppId, which expects a numeric appid)
@@ -10632,7 +10677,9 @@ module.exports = function makeWatchedFolders({
           folders: getWatchedFolders({ includeMeta: true }),
         };
       }
-      const cur = getWatchedFolders();
+      const cur = getUserWatchedFoldersRaw()
+        .map(normalizePrefPath)
+        .filter(Boolean);
       if (!cur.includes(p)) saveWatchedFolders([...cur, p]);
       startFolderWatcher(p);
       await scanRootOnce(p, {
@@ -10728,6 +10775,12 @@ module.exports = function makeWatchedFolders({
       const blocked = getBlockedFoldersSet();
       blocked.delete(target);
       saveBlockedFolders([...blocked]);
+      const cur = getUserWatchedFoldersRaw()
+        .map(normalizePrefPath)
+        .filter(Boolean);
+      if (target && !cur.includes(target)) {
+        saveWatchedFolders([...cur, target]);
+      }
       await indexExistingConfigsSync();
       startFolderWatcher(target, { initialScan: false });
       await scanRootOnce(target, { suppressInitialNotify: true });

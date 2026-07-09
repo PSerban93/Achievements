@@ -547,7 +547,7 @@
   },
   {
     "uplay_id": "110",
-    "uplay_name": "Tom Clancy's Splinter Cell Double Age",
+    "uplay_name": "Tom Clancy's Splinter Cell Double Agent",
     "steam_appid": 13580,
     "steam_name": "Tom Clancy's Splinter Cell Double Agent®"
   },
@@ -926,14 +926,14 @@
   {
     "uplay_id": "11786",
     "uplay_name": "The Settlers 5: Heritage of Kings - History Edition",
-    "steam_appid": null,
-    "steam_name": null
+    "steam_appid": 965300,
+    "steam_name": "The Settlers® : Heritage of Kings - History Edition"
   },
   {
     "uplay_id": "11787",
     "uplay_name": "The Settlers 6 - History Edition",
-    "steam_appid": null,
-    "steam_name": null
+    "steam_appid": 965310,
+    "steam_name": "The Settlers® : Rise of an Empire - History Edition"
   },
   {
     "uplay_id": "11788",
@@ -1022,8 +1022,8 @@
   {
     "uplay_id": "87",
     "uplay_name": "Heroes of Might and Magic V",
-    "steam_appid": null,
-    "steam_name": null
+    "steam_appid": 15170,
+    "steam_name": "Heroes of Might & Magic V"
   },
   {
     "uplay_id": "348",
@@ -1786,5 +1786,83 @@
     "uplay_name": "Anno 2205 (unknown Version)",
     "steam_appid": 375910,
     "steam_name": "Anno 2205™"
+  },
+  {
+    "uplay_id": "5481",
+    "uplay_name": "Assassin's Creed 2 (Uplay Connect)",
+    "steam_appid": 33230,
+    "steam_name": "Assassin's Creed 2"
+  },
+  {
+    "uplay_id": "65043",
+    "uplay_name": "Assassin's Creed Black Flag Resynced",
+    "steam_appid": 3751950,
+    "steam_name": "Assassin's Creed Black Flag Resynced"
+  },
+  {
+    "uplay_id": "314",
+    "uplay_name": "Tom Clancy's Splinter Cell Pandora Tomorrow (Uplay Connect)",
+    "steam_appid": 3929740,
+    "steam_name": "Tom Clancy's Splinter Cell: Pandora Tomorrow"
+  },
+  {
+    "uplay_id": "444",
+    "uplay_name": "Tom Clancy's Splinter Cell Blacklist (Uplay Connect)",
+    "steam_appid": 235600,
+    "steam_name": "Tom Clancy’s Splinter Cell Blacklist"
+  },
+  {
+    "uplay_id": "674",
+    "uplay_name": "Tom Clancy's Ghost Recon Future Soldier (Uplay Connect)",
+    "steam_appid": 212630,
+    "steam_name": "Tom Clancy's Ghost Recon: Future Soldier™"
+  },
+  {
+    "uplay_id": "8000",
+    "uplay_name": "Tom Clancy's The Division Resurgence (Uplay Connect)",
+    "steam_appid": null,
+    "steam_name": null
+  },
+  {
+    "uplay_id": "6220",
+    "uplay_name": "Rayman 30th Anniversary Edition (Uplay Connect)",
+    "steam_appid": 4094670,
+    "steam_name": "Rayman: 30th Anniversary Edition"
+  },
+  {
+    "uplay_id": "426",
+    "uplay_name": "Might & Magic X Legacy (Uplay Connect)",
+    "steam_appid": 238750,
+    "steam_name": "Might & Magic X - Legacy"
+  },
+  {
+    "uplay_id": "2741",
+    "uplay_name": "Trials of the Blood Dragon (Uplay Connect)",
+    "steam_appid": 435480,
+    "steam_name": "Trials of the Blood Dragon"
+  },
+  {
+    "uplay_id": "926",
+    "uplay_name": "Monopoly (Uplay Connect)",
+    "steam_appid": 2929170,
+    "steam_name": "New Monopoly"
+  },
+  {
+    "uplay_id": "5776",
+    "uplay_name": "BattleCore Arena (Uplay Connect)",
+    "steam_appid": 2613870,
+    "steam_name": "BattleCore Arena"
+  },
+  {
+    "uplay_id": "16382",
+    "uplay_name": "Brawlhalla (Uplay Connect)",
+    "steam_appid": 291550,
+    "steam_name": "Brawlhalla"
+  },
+  {
+    "uplay_id": "17965",
+    "uplay_name": "OddBallers (Uplay Connect)",
+    "steam_appid": 1064070,
+    "steam_name": "OddBallers"
   }
 ]

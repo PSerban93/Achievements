@@ -10,14 +10,14 @@ const os = require("os");
 const HTTP_TIMEOUT_MS = 15000;
 
 const UPLAY_URL =
-  "https://raw.githubusercontent.com/Haoose/UPLAY_GAME_ID/master/README.md";
+  "https://raw.githubusercontent.com/PSerban93/UPLAY_GAME_ID/master/README.md";
 const STEAM_URL =
   "https://raw.githubusercontent.com/jsnli/steamappidlist/refs/heads/master/data/games_appid.json";
 const DEFAULT_STEAM_DB_ASSET = path.join(
   __dirname,
   "..",
   "assets",
-  "steamdb.json"
+  "steamdb.json",
 );
 const DEFAULT_STEAM_DB_RUNTIME = (() => {
   const base =
@@ -28,7 +28,7 @@ const DEFAULT_STEAM_DB_RUNTIME = (() => {
   return path.join(base, "Achievements", "steamdb.json");
 })();
 const STEAM_DB_PATH = path.resolve(
-  process.env.STEAM_DB_PATH || DEFAULT_STEAM_DB_RUNTIME
+  process.env.STEAM_DB_PATH || DEFAULT_STEAM_DB_RUNTIME,
 );
 const MIN_TOKEN_SCORE = 0.72;
 
@@ -39,7 +39,7 @@ const outputFlag = process.argv
 const OUTPUT_FILE = path.resolve(
   outputFlag
     ? outputFlag.slice("--output=".length)
-    : process.env.UPLAY_STEAM_MAP_PATH || DEFAULT_OUTPUT
+    : process.env.UPLAY_STEAM_MAP_PATH || DEFAULT_OUTPUT,
 );
 
 const STOP_WORDS = new Set([
@@ -133,7 +133,7 @@ function persistSteamDb(apps) {
     fs.mkdirSync(path.dirname(STEAM_DB_PATH), { recursive: true });
     fs.writeFileSync(STEAM_DB_PATH, JSON.stringify(apps), "utf8");
     console.log(
-      `💾 updated Steam DB: ${apps.length} entries -> ${STEAM_DB_PATH}`
+      `💾 updated Steam DB: ${apps.length} entries -> ${STEAM_DB_PATH}`,
     );
   } catch (err) {
     console.warn("⚠️ Failed to persist steamdb.json:", err.message);
@@ -189,7 +189,7 @@ function appendSteamDbEntries(entries) {
         JSON.stringify({
           appid: Number(row.appid),
           name: String(row.name || ""),
-        })
+        }),
       )
       .join(",");
     if (!payload) return true;
@@ -201,7 +201,7 @@ function appendSteamDbEntries(entries) {
     fs.ftruncateSync(fd, lastPos + Buffer.byteLength(finalChunk));
 
     console.log(
-      `💾 appended Steam DB: +${entries.length} entries -> ${STEAM_DB_PATH}`
+      `💾 appended Steam DB: +${entries.length} entries -> ${STEAM_DB_PATH}`,
     );
     return true;
   } catch (err) {
@@ -244,6 +244,7 @@ function normalizeBase(str) {
     .replace(/\p{Diacritic}/gu, "")
     .replace(/[’‘`]/g, "'")
     .replace(/[™©®]/g, "")
+    .replace(/&/g, " and ")
     .replace(/[^a-z0-9&'():/+\- ]/gi, " ")
     .toLowerCase()
     .replace(/\s+/g, " ")
@@ -254,11 +255,11 @@ function stripEdition(txt) {
   return txt
     .replace(
       /\s*\((ru|jpn|jp|cz|asia|steam version|steam|uplay version(?:\/australia)?|australia|kr|cn)\)\s*/gi,
-      ""
+      "",
     )
     .replace(
       /\b(ultimate|gold|deluxe|definitive|complete|remastered|hd|pack)\b/gi,
-      ""
+      "",
     )
     .replace(/\s+/g, " ")
     .trim();
@@ -354,7 +355,7 @@ function generateVariants(rawName) {
   const cleaned = stripParentheses(
     String(rawName || "")
       .replace(/[™®]/g, "")
-      .trim()
+      .trim(),
   );
   const base = stripEdition(cleaned);
 
@@ -366,23 +367,6 @@ function generateVariants(rawName) {
 
   addVariant(base);
   addVariant(stripEdition(stripParentheses(rawName)));
-
-  const withoutTomClancy = base.replace(/^tom clancy'?s\s+/i, "").trim();
-  addVariant(withoutTomClancy);
-
-  const withoutSeries = base.replace(/ghost\s+recon/gi, "").trim();
-  addVariant(withoutSeries);
-
-  const tokens = base.split(/\s+/).filter(Boolean);
-  for (let i = 0; i < tokens.length; i++) {
-    addVariant(tokens.slice(i).join(" "));
-  }
-  for (let len = tokens.length; len > 1; len--) {
-    addVariant(tokens.slice(0, len).join(" "));
-  }
-  if (tokens.length >= 2) {
-    addVariant(tokens.slice(-2).join(" "));
-  }
 
   return Array.from(variants);
 }
@@ -474,7 +458,7 @@ function scoreCandidateForVariant(
     variantLength,
     sourceBonus = 0,
     requireLooseScore = false,
-  }
+  },
 ) {
   if (!app) return null;
   if (!containsAllDistinctiveTokens(app, requiredTokens)) return null;
@@ -529,7 +513,7 @@ function scoreCandidateList(bestByAppId, list, context) {
 }
 
 function tryMatchVariant(variant, indexes, baseTokens) {
-  const { byExact, byLoose, bySignature, tokenIndex, steamApps } = indexes;
+  const { byExact, byLoose, bySignature } = indexes;
   const norm = normalizeUplayName(variant);
   const loose = normalizeLoose(variant);
   const tokens = tokenizeImportant(variant);
@@ -566,35 +550,6 @@ function tryMatchVariant(variant, indexes, baseTokens) {
     });
   }
 
-  const normMatches = norm
-    ? steamApps.filter((app) => app.normalized.startsWith(norm))
-    : [];
-  scoreCandidateList(bestByAppId, normMatches, {
-    ...scoreContext,
-    sourceBonus: 2400,
-  });
-
-  const looseMatches = loose
-    ? steamApps.filter((app) => app.loose.startsWith(loose))
-    : [];
-  scoreCandidateList(bestByAppId, looseMatches, {
-    ...scoreContext,
-    sourceBonus: 1800,
-  });
-
-  if (baseTokens.length >= 2) {
-    const tokenCandidates = collectTokenCandidates(tokens, tokenIndex);
-    const unique = collectUniqueApps(filterPreferred(tokenCandidates));
-    for (const app of unique) {
-      const scored = scoreCandidateForVariant(app, {
-        ...scoreContext,
-        sourceBonus: 0,
-        requireLooseScore: true,
-      });
-      if (scored) updateBestCandidate(bestByAppId, scored);
-    }
-  }
-
   let best = null;
   for (const scored of bestByAppId.values()) {
     if (
@@ -610,18 +565,24 @@ function tryMatchVariant(variant, indexes, baseTokens) {
 }
 
 function findBestSteamForUplay(uplayName, indexes) {
-  const baseTokens = buildDistinctiveTokens(uplayName);
+  const cleanedBase = stripEdition(stripParentheses(uplayName));
+  const baseTokens = buildDistinctiveTokens(cleanedBase || uplayName);
   const variants = generateVariants(uplayName);
   let best = null;
   for (const variant of variants) {
-    const match = tryMatchVariant(variant, indexes, baseTokens);
+    const variantBase = stripEdition(stripParentheses(variant));
+    const variantBaseTokens = buildDistinctiveTokens(variantBase || variant);
+    const effectiveBaseTokens = variantBaseTokens.length
+      ? variantBaseTokens
+      : baseTokens;
+    const match = tryMatchVariant(variant, indexes, effectiveBaseTokens);
     if (!match) continue;
     const tokens = tokenizeImportant(variant);
     const requiredTokens = buildDistinctiveTokens(variant);
     const scored = scoreCandidateForVariant(match, {
       variantTokens: tokens,
       requiredTokens,
-      baseTokens,
+      baseTokens: effectiveBaseTokens,
       variantLength: variant.length,
     });
     if (!scored) continue;
@@ -650,7 +611,10 @@ async function fetchUplayList() {
   for (const line of lines) {
     const match = line.match(/^\s*(\d+)\s*-\s*(.+?)\s*$/);
     if (!match) continue;
-    out.push({ uplay_id: match[1], uplay_name: match[2] });
+    out.push({
+      uplay_id: match[1],
+      uplay_name: match[2],
+    });
   }
 
   if (!out.length) {
@@ -662,7 +626,7 @@ async function fetchUplayList() {
 
 async function fetchSteamList() {
   const local = loadLocalSteamDb().filter(
-    (app) => Number.isInteger(app.appid) && app.name?.trim()
+    (app) => Number.isInteger(app.appid) && app.name?.trim(),
   );
   let remote = null;
 
@@ -672,7 +636,7 @@ async function fetchSteamList() {
     const apps = Array.isArray(json) ? json : json?.applist?.apps || [];
     if (apps.length) {
       remote = apps.filter(
-        (app) => Number.isInteger(app.appid) && app.name?.trim()
+        (app) => Number.isInteger(app.appid) && app.name?.trim(),
       );
     } else {
       throw new Error("Steam app list source returned no entries.");
@@ -680,7 +644,7 @@ async function fetchSteamList() {
   } catch (err) {
     console.warn(
       "⚠️ Steam app list fetch failed, using local steamdb.json:",
-      err.message
+      err.message,
     );
   }
 
@@ -716,7 +680,7 @@ async function fetchSteamList() {
 
   if (local.length) return local;
   throw new Error(
-    "Steam app list unavailable (remote failed and no steamdb.json)."
+    "Steam app list unavailable (remote failed and no steamdb.json).",
   );
 }
 
@@ -760,13 +724,14 @@ async function main() {
   const indexes = buildSteamIndexes(steam);
   const existing = loadExistingData();
   const existingMap = new Map(
-    existing.map((item) => [String(item.uplay_id), item])
+    existing.map((item) => [String(item.uplay_id), item]),
   );
   const result = existing.slice();
   let added = 0;
 
   for (const entry of uplay) {
     if (existingMap.has(entry.uplay_id)) continue;
+
     const match = findBestSteamForUplay(entry.uplay_name, indexes);
 
     const record = {
@@ -790,7 +755,7 @@ async function main() {
   console.log(
     added
       ? `💾 appended ${added} new entries to ${OUTPUT_FILE}`
-      : `💾 generated mapping with ${result.length} entries`
+      : `💾 generated mapping with ${result.length} entries`,
   );
 }
 

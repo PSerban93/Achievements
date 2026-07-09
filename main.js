@@ -6117,9 +6117,86 @@ async function saveFullScreenShot(gameName, achDisplayName) {
     );
   }
 
-  const buf = await screenshot({ format: "png" }); // full desktop
-  fs.writeFileSync(file, buf);
+  await captureFullScreenShotInWorker(file);
   return file;
+}
+
+function killProcessTree(pid) {
+  if (!pid) return;
+  try {
+    if (process.platform === "win32") {
+      spawn("taskkill", ["/pid", String(pid), "/t", "/f"], {
+        windowsHide: true,
+        stdio: "ignore",
+      });
+      return;
+    }
+    process.kill(pid, "SIGKILL");
+  } catch {}
+}
+
+function captureFullScreenShotInWorker(outputPath, options = {}) {
+  const timeoutMs = Math.max(
+    1000,
+    Number(options.timeoutMs) ||
+      Number(process.env.ACHIEVEMENTS_SCREENSHOT_TIMEOUT_MS) ||
+      8000,
+  );
+  return new Promise((resolve, reject) => {
+    const script = path.join(__dirname, "utils", "screenshot-capture-worker.js");
+    const payload = JSON.stringify({ outputPath, timeoutMs });
+    const cp = fork(script, [payload], {
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+      windowsHide: true,
+    });
+    let settled = false;
+    const stderr = [];
+    const finish = (err, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (err) {
+        killProcessTree(cp.pid);
+        reject(err);
+        return;
+      }
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      const err = new Error(`Screenshot capture timed out after ${timeoutMs}ms`);
+      err.code = "capture-timeout";
+      finish(err);
+    }, timeoutMs + 1000);
+
+    cp.stderr?.on("data", (chunk) => {
+      const text = String(chunk || "").trim();
+      if (text) stderr.push(text.slice(0, 1000));
+    });
+    cp.on("message", (message) => {
+      if (!message || typeof message !== "object") return;
+      if (message.ok) {
+        finish(null, message.outputPath || outputPath);
+        return;
+      }
+      const err = new Error(message.error || "Screenshot capture failed");
+      err.code = message.code || "capture-failed";
+      finish(err);
+    });
+    cp.on("error", (err) => finish(err));
+    cp.on("exit", (code, signal) => {
+      if (settled) return;
+      if (code === 0 && fs.existsSync(outputPath)) {
+        finish(null, outputPath);
+        return;
+      }
+      const err = new Error(
+        stderr[0] ||
+          `Screenshot worker exited before completing (code=${code}, signal=${signal || ""})`,
+      );
+      err.code = code === null && signal ? "capture-killed" : "capture-failed";
+      finish(err);
+    });
+  });
 }
 
 ipcMain.handle("load-preferences", () => {
@@ -11199,19 +11276,28 @@ function processNextNotification() {
       }
       const gameName = selectedConfig || "Unknown Game";
       const achName = notificationData.displayName || "Achievement";
+      notificationLogger.info("notification:screenshot:start", {
+        displayName: achName,
+        config: notificationData.config_path || null,
+      });
       const saved = await saveFullScreenShot(gameName, achName);
-      console.log(
-        tUi("main.log.screenshotSaved", {}, "Screenshot saved:"),
-        saved,
-      );
+      notificationLogger.info("notification:screenshot:success", {
+        displayName: achName,
+        path: saved,
+      });
     } catch (err) {
-      console.warn(
-        tUi(
-          "main.log.screenshotFailed",
-          { error: err.message },
-          `Screenshot failed: ${err.message}`,
-        ),
-      );
+      const code = err?.code || null;
+      const error = err?.message || String(err);
+      const payload = {
+        displayName: notificationData.displayName || "Achievement",
+        code,
+        error,
+      };
+      if (code === "capture-timeout") {
+        notificationLogger.warn("notification:screenshot:timeout", payload);
+      } else {
+        notificationLogger.warn("notification:screenshot:failed", payload);
+      }
     }
   };
 

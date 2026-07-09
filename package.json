@@ -14,6 +14,7 @@
     "appId": "com.achievements.app",
     "productName": "Achievements",
     "copyright": "Copyright © 2025 JokerVerse",
+    "npmRebuild": false,
     "asarUnpack": [
       "utils/**",
       "utils/pslist-wrapper.mjs",
@@ -100,15 +101,15 @@
   "dependencies": {
     "axios": "^1.12.0",
     "cheerio": "^1.1.2",
-    "chokidar": "^4.0.3",
+    "chokidar": "5.0.0",
     "crc-32": "^1.2.2",
     "electron-updater": "^6.8.3",
-    "ini": "^4.1.1",
-    "jsdom": "^26.1.0",
-    "koffi": "2.16.2",
+    "ini": "6.0.0",
+    "jsdom": "29.1.1",
+    "koffi": "3.1.0",
     "playwright": "^1.55.0",
     "playwright-extra": "^4.3.6",
-    "ps-list": "8.1.1",
+    "ps-list": "9.0.0",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "screenshot-desktop": "^1.15.3",
     "uiohook-napi": "1.5.5",
@@ -116,7 +117,7 @@
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "40.10.6",
+    "electron": "43.1.0",
     "electron-builder": "^26.8.1",
     "eslint": "^10.0.1",
     "rcedit": "^5.0.2"
@@ -132,8 +133,8 @@
   },
   "allowScripts": {
     "electron-winstaller@5.4.0": true,
-    "electron@40.10.6": true,
-    "koffi@2.16.2": true,
+    "electron@43.1.0": true,
+    "koffi@3.1.0": true,
     "uiohook-napi@1.5.5": true
   }
 }
