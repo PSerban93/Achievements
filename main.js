@@ -2218,6 +2218,43 @@ function createGenerationProgressJob(seed = {}) {
   };
 }
 
+const BOOT_CACHE_PROGRESS_ID = "boot-cache";
+let bootCacheProgressLastEmitAt = 0;
+
+function broadcastBootCacheProgress(channel, patch = {}) {
+  const status =
+    patch.status ||
+    (channel === "generation:progress:end" ? "success" : "running");
+  const payload = normalizeGenerationProgressState(
+    {
+      id: BOOT_CACHE_PROGRESS_ID,
+      kind: "boot-background",
+      scope: "boot",
+      phase: "loadingCache",
+      itemName: "Achievement cache",
+      status,
+      ...patch,
+    },
+    {
+      id: BOOT_CACHE_PROGRESS_ID,
+      kind: "boot-background",
+      scope: "boot",
+      phase: "loadingCache",
+      itemName: "Achievement cache",
+      status,
+    },
+  );
+  broadcastGenerationProgress(channel, payload);
+}
+
+function updateBootCacheProgress(patch = {}, options = {}) {
+  const now = Date.now();
+  const force = options.force === true;
+  if (!force && now - bootCacheProgressLastEmitAt < 700) return;
+  bootCacheProgressLastEmitAt = now;
+  broadcastBootCacheProgress("generation:progress:update", patch);
+}
+
 function mapAchgenUiMessage(message) {
   const raw = String(message || "").trim();
   const msg = raw.replace(/^[\u2705\u2139\u23ed\u23e9\u26a0]\s*/i, "");
@@ -18652,6 +18689,14 @@ async function seedManualConfigsAtBoot() {
   }
 
   persistenceLogger.info("boot-cache:manual-start", { total: files.length });
+  if (files.length > 0) {
+    broadcastBootCacheProgress("generation:progress:start", {
+      phase: "loadingCache",
+      current: 0,
+      total: files.length,
+      percent: 0,
+    });
+  }
   const runWithConcurrency = async (items, limit, worker) => {
     if (!Array.isArray(items) || items.length === 0) return;
     const max = Math.max(1, Number(limit) || 1);
@@ -18887,7 +18932,43 @@ async function seedManualConfigsAtBoot() {
     }
   };
 
-  await runWithConcurrency(files, BOOT_MANUAL_SEED_CONCURRENCY, processFile);
+  let processedBootCacheFiles = 0;
+  const emitBootCacheSeedProgress = (force = false) => {
+    if (files.length <= 0) return;
+    const current = Math.min(processedBootCacheFiles, files.length);
+    const percent =
+      files.length > 0 ? Math.round((current / files.length) * 100) : 0;
+    updateBootCacheProgress(
+      {
+        phase: "loadingCache",
+        current,
+        total: files.length,
+        percent,
+      },
+      { force },
+    );
+  };
+
+  await runWithConcurrency(
+    files,
+    BOOT_MANUAL_SEED_CONCURRENCY,
+    async (file) => {
+      try {
+        await processFile(file);
+      } finally {
+        processedBootCacheFiles++;
+        emitBootCacheSeedProgress(processedBootCacheFiles >= files.length);
+      }
+    },
+  );
+  if (files.length > 0) {
+    broadcastBootCacheProgress("generation:progress:end", {
+      phase: "completed",
+      current: files.length,
+      total: files.length,
+      percent: 100,
+    });
+  }
   persistenceLogger.info("boot-cache:manual-complete", { total: files.length });
   bootManualSeedRunning = false;
 }

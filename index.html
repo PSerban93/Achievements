@@ -419,15 +419,18 @@
         width: min(560px, calc(100vw - 32px));
         padding: 14px 16px 12px;
         border-radius: var(--app-radius-panel);
-        border: 1px solid rgba(189, 147, 249, 0.55);
+        border: 1px solid var(--app-border-subtle);
+        border-color: color-mix(
+          in srgb,
+          var(--app-accent) 44%,
+          var(--app-border-subtle)
+        );
         background: linear-gradient(
           180deg,
-          rgba(40, 42, 54, 0.97) 0%,
-          rgba(32, 34, 44, 0.98) 100%
+          var(--app-panel-bg) 0%,
+          var(--app-panel-bg-strong) 100%
         );
-        box-shadow:
-          0 10px 24px rgba(0, 0, 0, 0.32),
-          0 0 0 1px rgba(139, 233, 253, 0.08);
+        box-shadow: var(--app-shadow-panel);
         color: var(--app-text);
         z-index: 10001;
         opacity: 0;
@@ -445,17 +448,19 @@
       }
 
       .generation-progress-rail.is-success {
-        border-color: rgba(80, 250, 123, 0.55);
-        box-shadow:
-          0 10px 24px rgba(0, 0, 0, 0.32),
-          0 0 0 1px rgba(80, 250, 123, 0.1);
+        border-color: color-mix(
+          in srgb,
+          var(--app-success) 58%,
+          var(--app-border-subtle)
+        );
       }
 
       .generation-progress-rail.is-failed {
-        border-color: rgba(255, 85, 85, 0.58);
-        box-shadow:
-          0 10px 24px rgba(0, 0, 0, 0.32),
-          0 0 0 1px rgba(255, 85, 85, 0.12);
+        border-color: color-mix(
+          in srgb,
+          var(--app-danger) 62%,
+          var(--app-border-subtle)
+        );
       }
 
       .generation-progress-head {
@@ -468,7 +473,7 @@
       .generation-progress-title {
         font-size: 15px;
         font-weight: 700;
-        color: var(--dracula-cyan, #8be9fd);
+        color: var(--app-accent-2);
       }
 
       .generation-progress-percent {
@@ -496,7 +501,7 @@
         justify-content: space-between;
         gap: 12px;
         font-size: 12px;
-        color: var(--dracula-comment, #b6b9c9);
+        color: var(--app-muted);
       }
 
       .generation-progress-detail {
@@ -518,8 +523,8 @@
         height: 9px;
         border-radius: var(--app-radius-pill);
         overflow: hidden;
-        background: rgba(68, 71, 90, 0.9);
-        box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        background: var(--app-surface);
+        box-shadow: inset 0 0 0 1px var(--app-border-subtle);
       }
 
       .generation-progress-fill {
@@ -528,8 +533,8 @@
         border-radius: inherit;
         background: linear-gradient(
           90deg,
-          rgba(139, 233, 253, 0.88) 0%,
-          rgba(98, 114, 164, 0.92) 100%
+          var(--app-accent-2) 0%,
+          var(--app-accent) 100%
         );
         transition:
           width 0.24s ease,
@@ -539,17 +544,31 @@
       .generation-progress-rail.is-success .generation-progress-fill {
         background: linear-gradient(
           90deg,
-          rgba(80, 250, 123, 0.92) 0%,
-          rgba(39, 174, 96, 0.95) 100%
+          var(--app-success) 0%,
+          var(--app-accent-2) 100%
         );
       }
 
       .generation-progress-rail.is-failed .generation-progress-fill {
         background: linear-gradient(
           90deg,
-          rgba(255, 85, 85, 0.92) 0%,
-          rgba(180, 43, 43, 0.95) 100%
+          var(--app-danger) 0%,
+          var(--app-warning) 100%
         );
+      }
+
+      :root[data-theme="aero"] .generation-progress-rail,
+      :root[data-theme="aero-dark"] .generation-progress-rail {
+        backdrop-filter: blur(14px) saturate(1.35);
+        -webkit-backdrop-filter: blur(14px) saturate(1.35);
+      }
+
+      :root[data-hardware-acceleration="off"][data-theme="aero"]
+        .generation-progress-rail,
+      :root[data-hardware-acceleration="off"][data-theme="aero-dark"]
+        .generation-progress-rail {
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
       }
     </style>
   </head>
@@ -7500,7 +7519,9 @@
       const notificationQueue = [];
       let isNotificationActive = false;
       let generationProgressState = null;
-      let generationProgressHideTimer = null;
+      const bootBackgroundProgressStates = new Map();
+      const generationProgressHideTimers = new Map();
+      let generationProgressSequence = 0;
       window.__generationProgressActive = false;
 
       function clampGenerationProgressPercent(value, fallback = 0) {
@@ -7512,6 +7533,12 @@
       }
 
       function getGenerationProgressTitle(state) {
+        if (state?.kind === "boot-background") {
+          return (
+            state?.title ||
+            tUi("main.boot.progress.title", "Starting Background Services")
+          );
+        }
         if (state?.kind === "app-update") {
           return tUi("main.update.progress.title", "Downloading Update");
         }
@@ -7533,8 +7560,63 @@
         );
       }
 
-      function getGenerationProgressPhaseLabel(phase, detail = "") {
+      function getGenerationProgressPhaseLabel(phase, detail = "", state = null) {
         if (detail) return detail;
+        if (state?.kind === "boot-background") {
+          switch (String(phase || "")) {
+            case "waitingForUi":
+              return tUi("main.boot.progress.waitingForUi", "Waiting for UI");
+            case "indexingConfigs":
+              return tUi(
+                "main.boot.progress.indexingConfigs",
+                "Indexing configs",
+              );
+            case "attachingWatchers":
+              return tUi(
+                "main.boot.progress.attachingWatchers",
+                "Attaching folder watchers",
+              );
+            case "scanningFolders":
+              return tUi(
+                "main.boot.progress.scanningFolders",
+                "Scanning watched folders",
+              );
+            case "loadingCache":
+              return tUi(
+                "main.boot.progress.loadingCache",
+                "Loading achievement cache",
+              );
+            case "scanningLumaplay":
+              return tUi(
+                "main.boot.progress.scanningLumaplay",
+                "Scanning LumaPlay registry",
+              );
+            case "rebuildingWatchers":
+              return tUi(
+                "main.boot.progress.rebuildingWatchers",
+                "Rebuilding save watchers",
+              );
+            case "startingPollers":
+              return tUi(
+                "main.boot.progress.startingPollers",
+                "Starting background pollers",
+              );
+            case "finalizing":
+              return tUi("main.boot.progress.finalizing", "Finalizing startup");
+            case "completed":
+              return tUi(
+                "main.boot.progress.completed",
+                "Background services ready",
+              );
+            case "failed":
+              return tUi(
+                "main.boot.progress.failed",
+                "Background startup failed",
+              );
+            default:
+              return "";
+          }
+        }
         switch (String(phase || "")) {
           case "preparing":
             return tUi("main.generation.progress.preparing", "Preparing");
@@ -7604,14 +7686,93 @@
         return `${Math.max(0, current)} / ${Math.max(0, total)}`;
       }
 
-      function hideGenerationProgressRail() {
+      function isBootBackgroundProgressState(state) {
+        return String(state?.kind || "") === "boot-background";
+      }
+
+      function getProgressHideKey(kind, id) {
+        if (kind === "boot-background") {
+          return `boot:${String(id || "boot-background")}`;
+        }
+        return "primary";
+      }
+
+      function clearProgressHideTimer(key) {
+        const timer = generationProgressHideTimers.get(key);
+        if (!timer) return;
+        clearTimeout(timer);
+        generationProgressHideTimers.delete(key);
+      }
+
+      function clearAllProgressHideTimers() {
+        for (const timer of generationProgressHideTimers.values()) {
+          clearTimeout(timer);
+        }
+        generationProgressHideTimers.clear();
+      }
+
+      function updateGenerationProgressActiveFlag() {
+        window.__generationProgressActive =
+          generationProgressState?.status === "running";
+      }
+
+      function getBootBackgroundProgressState() {
+        let latestRunning = null;
+        let latestAny = null;
+        for (const state of bootBackgroundProgressStates.values()) {
+          if (
+            !latestAny ||
+            Number(state?._progressSeq || 0) >
+              Number(latestAny?._progressSeq || 0)
+          ) {
+            latestAny = state;
+          }
+          if (
+            state?.status === "running" &&
+            (!latestRunning ||
+              Number(state?._progressSeq || 0) >
+                Number(latestRunning?._progressSeq || 0))
+          ) {
+            latestRunning = state;
+          }
+        }
+        return latestRunning || latestAny;
+      }
+
+      function getVisibleGenerationProgressState() {
+        if (generationProgressState) return generationProgressState;
+        return getBootBackgroundProgressState();
+      }
+
+      function hideGenerationProgressRailElement() {
         const rail = document.getElementById("generationProgressRail");
         if (!rail) return;
         rail.classList.remove("is-visible", "is-success", "is-failed");
         rail.classList.add("hidden");
         rail.setAttribute("aria-hidden", "true");
+      }
+
+      function hideGenerationProgressRail() {
+        clearAllProgressHideTimers();
         generationProgressState = null;
-        window.__generationProgressActive = false;
+        bootBackgroundProgressStates.clear();
+        updateGenerationProgressActiveFlag();
+        hideGenerationProgressRailElement();
+      }
+
+      function clearGenerationProgressState(kind, id) {
+        if (kind === "boot-background") {
+          bootBackgroundProgressStates.delete(String(id || "boot-background"));
+        } else {
+          generationProgressState = null;
+        }
+        updateGenerationProgressActiveFlag();
+        const visibleState = getVisibleGenerationProgressState();
+        if (visibleState) {
+          renderGenerationProgressRail(visibleState);
+        } else {
+          hideGenerationProgressRailElement();
+        }
       }
 
       function renderGenerationProgressRail(state) {
@@ -7637,6 +7798,7 @@
         const phaseText = getGenerationProgressPhaseLabel(
           state?.phase,
           state?.detail,
+          state,
         );
         const itemName = String(state?.itemName || state?.appid || "").trim();
         const countText = formatGenerationProgressCount(state);
@@ -7659,25 +7821,46 @@
       }
 
       function applyGenerationProgressState(nextState, options = {}) {
-        if (generationProgressHideTimer) {
-          clearTimeout(generationProgressHideTimer);
-          generationProgressHideTimer = null;
+        const incoming = nextState || {};
+        const isBoot = isBootBackgroundProgressState(incoming);
+        const id = String(
+          incoming.id || (isBoot ? "boot-background" : generationProgressState?.id || ""),
+        );
+        const kind = isBoot ? "boot-background" : "primary";
+        const hideKey = getProgressHideKey(kind, id);
+        clearProgressHideTimer(hideKey);
+
+        if (isBoot) {
+          const current = bootBackgroundProgressStates.get(id);
+          bootBackgroundProgressStates.set(id, {
+            ...(options.replace ? {} : current || {}),
+            ...incoming,
+            id,
+            kind: "boot-background",
+            _progressSeq: ++generationProgressSequence,
+          });
+        } else {
+          generationProgressState = options.replace
+            ? { ...incoming, _progressSeq: ++generationProgressSequence }
+            : {
+                ...(generationProgressState || {}),
+                ...incoming,
+                _progressSeq: ++generationProgressSequence,
+              };
         }
-        generationProgressState = options.replace
-          ? { ...(nextState || {}) }
-          : {
-              ...(generationProgressState || {}),
-              ...(nextState || {}),
-            };
-        window.__generationProgressActive =
-          generationProgressState?.status === "running";
-        renderGenerationProgressRail(generationProgressState);
+
+        updateGenerationProgressActiveFlag();
+        renderGenerationProgressRail(getVisibleGenerationProgressState());
         if (options.autoHide === true) {
-          const delay =
-            generationProgressState?.status === "failed" ? 2400 : 1400;
-          generationProgressHideTimer = setTimeout(() => {
-            hideGenerationProgressRail();
+          const finalState = isBoot
+            ? bootBackgroundProgressStates.get(id)
+            : generationProgressState;
+          const delay = finalState?.status === "failed" ? 2400 : 1400;
+          const timer = setTimeout(() => {
+            generationProgressHideTimers.delete(hideKey);
+            clearGenerationProgressState(kind, id);
           }, delay);
+          generationProgressHideTimers.set(hideKey, timer);
         }
       }
 
@@ -7916,12 +8099,14 @@
       });
 
       window.api?.on?.("generation:progress:update", (payload = {}) => {
-        if (
-          generationProgressState?.id &&
-          payload?.id &&
-          generationProgressState.id !== payload.id
-        ) {
-          return;
+        if (!isBootBackgroundProgressState(payload)) {
+          if (
+            generationProgressState?.id &&
+            payload?.id &&
+            generationProgressState.id !== payload.id
+          ) {
+            return;
+          }
         }
         applyGenerationProgressState(
           {
@@ -7936,12 +8121,14 @@
       });
 
       window.api?.on?.("generation:progress:end", (payload = {}) => {
-        if (
-          generationProgressState?.id &&
-          payload?.id &&
-          generationProgressState.id !== payload.id
-        ) {
-          return;
+        if (!isBootBackgroundProgressState(payload)) {
+          if (
+            generationProgressState?.id &&
+            payload?.id &&
+            generationProgressState.id !== payload.id
+          ) {
+            return;
+          }
         }
         applyGenerationProgressState(payload, { autoHide: true });
       });

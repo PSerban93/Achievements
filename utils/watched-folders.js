@@ -4061,6 +4061,85 @@ module.exports = function makeWatchedFolders({
     }
   }
 
+  const BOOT_WATCHER_PROGRESS_ID = "boot-watchers";
+  let bootWatcherProgressStarted = false;
+  let bootWatcherProgressLastEmitAt = 0;
+
+  function clampBootProgressPercent(value, fallback = 0) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return fallback;
+    if (n <= 0) return 0;
+    if (n >= 100) return 100;
+    return Math.round(n);
+  }
+
+  function getBootProgressPercent(current, total, fallback = 0) {
+    const c = Number(current);
+    const t = Number(total);
+    if (!Number.isFinite(c) || !Number.isFinite(t) || t <= 0) {
+      return clampBootProgressPercent(fallback, 0);
+    }
+    return clampBootProgressPercent((Math.max(0, c) / t) * 100, fallback);
+  }
+
+  function getBootProgressItemName(value) {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    try {
+      return path.basename(text) || text;
+    } catch {
+      return text;
+    }
+  }
+
+  function broadcastBootWatcherProgress(channel, patch = {}) {
+    const status =
+      patch.status ||
+      (channel === "generation:progress:end" ? "success" : "running");
+    broadcastAll(channel, {
+      id: BOOT_WATCHER_PROGRESS_ID,
+      kind: "boot-background",
+      scope: "boot",
+      status,
+      phase: "waitingForUi",
+      itemName: "",
+      current: 0,
+      total: 0,
+      percent: 0,
+      ...patch,
+    });
+  }
+
+  function startBootWatcherProgress(patch = {}) {
+    bootWatcherProgressStarted = true;
+    bootWatcherProgressLastEmitAt = Date.now();
+    broadcastBootWatcherProgress("generation:progress:start", patch);
+  }
+
+  function updateBootWatcherProgress(patch = {}, options = {}) {
+    const now = Date.now();
+    if (!bootWatcherProgressStarted) {
+      startBootWatcherProgress(patch);
+      return;
+    }
+    if (options.force !== true && now - bootWatcherProgressLastEmitAt < 500) {
+      return;
+    }
+    bootWatcherProgressLastEmitAt = now;
+    broadcastBootWatcherProgress("generation:progress:update", patch);
+  }
+
+  function finishBootWatcherProgress(status = "success", patch = {}) {
+    if (!bootWatcherProgressStarted) {
+      startBootWatcherProgress(patch);
+    }
+    broadcastBootWatcherProgress("generation:progress:end", {
+      ...patch,
+      status,
+    });
+    bootWatcherProgressStarted = false;
+  }
+
   function waitForMainWindowReady(timeoutMs = 4000) {
     return new Promise((resolve) => {
       let win = global.mainWindow;
@@ -10907,106 +10986,235 @@ module.exports = function makeWatchedFolders({
 
     // Background boot scan with bounded concurrency.
     (async () => {
-      try {
-        await waitForBootOverlayHiddenBeforeBackgroundScan();
-      } catch {}
-      try {
-        await waitForBootOnboardingGateOpen();
-      } catch {}
-      try {
-        await rebuildKnownAppIds({
-          forceAsyncIndex: true,
-          forceAsyncRootScan: true,
-        });
-      } catch {}
-      const rootsForBootScan = getWatchedFolders();
-      try {
-        if (BOOT_WATCH_FOLDER_DELAY_MS > 0) {
-          await sleep(BOOT_WATCH_FOLDER_DELAY_MS);
-        }
-        await startFolderWatchersBatched(rootsForBootScan, {
-          initialScan: false,
-          batchDelayMs: BOOT_ATTACH_DELAY_MS,
-        });
-        if (ROOT_WATCH_SETTLE_DELAY_MS > 0 && rootsForBootScan.length > 0) {
-          await sleep(ROOT_WATCH_SETTLE_DELAY_MS);
-        }
-      } catch {}
-      try {
-        await flushBootOnboardingDirtyRoots({
-          reason: "boot-scan-gate-open",
-        });
-      } catch {}
-      try {
-        const scanJobs = rootsForBootScan.map((root, index) => ({
-          root,
-          index,
-        }));
-        await runWithConcurrency(scanJobs, 1, async ({ root, index }) => {
-          try {
-            const normalizedRoot = normalizeRoot(root);
-            const strictProfile = getStrictRootProfile(normalizedRoot);
-            if (
-              strictProfile &&
-              BOOT_STRICT_SCAN_STAGGER_BASE_MS > 0 &&
-              BOOT_STRICT_SCAN_STAGGER_SLOTS > 0
-            ) {
-              const offset =
-                (Math.max(0, Number(index) || 0) %
-                  BOOT_STRICT_SCAN_STAGGER_SLOTS) *
-                BOOT_STRICT_SCAN_STAGGER_STEP_MS;
-              const delayMs = BOOT_STRICT_SCAN_STAGGER_BASE_MS + offset;
-              if (delayMs > 0) {
-                await sleep(delayMs);
-              }
-            }
-            await scanRootOnce(root);
-          } catch {}
-        });
-      } catch {}
-      if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
-        await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
-      }
-      try {
-        await scanLumaPlayRegistryOnce({
-          suppressInitialNotify: true,
-          autoRebuild: false,
-        });
-      } catch (err) {
-        watcherLogger.warn("lumaplay:boot-scan-failed", {
-          error: err?.message || String(err),
-        });
-      }
-      if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
-        await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
-      }
+      let bootProgressTotal = 8;
+      const emitBootProgress = (patch = {}, options = {}) => {
+        updateBootWatcherProgress(
+          {
+            total: bootProgressTotal,
+            ...patch,
+          },
+          options,
+        );
+      };
 
       try {
-        await rebuildSaveWatchers({
-          deferLumaPlayPolling: true,
+        startBootWatcherProgress({
+          phase: "waitingForUi",
+          current: 0,
+          total: bootProgressTotal,
+          percent: 1,
         });
-      } catch {}
-      try {
-        emitDashboardRefresh();
-      } catch {}
-      if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
-        await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+        try {
+          await waitForBootOverlayHiddenBeforeBackgroundScan();
+        } catch {}
+        try {
+          await waitForBootOnboardingGateOpen();
+        } catch {}
+
+        emitBootProgress(
+          {
+            phase: "indexingConfigs",
+            itemName: "Configs",
+            current: 1,
+            percent: getBootProgressPercent(1, bootProgressTotal, 12),
+          },
+          { force: true },
+        );
+        try {
+          await rebuildKnownAppIds({
+            forceAsyncIndex: true,
+            forceAsyncRootScan: true,
+          });
+        } catch {}
+        const rootsForBootScan = getWatchedFolders();
+        bootProgressTotal = Math.max(7, rootsForBootScan.length + 7);
+
+        emitBootProgress(
+          {
+            phase: "attachingWatchers",
+            itemName: `${rootsForBootScan.length} folders`,
+            current: 2,
+            percent: getBootProgressPercent(2, bootProgressTotal, 18),
+          },
+          { force: true },
+        );
+        try {
+          if (BOOT_WATCH_FOLDER_DELAY_MS > 0) {
+            await sleep(BOOT_WATCH_FOLDER_DELAY_MS);
+          }
+          await startFolderWatchersBatched(rootsForBootScan, {
+            initialScan: false,
+            batchDelayMs: BOOT_ATTACH_DELAY_MS,
+          });
+          if (ROOT_WATCH_SETTLE_DELAY_MS > 0 && rootsForBootScan.length > 0) {
+            await sleep(ROOT_WATCH_SETTLE_DELAY_MS);
+          }
+        } catch {}
+        try {
+          await flushBootOnboardingDirtyRoots({
+            reason: "boot-scan-gate-open",
+          });
+        } catch {}
+        try {
+          const scanJobs = rootsForBootScan.map((root, index) => ({
+            root,
+            index,
+          }));
+          await runWithConcurrency(scanJobs, 1, async ({ root, index }) => {
+            emitBootProgress(
+              {
+                phase: "scanningFolders",
+                itemName: getBootProgressItemName(root),
+                current: Math.min(bootProgressTotal, 3 + index),
+                percent: getBootProgressPercent(
+                  Math.min(bootProgressTotal, 3 + index),
+                  bootProgressTotal,
+                  35,
+                ),
+              },
+              { force: index === 0 || index === rootsForBootScan.length - 1 },
+            );
+            try {
+              const normalizedRoot = normalizeRoot(root);
+              const strictProfile = getStrictRootProfile(normalizedRoot);
+              if (
+                strictProfile &&
+                BOOT_STRICT_SCAN_STAGGER_BASE_MS > 0 &&
+                BOOT_STRICT_SCAN_STAGGER_SLOTS > 0
+              ) {
+                const offset =
+                  (Math.max(0, Number(index) || 0) %
+                    BOOT_STRICT_SCAN_STAGGER_SLOTS) *
+                  BOOT_STRICT_SCAN_STAGGER_STEP_MS;
+                const delayMs = BOOT_STRICT_SCAN_STAGGER_BASE_MS + offset;
+                if (delayMs > 0) {
+                  await sleep(delayMs);
+                }
+              }
+              await scanRootOnce(root);
+            } catch {}
+          });
+        } catch {}
+        if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
+          await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+        }
+
+        const afterFolderScanCurrent = Math.min(
+          bootProgressTotal,
+          rootsForBootScan.length + 3,
+        );
+        emitBootProgress(
+          {
+            phase: "scanningLumaplay",
+            itemName: "LumaPlay",
+            current: afterFolderScanCurrent,
+            percent: getBootProgressPercent(
+              afterFolderScanCurrent,
+              bootProgressTotal,
+              72,
+            ),
+          },
+          { force: true },
+        );
+        try {
+          await scanLumaPlayRegistryOnce({
+            suppressInitialNotify: true,
+            autoRebuild: false,
+          });
+        } catch (err) {
+          watcherLogger.warn("lumaplay:boot-scan-failed", {
+            error: err?.message || String(err),
+          });
+        }
+        if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
+          await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+        }
+
+        const rebuildCurrent = Math.min(
+          bootProgressTotal,
+          rootsForBootScan.length + 4,
+        );
+        emitBootProgress(
+          {
+            phase: "rebuildingWatchers",
+            itemName: "Save watchers",
+            current: rebuildCurrent,
+            percent: getBootProgressPercent(
+              rebuildCurrent,
+              bootProgressTotal,
+              82,
+            ),
+          },
+          { force: true },
+        );
+        try {
+          await rebuildSaveWatchers({
+            deferLumaPlayPolling: true,
+          });
+        } catch {}
+        try {
+          emitDashboardRefresh();
+        } catch {}
+        if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
+          await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+        }
+        bootMode = false;
+        if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
+          await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+        }
+
+        const pollersCurrent = Math.min(
+          bootProgressTotal,
+          rootsForBootScan.length + 5,
+        );
+        emitBootProgress(
+          {
+            phase: "startingPollers",
+            itemName: "Background pollers",
+            current: pollersCurrent,
+            percent: getBootProgressPercent(
+              pollersCurrent,
+              bootProgressTotal,
+              90,
+            ),
+          },
+          { force: true },
+        );
+        startLumaPlayDiscoveryPolling();
+        if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
+          await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+        }
+        try {
+          await runLumaPlayDiscoveryTick({ autoRebuild: true });
+        } catch {}
+        if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
+          await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+        }
+
+        emitBootProgress(
+          {
+            phase: "finalizing",
+            itemName: "",
+            current: Math.max(0, bootProgressTotal - 1),
+            percent: 96,
+          },
+          { force: true },
+        );
+        scheduleDeferredSeedPumpAfterOverlayGate();
+        finishBootWatcherProgress("success", {
+          phase: "completed",
+          itemName: "",
+          current: bootProgressTotal,
+          total: bootProgressTotal,
+          percent: 100,
+        });
+      } catch (err) {
+        finishBootWatcherProgress("failed", {
+          phase: "failed",
+          detail: err?.message || String(err || "Boot background startup failed"),
+          percent: 0,
+        });
       }
-      bootMode = false;
-      if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
-        await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
-      }
-      startLumaPlayDiscoveryPolling();
-      if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
-        await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
-      }
-      try {
-        await runLumaPlayDiscoveryTick({ autoRebuild: true });
-      } catch {}
-      if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
-        await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
-      }
-      scheduleDeferredSeedPumpAfterOverlayGate();
     })().catch(() => {});
   });
 
