@@ -5449,6 +5449,34 @@
           return true;
         }
 
+        async function downloadFromSteamProductAssets(
+          targetAppId,
+          fetchAppId,
+          platformHint,
+          options = {},
+        ) {
+          if (!window.api?.getSteamProductAssetUrls) return null;
+          const response = await window.api.getSteamProductAssetUrls({
+            appid: fetchAppId,
+            steamAppId: fetchAppId,
+            platform: platformHint || null,
+            configName: options?.configName || null,
+            configPath: options?.configPath || null,
+            purpose: options?.purpose || "portrait",
+          });
+          const urls = Array.isArray(response?.urls) ? response.urls : [];
+          for (const url of urls) {
+            try {
+              await downloadAndSave(targetAppId, url, platformHint);
+              return { ok: true, url };
+            } catch {}
+          }
+          return {
+            ok: false,
+            reason: response?.reason || "no-product-asset-hit",
+          };
+        }
+
         const inFlightCovers = new Map();
         async function downloadFromCdnAndCache(
           targetAppId,
@@ -5555,6 +5583,36 @@
                 term: fallbackName || null,
               });
               return false;
+            }
+            try {
+              const productAsset = await downloadFromSteamProductAssets(
+                targetAppId,
+                fetchAppId,
+                platform,
+                {
+                  configName: options?.configName || null,
+                  purpose: "portrait",
+                },
+              );
+              if (productAsset?.ok) {
+                logCover("info", "schema-product:hit", {
+                  targetAppId,
+                  fetchAppId,
+                  url: productAsset.url,
+                });
+                return true;
+              }
+              logCover("warn", "schema-product:miss", {
+                targetAppId,
+                fetchAppId,
+                reason: productAsset?.reason || "missing",
+              });
+            } catch (err) {
+              logCover("warn", "schema-product:fail", {
+                targetAppId,
+                fetchAppId,
+                error: err?.message || String(err),
+              });
             }
             const plainPortrait = [
               `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${fetchAppId}/library_600x900.jpg`,
@@ -5725,6 +5783,7 @@
 
         function getCoverRedownloadSourceLabel(sourceId) {
           const labels = {
+            "schema-product": "Schema Product Assets",
             "cdn-portrait": "Steam CDN Portrait",
             steamdb: "SteamDB",
             steamgriddb: "SteamGridDB",
@@ -5774,6 +5833,22 @@
             }
             return sources;
           }
+
+          sources.push({
+            id: "schema-product",
+            run: async () => {
+              const result = await downloadFromSteamProductAssets(
+                targetAppId,
+                fetchAppId,
+                platform,
+                {
+                  configName: context.configName || null,
+                  purpose: "portrait",
+                },
+              );
+              return !!result?.ok;
+            },
+          });
 
           sources.push({
             id: "cdn-portrait",

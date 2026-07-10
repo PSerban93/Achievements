@@ -20390,6 +20390,58 @@ const {
   fetchSteamDbLibraryCover,
   fetchSteamGridDbImage,
 } = require("./utils/game-cover");
+const {
+  resolveSteamProductAssetUrls,
+} = require("./utils/steam-product-assets");
+
+function resolveSteamProductAssetConfigPath(payload = {}) {
+  const explicit = String(
+    payload?.configPath || payload?.config_path || "",
+  ).trim();
+  if (explicit) return explicit;
+
+  const configName = sanitizeConfigName(payload?.configName || "");
+  if (configName) {
+    try {
+      const configFile = path.join(configsDir, `${configName}.json`);
+      if (fs.existsSync(configFile)) {
+        const config = readJsonWithRetries(configFile, 4, 30);
+        const configPath = String(config?.config_path || "").trim();
+        if (configPath) return configPath;
+      }
+    } catch {}
+  }
+
+  const appid = sanitizeAppId(payload?.appid || payload?.steamAppId);
+  if (appid) {
+    try {
+      return resolveSchemaDirForPlatform(appid, payload?.platform || "steam");
+    } catch {}
+  }
+  return "";
+}
+
+ipcMain.handle("covers:steam-product-assets", async (_evt, payload = {}) => {
+  try {
+    const appid = sanitizeAppId(payload?.steamAppId || payload?.appid);
+    const configPath = resolveSteamProductAssetConfigPath(payload);
+    const result = resolveSteamProductAssetUrls({
+      appid,
+      configPath,
+      productInfoPath: payload?.productInfoPath || "",
+      purpose: payload?.purpose || "portrait",
+      language: cachedPreferences?.language || "english",
+    });
+    return result;
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "failed",
+      urls: [],
+      message: String(err?.message || err),
+    };
+  }
+});
 
 ipcMain.handle("covers:steamdb", async (_evt, payload) => {
   try {

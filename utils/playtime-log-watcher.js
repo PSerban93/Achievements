@@ -8,6 +8,7 @@ const { pathToFileURL } = require("url");
 const { accumulatePlaytime, sanitizeConfigName } = require("./playtime-store");
 const { fetchSteamGridDbImage } = require("./game-cover");
 const { normalizePlatform } = require("./config-platform-migrator");
+const { resolveSteamProductAssetUrls } = require("./steam-product-assets");
 const processPoller = require("./process-poller");
 const {
   getProcessExecutableNames,
@@ -353,6 +354,24 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
     return { headerUrl: localUrl() };
   };
   try {
+    const productAssets = resolveSteamProductAssetUrls({
+      appid: options?.steamAppId || appid,
+      configPath:
+        options?.configPath ||
+        options?.configData?.config_path ||
+        options?.configData?.configPath ||
+        "",
+      purpose: "header",
+    });
+    for (const url of productAssets.urls || []) {
+      try {
+        return await downloadToLocal(url);
+      } catch {}
+    }
+  } catch {
+    // fallthrough to the regular Steam CDN and SteamGridDB fallbacks
+  }
+  try {
     if (!preferLocalOnly && headerUrl) {
       return await downloadToLocal(headerUrl);
     }
@@ -634,6 +653,7 @@ function startPlaytimeLogWatcher(configData) {
     gridSize: "460x215,920x430",
     platform,
     configData,
+    steamAppId: effectiveAppId,
   })
     .then(({ headerUrl }) => {
       if (closed) return;

@@ -640,6 +640,29 @@ function copyImageDirectory(sourceDir, destDir) {
   return true;
 }
 
+function copySchemaParseProductInfo(appOutputDir, outDir) {
+  const sourcePath = path.join(
+    appOutputDir,
+    "steam_misc",
+    "app_info",
+    "app_product_info.json",
+  );
+  if (!fs.existsSync(sourcePath)) return false;
+  const destPath = path.join(
+    outDir,
+    "steam_misc",
+    "app_info",
+    "app_product_info.json",
+  );
+  try {
+    fs.mkdirSync(path.dirname(destPath), { recursive: true });
+    fs.copyFileSync(sourcePath, destPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function cleanupGeneratedAppOutput(appOutputDir = "", appid = "") {
   const targetDir = path.resolve(String(appOutputDir || "").trim());
   if (!targetDir || !fs.existsSync(targetDir)) return;
@@ -707,12 +730,14 @@ function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
   const sourceImgDir = path.join(appOutputDir, "steam_settings", "img");
   const destImgDir = path.join(outDir, "img");
   copyImageDirectory(sourceImgDir, destImgDir);
+  const hasProductInfo = copySchemaParseProductInfo(appOutputDir, outDir);
 
   logger.info("schema-parse:run:success", {
     appid,
     count: achievements.length,
     outDir,
     hasLaunchMetadata: !!launchMetadata,
+    hasProductInfo,
   });
   return {
     ok: true,
@@ -721,6 +746,7 @@ function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
     outDir,
     launchMetadata,
     displayName,
+    hasProductInfo,
   };
 }
 

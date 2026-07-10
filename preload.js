@@ -653,6 +653,8 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("boot:onboarding:apply-selection", { selectedPaths }),
   skipBootOnboarding: () => ipcRenderer.invoke("boot:onboarding:skip-all"),
   getSteamDbCover: (payload) => ipcRenderer.invoke("covers:steamdb", payload),
+  getSteamProductAssetUrls: (payload) =>
+    ipcRenderer.invoke("covers:steam-product-assets", payload),
   getSteamGridDbCover: (payload) =>
     ipcRenderer.invoke("covers:steamgriddb", payload),
   openExternalUrl: (url) => ipcRenderer.invoke("open-external-url", url),
