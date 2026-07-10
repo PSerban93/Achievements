@@ -819,8 +819,9 @@ function parseUbisoftLocalizationText(buffer) {
     if (!trimmed) continue;
     const parts = trimmed.split("\t");
     if (parts.length < 3) continue;
-    const id = String(parts[0] || "").trim();
-    if (!/^\d+$/.test(id)) continue;
+    const rawId = String(parts[0] || "").trim();
+    if (!/^\d+$/.test(rawId)) continue;
+    const id = rawId.replace(/^0+(?=\d)/, "");
     const name = String(parts[1] || "").trim();
     const description = parts.slice(2).join("\t").trim();
     out.set(id, {
@@ -851,11 +852,11 @@ function collectUbisoftSchemaData(archivePath) {
     }
   }
 
-  const allIds = new Set();
+  const localizedIds = new Set();
   for (const map of localizations.values()) {
-    for (const id of map.keys()) allIds.add(id);
+    for (const id of map.keys()) localizedIds.add(id);
   }
-  for (const id of imageBuffers.keys()) allIds.add(id);
+  const allIds = localizedIds.size ? localizedIds : new Set(imageBuffers.keys());
 
   const achievements = [];
   const sortedIds = Array.from(allIds).sort((a, b) => Number(a) - Number(b));

@@ -6117,7 +6117,10 @@ async function saveFullScreenShot(gameName, achDisplayName) {
     );
   }
 
-  await captureFullScreenShotInWorker(file);
+  await enqueueScreenshotCaptureTask(() => captureFullScreenShotInWorker(file), {
+    gameName,
+    achievement: achDisplayName,
+  });
   return file;
 }
 
@@ -6133,6 +6136,49 @@ function killProcessTree(pid) {
     }
     process.kill(pid, "SIGKILL");
   } catch {}
+}
+
+const screenshotCaptureQueue = [];
+let screenshotCaptureInFlight = false;
+
+function pumpScreenshotCaptureQueue() {
+  if (screenshotCaptureInFlight) return;
+  const next = screenshotCaptureQueue.shift();
+  if (!next) return;
+  screenshotCaptureInFlight = true;
+  notificationLogger.info("notification:screenshot:queue-run", {
+    queuedRemaining: screenshotCaptureQueue.length,
+    gameName: next.meta.gameName || null,
+    achievement: next.meta.achievement || null,
+  });
+  Promise.resolve()
+    .then(() => next.task())
+    .then((result) => next.resolve(result))
+    .catch((error) => next.reject(error))
+    .finally(() => {
+      screenshotCaptureInFlight = false;
+      if (screenshotCaptureQueue.length > 0) {
+        setImmediate(pumpScreenshotCaptureQueue);
+      }
+    });
+}
+
+function enqueueScreenshotCaptureTask(task, meta = {}) {
+  return new Promise((resolve, reject) => {
+    screenshotCaptureQueue.push({
+      task,
+      resolve,
+      reject,
+      meta: meta && typeof meta === "object" ? meta : {},
+    });
+    notificationLogger.info("notification:screenshot:queued", {
+      queued: screenshotCaptureQueue.length,
+      inFlight: screenshotCaptureInFlight,
+      gameName: meta?.gameName || null,
+      achievement: meta?.achievement || null,
+    });
+    pumpScreenshotCaptureQueue();
+  });
 }
 
 function captureFullScreenShotInWorker(outputPath, options = {}) {
@@ -6151,6 +6197,7 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
     });
     let settled = false;
     const stderr = [];
+    let reportedSuccessPath = "";
     const finish = (err, result) => {
       if (settled) return;
       settled = true;
@@ -6175,7 +6222,7 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
     cp.on("message", (message) => {
       if (!message || typeof message !== "object") return;
       if (message.ok) {
-        finish(null, message.outputPath || outputPath);
+        reportedSuccessPath = message.outputPath || outputPath;
         return;
       }
       const err = new Error(message.error || "Screenshot capture failed");
@@ -6185,8 +6232,8 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
     cp.on("error", (err) => finish(err));
     cp.on("exit", (code, signal) => {
       if (settled) return;
-      if (code === 0 && fs.existsSync(outputPath)) {
-        finish(null, outputPath);
+      if (code === 0 && (reportedSuccessPath || fs.existsSync(outputPath))) {
+        finish(null, reportedSuccessPath || outputPath);
         return;
       }
       const err = new Error(
@@ -10517,8 +10564,16 @@ ipcMain.on("show-test-notification", (event, options) => {
   const baseDir = app.isPackaged ? process.resourcesPath : __dirname;
 
   const notificationData = {
-    displayName: "This is a testing achievement notification",
-    description: "This is a testing achievement notification for this app",
+    displayName: tUi(
+      "main.notify.testAchievementTitle",
+      {},
+      "Test Achievement Notification",
+    ),
+    description: tUi(
+      "main.notify.testAchievementDescription",
+      {},
+      "This is a test achievement notification for this app.",
+    ),
     icon: ICON_PNG_PATH, // Use app icon
     icon_gray: ICON_PNG_PATH, // Use app icon
     config_path: baseDir, // Use app's directory
@@ -10560,8 +10615,16 @@ ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
 
   queueAchievementNotification({
     name: `TEST_RARE_NOTIFICATION_${rarity.tier.toUpperCase()}`,
-    displayName: `${tierLabel} Rare Test`,
-    description: `Random ${tierLabel.toLowerCase()} rarity test notification (${rarity.percent}%)`,
+    displayName: tUi(
+      "main.notify.testRareTitle",
+      { tier: tierLabel },
+      "{tier} Rare Test",
+    ),
+    description: tUi(
+      "main.notify.testRareDescription",
+      { tier: tierLabel.toLowerCase(), percent: rarity.percent },
+      "Random {tier} rarity test notification ({percent}%)",
+    ),
     icon: ICON_PNG_PATH,
     icon_gray: ICON_PNG_PATH,
     config_path: baseDir,
@@ -17722,7 +17785,7 @@ function createPlaytimeWindow(playData = {}) {
     }
   });
 
-  ipcMain.once("close-playtime-window", () => {
+  const closePlaytimeWindowHandler = () => {
     const next = pendingPlayData;
     if (playtimeWindow && !playtimeWindow.isDestroyed()) {
       playtimeWindow.close();
@@ -17732,11 +17795,16 @@ function createPlaytimeWindow(playData = {}) {
       pendingPlayData = null;
       createPlaytimeWindow(next);
     }
-  });
+  };
+  ipcMain.once("close-playtime-window", closePlaytimeWindowHandler);
 
   const localWindow = playtimeWindow;
   localWindow.on("closed", () => {
     windowLogger.info("create-playtime-window:closed");
+    ipcMain.removeListener(
+      "close-playtime-window",
+      closePlaytimeWindowHandler,
+    );
     if (playtimeWindow === localWindow) {
       playtimeWindow = null;
       playtimeAlreadyClosing = false;
