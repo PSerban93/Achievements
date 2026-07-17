@@ -4843,6 +4843,110 @@
           : "on";
         return disabled ? "off" : "on";
       }
+      const APP_THEME_LABEL_KEYS = {
+        dracula: "option.appTheme.dracula",
+        dark: "option.appTheme.dark",
+        light: "option.appTheme.light",
+        oled: "option.appTheme.oled",
+        metro: "option.appTheme.metro",
+        "metro-dark": "option.appTheme.metroDark",
+        aero: "option.appTheme.aero",
+        "aero-dark": "option.appTheme.aeroDark",
+      };
+      const APP_THEME_FALLBACK_LABELS = {
+        dracula: "Dracula",
+        dark: "Dark",
+        light: "Light",
+        oled: "OLED",
+        metro: "Metro",
+        "metro-dark": "Metro Dark",
+        aero: "Aero",
+        "aero-dark": "Aero Dark",
+      };
+      window.__appThemeRegistryPayload = null;
+      function registerAppThemePayload(payload) {
+        const themes = Array.isArray(payload?.themes) ? payload.themes : [];
+        if (window.AppTheme?.registerAppThemes) {
+          window.AppTheme.registerAppThemes(themes);
+        }
+        window.__appThemeRegistryPayload = {
+          ...(payload || {}),
+          themes,
+        };
+        return window.__appThemeRegistryPayload;
+      }
+      function getRegisteredAppThemes() {
+        const themes = Array.isArray(window.__appThemeRegistryPayload?.themes)
+          ? [...window.__appThemeRegistryPayload.themes]
+          : [];
+        if (!themes.length && window.AppTheme?.APP_THEME_VALUES) {
+          return window.AppTheme.APP_THEME_VALUES.map((id) => ({
+            id,
+            base: id,
+            name: APP_THEME_FALLBACK_LABELS[id] || id,
+          }));
+        }
+        const order = new Map(
+          (window.AppTheme?.APP_THEME_VALUES || []).map((id, index) => [
+            id,
+            index,
+          ]),
+        );
+        themes.sort((a, b) => {
+          const ao = order.has(a.id) ? order.get(a.id) : 1000;
+          const bo = order.has(b.id) ? order.get(b.id) : 1000;
+          if (ao !== bo) return ao - bo;
+          return String(a.name || a.id).localeCompare(String(b.name || b.id));
+        });
+        return themes;
+      }
+      function getAppThemeDisplayName(theme) {
+        const id = String(theme?.id || "").trim().toLowerCase();
+        const key = APP_THEME_LABEL_KEYS[id];
+        const fallback =
+          String(theme?.name || "").trim() ||
+          APP_THEME_FALLBACK_LABELS[id] ||
+          id ||
+          "Theme";
+        return key ? tUi(key, fallback) : fallback;
+      }
+      function populateAppThemeSelect(selectedTheme) {
+        const select = document.getElementById("appThemeSelect");
+        if (!select) return;
+        const selected = normalizeAppTheme(selectedTheme || select.value);
+        const themes = getRegisteredAppThemes();
+        select.innerHTML = "";
+        for (const theme of themes) {
+          const id = normalizeAppTheme(theme.id);
+          const option = document.createElement("option");
+          option.value = id;
+          option.textContent = getAppThemeDisplayName(theme);
+          select.appendChild(option);
+        }
+        if (
+          selected &&
+          !Array.from(select.options).some((option) => option.value === selected)
+        ) {
+          const option = document.createElement("option");
+          option.value = selected;
+          option.textContent = selected;
+          select.appendChild(option);
+        }
+        select.value = selected || "dracula";
+      }
+      async function loadAppThemeRegistry({ reload = false } = {}) {
+        try {
+          const loader = reload
+            ? window.api?.reloadAppThemes
+            : window.api?.listAppThemes;
+          if (typeof loader === "function") {
+            const payload = await loader();
+            registerAppThemePayload(payload);
+          }
+        } catch {}
+        populateAppThemeSelect(getCachedPreferences()?.appTheme || "dracula");
+        return window.__appThemeRegistryPayload;
+      }
       function refreshAppThemeText() {
         const title = document.getElementById("settings-appThemeTitle");
         const label = document.getElementById("label.appThemeSelect");
@@ -4871,6 +4975,7 @@
         if (metroDark) metroDark.textContent = tUi("option.appTheme.metroDark", "Metro Dark");
         if (aero) aero.textContent = tUi("option.appTheme.aero", "Aero");
         if (aeroDark) aeroDark.textContent = tUi("option.appTheme.aeroDark", "Aero Dark");
+        populateAppThemeSelect(getCachedPreferences()?.appTheme || "dracula");
       }
       const tUiFmt = (key, params = {}, fallback) => {
         let text = tUi(key, fallback);
@@ -5060,6 +5165,13 @@
         window.__appThemeEventBound = true;
         window.api.on("tray:theme-changed", (data) => {
           if (data && Object.prototype.hasOwnProperty.call(data, "appTheme")) {
+            if (Array.isArray(data.themes)) {
+              registerAppThemePayload({
+                folder: data.themesFolder,
+                themes: data.themes,
+              });
+              populateAppThemeSelect(data.appTheme);
+            }
             applyAppTheme(data.appTheme);
           }
         });
@@ -12697,6 +12809,8 @@
 
       async function loadPreferences() {
         const prefs = await loadPreferencesFromDisk();
+        await loadAppThemeRegistry();
+        applyAppTheme(prefs.appTheme);
         renderSteamApiKeyStatusFromPrefs(prefs);
         await syncSteamOfficialAccountDropdown(prefs);
         await syncEpicOfficialAccountStatus();
@@ -12916,6 +13030,7 @@
         try {
           await loadPreferencesCached();
           const prefs = getCachedPreferences();
+          await loadAppThemeRegistry();
           applyAppTheme(prefs.appTheme);
           applyHardwareAccelerationPreference(
             prefs?.disableHardwareAcceleration,
@@ -14224,6 +14339,11 @@
         settingsMenu.classList.remove("hidden");
         document.documentElement.classList.add("settings-open");
         document.body.classList.add("settings-open");
+        void loadAppThemeRegistry({ reload: true }).then(() => {
+          const prefs = getCachedPreferences();
+          populateAppThemeSelect(prefs.appTheme || "dracula");
+          applyAppTheme(prefs.appTheme);
+        });
 
         installBgScrollBlockers();
 

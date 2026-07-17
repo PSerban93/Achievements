@@ -55,6 +55,10 @@ const {
 } = require("./utils/paths");
 const { normalizeAppTheme } = require("./utils/app-theme");
 const {
+  ensureUserThemes,
+  getThemeRegistryPayload,
+} = require("./utils/theme-manager");
+const {
   pickWindowsExecutableOrShortcut,
 } = require("./utils/windows-shortcut-picker");
 const { ensureSchemaParseRuntimeReady } = require("./utils/steam-schema-parse");
@@ -1973,6 +1977,12 @@ const DEFAULT_PREFERENCES = {
   steamOfficialSteamId: "",
   epicOfficialAccountId: "",
 };
+
+try {
+  ensureUserThemes();
+} catch (err) {
+  console.warn("themes:ensure-failed", err?.message || err);
+}
 
 const UI_LOCALE_DIR = path.join(__dirname, "assets", "locales");
 const uiLocaleCache = new Map();
@@ -6124,12 +6134,18 @@ function applyPreferenceSideEffects(
   }
   if (Object.prototype.hasOwnProperty.call(patch, "appTheme")) {
     const appTheme = normalizeAppTheme(prefsSnapshot.appTheme);
+    const themeRegistry = getThemeRegistryPayload();
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.send("overlay-preferences-updated", {
         appTheme,
+        themes: themeRegistry.themes,
       });
     }
-    broadcastToAll("tray:theme-changed", { appTheme });
+    broadcastToAll("tray:theme-changed", {
+      appTheme,
+      themes: themeRegistry.themes,
+      themesFolder: themeRegistry.folder,
+    });
   }
   if (Object.prototype.hasOwnProperty.call(patch, "lumaPlayWatcherEnabled")) {
     try {
@@ -7191,6 +7207,26 @@ ipcMain.handle("load-preferences", () => {
     safePrefs.steamApiKeyMasked = "";
   }
   return safePrefs;
+});
+
+ipcMain.handle("themes:list", () => getThemeRegistryPayload());
+
+ipcMain.handle("themes:reload", () => {
+  const payload = getThemeRegistryPayload();
+  const prefs = readPrefsSafe();
+  const appTheme = normalizeAppTheme(prefs?.appTheme);
+  broadcastToAll("tray:theme-changed", {
+    appTheme,
+    themes: payload.themes,
+    themesFolder: payload.folder,
+  });
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send("overlay-preferences-updated", {
+      appTheme,
+      themes: payload.themes,
+    });
+  }
+  return payload;
 });
 
 ipcMain.handle("steam-official:list-accounts", () => {

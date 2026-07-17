@@ -614,6 +614,18 @@
         }
         document.documentElement.dataset.theme = normalizeAppTheme(value);
       }
+      function registerOverlayThemes(payload) {
+        if (window.AppTheme?.registerAppThemes && Array.isArray(payload?.themes)) {
+          window.AppTheme.registerAppThemes(payload.themes);
+        }
+      }
+      async function loadOverlayThemes() {
+        try {
+          if (typeof window.api?.listAppThemes === "function") {
+            registerOverlayThemes(await window.api.listAppThemes());
+          }
+        } catch {}
+      }
       const overlayAchievementTableViewState = {
         status: "all",
         nameSort: "off",
@@ -717,6 +729,7 @@
       async function loadOverlayPrefs() {
         if (overlayPrefsLoaded && overlayPrefs) return overlayPrefs;
         try {
+          await loadOverlayThemes();
           overlayPrefs = await window.api.loadPreferences?.();
           applyAppTheme(overlayPrefs?.appTheme);
           overlayPrefsLoaded = true;
@@ -1452,6 +1465,7 @@
       window.api.on("overlay-preferences-updated", (payload) => {
         if (!payload || typeof payload !== "object") return;
         if (Object.prototype.hasOwnProperty.call(payload, "appTheme")) {
+          registerOverlayThemes(payload);
           overlayPrefs = {
             ...(overlayPrefs || {}),
             appTheme: normalizeAppTheme(payload.appTheme),

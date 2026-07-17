@@ -12,6 +12,18 @@
     }
     document.documentElement.dataset.theme = normalizeAppTheme(value);
   };
+  const registerThemes = (payload) => {
+    if (window.AppTheme?.registerAppThemes && Array.isArray(payload?.themes)) {
+      window.AppTheme.registerAppThemes(payload.themes);
+    }
+  };
+  const loadThemes = async () => {
+    try {
+      if (typeof window.api?.listAppThemes === "function") {
+        registerThemes(await window.api.listAppThemes());
+      }
+    } catch {}
+  };
   const applyHardwareAccelerationPreference = (value) => {
     if (window.AppTheme?.applyHardwareAccelerationPreferenceToDocument) {
       window.AppTheme.applyHardwareAccelerationPreferenceToDocument(value);
@@ -74,6 +86,7 @@
       }
     });
     window.api.on("tray:theme-changed", (data) => {
+      registerThemes(data);
       applyAppTheme(data?.appTheme);
     });
   }
@@ -81,7 +94,8 @@
   if (window.api && typeof window.api.loadPreferences === "function") {
     window.api
       .loadPreferences()
-      .then((prefs) => {
+      .then(async (prefs) => {
+        await loadThemes();
         applyAppTheme(prefs?.appTheme);
         applyHardwareAccelerationPreference(
           prefs?.disableHardwareAcceleration,

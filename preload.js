@@ -585,6 +585,8 @@ contextBridge.exposeInMainWorld("api", {
   savePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   updatePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   loadPreferences: () => ipcRenderer.invoke("load-preferences"),
+  listAppThemes: () => ipcRenderer.invoke("themes:list"),
+  reloadAppThemes: () => ipcRenderer.invoke("themes:reload"),
   listSteamOfficialAccounts: () =>
     ipcRenderer.invoke("steam-official:list-accounts"),
   getEpicOfficialStatus: () => ipcRenderer.invoke("epic-official:status"),
@@ -795,6 +797,8 @@ contextBridge.exposeInMainWorld("electron", {
         "preferences:update",
         "save-preferences",
         "load-preferences",
+        "themes:list",
+        "themes:reload",
         "steam-official:list-accounts",
         "epic-official:status",
         "epic-official:connect",

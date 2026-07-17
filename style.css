@@ -2,6 +2,7 @@
 :root,
 :root[data-theme="dracula"] {
   --app-bg: #282a36;
+  --app-body-bg: var(--app-bg);
   --app-surface: #44475a;
   --app-text: #f8f8f2;
   --app-muted: #6272a4;
@@ -318,15 +319,19 @@
 }
 
 :root[data-theme="aero"] body {
-  background:
+  background: var(
+    --app-body-bg,
     linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(87, 166, 226, 0.18)),
-    linear-gradient(180deg, #d8edf9 0%, #9fcce8 52%, #78afd9 100%);
+    linear-gradient(180deg, #d8edf9 0%, #9fcce8 52%, #78afd9 100%)
+  );
 }
 
 :root[data-theme="aero-dark"] body {
-  background:
+  background: var(
+    --app-body-bg,
     linear-gradient(145deg, rgba(126, 230, 255, 0.16), rgba(2, 9, 18, 0.12)),
-    linear-gradient(180deg, #263f56 0%, #14283b 52%, #0b1724 100%);
+    linear-gradient(180deg, #263f56 0%, #14283b 52%, #0b1724 100%)
+  );
 }
 
 :root[data-theme="aero"] .modal-content,
@@ -408,7 +413,7 @@
 
 body {
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  background-color: var(--dracula-background);
+  background: var(--app-body-bg, var(--dracula-background));
   color: var(--dracula-foreground);
   margin: 0;
   padding: 48px 20px 20px 20px;
