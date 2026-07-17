@@ -8,6 +8,13 @@ const {
   buildSnapshotFromPs4ProgressFile,
   PS4_LANG_MAP,
 } = require("./shadps4-trophy");
+const { writeAchievementPercentagesSidecar } = require("./achievement-rarity");
+const {
+  EXOPHASE_LANG_MAP,
+  EXOPHASE_RARITY_SOURCE,
+  buildExophaseSlugVariants,
+  fetchExophaseAchievementsMultiLang,
+} = require("./exophase-scraper");
 
 const autoConfigLogger = createLogger("autoconfig");
 const schemaLogger = createLogger("achschema");
@@ -107,6 +114,262 @@ function hasAllLanguages(entries, langKeys) {
     }
   }
   return true;
+}
+
+function normalizeExophaseRarityPct(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value)
+      ? Number(Math.min(100, Math.max(0, value)).toFixed(4))
+      : null;
+  }
+  const raw = String(value || "")
+    .replace(",", ".")
+    .trim();
+  if (!raw) return null;
+  const match = raw.match(/(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed)
+    ? Number(Math.min(100, Math.max(0, parsed)).toFixed(4))
+    : null;
+}
+
+function hasAllRarityPct(entries) {
+  if (!Array.isArray(entries) || !entries.length) return false;
+  return entries.every(
+    (entry) => normalizeExophaseRarityPct(entry?.rarityPct) !== null,
+  );
+}
+
+function getLangValue(value, lang = "english") {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim();
+  }
+  if (value && typeof value === "object") {
+    return (
+      String(value[lang] || "").trim() ||
+      Object.values(value)
+        .map((v) =>
+          typeof v === "string" || typeof v === "number"
+            ? String(v).trim()
+            : "",
+        )
+        .find(Boolean) ||
+      ""
+    );
+  }
+  return "";
+}
+
+function normalizeMatchText(value) {
+  if (!value) return "";
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function buildMatchKey(title, description) {
+  const t = normalizeMatchText(title);
+  if (!t) return "";
+  const d = normalizeMatchText(description);
+  return `${t}|${d}`;
+}
+
+function buildRarityEntries(entries) {
+  const out = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const name =
+      typeof entry?.name === "string" || typeof entry?.name === "number"
+        ? String(entry.name).trim()
+        : "";
+    if (!name || seen.has(name)) continue;
+    const percent = normalizeExophaseRarityPct(entry?.rarityPct);
+    if (percent === null) continue;
+    seen.add(name);
+    out.push({ name, percent });
+  }
+  out.sort((a, b) =>
+    String(a.name).localeCompare(String(b.name), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    }),
+  );
+  return out;
+}
+
+function writeExophaseRaritySidecar(schemaDir, appid, entries) {
+  const achievements = buildRarityEntries(entries);
+  if (!schemaDir || !achievements.length) {
+    return { written: false, matched: 0, sidecarPath: "" };
+  }
+  const sidecarPath = writeAchievementPercentagesSidecar(
+    schemaDir,
+    appid,
+    achievements,
+    { source: EXOPHASE_RARITY_SOURCE },
+  );
+  return { written: true, matched: achievements.length, sidecarPath };
+}
+
+function buildPs4ExophaseSlugCandidates(title, appid = "") {
+  const cleaned = String(title || appid || "")
+    .replace(/\s*\((?:PS4|shadps4)\)\s*$/i, "")
+    .replace(/[™®©]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const variants = buildExophaseSlugVariants(cleaned || appid);
+  return Array.from(
+    new Set([
+      ...variants,
+      ...variants.map((slug) => `${slug}-ps4`),
+    ]),
+  );
+}
+
+async function enrichSchemaRarityFromExophase(schemaDir, parsed) {
+  if (!schemaDir || !parsed) return { updated: false, matched: 0, fetched: 0 };
+  const schemaPath = path.join(schemaDir, "achievements.json");
+  if (!fs.existsSync(schemaPath)) return { updated: false, matched: 0, fetched: 0 };
+
+  let entries;
+  try {
+    entries = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+  } catch {
+    return { updated: false, matched: 0, fetched: 0 };
+  }
+  if (!Array.isArray(entries) || !entries.length) {
+    return { updated: false, matched: 0, fetched: 0 };
+  }
+  if (hasAllRarityPct(entries)) {
+    schemaLogger.info("ps4:exophase:skip", {
+      appid: String(parsed?.appid || ""),
+      reason: "rarity-complete",
+    });
+    return { updated: false, matched: entries.length, fetched: entries.length };
+  }
+
+  const slugCandidates = buildPs4ExophaseSlugCandidates(
+    parsed?.title || parsed?.appid,
+    parsed?.appid,
+  );
+  let exoData = null;
+  let usedSlug = slugCandidates[0] || "";
+  let lastError = null;
+  schemaLogger.info("ps4:exophase:start", {
+    appid: String(parsed?.appid || ""),
+    slug: usedSlug,
+    platform: "ps4",
+    variants: slugCandidates.length,
+  });
+  for (const slug of slugCandidates) {
+    try {
+      exoData = await fetchExophaseAchievementsMultiLang({
+        slug,
+        platform: "shadps4",
+        langKeys: ["english"],
+        langMap: EXOPHASE_LANG_MAP,
+        logger: schemaLogger,
+      });
+      usedSlug = slug;
+      break;
+    } catch (err) {
+      lastError = err;
+      schemaLogger.warn("ps4:exophase:retry", {
+        appid: String(parsed?.appid || ""),
+        slug,
+        platform: "ps4",
+        error: err?.message || String(err),
+      });
+    }
+  }
+  if (!exoData) {
+    schemaLogger.warn("ps4:exophase:failed", {
+      appid: String(parsed?.appid || ""),
+      slug: slugCandidates[0] || "",
+      platform: "ps4",
+      error: lastError?.message || String(lastError || "No working Exophase URL"),
+      tried: slugCandidates,
+    });
+    return { updated: false, matched: 0, fetched: 0 };
+  }
+
+  const keyMap = new Map();
+  const keyDupes = new Set();
+  const titleMap = new Map();
+  const titleDupes = new Set();
+  const register = (map, dupes, key, item) => {
+    if (!key) return;
+    const prev = map.get(key);
+    if (prev && prev !== item) {
+      dupes.add(key);
+      return;
+    }
+    map.set(key, item);
+  };
+  for (const item of exoData.items || []) {
+    const title = item?.titles?.english || "";
+    const desc = item?.descriptions?.english || "";
+    register(keyMap, keyDupes, buildMatchKey(title, desc), item);
+    register(titleMap, titleDupes, normalizeMatchText(title), item);
+  }
+
+  let updated = false;
+  let matched = 0;
+  for (const entry of entries) {
+    const title = getLangValue(entry.displayName, "english");
+    const desc = getLangValue(entry.description, "english");
+    let match = null;
+    const key = buildMatchKey(title, desc);
+    if (key && !keyDupes.has(key)) match = keyMap.get(key) || null;
+    if (!match) {
+      const titleKey = normalizeMatchText(title);
+      if (titleKey && !titleDupes.has(titleKey)) {
+        match = titleMap.get(titleKey) || null;
+      }
+    }
+    const rarityPct = normalizeExophaseRarityPct(match?.rarityPct);
+    if (!match || rarityPct === null) continue;
+    matched += 1;
+    if (entry.rarityPct !== rarityPct) {
+      entry.rarityPct = rarityPct;
+      updated = true;
+    }
+    const source = match.raritySource || EXOPHASE_RARITY_SOURCE;
+    if (entry.raritySource !== source) {
+      entry.raritySource = source;
+      updated = true;
+    }
+  }
+
+  if (updated) {
+    fs.writeFileSync(schemaPath, JSON.stringify(entries, null, 2), "utf8");
+  }
+  const raritySidecar = writeExophaseRaritySidecar(
+    schemaDir,
+    String(parsed?.appid || ""),
+    entries,
+  );
+  schemaLogger.info("ps4:exophase:merged", {
+    appid: String(parsed?.appid || ""),
+    slug: usedSlug,
+    platform: "ps4",
+    fetched: (exoData.items || []).length,
+    matched,
+    updated,
+    raritySidecar: raritySidecar.matched,
+  });
+  return {
+    updated,
+    matched,
+    fetched: (exoData.items || []).length,
+    raritySidecar: raritySidecar.matched,
+  };
 }
 
 function writeSchemaAssets(schemaDir, parsed) {
@@ -363,6 +626,12 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     currentEntries = writeSchemaAssets(schemaDir, parsed);
     schemaUpdated = true;
     added = currentEntries.length;
+  }
+  const shouldRefreshRarity =
+    options.bootMode !== true && (added > 0 || !hasAllRarityPct(currentEntries));
+  if (shouldRefreshRarity) {
+    const exophaseRes = await enrichSchemaRarityFromExophase(schemaDir, parsed);
+    if (exophaseRes?.updated) schemaUpdated = true;
   }
 
   const payload = {

@@ -1,0 +1,3 @@
+SAN runtime assets vendored from SteamAchievementNotifier/SteamAchievementNotifier.
+Source: https://github.com/SteamAchievementNotifier/SteamAchievementNotifier
+Fetched paths: notify/**, img/**, fonts/**, icon/lock.svg, dist/app/global.css

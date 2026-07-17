@@ -6,10 +6,12 @@ const {
   buildSnapshotFromTrophy,
   buildSchemaFromTrophy,
 } = require("./rpcs3-trophy");
+const { writeAchievementPercentagesSidecar } = require("./achievement-rarity");
 const {
   fetchExophaseAchievementsMultiLang,
   EXOPHASE_LANG_KEYS,
   EXOPHASE_LANG_MAP,
+  EXOPHASE_RARITY_SOURCE,
   buildExophaseSlugVariants,
   downloadExophaseIcon,
 } = require("./exophase-scraper");
@@ -51,6 +53,25 @@ function hasConfigChanges(prev, next) {
     if (a !== b) return true;
   }
   return false;
+}
+
+function normalizeExophaseRarityPct(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value)
+      ? Number(Math.min(100, Math.max(0, value)).toFixed(4))
+      : null;
+  }
+  const raw = String(value || "")
+    .replace(",", ".")
+    .trim();
+  if (!raw) return null;
+  const match = raw.match(/(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed)
+    ? Number(Math.min(100, Math.max(0, parsed)).toFixed(4))
+    : null;
 }
 
 function sanitizeConfigName(raw) {
@@ -186,6 +207,50 @@ function hasMultiLang(entries) {
   });
 }
 
+function hasAllRarityPct(entries) {
+  if (!Array.isArray(entries) || !entries.length) return false;
+  return entries.every(
+    (entry) => normalizeExophaseRarityPct(entry?.rarityPct) !== null,
+  );
+}
+
+function buildExophaseRarityEntries(entries) {
+  const out = [];
+  const seen = new Set();
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const name =
+      typeof entry?.name === "string" || typeof entry?.name === "number"
+        ? String(entry.name).trim()
+        : "";
+    if (!name || seen.has(name)) continue;
+    const percent = normalizeExophaseRarityPct(entry?.rarityPct);
+    if (percent === null) continue;
+    seen.add(name);
+    out.push({ name, percent });
+  }
+  out.sort((a, b) =>
+    String(a.name).localeCompare(String(b.name), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    }),
+  );
+  return out;
+}
+
+function writeExophaseRaritySidecar(schemaDir, appid, entries) {
+  const achievements = buildExophaseRarityEntries(entries);
+  if (!schemaDir || !achievements.length) {
+    return { written: false, matched: 0, sidecarPath: "" };
+  }
+  const sidecarPath = writeAchievementPercentagesSidecar(
+    schemaDir,
+    appid,
+    achievements,
+    { source: EXOPHASE_RARITY_SOURCE },
+  );
+  return { written: true, matched: achievements.length, sidecarPath };
+}
+
 function copyIfMissing(src, dst) {
   if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
 }
@@ -294,6 +359,7 @@ async function enrichSchemaFromExophase(schemaDir, parsed, exoData) {
   let updated = false;
   let matched = 0;
   let iconsSaved = 0;
+  let rarityMatched = 0;
 
   for (const entry of entries) {
     const title = getLangValue(entry.displayName, "english");
@@ -326,14 +392,39 @@ async function enrichSchemaFromExophase(schemaDir, parsed, exoData) {
       updated = true;
     }
 
+    const rarityPct = normalizeExophaseRarityPct(match.rarityPct);
+    if (rarityPct !== null) {
+      rarityMatched += 1;
+      if (entry.rarityPct !== rarityPct) {
+        entry.rarityPct = rarityPct;
+        updated = true;
+      }
+      const source = match.raritySource || EXOPHASE_RARITY_SOURCE;
+      if (entry.raritySource !== source) {
+        entry.raritySource = source;
+        updated = true;
+      }
+    }
+
     // Icon handling for RPCS3 stays native (TROP*.PNG); do not overwrite with Exophase.
   }
 
   if (updated) {
     fs.writeFileSync(schemaPath, JSON.stringify(entries, null, 2), "utf8");
   }
+  const raritySidecar = writeExophaseRaritySidecar(
+    schemaDir,
+    String(parsed?.appid || ""),
+    entries,
+  );
 
-  return { updated, matched, icons: iconsSaved };
+  return {
+    updated,
+    matched,
+    icons: iconsSaved,
+    rarity: rarityMatched,
+    raritySidecar: raritySidecar.matched,
+  };
 }
 
 function updateSchemaFromTrophy(schemaDir, parsed) {
@@ -516,17 +607,21 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
       if (
         added === 0 &&
         currentEntries.length > 0 &&
-        hasAllLanguages(currentEntries, EXOPHASE_LANG_KEYS)
+        hasAllLanguages(currentEntries, EXOPHASE_LANG_KEYS) &&
+        hasAllRarityPct(currentEntries)
       ) {
         schemaLogger.info("rpcs3:exophase:skip", {
           appid: String(appid),
-          reason: "languages-complete",
+          reason: "metadata-complete",
         });
         skipExo = true;
       }
     } catch {}
     // if no new entries were added and each one already has at least one non-English language, skip
-    if (!skipExo && (added > 0 || !hasMultiLang(currentEntries))) {
+    if (
+      !skipExo &&
+      (added > 0 || !hasMultiLang(currentEntries) || !hasAllRarityPct(currentEntries))
+    ) {
     const variants = buildExophaseSlugVariants(title || appid);
     const slugCandidates = Array.from(
       new Set([
@@ -546,6 +641,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
       let usedSlug = slugCandidates[0];
       let lastError = null;
       let exoData = null;
+      let mergeRes = null;
       for (const candidate of slugCandidates) {
         try {
           exoData = await fetchExophaseAchievementsMultiLang({
@@ -555,7 +651,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
             langMap: EXOPHASE_LANG_MAP,
             logger: schemaLogger,
           });
-      const mergeRes = await enrichSchemaFromExophase(
+      mergeRes = await enrichSchemaFromExophase(
         schemaDir,
         parsed,
         exoData
@@ -586,6 +682,11 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
           appid: String(appid),
           slug: usedSlug,
           expected: trophyCount,
+          matched: mergeRes?.matched || 0,
+          updated: !!mergeRes?.updated,
+          icons: mergeRes?.icons || 0,
+          rarity: mergeRes?.rarity || 0,
+          raritySidecar: mergeRes?.raritySidecar || 0,
         });
       } else if (lastError) {
         schemaLogger.warn("rpcs3:exophase:failed", {

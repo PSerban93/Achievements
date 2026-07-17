@@ -1,0 +1,306 @@
+@font-face {
+    font-family: "Source Sans Pro Light";
+    src: url("../../../fonts/SourceSansPro-Light.ttf");
+}
+
+@font-face {
+    font-family: "Source Sans Pro ExtraLight";
+    src: url("../../../fonts/SourceSansPro-ExtraLight.ttf");
+}
+
+body {
+    --placement: center end;
+    place-content: var(--placement);
+}
+
+body[topleft],
+body[bottomleft] {
+    --placement: center start;
+}
+
+body[topcenter] {
+    --placement: start center;
+}
+
+body[bottomcenter] {
+    --placement: end center;
+}
+
+.wrapper#outerwrapper {
+    border-radius: 0;
+}
+
+.wrapper#achcont {
+    --translate: var(--notifywidth) 0;
+    --br: var(--roundness) 0 0 var(--roundness);
+    --height: var(--notifyheight);
+    --margin: calc(10px * var(--scale)) calc(var(--notifywidth) / 8);
+    --achcontopacity: var(--opacity);
+    --achiconstart: 3;
+    --logostart: 1;
+    grid-template-columns: auto 1fr auto;
+    width: var(--notifywidth);
+    height: var(--height);
+    border-radius: var(--br);
+    animation:
+        slidein var(--transition) forwards,
+        slideout var(--transition) calc(var(--displaytime) - var(--transition)) forwards;
+}
+
+body[ss] .wrapper#achcont {
+    --translate: 0 0 !important;
+}
+
+@keyframes slidein {
+    from { translate: var(--translate); }
+    to {
+        opacity: var(--achcontopacity);
+        translate: 0;
+    }
+}
+
+@keyframes slideout {
+    from { translate: 0; }
+    to {
+        opacity: 0;
+        translate: var(--translate);
+    }
+}
+
+body[bgonly] .wrapper#achcont {
+    --achcontopacity: 1;
+}
+
+body[bgonly] .wrapper#bg {
+    opacity: var(--opacity);
+}
+
+.wrapper#achcont > .wrapper#bg {
+    width: var(--notifywidth);
+    height: var(--height);
+    border-radius: var(--br);
+}
+
+.wrapper#bg,
+.wrapper#achcontent {
+    width: 100%;
+}
+
+body[topleft] .wrapper#achcont,
+body[bottomleft] .wrapper#achcont {
+    --translate: calc(var(--notifywidth) * -1) 0;
+    --br: 0 var(--roundness) var(--roundness) 0;
+    --margin: calc(var(--notifywidth) / 8) calc(10px * var(--scale));
+    --achiconstart: 1;
+    --logostart: 3;
+}
+
+body[topcenter] .wrapper#achcont {
+    --translate: 0 calc(var(--notifyheight) * -1);
+    --br: 0 0 var(--roundness) var(--roundness);
+    --margin: calc(10px * var(--scale));
+    --achiconstart: 1;
+    --logostart: 3;
+}
+
+body[bottomcenter] .wrapper#achcont {
+    --translate: 0 var(--notifywidth);
+    --br: var(--roundness) var(--roundness) 0 0;
+    --margin: calc(10px * var(--scale));
+    --achiconstart: 1;
+    --logostart: 3;
+}
+
+.wrapper#achiconwrapper {
+    scale: 0.8;
+    margin-inline: var(--margin);
+    grid-column-start: var(--achiconstart);
+}
+
+@keyframes fadein {
+    to { opacity: 1; }
+}
+
+.wrapper#achcontent {
+    column-gap: calc(0.5rem * var(--fontsize));
+}
+
+.wrapper#achcontent::before {
+    content: "";
+    display: var(--decorationdisplaytype);
+    width: 0.5rem;
+    height: 0.5rem;
+    scale: calc(1.75 * var(--fontsize));
+    background: var(--decoration) center / contain no-repeat;
+    grid-column-start: 1;
+    grid-row-start: var(--decorationindex);
+    transform: scale(var(--decorationscale));
+}
+
+.wrapper#logo {
+    display: grid;
+    grid-column-start: var(--logostart);
+    margin-inline: 1.5rem;
+    place-self: center;
+    isolation: isolate;
+    transform: scale(var(--logoscale));
+}
+
+.wrapper#logo::before {
+    content: "";
+    width: 1.5rem;
+    height: 1.5rem;
+    background: var(--logo) center / contain no-repeat;
+}
+
+.wrapper#logo::after {
+    content: "";
+    width: 2.5rem;
+    height: 2.5rem;
+    opacity: 0;
+    background-color: transparent;
+    outline: calc(1px * var(--scale)) solid var(--tertiarycolor);
+    border-radius: 50%;
+    filter: blur(calc(0.5px * var(--scale)));
+    z-index: -1;
+    animation: expandcircle calc(var(--transition) * 10) calc(var(--displaytime) / 4) linear forwards;
+}
+
+@keyframes expandcircle {
+    1% { opacity: 1; }
+    to { opacity: 0; }
+}
+
+.wrapper#logo::before,
+.wrapper#logo::after {
+    grid-column-start: 1;
+    grid-row-start: 1;
+    place-self: center;
+}
+
+body[alldetails] .wrapper#achcontent::before {
+    scale: 1.35;
+}
+
+.wrapper#achcontent > span {
+    line-height: calc(1.1rem * var(--fontsize));
+}
+
+body:not([alldetails]) .wrapper#achcontent > #unlockmsg {
+    line-height: calc(1.12rem * var(--fontsize));
+}
+
+body[alldetails] .wrapper#achcontent > span {
+    font-size: calc(0.85rem * var(--fontsize));
+    -webkit-line-clamp: 1;
+}
+
+/* body[alldetails] .wrapper#achcontent > span:not(#title),
+body .wrapper#achcontent > span:not(#title) {
+    grid-column: 1 / span 2;
+} */
+
+.wrapper#achcontent > span {
+    grid-column: 1 / -1;
+}
+
+.wrapper#achcontent > span:has(#decoration) {
+    grid-column: 2 / -1;
+}
+
+body:not([alldetails]) #desc {
+    display: none;
+}
+
+#unlockmsg {
+    font-family: "customfont", "Source Sans Pro Light", "Roboto";
+    opacity: 1;
+}
+
+#title,
+#desc {
+    font-family: "customfont", "Source Sans Pro ExtraLight", "Roboto";
+    font-size: calc(0.9rem * var(--fontsize));
+    opacity: 0.85 !important;
+}
+
+body[ss] > .wrapper#achcont,
+body[ss] .wrapper#achcontent {
+    --translate: 0 0;
+    opacity: 1;
+}
+
+body[ss] .wrapper#logo {
+    display: grid;
+    opacity: 1;
+}
+
+.wrapper#ssdisplay {
+    height: calc(var(--notifyheight) * 3.88888);
+}
+
+body[bottomleft] .wrapper#ssdisplay,
+body[bottomleft] .wrapper#ssdisplay::before {
+    border-radius: 0 var(--roundness) 0 0;
+}
+
+body[bottomright] .wrapper#ssdisplay,
+body[bottomright] .wrapper#ssdisplay::before {
+    border-radius: var(--roundness) 0 0 0;
+}
+
+body[topleft] .wrapper#ssdisplay,
+body[topleft] .wrapper#ssdisplay::before {
+    border-radius: 0 0 var(--roundness) 0;
+}
+
+body[topright] .wrapper#ssdisplay,
+body[topright] .wrapper#ssdisplay::before {
+    border-radius: 0 0 0 var(--roundness);
+}
+
+body:not([ss])[ssdisplay] .wrapper#ssdisplay::before {
+    animation:
+        ssslidein var(--transition) calc(var(--transition) * 2) forwards,
+        ssslideout var(--transition) calc(var(--displaytime) - (var(--transition) * 2)) forwards;
+}
+
+body:not([ss])[ssdisplay][bottomcenter] .wrapper#achcont,
+body:not([ss])[ssdisplay][bottomcenter] .wrapper#bg,
+body:not([ss])[ssdisplay][topcenter] .wrapper#achcont,
+body:not([ss])[ssdisplay][topcenter] .wrapper#bg {
+    --ssbr: 0;
+}
+
+body:not([ss])[ssdisplay][bottomleft] .wrapper#achcont,
+body:not([ss])[ssdisplay][bottomleft] .wrapper#bg {
+    --ssbr: 0 0 var(--roundness) 0;
+}
+
+body:not([ss])[ssdisplay][bottomright] .wrapper#achcont,
+body:not([ss])[ssdisplay][bottomright] .wrapper#bg {
+    --ssbr: 0 0 0 var(--roundness);
+}
+
+body:not([ss])[ssdisplay][topleft] .wrapper#achcont,
+body:not([ss])[ssdisplay][topleft] .wrapper#bg {
+    --ssbr: 0 var(--roundness) 0 0;
+}
+
+body:not([ss])[ssdisplay][topright] .wrapper#achcont,
+body:not([ss])[ssdisplay][topright] .wrapper#bg {
+    --ssbr: var(--roundness) 0 0 0;
+}
+
+body:not([ss])[ssdisplay] .wrapper#achcont,
+body:not([ss])[ssdisplay] .wrapper#bg {
+    animation:
+        slidein var(--transition) forwards,
+        ssbrin var(--transition) calc(var(--transition) * 2) forwards,
+        ssbrout var(--transition) calc(var(--displaytime) - (var(--transition) * 2)) forwards,
+        slideout var(--transition) calc(var(--displaytime) - var(--transition)) forwards;
+}
+
+@keyframes ssbrout {
+    to { border-radius: var(--br); }
+}

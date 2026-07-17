@@ -1,0 +1,241 @@
+.wrapper#outerwrapper {
+    overflow: hidden;
+}
+
+.wrapper#achcont {
+    grid-column-start: 1;
+    grid-row-start: 1;
+    width: 16.6%;
+}
+
+.wrapper#bg {
+    width: 100%;
+}
+
+.wrapper#achcont:has(.wrapper#achcontent > #unlockmsg) {
+    --move: calc(var(--notifywidth) - 100%);
+    --slidex: -100%;
+    --slidey: 0;
+    scale: 0;
+    animation:
+        popin calc(var(--transition) * 2) forwards,
+        move calc(var(--transition) * 2) calc(var(--transition) * 2) forwards,
+        expand calc(var(--transition) * 2) calc(var(--transition) * 4) forwards,
+        slide calc(var(--transition) * 2) calc(var(--displaytime) / 2 - calc(var(--transition) * 2)) forwards;
+}
+
+@keyframes popin {
+    to { scale: 1; }
+}
+
+@keyframes move {
+    to { translate: var(--move); }
+}
+
+@keyframes expandleft {
+    to { width: var(--notifywidth); }
+}
+
+.wrapper#achcont:has(.wrapper#achcontent > #desc) {
+    --move: 0;
+    --slidex: 0;
+    --slidey: -100%;
+    translate: var(--notifywidth);
+    animation:
+        move calc(var(--transition) * 2) calc(var(--displaytime) / 2 - calc(var(--transition) * 2)) forwards,
+        expand calc(var(--transition) * 2) calc(var(--displaytime) / 2) forwards,
+        shrink calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 4)) forwards,
+        slide var(--transition) calc(var(--displaytime) - (var(--transition) * 2)) forwards;
+}
+
+.wrapper#achiconwrapper {
+    grid-column: 1 / -1;
+    justify-self: start;
+}
+
+#logo {
+    place-self: center;
+    grid-column-start: 1;
+    grid-row-start: 1;
+    width: 85%;
+    height: 85%;
+    background: var(--logo) center / contain no-repeat;
+    border-radius: var(--iconroundness);
+    transform: scale(var(--logoscale));
+}
+
+.wrapper#achiconwrapper:has(#logo) {
+    transform: none;
+}
+
+body[rare]:not([noiconanim]) .wrapper#achiconwrapper:has(#logo),
+body[plat]:not([noiconanim]) .wrapper#achiconwrapper:has(#logo) {
+    filter: var(--iconshadow);
+}
+
+.wrapper#achcont:has(.wrapper#achcontent > #desc) > .wrapper#achiconwrapper {
+    grid-column-start: 2;
+    justify-self: end;
+}
+
+@keyframes expand {
+    to { width: var(--notifywidth); }
+}
+
+@keyframes shrink {
+    to { width: 16.6%; }
+}
+
+@keyframes slide {
+    to { translate: var(--slidex) var(--slidey); }
+}
+
+body[solid] .wrapper#achcont:has(.wrapper#achcontent > #unlockmsg)  > #bg {
+    background-color: var(--primarycolor);
+}
+
+body[solid] .wrapper#achcont:has(.wrapper#achcontent > #desc) > #bg {
+    background-color: var(--secondarycolor);
+}
+
+.wrapper#achcontent {
+    padding: 0;
+    opacity: 0;
+}
+
+/* .wrapper#achcont:has(.wrapper#achcontent > #unlockmsg) > .wrapper#achcontent {
+    grid-template-columns: calc(var(--notifyheight) - (10px * var(--scale))) auto auto calc(var(--notifyheight) - (10px * var(--scale)));
+    grid-column: 1 / -1;
+    align-self: center;
+    align-items: center;
+    animation: fadein calc(var(--transition) * 2) calc(var(--transition) * 6) forwards;
+    gap: 0;
+} */
+
+.wrapper#achcont:has(.wrapper#achcontent > #unlockmsg) > .wrapper#achcontent {
+    grid-template-columns: calc(var(--notifyheight) - (10px * var(--scale))) auto auto calc(var(--notifyheight) - (10px * var(--scale)));
+    grid-column: 1 / -1;
+    place-content: center;
+    width: 100%;
+    animation: fadein calc(var(--transition) * 2) calc(var(--transition) * 6) forwards;
+    gap: 0.75rem;
+}
+
+.wrapper#achcontent::before {
+    content: "";
+    display: var(--decorationdisplaytype);
+    width: calc(var(--fontsize) * 0.6rem);
+    height: calc(var(--fontsize) * 0.6rem);
+    scale: calc(1.75 * var(--fontsize));
+    background: var(--decoration) center / contain no-repeat;
+    grid-column-start: 2;
+    grid-row-start: var(--decorationindex);
+    transform: scale(var(--decorationscale));
+}
+
+.wrapper#achcontent > span:has(#decoration) {
+    grid-column-start: 3;
+}
+
+.wrapper#achcontent > span:not(:has(#decoration)) {
+    grid-column: 2 / span 2;
+}
+
+.wrapper#achcontent:not(:has(#decoration))::before {
+    content: none;
+}
+
+body:not([ss]) .wrapper#achcont:has(.wrapper#achcontent > #desc) > .wrapper#achcontent::before {
+    grid-row-start: calc(var(--decorationindex) - 1);
+}
+
+.wrapper#achcont:has(.wrapper#achcontent > #desc) > .wrapper#achcontent {
+    grid-template-columns: calc(10px * var(--scale)) min-content auto calc(var(--notifyheight) - (10px * var(--scale)));
+    grid-column: 1 / -1;
+    animation:
+        fadein calc(var(--transition) * 2) calc(var(--displaytime) / 2 + (var(--transition))) forwards,
+        fadeout calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 6)) forwards;
+}
+
+@keyframes fadein {
+    to { opacity: 1; }
+}
+
+@keyframes fadeout {
+    to { opacity: 0; }
+}
+
+.wrapper#achcontent > #unlockmsg {
+    grid-column-start: 3;
+    justify-self: start;
+}
+
+.wrapper#achcontent > span {
+    font-family: "customfont", "Titillium Web", "Roboto";
+}
+
+body[nodecoration] .wrapper#achcont:has(.wrapper#achcontent > #unlockmsg) > .wrapper#achcontent > #unlockmsg {
+    grid-column: 2 / span 2;
+    place-self: center;
+}
+
+body[nodecoration] .wrapper#achcontent > span {
+    grid-column: auto;
+    grid-column-start: 2;
+}
+
+#unlockmsg,
+#title {
+    grid-row-start: 1;
+}
+
+#desc {
+    font-size: calc(0.85rem * var(--fontsize));
+    grid-row-start: 2;
+}
+
+body[ss] .wrapper#achcont:has(.wrapper#achcontent > #unlockmsg) {
+    display: none;
+}
+
+body[ss] .wrapper#achcont:has(.wrapper#achcontent > #desc) {
+    translate: 0;
+}
+
+body[ss] .wrapper#achcont:has(.wrapper#achcontent > #desc) > #bg {
+    background-color: var(--primarycolor);
+}
+
+.wrapper#ssdisplay::before {
+    animation:
+        ssslidein calc(var(--transition) * 2) calc(var(--transition) * 6) forwards,
+        ssslideout calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 6)) forwards;
+}
+
+body:not([ss])[ssdisplay][bottomcenter] .wrapper#achcont:has(.wrapper#achcontent > #unlockmsg) {
+    animation:
+        popin calc(var(--transition) * 2) forwards,
+        move calc(var(--transition) * 2) calc(var(--transition) * 2) forwards,
+        expand calc(var(--transition) * 2) calc(var(--transition) * 4) forwards,
+        ssbrin calc(var(--transition) * 2) calc(var(--transition) * 6) forwards,
+        slide calc(var(--transition) * 2) calc(var(--displaytime) / 2 - calc(var(--transition) * 2)) forwards;
+}
+
+body:not([ss])[ssdisplay][bottomcenter] .wrapper#achcont:has(.wrapper#achcontent > #unlockmsg) > .wrapper#bg {
+    animation: ssbrin calc(var(--transition) * 2) calc(var(--transition) * 6) forwards;
+}
+
+body:not([ss])[ssdisplay][bottomcenter] .wrapper#achcont:has(.wrapper#achcontent > #desc) {
+    border-radius: var(--ssbr);
+    animation:
+        move calc(var(--transition) * 2) calc(var(--displaytime) / 2 - calc(var(--transition) * 2)) forwards,
+        expand calc(var(--transition) * 2) calc(var(--displaytime) / 2) forwards,
+        ssbrout calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 6)) forwards,
+        shrink calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 4)) forwards,
+        slide var(--transition) calc(var(--displaytime) - (var(--transition) * 2)) forwards;
+}
+
+body:not([ss])[ssdisplay][bottomcenter] .wrapper#achcont:has(.wrapper#achcontent > #desc) > .wrapper#bg {
+    border-radius: var(--ssbr);
+    animation: ssbrout calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 6)) forwards;
+}

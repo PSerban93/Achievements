@@ -1,0 +1,328 @@
+@font-face {
+    font-family: "Source Sans Pro Light";
+    src: url("../../../fonts/SourceSansPro-Light.ttf");
+}
+
+:root {
+    --olwidth: 2px;
+    --olcolor: #50505050;
+    --inset: var(--olwidth) inset var(--olcolor);
+    --outset: var(--olwidth) outset var(--olcolor);
+    --bgshadowcolor: #00000050;
+}
+
+.wrapper#bg {
+    width: 0%;
+    opacity: 0;
+    animation:
+        grow calc(var(--transition) * 2) calc(var(--transition) / 2) forwards,
+        shrink calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 2.5)) forwards;
+}
+
+body[ss] .wrapper#bg {
+    width: 100%;
+    opacity: var(--opacity);
+}
+
+@keyframes grow {
+    from {
+        width: 0%;
+        opacity: 0;
+    }
+
+    to {
+        width: 100%;
+        opacity: var(--opacity);
+    }
+}
+
+@keyframes shrink {
+    from {
+        width: 100%;
+        opacity: var(--opacity);
+    }
+
+    to {
+        width: 0%;
+        opacity: 0;
+    }
+}
+
+.wrapper#bg > div {
+    display: grid;
+    width: calc(100% - calc(5px * var(--scale)));
+    height: calc(100% - calc(5px * var(--scale)));
+    place-self: center;
+    outline: var(--inset);
+    outline-offset: calc((2px * var(--scale)) * -1);
+    border-radius: var(--roundness);
+}
+
+.wrapper#bg > div,
+.wrapper#bg::after {
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+}
+
+#bg > div::before,
+#bg > div::after {
+    --margin: -0.5rem;
+    content: "";
+    width: calc(5px * var(--scale));
+    height: 65%;
+    align-self: center;
+    grid-column: 1 / -1;
+    grid-row: 1 / -1;
+    background-color: var(--bgshadowcolor);
+    margin-top: 0.75rem;
+    filter: blur(0.2rem);
+}
+
+#bg > div::before {
+    justify-self: start;
+    margin-left: var(--margin);
+}
+
+#bg > div::after {
+    justify-self: end;
+    margin-right: var(--margin);
+}
+
+.wrapper#achiconwrapper {
+    --op: var(--opacity);
+    position: relative;
+    outline: var(--outset);
+    border-radius: var(--iconroundness);
+    width: 17.5vmax;
+    height: 17.5vmax;
+    margin-left: 0.6rem;
+    overflow: hidden;
+    background-color: var(--primarycolor);
+    filter: drop-shadow(0 0 0.25rem var(--bgshadowcolor));
+    scale: 0;
+    opacity: 0;
+    animation:
+        popin calc(var(--transition) * 2) forwards,
+        popout calc(var(--transition) * 2) calc(var(--displaytime) - calc(var(--transition) * 2)) forwards;
+}
+
+body[bgonly] .wrapper#achiconwrapper {
+    --op: 1;
+}
+
+body[ss] .wrapper#achiconwrapper {
+    scale: 1 !important;
+    opacity: 1 !important;
+}
+
+@keyframes popin {
+    from {
+        scale: 0;
+        opacity: 0;
+    }
+
+    50% {
+        scale: 1.2;
+        opacity: calc(var(--op) * 0.75);
+    }
+
+    to {
+        scale: 1;
+        opacity: var(--op);
+    }
+}
+
+@keyframes popout {
+    from {
+        scale: 1;
+        opacity: var(--op);
+    }
+
+    50% {
+        scale: 1.2;
+        opacity: calc(var(--op) * 0.75);
+    }
+
+    to {
+        opacity: 0;
+        scale: 0;
+    }
+}
+
+.wrapper#achiconwrapper > #achiconshadow {
+    position: absolute;
+    top: 60%;
+    left: 50%;
+    translate: -50% -50%;
+    width: 200%;
+    height: 50%;
+    background-color: var(--bgshadowcolor);
+    filter: blur(0.25rem);
+    z-index: -1;
+}
+
+.wrapper#logo {
+    width: 85%;
+    height: 85%;
+    place-self: center;
+    background-color: var(--tertiarycolor);
+    border-radius: var(--iconroundness);
+    grid-column-start: 1;
+    grid-row-start: 1;
+    outline: var(--inset);
+}
+
+body[ss] .wrapper#logo {
+    display: grid;
+}
+
+.wrapper#logo::before {
+    content: "";
+    grid-column-start: 1;
+    grid-row-start: 1;
+    width: 100%;
+    height: 100%;
+    align-self: end;
+    background-image: linear-gradient(180deg,transparent 15%,var(--tertiarycolor) 50%,var(--tertiarycolor) 65%,transparent 100%);
+    filter: brightness(0.75);
+    mix-blend-mode: multiply;
+    border-radius: var(--iconroundness);
+    z-index: 1;
+}
+
+.wrapper#logo::after {
+    content: "";
+    width: 100%;
+    height: 100%;
+    place-self: center;
+    background: var(--logo) center / cover no-repeat;
+    grid-column-start: 1;
+    grid-row-start: 1;
+    border-radius: var(--iconroundness);
+    z-index: 1;
+    opacity: var(--opacity);
+    animation: altfade calc(var(--transition) * 20) calc(var(--transition) * 5) infinite;
+    transform: scale(var(--logoscale));
+}
+
+@keyframes altfade {
+    from { opacity: var(--opacity); }
+    20% { opacity: var(--opacity); }
+    30% { opacity: 0; }
+    45% { opacity: 0; }
+    55% { opacity: var(--opacity); }
+    to { opacity: var(--opacity); }
+}
+
+body[ss] .wrapper#logo::after {
+    display: none;
+}
+
+#achicon {
+    border-radius: var(--iconroundness);
+    scale: 1;
+    opacity: 0;
+    animation: altbounce calc(var(--transition) * 20) calc(var(--transition) * 5) infinite;
+    z-index: 10;
+}
+
+body[ss] #achicon {
+    opacity: 1;
+}
+
+@keyframes altbounce {
+    from {
+        scale: 1;
+        opacity: 0;
+    }
+
+    15% {
+        scale: 1;
+        opacity: var(--opacity);
+    }
+
+    20% {
+        scale: 1;
+        opacity: var(--opacity);
+    }
+
+    25% {
+        scale: 0.8;
+        opacity: var(--opacity);
+    }
+
+    30% {
+        scale: 1;
+        opacity: var(--opacity);
+    }
+
+    35% {
+        scale: 1;
+        opacity: var(--opacity);
+    }
+
+    50% {
+        scale: 1;
+        opacity: 0;
+    }
+
+    to {
+        scale: 1;
+        opacity: 0;
+    }
+}
+
+.wrapper#achcontent {
+    column-gap: 0.5rem;
+    opacity: 0;
+    animation:
+        fadein var(--transition) calc(var(--transition) * 2) forwards,
+        fadeout var(--transition) calc(var(--displaytime) - (var(--transition) * 3.5)) forwards;
+}
+
+@keyframes fadein {
+    to { opacity: 1; }
+}
+
+@keyframes fadeout {
+    to { opacity: 0; }
+}
+
+.wrapper#achcontent > span {
+    font-family: "customfont","Source Sans Pro Light";
+    font-size: calc(1.6rem * var(--fontsize));
+    font-weight: bold;
+    line-height: 1.25;
+    letter-spacing: 0.025rem;
+    -webkit-line-clamp: 1;
+}
+
+body:not([alldetails]) .wrapper#achcontent > span:not(:empty,:first-child) {
+    margin-top: 0.4rem;
+}
+
+.wrapper#achcontent > #unlockmsg:has(> #decoration) + #title:not(:empty)::before {
+    content: attr(gs) attr(unit) " - ";
+}
+
+.wrapper#ssdisplay {
+    height: calc(var(--notifyheight) * 2.3333);
+}
+
+body:not([ss])[ssdisplay] .wrapper#ssdisplay::before {
+    animation:
+        ssslidein calc(var(--transition) * 2) calc(var(--transition) * 2.5) forwards,
+        ssslideout calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 5)) forwards;
+}
+
+body:not([ss])[ssdisplay] .wrapper#achcont {
+    border-radius: var(--ssbr);
+}
+
+body:not([ss])[ssdisplay] .wrapper#bg {
+    animation:
+        grow calc(var(--transition) * 2) calc(var(--transition) / 2) forwards,
+        ssbrin calc(var(--transition) * 2) calc(var(--transition) * 2) forwards,
+        ssbrout calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 4)) forwards,
+        shrink calc(var(--transition) * 2) calc(var(--displaytime) - (var(--transition) * 2.5)) forwards;
+}

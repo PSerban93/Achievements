@@ -36,9 +36,12 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 const crypto = require("crypto");
+const axios = require("axios");
+const { pathToFileURL } = require("url");
 const ini = require("ini");
 const chokidar = require("chokidar");
 const CRC32 = require("crc-32");
+const AdmZip = require("adm-zip");
 const { copyFolderOnce, copyFolderOverwrite } = require("./utils/fileCopy");
 const { computeFolderContentVersion } = require("./utils/content-version");
 const {
@@ -51,6 +54,9 @@ const {
   cacheDir,
 } = require("./utils/paths");
 const { normalizeAppTheme } = require("./utils/app-theme");
+const {
+  pickWindowsExecutableOrShortcut,
+} = require("./utils/windows-shortcut-picker");
 const { ensureSchemaParseRuntimeReady } = require("./utils/steam-schema-parse");
 const { startPlaytimeLogWatcher } = require("./utils/playtime-log-watcher");
 const { parseGpdFile, buildSnapshotFromGpd } = require("./utils/xenia-gpd");
@@ -168,6 +174,825 @@ const PRESET_FOLDER_DEFAULT = "Default Presets";
 const PRESET_FOLDER_USERS = "Users Presets";
 const PRESET_FOLDER_DEFAULT_LEGACY = "Scalable";
 const PRESET_FOLDER_USERS_LEGACY = "Non-scalable";
+const SAN_PRESETS_FOLDER_NAME = "SANpresets";
+const SAN_CACHE_FOLDER_NAME = "SANcache";
+const SAN_RUNTIME_FOLDER = path.join(__dirname, "assets", "san-runtime");
+const SAN_BUILTIN_PRESET_ID_PREFIX = "builtin:";
+const SAN_AUDIO_EXTENSIONS = new Set([
+  ".wav",
+  ".mp3",
+  ".ogg",
+  ".flac",
+  ".m4a",
+  ".aac",
+]);
+const SAN_PRESET_DIMENSIONS = {
+  default: { width: 300, height: 50 },
+  xqjan: { width: 300, height: 50 },
+  steamdeck: { width: 300, height: 50 },
+  epicgames: { width: 300, height: 50 },
+  xboxone: { width: 400, height: 100 },
+  xbox360: { width: 400, height: 100 },
+  ps5: { width: 300, height: 50 },
+  ps4: { width: 300, height: 50 },
+  ps3: { width: 300, height: 50 },
+  windows: { width: 300, height: 80 },
+  gfwl: { width: 300, height: 80 },
+  os: { width: 360, height: 120 },
+};
+const SAN_DEFAULT_PRESET_ICONS = {
+  default: {
+    logo: ["img", "sanlogosquare.svg"],
+    decoration: ["img", "sanlogotrophy.svg"],
+    elems: ["unlockmsg", "title", "desc"],
+  },
+  xqjan: {
+    logo: ["img", "steamlogonew.svg"],
+    elems: ["unlockmsg", "title", "desc"],
+  },
+  steamdeck: {
+    decoration: ["img", "ribbonbw.svg"],
+    elems: ["title", "desc"],
+  },
+  epicgames: {
+    decoration: [
+      ["img", "sanlogotrophy_bronze.svg"],
+      ["img", "sanlogotrophy_silver.svg"],
+      ["img", "sanlogotrophy_gold.svg"],
+    ],
+    elems: ["title"],
+  },
+  xboxone: {
+    logo: ["img", "sanlogotrophy.svg"],
+    elems: ["unlockmsg", "title", "desc"],
+  },
+  xbox360: {
+    logo: ["img", "sanlogotrophy_small.svg"],
+    elems: ["unlockmsg", "title"],
+  },
+  ps5: {
+    logo: ["img", "sanlogo.svg"],
+    decoration: [
+      ["img", "sanlogotrophy_bronze.svg"],
+      ["img", "sanlogotrophy_silver.svg"],
+      ["img", "sanlogotrophy_gold.svg"],
+    ],
+    elems: ["title", "desc"],
+  },
+  ps4: {
+    logo: ["img", "sanlogo.svg"],
+    decoration: [
+      ["img", "sanlogotrophy_bronze.svg"],
+      ["img", "sanlogotrophy_silver.svg"],
+      ["img", "sanlogotrophy_gold.svg"],
+    ],
+    elems: ["unlockmsg", "title"],
+  },
+  ps3: {
+    decoration: [
+      ["img", "sanlogotrophy_bronze.svg"],
+      ["img", "sanlogotrophy_silver.svg"],
+      ["img", "sanlogotrophy_gold.svg"],
+    ],
+    elems: ["unlockmsg", "title"],
+  },
+  windows: {
+    logo: ["img", "sanlogotrophy.svg"],
+    elems: ["unlockmsg", "title", "desc"],
+  },
+  gfwl: {
+    logo: ["img", "sanlogotrophy_small.svg"],
+    elems: ["unlockmsg", "title"],
+  },
+  os: {
+    logo: ["img", "sanlogotrophy.svg"],
+    elems: ["unlockmsg", "title", "desc"],
+  },
+};
+function normalizeSanPresetKey(preset) {
+  return String(preset || "default")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, "") || "default";
+}
+
+function toFileUrl(filePath) {
+  return pathToFileURL(filePath).toString();
+}
+
+function getSanRuntimePath(...parts) {
+  return path.join(SAN_RUNTIME_FOLDER, ...parts);
+}
+
+function getSanRuntimeAssetPath(value) {
+  if (Array.isArray(value)) {
+    return getSanRuntimePath(...value);
+  }
+  return "";
+}
+
+function resolveSanRuntimeAssetValue(value) {
+  if (Array.isArray(value) && Array.isArray(value[0])) {
+    return value.map((entry) => getSanRuntimeAssetPath(entry));
+  }
+  if (Array.isArray(value)) return getSanRuntimeAssetPath(value);
+  return value || "";
+}
+
+function getSanRuntimePresetPath(preset, fileName) {
+  const safePreset = normalizeSanPresetKey(preset);
+  const candidate = getSanRuntimePath(
+    "notify",
+    "presets",
+    safePreset,
+    fileName,
+  );
+  try {
+    if (fs.existsSync(candidate)) return candidate;
+  } catch {}
+  return getSanRuntimePath("notify", "presets", "default", fileName);
+}
+
+function getSanRuntimePresetHtml(preset) {
+  const indexPath = getSanRuntimePresetPath(preset, "index.html");
+  return fs.readFileSync(indexPath, "utf8");
+}
+
+function getSanRuntimePresetDimensions(preset) {
+  try {
+    const html = getSanRuntimePresetHtml(preset);
+    const meta = html.match(
+      /<meta\s+width\s*=\s*"(\d+)"\s+height\s*=\s*"(\d+)"(?:\s+offset\s*=\s*"(\d+)")?\s*\/?>/i,
+    );
+    if (meta) {
+      return {
+        width: Number(meta[1]) || 300,
+        height: Number(meta[2]) || 50,
+        offset: Number(meta[3]) || 20,
+      };
+    }
+  } catch (err) {
+    appLogger.warn("san-runtime:preset-dimensions-failed", {
+      preset,
+      error: err?.message || String(err),
+    });
+  }
+  const fallback = SAN_PRESET_DIMENSIONS[normalizeSanPresetKey(preset)] ||
+    SAN_PRESET_DIMENSIONS.default;
+  return { ...fallback, offset: 20 };
+}
+
+function getSanPresetsFolder() {
+  return path.join(app.getPath("userData"), SAN_PRESETS_FOLDER_NAME);
+}
+
+function getSanCacheFolder() {
+  return path.join(app.getPath("userData"), SAN_CACHE_FOLDER_NAME);
+}
+
+function normalizeSanZipEntryName(value) {
+  const normalized = String(value || "").replace(/\\/g, "/");
+  const segments = normalized.split("/").filter(Boolean);
+  if (
+    !normalized ||
+    path.isAbsolute(normalized) ||
+    segments.includes("..") ||
+    normalized.includes("../") ||
+    normalized === ".." ||
+    normalized.startsWith("/")
+  ) {
+    return "";
+  }
+  return normalized;
+}
+
+function getSanPresetId(filePath, stat = null) {
+  const details = path.resolve(filePath).toLowerCase();
+  return crypto.createHash("sha1").update(details).digest("hex").slice(0, 16);
+}
+
+function isSanBuiltinPresetId(id) {
+  return String(id || "").startsWith(SAN_BUILTIN_PRESET_ID_PREFIX);
+}
+
+function readSanArchive(filePath) {
+  const stat = fs.statSync(filePath);
+  const zip = new AdmZip(filePath);
+  const entries = zip.getEntries();
+  for (const entry of entries) {
+    if (!normalizeSanZipEntryName(entry.entryName)) {
+      throw new Error(`Unsafe SAN archive entry: ${entry.entryName}`);
+    }
+  }
+  const themeEntry = zip.getEntry("usertheme.json");
+  if (!themeEntry) {
+    throw new Error('SAN archive is missing "usertheme.json"');
+  }
+  const theme = JSON.parse(zip.readAsText(themeEntry));
+  if (!theme || typeof theme !== "object" || !theme.customisation) {
+    throw new Error("SAN theme customisation is missing");
+  }
+  const id = getSanPresetId(filePath, stat);
+  const sounds = entries
+    .filter((entry) => !entry.isDirectory)
+    .filter((entry) =>
+      SAN_AUDIO_EXTENSIONS.has(path.extname(entry.entryName).toLowerCase()),
+    )
+    .map((entry) => ({
+      entryName: entry.entryName,
+      fileName: path.basename(entry.entryName),
+      value: `san:${id}:${Buffer.from(entry.entryName, "utf8").toString(
+        "base64url",
+      )}`,
+    }));
+
+  const source = theme.source === "achievements-default" ? "default" : "imported";
+  const preset = String(theme.customisation?.preset || "default").trim();
+  const presetKey = normalizeSanPresetKey(preset);
+  const fileLabel = path.basename(filePath, ".san").trim();
+  const themeLabel = String(theme.label || "").trim();
+  const label = source === "default"
+    ? themeLabel || fileLabel
+    : fileLabel || themeLabel || presetKey;
+
+  return {
+    id,
+    filePath,
+    fileName: path.basename(filePath),
+    label,
+    preset,
+    version: String(theme.version || "").trim(),
+    source,
+    legacyId: "",
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    sounds,
+    theme,
+  };
+}
+
+function getSanPresetDisplayLabel(label) {
+  const clean = String(label || "").trim();
+  if (!clean) return "SAN";
+  return /^SAN\s+-\s+/i.test(clean) ? clean : `SAN - ${clean}`;
+}
+
+function listSanPresets() {
+  const folder = getSanPresetsFolder();
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+  } catch (err) {
+    appLogger.warn("san-presets:folder-create-failed", {
+      folder,
+      error: err?.message || String(err),
+    });
+    return [];
+  }
+
+  let files = [];
+  try {
+    files = fs
+      .readdirSync(folder, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => path.extname(name).toLowerCase() === ".san")
+      .sort((a, b) => a.localeCompare(b));
+  } catch (err) {
+    appLogger.warn("san-presets:list-failed", {
+      folder,
+      error: err?.message || String(err),
+    });
+    return [];
+  }
+
+  const presets = [];
+  for (const fileName of files) {
+    const filePath = path.join(folder, fileName);
+    try {
+      const info = readSanArchive(filePath);
+      if (info.source === "default") continue;
+      presets.push({
+        id: info.id,
+        label: info.label,
+        displayLabel: getSanPresetDisplayLabel(info.label),
+        fileName: info.fileName,
+        preset: info.preset,
+        version: info.version,
+        source: info.source,
+        legacyId: info.legacyId,
+        sounds: info.sounds,
+      });
+    } catch (err) {
+      appLogger.warn("san-presets:invalid", {
+        filePath,
+        error: err?.message || String(err),
+      });
+    }
+  }
+  return presets.sort((a, b) => {
+    if (a.source !== b.source) {
+      return a.source === "default" ? -1 : 1;
+    }
+    return String(a.displayLabel || a.label || a.fileName || "").localeCompare(
+      String(b.displayLabel || b.label || b.fileName || ""),
+    );
+  });
+}
+
+function findSanPresetById(id) {
+  const wanted = String(id || "").trim();
+  if (!wanted) return null;
+  if (isSanBuiltinPresetId(wanted)) return null;
+  const folder = getSanPresetsFolder();
+  try {
+    const files = fs
+      .readdirSync(folder, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => path.extname(name).toLowerCase() === ".san");
+    for (const fileName of files) {
+      const filePath = path.join(folder, fileName);
+      const info = readSanArchive(filePath);
+      if (info.id === wanted) return info;
+    }
+  } catch (err) {
+    appLogger.warn("san-presets:find-failed", {
+      id: wanted,
+      error: err?.message || String(err),
+    });
+  }
+  return null;
+}
+
+function ensureSanPresetCache(info) {
+  if (!info?.id || !info?.filePath) return "";
+  const cacheDir = path.join(getSanCacheFolder(), info.id);
+  const markerPath = path.join(cacheDir, ".source.json");
+  const marker = {
+    filePath: info.filePath,
+    size: info.size,
+    mtimeMs: Math.round(info.mtimeMs || 0),
+  };
+  try {
+    if (fs.existsSync(markerPath)) {
+      const existing = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+      if (
+        existing?.filePath === marker.filePath &&
+        existing?.size === marker.size &&
+        existing?.mtimeMs === marker.mtimeMs
+      ) {
+        return cacheDir;
+      }
+    }
+  } catch {}
+
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const zip = new AdmZip(info.filePath);
+  for (const entry of zip.getEntries()) {
+    const safeName = normalizeSanZipEntryName(entry.entryName);
+    if (!safeName) {
+      throw new Error(`Unsafe SAN archive entry: ${entry.entryName}`);
+    }
+    const targetPath = path.resolve(cacheDir, safeName);
+    const cacheRoot = path.resolve(cacheDir);
+    if (targetPath !== cacheRoot && !targetPath.startsWith(cacheRoot + path.sep)) {
+      throw new Error(`Unsafe SAN extraction target: ${entry.entryName}`);
+    }
+    if (entry.isDirectory) {
+      fs.mkdirSync(targetPath, { recursive: true });
+      continue;
+    }
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.writeFileSync(targetPath, entry.getData());
+  }
+  fs.writeFileSync(markerPath, JSON.stringify(marker, null, 2), "utf8");
+  return cacheDir;
+}
+
+function resolveSanAssetPath(cacheDir, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const candidate = path.join(cacheDir, "assets", path.basename(raw));
+  try {
+    return fs.existsSync(candidate) ? candidate : "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveSanAssetList(cacheDir, value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => resolveSanAssetPath(cacheDir, item)).filter(Boolean);
+  }
+  const single = resolveSanAssetPath(cacheDir, value);
+  return single ? [single] : [];
+}
+
+function resolveSanThemeAssetPath(cacheDir, value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    if (path.isAbsolute(raw) && fs.existsSync(raw)) return raw;
+  } catch {}
+  return resolveSanAssetPath(cacheDir, raw);
+}
+
+function resolveSanThemeAssetList(cacheDir, value) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => resolveSanThemeAssetPath(cacheDir, item))
+      .filter(Boolean);
+  }
+  const single = resolveSanThemeAssetPath(cacheDir, value);
+  return single ? [single] : [];
+}
+
+function rewriteSanCustomisationAssetPaths(cacheDir, value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => rewriteSanCustomisationAssetPaths(cacheDir, item));
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [key, entryValue] of Object.entries(value)) {
+      out[key] = rewriteSanCustomisationAssetPaths(cacheDir, entryValue);
+    }
+    return out;
+  }
+  if (typeof value !== "string") return value;
+  if (!value.trim()) return value;
+  const ext = path.extname(value).toLowerCase();
+  const likelyAssetExts = new Set([
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".svg",
+    ".ttf",
+    ".otf",
+    ".wav",
+    ".mp3",
+    ".ogg",
+    ".aac",
+    ".flac",
+    ".m4a",
+  ]);
+  if (!likelyAssetExts.has(ext)) return value;
+  return resolveSanAssetPath(cacheDir, value) || value;
+}
+
+function getSanPresetIcons(customisation = {}) {
+  const presetKey = normalizeSanPresetKey(customisation.preset);
+  const icons = customisation.customicons || {};
+  return icons[customisation.preset] || icons[presetKey] || {};
+}
+
+function sanRuntimeAssetIfExists(...parts) {
+  const filePath = getSanRuntimePath(...parts);
+  try {
+    return fs.existsSync(filePath) ? filePath : "";
+  } catch {
+    return "";
+  }
+}
+
+function mergeSanRuntimeDefaults(customisation = {}) {
+  const presetKey = normalizeSanPresetKey(customisation.preset);
+  const runtimeDefaults =
+    SAN_DEFAULT_PRESET_ICONS[presetKey] || SAN_DEFAULT_PRESET_ICONS.default;
+  const customIcons =
+    customisation.customicons && typeof customisation.customicons === "object"
+      ? { ...customisation.customicons }
+      : {};
+  const existingIcons =
+    customIcons[customisation.preset] || customIcons[presetKey] || {};
+  const defaultIcons = {};
+
+  for (const [key, value] of Object.entries(runtimeDefaults)) {
+    defaultIcons[key] = resolveSanRuntimeAssetValue(value);
+  }
+
+  const mergedIcons = {
+    ...defaultIcons,
+    ...existingIcons,
+  };
+
+  customIcons[presetKey] = mergedIcons;
+  if (customisation.preset && customisation.preset !== presetKey) {
+    customIcons[customisation.preset] = mergedIcons;
+  }
+
+  return {
+    ...customisation,
+    preset: presetKey,
+    customicons: customIcons,
+    iconanim: customisation.iconanim !== false,
+    showdecoration: customisation.showdecoration !== false,
+    bgimg: customisation.bgimg || sanRuntimeAssetIfExists("img", "sanimgbg.png"),
+    base64: customisation.base64 || sanRuntimeAssetIfExists("img", "base64.png"),
+    gameicon: customisation.gameicon || sanRuntimeAssetIfExists("img", "gameicon.png"),
+    maskimg: customisation.maskimg || sanRuntimeAssetIfExists("img", "san_trophy_mask.png"),
+    iconborderimg:
+      customisation.iconborderimg || sanRuntimeAssetIfExists("img", "saniconborder.png"),
+    iconborderimgbronze:
+      customisation.iconborderimgbronze ||
+      sanRuntimeAssetIfExists("img", "saniconborder_bronze.png"),
+    iconborderimgsilver:
+      customisation.iconborderimgsilver ||
+      sanRuntimeAssetIfExists("img", "saniconborder_silver.png"),
+    percentbadgeimgbronze:
+      customisation.percentbadgeimgbronze ||
+      sanRuntimeAssetIfExists("img", "sanlogotrophy_bronze.svg"),
+    percentbadgeimgsilver:
+      customisation.percentbadgeimgsilver ||
+      sanRuntimeAssetIfExists("img", "sanlogotrophy_silver.svg"),
+    percentbadgeimggold:
+      customisation.percentbadgeimggold ||
+      sanRuntimeAssetIfExists("img", "sanlogotrophy_gold.svg"),
+    hiddenicon: customisation.hiddenicon || sanRuntimeAssetIfExists("icon", "lock.svg"),
+    defaultAchIcon: customisation.defaultAchIcon || sanRuntimeAssetIfExists("img", "achicon.png"),
+  };
+}
+
+function buildSanThemeForNotification(sanPresetId, notificationScale = 1) {
+  const info = findSanPresetById(sanPresetId);
+  if (!info) return null;
+  const cacheDir = ensureSanPresetCache(info);
+  const theme = JSON.parse(fs.readFileSync(path.join(cacheDir, "usertheme.json"), "utf8"));
+  const customisation = mergeSanRuntimeDefaults(
+    rewriteSanCustomisationAssetPaths(cacheDir, theme.customisation || {}),
+  );
+  const presetKey = normalizeSanPresetKey(customisation.preset);
+  const baseDimensions = getSanRuntimePresetDimensions(presetKey);
+  const sanScaleRaw = Number(customisation.scale);
+  const baseSanScale = Number.isFinite(sanScaleRaw) && sanScaleRaw > 0
+    ? sanScaleRaw / 100
+    : 1;
+  const appScaleRaw = Number(notificationScale);
+  const appScale = Number.isFinite(appScaleRaw) && appScaleRaw > 0
+    ? appScaleRaw
+    : 1;
+  const sanScale = baseSanScale * appScale;
+  const effectiveSanScalePercent = Math.max(1, sanScale * 100);
+  const bgImage = resolveSanThemeAssetPath(cacheDir, customisation.bgimg);
+  const customFont = resolveSanThemeAssetPath(cacheDir, customisation.customfont);
+  const hiddenIcon = resolveSanThemeAssetPath(cacheDir, customisation.hiddenicon);
+  const customIcon = resolveSanThemeAssetPath(cacheDir, customisation.customimgicon);
+  const presetIcons = getSanPresetIcons(customisation);
+  const logo = resolveSanThemeAssetPath(cacheDir, presetIcons.logo);
+  const decorations = resolveSanThemeAssetList(cacheDir, presetIcons.decoration);
+  const mask = resolveSanThemeAssetPath(cacheDir, customisation.maskimg);
+
+  return {
+    id: info.id,
+    label: info.label,
+    cacheDir,
+    preset: presetKey,
+    width: Math.max(
+      260,
+      Math.ceil((baseDimensions.width + (baseDimensions.offset || 20) * 2) * sanScale),
+    ),
+    height: Math.max(
+      90,
+      Math.ceil((baseDimensions.height + (baseDimensions.offset || 20) * 2) * sanScale),
+    ),
+    scale: sanScale,
+    presetHtml: getSanRuntimePresetHtml(presetKey),
+    runtime: {
+      globalCssUrl: toFileUrl(getSanRuntimePath("dist", "app", "global.css")),
+      baseCssUrl: toFileUrl(getSanRuntimePath("notify", "base.css")),
+      baseAnimCssUrl: toFileUrl(getSanRuntimePath("notify", "baseanim.css")),
+      presetCssUrl: toFileUrl(getSanRuntimePresetPath(presetKey, "styles.css")),
+    },
+    presetDimensions: baseDimensions,
+    customisation: {
+      ...customisation,
+      preset: presetKey,
+      scale: effectiveSanScalePercent,
+      sourceScale: Number(customisation.scale) || 100,
+      notificationScale: appScale,
+      displaytime: Number(customisation.displaytime) || 8,
+      bgstyle: customisation.bgstyle || "",
+      bgImage,
+      bgimgbrightness: Number(customisation.bgimgbrightness) || 100,
+      blur: Number(customisation.blur) || 0,
+      brightness: Number(customisation.brightness) || 100,
+      roundness: Number(customisation.roundness) || 0,
+      opacity: Number(customisation.opacity) || 100,
+      primarycolor: customisation.primarycolor || "#203e7a",
+      secondarycolor: customisation.secondarycolor || "#0c2a66",
+      tertiarycolor: customisation.tertiarycolor || "#ffffff",
+      fontcolor: customisation.fontcolor || "#ffffff",
+      titlefontcolor: customisation.titlefontcolor || customisation.fontcolor || "#ffffff",
+      descfontcolor: customisation.descfontcolor || customisation.fontcolor || "#ffffff",
+      fontshadow: customisation.fontshadow === true,
+      fontshadowcolor: customisation.fontshadowcolor || "#000000",
+      fontoutline: customisation.fontoutline === true,
+      fontoutlinecolor: customisation.fontoutlinecolor || "#000000",
+      fontsize: Number(customisation.fontsize) || 100,
+      iconroundness: Number(customisation.iconroundness) || 0,
+      iconscale: Number(customisation.iconscale) || 100,
+      logoscale: Number(customisation.logoscale) || 100,
+      customFont,
+      hiddenIcon,
+      customIcon,
+      logo,
+      decorations,
+      mask: customisation.mask === true,
+      maskimg: mask,
+      usegameicon: customisation.usegameicon === true,
+      usecustomimgicon: customisation.usecustomimgicon === true,
+      replacelogo: customisation.replacelogo === true,
+      showdecoration: customisation.showdecoration === true,
+      maskEnabled: customisation.mask === true,
+      bgonly: customisation.bgonly === true,
+    },
+  };
+}
+
+function parseSanSoundValue(value) {
+  const raw = String(value || "");
+  if (!raw.startsWith("san:")) return null;
+  const parts = raw.split(":");
+  if (parts.length < 3) return null;
+  const id = parts[1];
+  const encoded = parts.slice(2).join(":");
+  try {
+    const entryName = Buffer.from(encoded, "base64url").toString("utf8");
+    if (!normalizeSanZipEntryName(entryName)) return null;
+    return { id, entryName };
+  } catch {
+    return null;
+  }
+}
+
+function resolveSanSoundPath(value) {
+  const parsed = parseSanSoundValue(value);
+  if (!parsed) return "";
+  const info = findSanPresetById(parsed.id);
+  if (!info) return "";
+  const cacheDir = ensureSanPresetCache(info);
+  const target = path.resolve(cacheDir, parsed.entryName);
+  const root = path.resolve(cacheDir);
+  if (target !== root && !target.startsWith(root + path.sep)) return "";
+  try {
+    return fs.existsSync(target) ? target : "";
+  } catch {
+    return "";
+  }
+}
+
+function isSupportedNotificationSoundFile(fileName) {
+  return SAN_AUDIO_EXTENSIONS.has(path.extname(String(fileName || "")).toLowerCase());
+}
+
+function getSanExportedSoundFileName(info, entryName, index = 0, total = 1) {
+  const ext = path.extname(entryName).toLowerCase();
+  const label = sanitizeFilename(info?.label || info?.fileName || "SAN Preset") || "SAN Preset";
+  const suffix = total > 1 ? ` ${index + 1}` : "";
+  return `SAN - ${label}${suffix}${ext}`;
+}
+
+function getSanLegacyExportedSoundFileName(info, entryName) {
+  const ext = path.extname(entryName).toLowerCase();
+  const rawBase = path.basename(entryName, ext);
+  const label = sanitizeFilename(info?.label || info?.fileName || "SAN Preset") || "SAN Preset";
+  const base = sanitizeFilename(rawBase || "sound") || "sound";
+  const hash = crypto
+    .createHash("sha1")
+    .update(`${info?.id || ""}:${entryName}`)
+    .digest("hex")
+    .slice(0, 8);
+  return `SAN - ${label} - ${base}-${hash}${ext}`;
+}
+
+function exportSanPresetSoundsToUserSounds(info) {
+  if (!info?.filePath) return 0;
+  let exported = 0;
+  try {
+    const zip = new AdmZip(info.filePath);
+    fs.mkdirSync(userSoundsFolder, { recursive: true });
+    const soundEntries = zip
+      .getEntries()
+      .filter((entry) => {
+        if (entry.isDirectory) return false;
+        const entryName = normalizeSanZipEntryName(entry.entryName);
+        return !!entryName && isSupportedNotificationSoundFile(entryName);
+      });
+    for (const [index, entry] of soundEntries.entries()) {
+      const entryName = normalizeSanZipEntryName(entry.entryName);
+      const fileName = getSanExportedSoundFileName(
+        info,
+        entryName,
+        index,
+        soundEntries.length,
+      );
+      const targetPath = path.join(userSoundsFolder, fileName);
+      if (!fs.existsSync(targetPath)) {
+        fs.writeFileSync(targetPath, entry.getData());
+        exported += 1;
+      }
+      const legacyPath = path.join(
+        userSoundsFolder,
+        getSanLegacyExportedSoundFileName(info, entryName),
+      );
+      if (legacyPath !== targetPath && fs.existsSync(legacyPath)) {
+        fs.rmSync(legacyPath, { force: true });
+      }
+    }
+  } catch (err) {
+    appLogger.warn("san-presets:sounds-export-failed", {
+      filePath: info.filePath,
+      error: err?.message || String(err),
+    });
+  }
+  return exported;
+}
+
+function listExpectedSanExportedSoundNames(presetInfos) {
+  const expected = new Set();
+  for (const info of presetInfos) {
+    try {
+      const zip = new AdmZip(info.filePath);
+      const soundEntries = zip
+        .getEntries()
+        .filter((entry) => {
+          if (entry.isDirectory) return false;
+          const entryName = normalizeSanZipEntryName(entry.entryName);
+          return !!entryName && isSupportedNotificationSoundFile(entryName);
+        });
+      soundEntries.forEach((entry, index) => {
+        const entryName = normalizeSanZipEntryName(entry.entryName);
+        expected.add(
+          getSanExportedSoundFileName(info, entryName, index, soundEntries.length),
+        );
+      });
+    } catch {}
+  }
+  return expected;
+}
+
+function cleanupStaleSanExportedSounds(expectedNames) {
+  if (!fs.existsSync(userSoundsFolder)) return 0;
+  let removed = 0;
+  try {
+    for (const entry of fs.readdirSync(userSoundsFolder, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (!entry.name.startsWith("SAN - ")) continue;
+      if (!isSupportedNotificationSoundFile(entry.name)) continue;
+      if (expectedNames.has(entry.name)) continue;
+      fs.rmSync(path.join(userSoundsFolder, entry.name), { force: true });
+      removed += 1;
+    }
+  } catch (err) {
+    appLogger.warn("san-presets:sounds-cleanup-failed", {
+      error: err?.message || String(err),
+    });
+  }
+  return removed;
+}
+
+function syncSanPresetSoundsToUserSounds() {
+  const folder = getSanPresetsFolder();
+  try {
+    fs.mkdirSync(userSoundsFolder, { recursive: true });
+    if (!fs.existsSync(folder)) return 0;
+    let exported = 0;
+    const presetInfos = [];
+    const files = fs
+      .readdirSync(folder, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .filter((name) => path.extname(name).toLowerCase() === ".san");
+    for (const fileName of files) {
+      try {
+        const info = readSanArchive(path.join(folder, fileName));
+        if (info.source === "default") continue;
+        presetInfos.push(info);
+      } catch (err) {
+        appLogger.warn("san-presets:sounds-scan-invalid", {
+          fileName,
+          error: err?.message || String(err),
+        });
+      }
+    }
+    const removed = cleanupStaleSanExportedSounds(
+      listExpectedSanExportedSoundNames(presetInfos),
+    );
+    for (const info of presetInfos) {
+      exported += exportSanPresetSoundsToUserSounds(info);
+    }
+    if (exported > 0 || removed > 0) {
+      appLogger.info("san-presets:sounds-exported", { count: exported, removed });
+    }
+    return exported;
+  } catch (err) {
+    appLogger.warn("san-presets:sounds-sync-failed", {
+      error: err?.message || String(err),
+    });
+    return 0;
+  }
+}
 
 function buildEpicOfficialLoadSyncKey(configName, accountId, productId) {
   return [
@@ -1100,9 +1925,25 @@ const DEFAULT_PREFERENCES = {
   disablePlaytime: false,
   showNotificationRarityPercentage: true,
   progressPosition: "bottom-left",
+  useSanPreset: false,
+  sanPreset: "",
+  rareSanPreset: "",
+  platinumSanPreset: "",
+  xeniaSanPreset: "",
+  rpcs3SanPreset: "",
+  shadps4SanPreset: "",
   rareSound: "mute",
   rarePreset: "default",
   rarePosition: "center-bottom",
+  xeniaSound: "mute",
+  xeniaPreset: "default",
+  xeniaPosition: "center-bottom",
+  rpcs3Sound: "mute",
+  rpcs3Preset: "default",
+  rpcs3Position: "center-bottom",
+  shadps4Sound: "mute",
+  shadps4Preset: "default",
+  shadps4Position: "center-bottom",
   platinumSound: "mute",
   platinumPreset: "default",
   platinumPosition: "center-bottom",
@@ -7009,16 +7850,29 @@ ipcMain.handle("config:get-by-appid", async (_event, appid) => {
 });
 
 ipcMain.handle("get-sound-files", () => {
+  syncSanPresetSoundsToUserSounds();
   if (!fs.existsSync(userSoundsFolder)) return [];
   const files = fs
     .readdirSync(userSoundsFolder)
-    .filter((file) => file.toLowerCase().endsWith(".wav"));
+    .filter((file) => isSupportedNotificationSoundFile(file));
   return files;
 });
 
 ipcMain.handle("get-sound-path", (_event, fileName) => {
+  const sanSoundPath = resolveSanSoundPath(fileName);
+  if (sanSoundPath) {
+    return `file://${sanSoundPath.replace(/\\/g, "/")}`;
+  }
   const fullPath = path.join(app.getPath("userData"), "sounds", fileName);
   return `file://${fullPath.replace(/\\/g, "/")}`;
+});
+
+ipcMain.handle("load-san-presets", () => {
+  syncSanPresetSoundsToUserSounds();
+  return {
+    folder: getSanPresetsFolder(),
+    presets: listSanPresets(),
+  };
 });
 
 ipcMain.handle("ui:confirm", async (e, { title, message, detail }) => {
@@ -7224,6 +8078,46 @@ function mergeEarnedTimeFromCached(snapshot, cached) {
     }
   }
   return changed ? merged : snapshot;
+}
+
+function mergeManualAchievementOverrides(snapshot, cached) {
+  const source = snapshot && typeof snapshot === "object" ? snapshot : {};
+  const cache = cached && typeof cached === "object" ? cached : {};
+  let changed = false;
+  const merged = { ...source };
+  for (const [key, cacheEntry] of Object.entries(cache)) {
+    if (!cacheEntry || typeof cacheEntry !== "object") continue;
+    if (cacheEntry.manual !== true || cacheEntry.earned !== true) continue;
+    const nextEntry = merged[key];
+    const nextEarned =
+      nextEntry && typeof nextEntry === "object"
+        ? nextEntry.earned === true || nextEntry.earned === 1
+        : false;
+    if (!nextEarned) {
+      merged[key] = {
+        ...(nextEntry && typeof nextEntry === "object" ? nextEntry : {}),
+        ...cacheEntry,
+        earned: true,
+        manual: true,
+      };
+      changed = true;
+      continue;
+    }
+    const nextManual = nextEntry?.manual === true;
+    const nextTime = nextEntry?.earned_time ?? 0;
+    const cacheTime = cacheEntry.earned_time ?? 0;
+    if (!nextManual || (!nextTime && cacheTime)) {
+      merged[key] = {
+        ...cacheEntry,
+        ...(nextEntry && typeof nextEntry === "object" ? nextEntry : {}),
+        earned: true,
+        manual: true,
+        earned_time: nextTime || cacheTime || Date.now(),
+      };
+      changed = true;
+    }
+  }
+  return changed ? merged : source;
 }
 
 function ensureXeniaDisplayName(name) {
@@ -7730,6 +8624,62 @@ ipcMain.handle("loadConfigs", () => {
       if (raw && Object.prototype.hasOwnProperty.call(raw, "process_name")) {
         meta.process_name = normalizeProcessNameValue(raw.process_name);
       }
+      if (raw?.gog_client_id || raw?.gogClientId) {
+        meta.gog_client_id = raw.gog_client_id || raw.gogClientId;
+      }
+      if (raw?.gog_user_id || raw?.gogUserId) {
+        meta.gog_user_id = raw.gog_user_id || raw.gogUserId;
+      }
+      if (raw?.gog_gameplay_db || raw?.gogGameplayDb) {
+        meta.gog_gameplay_db = raw.gog_gameplay_db || raw.gogGameplayDb;
+      }
+      if (raw?.epic_product_id || raw?.epicProductId) {
+        meta.epic_product_id = raw.epic_product_id || raw.epicProductId;
+      }
+      if (raw?.epic_catalog_item_id || raw?.epicCatalogItemId) {
+        meta.epic_catalog_item_id =
+          raw.epic_catalog_item_id || raw.epicCatalogItemId;
+      }
+      if (raw?.epic_namespace || raw?.epicNamespace) {
+        meta.epic_namespace = raw.epic_namespace || raw.epicNamespace;
+      }
+      if (raw?.epic_app_name || raw?.epicAppName) {
+        meta.epic_app_name = raw.epic_app_name || raw.epicAppName;
+      }
+      if (raw?.epic_store_slug || raw?.epicStoreSlug) {
+        meta.epic_store_slug = raw.epic_store_slug || raw.epicStoreSlug;
+      }
+      if (raw?.ea_offer_id || raw?.eaOfferId) {
+        meta.ea_offer_id = raw.ea_offer_id || raw.eaOfferId;
+      }
+      if (
+        raw?.ps_content_id ||
+        raw?.psContentId ||
+        raw?.content_id ||
+        raw?.contentId ||
+        raw?.playstation_content_id ||
+        raw?.playstationContentId
+      ) {
+        meta.ps_content_id =
+          raw.ps_content_id ||
+          raw.psContentId ||
+          raw.content_id ||
+          raw.contentId ||
+          raw.playstation_content_id ||
+          raw.playstationContentId;
+      }
+      if (
+        raw?.ps_store_url ||
+        raw?.psStoreUrl ||
+        raw?.playstation_store_url ||
+        raw?.playstationStoreUrl
+      ) {
+        meta.ps_store_url =
+          raw.ps_store_url ||
+          raw.psStoreUrl ||
+          raw.playstation_store_url ||
+          raw.playstationStoreUrl;
+      }
     } catch (err) {
       ipcLogger.warn("loadConfigs:parse-failed", {
         file: fullPath,
@@ -7793,6 +8743,231 @@ function normalizeAchievementNameForRarity(name, shouldStrip = false) {
     }
   }
   return result;
+}
+
+function normalizeExophaseRarityPct(value) {
+  const normalized = normalizeRarityPercent(value);
+  if (normalized !== null) return Number(normalized.toFixed(4));
+  if (typeof value !== "string") return null;
+  const match = value.replace(",", ".").trim().match(/(\d+(?:\.\d+)?)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed)
+    ? Number(Math.min(100, Math.max(0, parsed)).toFixed(4))
+    : null;
+}
+
+function normalizeExophaseMatchText(value) {
+  if (!value) return "";
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function buildExophaseMatchKey(title, description) {
+  const t = normalizeExophaseMatchText(title);
+  if (!t) return "";
+  const d = normalizeExophaseMatchText(description);
+  return `${t}|${d}`;
+}
+
+function getSchemaLocalizedTextForRarity(value) {
+  if (typeof value === "string" || typeof value === "number") {
+    return String(value).trim();
+  }
+  if (value && typeof value === "object") {
+    return (
+      String(value.english || "").trim() ||
+      Object.values(value)
+        .map((v) => (typeof v === "string" || typeof v === "number" ? String(v).trim() : ""))
+        .find(Boolean) ||
+      ""
+    );
+  }
+  return "";
+}
+
+function getConfigTitleForExophaseRarity(config = {}, fallback = "") {
+  const raw =
+    getSafeLocalizedText(config?.displayName, "english") ||
+    getSchemaLocalizedTextForRarity(config?.displayName) ||
+    config?.name ||
+    fallback ||
+    "";
+  return String(raw || "")
+    .replace(/\((?:Xenia|RPCS3|PS4|shadps4)\)\s*$/i, "")
+    .replace(/[™®©]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildExophaseRaritySlugCandidates(config = {}, platform = "") {
+  const title = getConfigTitleForExophaseRarity(
+    config,
+    config?.appid != null ? String(config.appid).trim() : "",
+  );
+  const variants = buildExophaseSlugVariants(title);
+  if (platform === "shadps4") {
+    return Array.from(
+      new Set([
+        ...variants,
+        ...variants.map((slug) => `${slug}-ps4`),
+      ]),
+    );
+  }
+  if (platform !== "rpcs3") return variants;
+  return Array.from(
+    new Set([
+      ...variants,
+      ...variants.map((slug) => `${slug}-ps3`),
+      ...variants.map((slug) => `${slug}-psn`),
+    ]),
+  );
+}
+
+function buildExophaseRarityMatchMaps(items = []) {
+  const keyMap = new Map();
+  const keyDupes = new Set();
+  const titleMap = new Map();
+  const titleDupes = new Set();
+  const register = (map, dupes, key, item) => {
+    if (!key) return;
+    const previous = map.get(key);
+    if (previous && previous !== item) {
+      dupes.add(key);
+      return;
+    }
+    map.set(key, item);
+  };
+
+  for (const item of Array.isArray(items) ? items : []) {
+    const titles = item?.titles || {};
+    const descriptions = item?.descriptions || {};
+    for (const langKey of Object.keys(titles)) {
+      const title = titles[langKey] || "";
+      const description = descriptions[langKey] || "";
+      register(
+        keyMap,
+        keyDupes,
+        buildExophaseMatchKey(title, description),
+        item,
+      );
+      register(
+        titleMap,
+        titleDupes,
+        normalizeExophaseMatchText(title),
+        item,
+      );
+    }
+  }
+  return { keyMap, keyDupes, titleMap, titleDupes };
+}
+
+function mergeExophaseRarityIntoSchema(schemaAchievements = [], items = []) {
+  const { keyMap, keyDupes, titleMap, titleDupes } =
+    buildExophaseRarityMatchMaps(items);
+  const sidecarEntries = [];
+  let updated = false;
+  let matched = 0;
+  const seen = new Set();
+
+  for (const entry of Array.isArray(schemaAchievements) ? schemaAchievements : []) {
+    if (!entry || typeof entry !== "object") continue;
+    const title = getSchemaLocalizedTextForRarity(entry.displayName);
+    const description = getSchemaLocalizedTextForRarity(entry.description);
+    let match = null;
+    const key = buildExophaseMatchKey(title, description);
+    if (key && !keyDupes.has(key)) match = keyMap.get(key) || null;
+    if (!match) {
+      const titleKey = normalizeExophaseMatchText(title);
+      if (titleKey && !titleDupes.has(titleKey)) {
+        match = titleMap.get(titleKey) || null;
+      }
+    }
+    const percent = normalizeExophaseRarityPct(match?.rarityPct);
+    const name =
+      typeof entry?.name === "string" || typeof entry?.name === "number"
+        ? String(entry.name).trim()
+        : "";
+    if (!match || percent === null || !name || seen.has(name)) continue;
+
+    matched += 1;
+    seen.add(name);
+    sidecarEntries.push({ name, percent });
+    if (entry.rarityPct !== percent) {
+      entry.rarityPct = percent;
+      updated = true;
+    }
+    const source = match.raritySource || EXOPHASE_RARITY_SOURCE;
+    if (entry.raritySource !== source) {
+      entry.raritySource = source;
+      updated = true;
+    }
+  }
+
+  sidecarEntries.sort((a, b) =>
+    String(a.name).localeCompare(String(b.name), undefined, {
+      sensitivity: "base",
+      numeric: true,
+    }),
+  );
+  return { entries: sidecarEntries, matched, updated };
+}
+
+async function refreshExophaseRarityForConfig(
+  config,
+  platform,
+  schemaAchievements,
+) {
+  const appid = config?.appid != null ? String(config.appid).trim() : "";
+  const slugCandidates = buildExophaseRaritySlugCandidates(config, platform);
+  if (!slugCandidates.length) {
+    throw new Error("No Exophase slug candidates could be built.");
+  }
+
+  let exoData = null;
+  let usedSlug = slugCandidates[0];
+  let lastError = null;
+  for (const slug of slugCandidates) {
+    try {
+      exoData = await fetchExophaseAchievementsMultiLang({
+        slug,
+        platform,
+        langKeys: ["english"],
+        langMap: EXOPHASE_LANG_MAP,
+        logger: rarityLogger,
+      });
+      usedSlug = slug;
+      break;
+    } catch (err) {
+      lastError = err;
+      rarityLogger.warn("rarity:exophase:retry", {
+        platform,
+        appid,
+        slug,
+        error: err?.message || String(err),
+      });
+    }
+  }
+  if (!exoData) throw lastError || new Error("No working Exophase URL");
+
+  const items = Array.isArray(exoData?.items) ? exoData.items : [];
+  const fetchedCount = items.reduce(
+    (count, item) =>
+      normalizeExophaseRarityPct(item?.rarityPct) !== null ? count + 1 : count,
+    0,
+  );
+  const merged = mergeExophaseRarityIntoSchema(schemaAchievements, items);
+  return {
+    ...merged,
+    fetchedCount,
+    usedSlug,
+    baseUrl: exoData?.baseUrl || "",
+  };
 }
 
 function resolveSteamAppIdForRarity(config = {}) {
@@ -8023,6 +9198,21 @@ ipcMain.handle(
         (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
       const shouldUseCacheFallback = () =>
         cacheFallbackPlatforms.has(normalizedPlatform);
+      const applyManualOverridesForReturn = async (
+        snapshot,
+        cacheOptions = null,
+        cachedSnapshot,
+      ) => {
+        const cached =
+          cachedSnapshot !== undefined
+            ? cachedSnapshot
+            : (await loadPreviousAchievements(
+                configName,
+                normalizedPlatform,
+                cacheOptions,
+              )) || {};
+        return mergeManualAchievementOverrides(snapshot || {}, cached || {});
+      };
 
       if (normalizedPlatform === "xenia") {
         const gpdPath = resolveGpdPathForConfig(config);
@@ -8047,7 +9237,7 @@ ipcMain.handle(
           const parsed = parseGpdFile(gpdPath);
           const snapshot = buildSnapshotFromGpd(parsed);
           return {
-            achievements: snapshot || {},
+            achievements: await applyManualOverridesForReturn(snapshot),
             save_path: config.save_path || path.dirname(gpdPath),
           };
         } catch (error) {
@@ -8077,7 +9267,11 @@ ipcMain.handle(
           );
           const merged = mergeRpcs3EarnedTime(snapshot, cached);
           return {
-            achievements: merged || snapshot || {},
+            achievements: await applyManualOverridesForReturn(
+              merged || snapshot || {},
+              null,
+              cached || {},
+            ),
             save_path: config.save_path || trophyDir,
           };
         } catch (error) {
@@ -8130,7 +9324,11 @@ ipcMain.handle(
                   return ps4Trophy.buildSnapshotFromPs4(parsed, previous);
                 })();
           return {
-            achievements: snapshot || {},
+            achievements: await applyManualOverridesForReturn(
+              snapshot || {},
+              ps4CacheOptions,
+              previous || {},
+            ),
             save_path: progressPath || trophyDir,
           };
         } catch (error) {
@@ -8173,7 +9371,11 @@ ipcMain.handle(
               : cached;
           const merged = mergeEarnedTimeFromCached(snapshot, cached);
           return {
-            achievements: merged || snapshot || {},
+            achievements: await applyManualOverridesForReturn(
+              merged || snapshot || {},
+              null,
+              cached || {},
+            ),
             save_path: config.save_path || "",
           };
         } catch (error) {
@@ -8230,7 +9432,11 @@ ipcMain.handle(
           }
 
           return {
-            achievements: merged || snapshot || {},
+            achievements: await applyManualOverridesForReturn(
+              merged || snapshot || {},
+              null,
+              cached || {},
+            ),
             save_path: nextSavePath,
           };
         } catch (error) {
@@ -8557,7 +9763,11 @@ ipcMain.handle(
             } catch {}
           }
           return {
-            achievements: merged || snapshot || {},
+            achievements: await applyManualOverridesForReturn(
+              merged || snapshot || {},
+              null,
+              cached || {},
+            ),
             save_path: nextSavePath,
           };
         } catch (error) {
@@ -8640,7 +9850,11 @@ ipcMain.handle(
           }
 
           return {
-            achievements: snapshot || cached || {},
+            achievements: await applyManualOverridesForReturn(
+              snapshot || cached || {},
+              null,
+              cached || {},
+            ),
             save_path: nextSavePath,
           };
         } catch (error) {
@@ -8690,7 +9904,13 @@ ipcMain.handle(
         if (!entries.length) {
           return {
             achievements:
-              hasPinnedSteamOfficialAccount && !userBin ? {} : cached,
+              hasPinnedSteamOfficialAccount && !userBin
+                ? {}
+                : await applyManualOverridesForReturn(
+                    cached || {},
+                    statsDir,
+                    cached || {},
+                  ),
             save_path: statsDir,
           };
         }
@@ -8718,7 +9938,11 @@ ipcMain.handle(
             }
             snapshot = merged;
             return {
-              achievements: snapshot || {},
+              achievements: await applyManualOverridesForReturn(
+                snapshot || {},
+                statsDir,
+                cached || {},
+              ),
               save_path: statsDir,
             };
           } catch (error) {
@@ -8730,7 +9954,13 @@ ipcMain.handle(
         }
         // Fallback to cache if parsing failed or no user bin yet
         return {
-          achievements: hasPinnedSteamOfficialAccount ? {} : cached,
+          achievements: hasPinnedSteamOfficialAccount
+            ? {}
+            : await applyManualOverridesForReturn(
+                cached || {},
+                statsDir,
+                cached || {},
+              ),
           save_path: statsDir,
         };
       }
@@ -8784,7 +10014,9 @@ ipcMain.handle(
       }
 
       return {
-        achievements: achievements || {},
+        achievements: await applyManualOverridesForReturn(
+          achievements || {},
+        ),
         save_path: effectiveSavePath || saveBase || "",
       };
     } catch (error) {
@@ -9662,7 +10894,7 @@ function getAvailableNotificationSounds() {
       .readdirSync(userSoundsFolder, { withFileTypes: true })
       .filter(
         (entry) =>
-          entry.isFile() && entry.name.toLowerCase().endsWith(".wav"),
+          entry.isFile() && isSupportedNotificationSoundFile(entry.name),
       )
       .map((entry) => entry.name);
   } catch (err) {
@@ -10225,9 +11457,14 @@ function normalizeNotificationScale(rawScale) {
 
 function createNotificationWindow(message) {
   const preset = message.preset || "default";
-  const { presetFolder } = resolveNotificationPresetFolder(preset);
+  const isSanNotification = !!message.sanTheme;
+  const { presetFolder } = isSanNotification
+    ? { presetFolder: null }
+    : resolveNotificationPresetFolder(preset);
 
-  const presetHtml = path.join(presetFolder, "index.html");
+  const presetHtml = isSanNotification
+    ? path.join(__dirname, "san-notification.html")
+    : path.join(presetFolder, "index.html");
   const position = message.position || "center-bottom";
   const scaleInfo = normalizeNotificationScale(message.scale);
   const scale = scaleInfo.scale;
@@ -10237,8 +11474,12 @@ function createNotificationWindow(message) {
     scale,
   });
 
-  const { width: windowWidth, height: windowHeight } =
-    getPresetDimensions(presetFolder);
+  const { width: windowWidth, height: windowHeight } = isSanNotification
+    ? {
+        width: Number(message.sanTheme?.width) || 420,
+        height: Number(message.sanTheme?.height) || 140,
+      }
+    : getPresetDimensions(presetFolder);
 
   // Apply scaling to window dimensions to prevent content overflow
   // at higher scale factors by increasing the window size proportionally
@@ -10357,16 +11598,26 @@ function createNotificationWindow(message) {
       }
     }
     notificationWindow.webContents.send("show-notification", {
+      name: message.name || "",
       displayName: message.displayName,
       description: message.description,
       iconPath: iconPathToSend,
       headerPath: message.headerPath || "",
+      sanTheme: message.sanTheme || null,
+      appid: message.appid || null,
+      platform: message.platform || null,
+      configName: message.configName || "",
+      config_path: message.config_path || "",
       rarityPct: message.rarityPct,
+      rarityTier: message.rarityTier || "",
+      trophyType: message.trophyType || "",
       isRare: message.isRare === true,
       isPlatinum: message.isPlatinum === true,
       showRarityPercentage: message.showRarityPercentage === true,
       preset: message.preset || preset,
+      position: message.position || position,
       scale,
+      durationMs: message.durationMs || 0,
       durationOverridden: !!message?.durationOverridden,
     });
   });
@@ -10437,6 +11688,7 @@ ipcMain.on("show-notification", async (_event, achievement) => {
       sound: achievement.sound,
       rarityPct: achievement.rarityPct,
       raritySource: achievement.raritySource,
+      trophyType: achievement.trophyType || achievement.trophy_type,
     };
 
     queueAchievementNotification(notificationData);
@@ -10617,6 +11869,8 @@ ipcMain.on("show-test-notification", (event, options) => {
     preset: options.preset || "default",
     position: options.position || "center-bottom",
     sound: options.sound || "mute",
+    useSanPreset: options.useSanPreset === true,
+    sanPreset: options.sanPreset || "",
     scale: parseFloat(
       options.scale != null
         ? options.scale
@@ -10641,6 +11895,13 @@ function getRandomTestRareRarity() {
   const percent =
     Math.round((tier.min + Math.random() * (tier.max - tier.min)) * 100) / 100;
   return { tier: tier.name, percent };
+}
+
+function resolveTestNotificationSanPreset(options = {}, fallback = "") {
+  if (Object.prototype.hasOwnProperty.call(options, "sanPreset")) {
+    return String(options.sanPreset || "");
+  }
+  return String(fallback || "");
 }
 
 ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
@@ -10674,6 +11935,8 @@ ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
       prefs.position ||
       "center-bottom",
     sound: options.sound || prefs.rareSound || prefs.sound || "mute",
+    useSanPreset: options.useSanPreset === true,
+    sanPreset: resolveTestNotificationSanPreset(options, prefs.rareSanPreset),
     scale: parseFloat(
       options.scale != null
         ? options.scale
@@ -10684,6 +11947,75 @@ ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
     skipScreenshot: true,
     isTest: true,
     isTestRare: true,
+  });
+});
+
+function getRandomTestTrophyType() {
+  const tiers = ["bronze", "silver", "gold"];
+  return tiers[crypto.randomInt(tiers.length)];
+}
+
+ipcMain.on("show-test-emulator-notification", (_event, options = {}) => {
+  const prefs = cachedPreferences || {};
+  const baseDir = app.isPackaged ? process.resourcesPath : __dirname;
+  const platform = getEmulatorNotificationPreferencePrefix(options.platform)
+    ? normalizePlatform(options.platform)
+    : "xenia";
+  const isTrophyPlatform = isTrophyTierNotificationPlatform(platform);
+  const trophyType = isTrophyPlatform
+    ? normalizeNotificationTrophyType(options.trophyType) || getRandomTestTrophyType()
+    : "";
+  const platformLabel =
+    platform === "rpcs3" ? "RPCS3" : platform === "shadps4" ? "ShadPS4" : "Xenia";
+  const tierLabel = trophyType
+    ? trophyType.charAt(0).toUpperCase() + trophyType.slice(1)
+    : "";
+
+  queueAchievementNotification({
+    name: `TEST_${String(platform || "emulator").toUpperCase()}_NOTIFICATION`,
+    displayName: tUi(
+      "main.notify.testEmulatorTitle",
+      { platform: platformLabel },
+      "{platform} Test Achievement",
+    ),
+    description: trophyType
+      ? tUi(
+          "main.notify.testEmulatorDescriptionWithTier",
+          { platform: platformLabel, tier: tierLabel },
+          "{platform} notification test with {tier} trophy border.",
+        )
+      : tUi(
+          "main.notify.testEmulatorDescription",
+          { platform: platformLabel },
+          "{platform} notification test.",
+        ),
+    icon: ICON_PNG_PATH,
+    icon_gray: ICON_PNG_PATH,
+    config_path: baseDir,
+    platform,
+    trophyType,
+    preset:
+      options.preset || prefs[`${platform}Preset`] || prefs.preset || "default",
+    position:
+      options.position ||
+      prefs[`${platform}Position`] ||
+      prefs.position ||
+      "center-bottom",
+    sound: options.sound || prefs[`${platform}Sound`] || prefs.sound || "mute",
+    useSanPreset: options.useSanPreset === true,
+    sanPreset: resolveTestNotificationSanPreset(
+      options,
+      prefs[`${platform}SanPreset`],
+    ),
+    scale: parseFloat(
+      options.scale != null
+        ? options.scale
+        : prefs.notificationScale != null
+          ? prefs.notificationScale
+          : 1,
+    ),
+    skipScreenshot: true,
+    isTest: true,
   });
 });
 
@@ -10720,6 +12052,11 @@ ipcMain.on("show-test-platinum-notification", (_event, options = {}) => {
       prefs.position ||
       "center-bottom",
     sound: options.sound || prefs.platinumSound || prefs.sound || "mute",
+    useSanPreset: options.useSanPreset === true,
+    sanPreset: resolveTestNotificationSanPreset(
+      options,
+      prefs.platinumSanPreset,
+    ),
     scale: parseFloat(
       options.scale != null
         ? options.scale
@@ -11099,17 +12436,58 @@ function resolveNotificationRarity(achievement = {}) {
   return { percent: null, source: null };
 }
 
+function normalizeNotificationTrophyType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["platinum", "p"].includes(normalized)) return "platinum";
+  if (["gold", "g"].includes(normalized)) return "gold";
+  if (["silver", "s"].includes(normalized)) return "silver";
+  if (["bronze", "b"].includes(normalized)) return "bronze";
+  return "";
+}
+
+function isTrophyTierNotificationPlatform(platform) {
+  const normalized = normalizePlatform(platform);
+  return normalized === "rpcs3" || normalized === "shadps4";
+}
+
+function getEmulatorNotificationPreferencePrefix(platform) {
+  const normalized = normalizePlatform(platform);
+  if (normalized === "xenia") return "xenia";
+  if (normalized === "rpcs3") return "rpcs3";
+  if (normalized === "shadps4") return "shadps4";
+  return "";
+}
+
 function queueAchievementNotification(achievement) {
   const prefs = cachedPreferences || {};
+  const platform = normalizePlatform(achievement.platform) || null;
+  const trophyType = normalizeNotificationTrophyType(
+    achievement.trophyType || achievement.trophy_type,
+  );
+  const usesTrophyTier = isTrophyTierNotificationPlatform(platform);
+  const emulatorPreferencePrefix = getEmulatorNotificationPreferencePrefix(platform);
+  const usesEmulatorNotificationProfile = !!emulatorPreferencePrefix;
   const isPlatinum =
-    achievement.isPlatinum === true || achievement.__isPlatinum === true;
+    achievement.isPlatinum === true ||
+    achievement.__isPlatinum === true ||
+    (usesTrophyTier && trophyType === "platinum");
   const isTest = achievement.isTest === true;
   const isTestRare = achievement.isTestRare === true;
-  const rarity = isPlatinum || (isTest && !isTestRare)
+  const hasExplicitRarity =
+    normalizeNotificationRarityPercent(achievement?.rarityPct) !== null;
+  const rarity = isPlatinum || (isTest && !isTestRare && !hasExplicitRarity)
     ? { percent: null, source: null }
     : resolveNotificationRarity(achievement);
   const isRare =
-    rarity.percent !== null && rarity.percent >= 0 && rarity.percent <= 10;
+    !usesEmulatorNotificationProfile &&
+    rarity.percent !== null &&
+    rarity.percent >= 0 &&
+    rarity.percent <= 10;
+  const trophyRarityTier =
+    usesTrophyTier && ["bronze", "silver", "gold"].includes(trophyType)
+      ? trophyType
+      : "";
+  const rarityTier = trophyRarityTier || "";
   const preferredScale =
     achievement.scale != null
       ? achievement.scale
@@ -11131,15 +12509,46 @@ function queueAchievementNotification(achievement) {
     "center-bottom";
   const normalSound =
     achievement.sound || selectedSound || prefs.sound || "mute";
-  const resolvedPreset = isRare
-    ? prefs.rarePreset || normalPreset
+  const emulatorPreset = emulatorPreferencePrefix
+    ? prefs[`${emulatorPreferencePrefix}Preset`] || normalPreset
     : normalPreset;
-  const resolvedPosition = isRare
-    ? prefs.rarePosition || normalPosition
+  const emulatorPosition = emulatorPreferencePrefix
+    ? prefs[`${emulatorPreferencePrefix}Position`] || normalPosition
     : normalPosition;
-  const requestedSound = isRare
-    ? prefs.rareSound || normalSound
+  const emulatorSound = emulatorPreferencePrefix
+    ? prefs[`${emulatorPreferencePrefix}Sound`] || normalSound
     : normalSound;
+  const resolvedPreset = isPlatinum
+    ? prefs.platinumPreset || normalPreset
+    : isRare
+      ? prefs.rarePreset || normalPreset
+      : emulatorPreset;
+  const resolvedPosition = isPlatinum
+    ? prefs.platinumPosition || normalPosition
+    : isRare
+      ? prefs.rarePosition || normalPosition
+      : emulatorPosition;
+  const requestedSound = isPlatinum
+    ? prefs.platinumSound || normalSound
+    : isRare
+      ? prefs.rareSound || normalSound
+      : emulatorSound;
+  const emulatorSanPreset = emulatorPreferencePrefix
+    ? String(prefs[`${emulatorPreferencePrefix}SanPreset`] || "")
+    : prefs.sanPreset || "";
+  const preferenceSanPreset = isPlatinum
+    ? String(prefs.platinumSanPreset || "")
+    : isRare
+      ? String(prefs.rareSanPreset || "")
+      : emulatorSanPreset;
+  const sanPresetCandidate = String(
+    Object.prototype.hasOwnProperty.call(achievement, "sanPreset")
+      ? achievement.sanPreset || ""
+      : preferenceSanPreset || "",
+  ).trim();
+  const useSanPreset =
+    (achievement.useSanPreset === true || prefs.useSanPreset === true) &&
+    sanPresetCandidate;
   const resolvedSkipScreenshot =
     achievement.skipScreenshot === true
       ? true
@@ -11151,17 +12560,21 @@ function queueAchievementNotification(achievement) {
     icon: achievement.icon,
     icon_gray: achievement.icon_gray || achievement.icongray,
     appid: achievement.appid || achievement.appId || null,
-    platform: normalizePlatform(achievement.platform) || null,
+    platform,
     config_path: achievement.config_path,
     configName: achievement.configName || achievement.config_name || "",
     name: getNotificationAchievementKeys(achievement)[0] || "",
     rarityPct: rarity.percent,
     raritySource: rarity.source,
+    rarityTier,
+    trophyType,
     isRare,
     showRarityPercentage: prefs.showNotificationRarityPercentage !== false,
     preset: resolvedPreset,
     position: resolvedPosition,
     sound: requestedSound,
+    sanPreset: useSanPreset ? sanPresetCandidate : "",
+    useSanPreset: !!useSanPreset,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: resolvedSkipScreenshot,
     isPlatinum,
@@ -11182,7 +12595,7 @@ function queueAchievementNotification(achievement) {
     recentAchievementNotificationKeys.set(dedupeKey, now);
   }
 
-  notificationData.sound = resolveNotificationSound(requestedSound, {
+  notificationData.sound = resolveNotificationSound(notificationData.sound, {
     isPlatinum,
     isRare,
     isTest: notificationData.isTest,
@@ -11192,6 +12605,8 @@ function queueAchievementNotification(achievement) {
     displayName: notificationData.displayName,
     name: notificationData.name || null,
     rarityPct: notificationData.rarityPct,
+    rarityTier: notificationData.rarityTier || null,
+    trophyType: notificationData.trophyType || null,
     rare: notificationData.isRare,
     platinum: notificationData.isPlatinum === true,
     preset: notificationData.preset || "default",
@@ -11270,12 +12685,16 @@ function processNextNotification() {
     configName: achievement.configName || "",
     rarityPct: achievement.rarityPct,
     raritySource: achievement.raritySource || null,
+    rarityTier: achievement.rarityTier || "",
+    trophyType: achievement.trophyType || "",
     isRare: achievement.isRare === true,
     showRarityPercentage:
       cachedPreferences.showNotificationRarityPercentage !== false,
     preset: achievement.preset,
     position: achievement.position,
     sound: achievement.sound,
+    sanPreset: achievement.sanPreset || "",
+    useSanPreset: achievement.useSanPreset === true,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: !!achievement.skipScreenshot,
     isPlatinum:
@@ -11286,6 +12705,23 @@ function processNextNotification() {
   const preset = achievement.preset || "default";
   const { presetFolder } = resolveNotificationPresetFolder(preset);
   const normalizedPreset = String(preset || "").trim().toLowerCase();
+  if (notificationData.useSanPreset && notificationData.sanPreset) {
+    try {
+      const sanTheme = buildSanThemeForNotification(
+        notificationData.sanPreset,
+        notificationData.scale,
+      );
+      if (sanTheme) {
+        notificationData.sanTheme = sanTheme;
+        notificationData.scale = 1;
+      }
+    } catch (err) {
+      notificationLogger.warn("san-notification:theme-load-failed", {
+        sanPreset: notificationData.sanPreset,
+        error: err?.message || String(err),
+      });
+    }
+  }
 
   const iconCandidate = notificationData.icon || notificationData.icon_gray;
   let iconPathFinal = resolveIconAbsolutePath(
@@ -11328,6 +12764,7 @@ function processNextNotification() {
   notificationLogger.info("show-notification", {
     displayName: notificationData.displayName,
     preset: notificationData.preset || "default",
+    sanPreset: notificationData.sanPreset || null,
     position: notificationData.position || "center-bottom",
     showRarityPercentage: notificationData.showRarityPercentage,
     config: notificationData.config_path || null,
@@ -11340,9 +12777,21 @@ function processNextNotification() {
       ? Math.round(overrideDurationSec * 1000)
       : 0;
   const duration =
-    overrideDurationMs || getPresetAnimationDuration(presetFolder);
+    overrideDurationMs ||
+    (notificationData.sanTheme
+      ? Math.round(
+          (Number(notificationData.sanTheme?.customisation?.displaytime) || 8) *
+            1000,
+        )
+      : getPresetAnimationDuration(presetFolder));
   notificationData.durationMs = duration;
   notificationData.durationOverridden = overrideDurationMs > 0;
+  if (notificationData.sanTheme?.customisation) {
+    notificationData.sanTheme.customisation.displaytime = Math.max(
+      1,
+      duration / 1000,
+    );
+  }
   const notificationWindow = createNotificationWindow(notificationData);
   const notificationWebContentsId = notificationWindow.webContents.id;
 
@@ -12152,14 +13601,21 @@ function savePreviousAchievements(
   );
   try {
     let effectiveData = data;
+    const existing = readCacheSilent(
+      configName,
+      normalizedPlatform,
+      effectiveOptions,
+    );
+    if (
+      existing &&
+      typeof existing === "object" &&
+      resolvedOptions.skipManualMerge !== true
+    ) {
+      effectiveData = mergeManualAchievementOverrides(effectiveData, existing);
+    }
     if (isRpcs3ConfigName(configName) || isLumaPlayConfigName(configName)) {
-      const cached = readCacheSilent(
-        configName,
-        normalizedPlatform,
-        effectiveOptions,
-      );
-      if (cached && typeof cached === "object") {
-        effectiveData = mergeEarnedTimeFromCached(data, cached);
+      if (existing && typeof existing === "object") {
+        effectiveData = mergeEarnedTimeFromCached(effectiveData, existing);
       }
     }
     const ordered = {};
@@ -12201,11 +13657,6 @@ function savePreviousAchievements(
       }
       ordered[key] = normalized;
     }
-    const existing = readCacheSilent(
-      configName,
-      normalizedPlatform,
-      effectiveOptions,
-    );
     if (existing && deepEqual(existing, ordered)) {
       return false;
     }
@@ -12841,6 +14292,8 @@ async function monitorAchievementsFile(filePath) {
               configName,
               rarityPct: achievementConfig.rarityPct,
               raritySource: achievementConfig.raritySource,
+              trophyType:
+                achievementConfig.trophyType || achievementConfig.trophy_type,
               preset: selectedPreset,
               position: selectedPosition,
               sound: selectedSound || "mute",
@@ -12962,6 +14415,8 @@ async function monitorAchievementsFile(filePath) {
             configName,
             rarityPct: achievementConfig.rarityPct,
             raritySource: achievementConfig.raritySource,
+            trophyType:
+              achievementConfig.trophyType || achievementConfig.trophy_type,
             preset: selectedPreset,
             position: selectedPosition,
             sound: getUserPreferredSound() || "mute",
@@ -16198,22 +17653,112 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   // Intentionally avoid blur-driven state changes here. The overlay is designed to be non-focusable.
 }
 
-ipcMain.handle("selectExecutable", async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    properties: ["openFile"],
-  });
-  return canceled ? null : filePaths[0];
+ipcMain.handle("selectExecutable", async (_event, currentPath) => {
+  const requestedPath = String(currentPath || "").trim();
+  let initialDirectory = "";
+  let initialFileName = "";
+  try {
+    if (requestedPath && fs.existsSync(requestedPath)) {
+      const currentStat = fs.statSync(requestedPath);
+      initialDirectory = currentStat.isDirectory()
+        ? requestedPath
+        : path.dirname(requestedPath);
+      initialFileName = currentStat.isFile() ? path.basename(requestedPath) : "";
+    }
+  } catch {}
+  if (!initialDirectory) {
+    initialDirectory = app.getPath("desktop");
+  }
+
+  let selectedPath = "";
+  if (process.platform === "win32") {
+    try {
+      const selection = await pickWindowsExecutableOrShortcut({
+        initialDirectory,
+        fileName: initialFileName,
+      });
+      if (selection.canceled) return null;
+      selectedPath = selection.filePath;
+    } catch (err) {
+      ipcLogger.warn("executable:windows-picker-failed", {
+        error: err?.message || String(err),
+      });
+    }
+  }
+  if (!selectedPath) {
+    const { canceled, filePaths } = await dialog.showOpenDialog({
+      defaultPath: initialFileName ? requestedPath : initialDirectory,
+      properties: ["openFile"],
+    });
+    if (canceled || !filePaths[0]) return null;
+    selectedPath = filePaths[0];
+  }
+  const fallback = {
+    selectedPath,
+    executable: selectedPath,
+    arguments: "",
+    processName: path.basename(selectedPath),
+    workingDirectory: path.dirname(selectedPath),
+    shortcutPath: "",
+    isShortcut: false,
+  };
+  if (
+    process.platform !== "win32" ||
+    path.extname(selectedPath).toLowerCase() !== ".lnk"
+  ) {
+    return fallback;
+  }
+  try {
+    const details = shell.readShortcutLink(selectedPath);
+    const target = String(details?.target || "").trim();
+    if (!target) {
+      return {
+        ...fallback,
+        shortcutPath: selectedPath,
+        isShortcut: true,
+        shortcutReadFailed: true,
+      };
+    }
+    return {
+      selectedPath,
+      executable: target,
+      arguments: String(details?.args || "").trim(),
+      processName: path.basename(target),
+      workingDirectory:
+        String(details?.cwd || "").trim() || path.dirname(target),
+      shortcutPath: selectedPath,
+      isShortcut: true,
+    };
+  } catch (err) {
+    ipcLogger.warn("executable:shortcut-read-failed", {
+      shortcutPath: selectedPath,
+      error: err?.message || String(err),
+    });
+    return {
+      ...fallback,
+      shortcutPath: selectedPath,
+      isShortcut: true,
+      shortcutReadFailed: true,
+    };
+  }
 });
 
-ipcMain.handle("launchExecutable", async (_event, exePath, argsString) => {
+ipcMain.handle(
+  "launchExecutable",
+  async (_event, exePath, argsString, workingDirectory) => {
   try {
     if (!exePath) {
       notifyError(tUi("main.notify.executable.pathMissing"));
       return;
     }
     const args = splitArgsString(argsString);
+    const requestedCwd = String(workingDirectory || "").trim();
+    const cwd =
+      requestedCwd && fs.existsSync(requestedCwd)
+        ? requestedCwd
+        : path.dirname(exePath);
     const child = spawn(exePath, args, {
-      cwd: path.dirname(exePath),
+      cwd,
       detached: true,
       stdio: "ignore",
     });
@@ -16573,6 +18118,7 @@ function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
       configName: config?.name || "",
       rarityPct: achievementConfig.rarityPct,
       raritySource: achievementConfig.raritySource,
+      trophyType: achievementConfig.trophyType || achievementConfig.trophy_type,
       preset: selectedPreset,
       position: selectedPosition,
       sound: getUserPreferredSound() || "mute",
@@ -17852,6 +19398,11 @@ function createPlaytimeWindow(playData = {}) {
 
 ipcMain.on("queue-achievement-notification", async (_event, payload) => {
   try {
+    if (payload?.isTest === true) {
+      queueAchievementNotification(payload);
+      return;
+    }
+
     const configName =
       payload?.configName || payload?.config_name || selectedConfig || null;
     const achKey =
@@ -17981,8 +19532,10 @@ ipcMain.on("overlay:visibility-ack", (event, payload = {}) => {
   }
 });
 
-const { pathToFileURL } = require("url");
 const processPoller = require("./utils/process-poller");
+const {
+  readWindowsProcessCommandLines,
+} = require("./utils/windows-process-command-line");
 
 const autoSelectIndex = {
   built: false,
@@ -17994,6 +19547,10 @@ const autoSelectIndex = {
 const autoSelectIndexTimers = new Map(); // configName -> timeout
 const AUTO_SELECT_INDEX_UPSERT_DEBOUNCE_MS = 120;
 const AUTO_SELECT_INDEX_BUILD_CONCURRENCY = 16;
+const PROCESS_COMMAND_LINE_FAILURE_TTL_MS = 10 * 1000;
+const PROCESS_COMMAND_LINE_CACHE_MAX_ENTRIES = 256;
+const processCommandLineCache = new Map();
+let processCommandLineWarnLastAt = 0;
 
 function getConfigNameFromConfigFilePath(filePath) {
   try {
@@ -18364,6 +19921,88 @@ function getConfigProcessArgTokens(configData) {
   return tokens;
 }
 
+async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
+  const now = Date.now();
+  const livePids = new Set();
+  for (const procs of procsByExe.values()) {
+    for (const proc of Array.isArray(procs) ? procs : []) {
+      const pid = Math.floor(Number(proc?.pid));
+      if (Number.isFinite(pid) && pid > 0) livePids.add(pid);
+    }
+  }
+  for (const [pid, cached] of processCommandLineCache) {
+    if (!livePids.has(pid) || Number(cached?.expiresAt || 0) <= now) {
+      processCommandLineCache.delete(pid);
+    }
+  }
+
+  const pendingByPid = new Map();
+  for (const [exe, procs] of procsByExe) {
+    const configNames = autoSelectIndex.exeToConfigs.get(exe);
+    if (!configNames?.size) continue;
+    const requiresArguments = Array.from(configNames).some((configName) => {
+      const entry = autoSelectIndex.configEntries.get(configName);
+      return getConfigProcessArgTokens(entry?.data).length > 0;
+    });
+    if (!requiresArguments) continue;
+
+    for (const proc of Array.isArray(procs) ? procs : []) {
+      const pid = Math.floor(Number(proc?.pid));
+      if (!Number.isFinite(pid) || pid <= 0) continue;
+      proc.__requireCommandLineForArgs = true;
+      if (normalizeProcessCmdLine(proc)) continue;
+
+      const processName = String(proc?.name || "").trim().toLowerCase();
+      const cached = processCommandLineCache.get(pid);
+      if (
+        cached &&
+        cached.processName === processName &&
+        Number(cached.expiresAt || 0) > now
+      ) {
+        if (cached.cmd) proc.cmd = cached.cmd;
+        continue;
+      }
+      pendingByPid.set(pid, { proc, processName });
+    }
+  }
+
+  if (!pendingByPid.size) return;
+
+  let resolved = new Map();
+  try {
+    resolved = await readWindowsProcessCommandLines(
+      Array.from(pendingByPid.keys()),
+      { timeoutMs: 2000, maxPids: 64 },
+    );
+  } catch (err) {
+    if (now - processCommandLineWarnLastAt >= 30000) {
+      processCommandLineWarnLastAt = now;
+      appLogger.warn("process-command-line:resolve-failed", {
+        count: pendingByPid.size,
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  for (const [pid, pending] of pendingByPid) {
+    const cmd = String(resolved.get(pid) || "").trim();
+    processCommandLineCache.set(pid, {
+      processName: pending.processName,
+      cmd,
+      expiresAt:
+        cmd
+          ? Number.POSITIVE_INFINITY
+          : Date.now() + PROCESS_COMMAND_LINE_FAILURE_TTL_MS,
+    });
+    if (cmd) pending.proc.cmd = cmd;
+  }
+  while (processCommandLineCache.size > PROCESS_COMMAND_LINE_CACHE_MAX_ENTRIES) {
+    const oldestPid = processCommandLineCache.keys().next().value;
+    if (oldestPid === undefined) break;
+    processCommandLineCache.delete(oldestPid);
+  }
+}
+
 function processMatchesConfig(proc, configData, configName) {
   if (!proc || !proc.name || !hasProcessNameValue(configData?.process_name)) {
     return false;
@@ -18376,7 +20015,7 @@ function processMatchesConfig(proc, configData, configName) {
   const argTokens = getConfigProcessArgTokens(configData);
   if (!argTokens.length) return true;
   const cmdLine = normalizeProcessCmdLine(proc);
-  if (!cmdLine) return true;
+  if (!cmdLine) return proc.__requireCommandLineForArgs !== true;
   return argTokens.every((token) => cmdLine.includes(token));
 }
 
@@ -18401,6 +20040,7 @@ async function autoSelectRunningGameConfig(processes) {
       if (!procsByExe.has(exe)) procsByExe.set(exe, []);
       procsByExe.get(exe).push(p);
     }
+    await enrichProcessCommandLinesForAutoSelect(procsByExe);
 
     const getEntry = (name) => {
       const safe = sanitizeConfigName(name || "");
@@ -18566,7 +20206,15 @@ async function autoSelectRunningGameConfig(processes) {
       const candidates = autoSelectIndex.exeToConfigs.get(exe);
       if (!candidates || !candidates.size) continue;
 
-      for (const configName of Array.from(candidates)) {
+      const orderedCandidates = Array.from(candidates).sort((a, b) => {
+        const aEntry = getEntry(a);
+        const bEntry = getEntry(b);
+        return (
+          getConfigProcessArgTokens(bEntry?.data).length -
+          getConfigProcessArgTokens(aEntry?.data).length
+        );
+      });
+      for (const configName of orderedCandidates) {
         if (activePlaytimeConfigs.has(configName)) continue;
 
         const entry = getEntry(configName);
@@ -18629,6 +20277,12 @@ const {
   buildCrcNameMap,
   resolveConfigSchemaPath,
 } = require("./utils/achievement-data");
+const {
+  EXOPHASE_LANG_MAP,
+  EXOPHASE_RARITY_SOURCE,
+  buildExophaseSlugVariants,
+  fetchExophaseAchievementsMultiLang,
+} = require("./utils/exophase-scraper");
 const {
   buildGogOfficialRarityEntries,
   buildGogOfficialSnapshot,
@@ -20015,14 +21669,90 @@ ipcMain.handle(
       platform === "epic" ||
       platform === "epic-official" ||
       platform === "gog" ||
-      platform === "gog-official";
+      platform === "gog-official" ||
+      platform === "xenia" ||
+      platform === "rpcs3" ||
+      platform === "shadps4";
 
     if (!supportedPlatform) {
       return {
         success: false,
         code: "unsupported-platform",
-        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG configs (current: ${platform}).`,
+        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG/Xenia/RPCS3/ShadPS4 configs (current: ${platform}).`,
       };
+    }
+
+    if (platform === "xenia" || platform === "rpcs3" || platform === "shadps4") {
+      const appid = config?.appid != null ? String(config.appid).trim() : "";
+      if (!appid) {
+        return {
+          success: false,
+          code: "invalid-exophase-appid",
+          message: "AppID for Exophase rarity refresh is invalid.",
+        };
+      }
+      const source = EXOPHASE_RARITY_SOURCE;
+      rarityLogger.info("rarity:manual-refresh:start", {
+        configName: config?.name || safeName,
+        platform,
+        appid,
+        source,
+      });
+      try {
+        const refreshed = await refreshExophaseRarityForConfig(
+          config,
+          platform,
+          schemaAchievements,
+        );
+        const sidecarPath = writeAchievementPercentagesSidecar(
+          path.dirname(schemaPath),
+          appid,
+          refreshed.entries,
+          { source },
+        );
+        if (refreshed.updated) {
+          fs.writeFileSync(
+            schemaPath,
+            JSON.stringify(schemaAchievements, null, 2),
+            "utf8",
+          );
+        }
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config?.name || safeName,
+          platform,
+          appid,
+          source,
+          sidecarPath,
+          slug: refreshed.usedSlug,
+          baseUrl: refreshed.baseUrl,
+          fetchedCount: refreshed.fetchedCount,
+          matchedCount: refreshed.matched,
+          schemaUpdated: refreshed.updated,
+        });
+        broadcastToAll("refresh-achievements-table", config?.name || safeName);
+        return {
+          success: true,
+          configName: config?.name || safeName,
+          platform,
+          appid,
+          sidecarPath,
+          fetchedCount: refreshed.fetchedCount,
+          matchedCount: refreshed.matched,
+        };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config?.name || safeName,
+          platform,
+          appid,
+          source,
+          error: err?.message || String(err),
+        });
+        return {
+          success: false,
+          code: "fetch-failed",
+          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+        };
+      }
     }
 
     if (platform === "gog-official") {
@@ -20386,6 +22116,556 @@ ipcMain.handle("open-external-url", async (_evt, url) => {
   }
 });
 
+ipcMain.handle("ea-app:open", async (_evt, payload = {}) => {
+  const rawLaunchId = String(
+    payload && typeof payload === "object"
+      ? payload?.launchId || payload?.contentId || payload?.offerId
+      : payload,
+  ).trim();
+  try {
+    if (!/^[A-Za-z0-9:._,-]+$/.test(rawLaunchId)) {
+      throw new Error("invalid-ea-launch-id");
+    }
+    const url = `origin2://game/launch/?offerIds=${encodeURIComponent(
+      rawLaunchId,
+    )}`;
+    await shell.openExternal(url);
+    return { success: true };
+  } catch (err) {
+    ipcLogger.warn("ea-app:open-failed", {
+      launchId: rawLaunchId || null,
+      error: err?.message || String(err),
+    });
+    return { success: false, error: err?.message || String(err) };
+  }
+});
+
+function isGogCatalogLandingUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.replace(/\/+$/g, "").toLowerCase();
+    return pathname === "/games" || pathname === "/en/games";
+  } catch {
+    return true;
+  }
+}
+
+async function resolveValidGogProductUrl(candidateUrl) {
+  const raw = String(candidateUrl || "").trim();
+  if (!raw) return "";
+  let currentUrl;
+  try {
+    currentUrl = new URL(raw, "https://www.gog.com").toString();
+  } catch {
+    return "";
+  }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (isGogCatalogLandingUrl(currentUrl)) return "";
+    const res = await axios.get(currentUrl, {
+      maxRedirects: 0,
+      timeout: 10000,
+      validateStatus: (status) => status >= 200 && status < 400,
+      headers: {
+        Accept: "text/html,application/xhtml+xml,application/json",
+        "User-Agent": "Achievements",
+      },
+    });
+    if (res.status >= 200 && res.status < 300) {
+      return isGogCatalogLandingUrl(currentUrl) ? "" : currentUrl;
+    }
+    const location = String(res.headers?.location || "").trim();
+    if (!location) return "";
+    try {
+      currentUrl = new URL(location, currentUrl).toString();
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
+function buildGogProductUrlCandidates(product = {}) {
+  const links = product?.links || {};
+  const candidates = [];
+  const directUrl = String(links.product_card || "").trim();
+  if (directUrl) candidates.push(directUrl);
+
+  const purchaseLink = String(links.purchase_link || "").trim();
+  try {
+    const purchaseUrl = new URL(purchaseLink, "https://www.gog.com");
+    const match = purchaseUrl.pathname.match(/\/checkout\/manual\/([^/?#]+)/i);
+    const purchaseSlug = match ? decodeURIComponent(match[1] || "").trim() : "";
+    if (purchaseSlug) {
+      candidates.push(`https://www.gog.com/en/game/${purchaseSlug}`);
+    }
+  } catch {}
+
+  const slug = String(product?.slug || "").trim();
+  if (slug) {
+    if (/_game$/i.test(slug)) {
+      candidates.push(`https://www.gog.com/en/game/${slug.replace(/_game$/i, "")}`);
+    }
+    candidates.push(`https://www.gog.com/en/game/${slug}`);
+    candidates.push(`https://www.gog.com/game/${slug}`);
+  }
+
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+ipcMain.handle("gog:store-url", async (_evt, payload = {}) => {
+  const appid = String(
+    payload && typeof payload === "object" ? payload?.appid : payload,
+  ).trim();
+  try {
+    if (!/^\d+$/.test(appid)) {
+      throw new Error("invalid-gog-appid");
+    }
+    const res = await axios.get(
+      `https://api.gog.com/products/${encodeURIComponent(appid)}`,
+      {
+        timeout: 10000,
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "Achievements",
+        },
+      },
+    );
+    const product = res?.data || {};
+    const slug = String(product?.slug || "").trim();
+    let url = "";
+    for (const candidate of buildGogProductUrlCandidates(product)) {
+      try {
+        url = await resolveValidGogProductUrl(candidate);
+      } catch {}
+      if (url) break;
+    }
+    if (!url) {
+      throw new Error("gog-product-url-missing");
+    }
+    return {
+      ok: true,
+      url,
+      title: String(product?.title || "").trim(),
+      slug,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: String(err?.message || err),
+    };
+  }
+});
+
+const PLAYSTATION_STORE_SEARCH_LOCALES = [
+  "en-us",
+  "en-gb",
+  "en-au",
+  "en-ca",
+  "ja-jp",
+  "en-hk",
+  "fr-fr",
+  "de-de",
+  "es-es",
+  "it-it",
+];
+
+function normalizePlayStationCusa(value) {
+  const raw = String(value || "")
+    .trim()
+    .toUpperCase();
+  return /^CUSA\d{5}$/.test(raw) ? raw : "";
+}
+
+function normalizePlayStationContentId(value) {
+  const raw = String(value || "")
+    .trim()
+    .toUpperCase();
+  return /^[A-Z]{2}\d{4}-CUSA\d{5}_00-[A-Z0-9_]+$/.test(raw) ? raw : "";
+}
+
+function getPlayStationStoreLocaleForContentId(contentId) {
+  const prefix = String(contentId || "").slice(0, 2).toUpperCase();
+  if (prefix === "EP") return "en-gb";
+  if (prefix === "JP") return "ja-jp";
+  if (prefix === "HP") return "en-hk";
+  if (prefix === "UP") return "en-us";
+  return "en-us";
+}
+
+function buildPlayStationStoreProductUrl(contentId, locale = "") {
+  const normalizedContentId = normalizePlayStationContentId(contentId);
+  if (!normalizedContentId) return "";
+  const resolvedLocale =
+    String(locale || "").trim().toLowerCase() ||
+    getPlayStationStoreLocaleForContentId(normalizedContentId);
+  return `https://store.playstation.com/${resolvedLocale}/product/${encodeURIComponent(
+    normalizedContentId,
+  )}`;
+}
+
+function normalizePlayStationSearchTitle(value) {
+  return String(value || "")
+    .replace(/\s*\((?:PS4|shadps4)\)\s*$/i, "")
+    .trim();
+}
+
+function normalizePlayStationComparableTitle(value) {
+  return normalizePlayStationSearchTitle(value)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[™®©]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractPlayStationNextData(html) {
+  const match = String(html || "").match(
+    /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/i,
+  );
+  if (!match) return null;
+  try {
+    return JSON.parse(match[1]);
+  } catch {
+    return null;
+  }
+}
+
+function extractPlayStationProductsFromSearchHtml(html) {
+  const nextData = extractPlayStationNextData(html);
+  const apolloState = nextData?.props?.apolloState || {};
+  return Object.values(apolloState)
+    .filter((entry) => entry && entry.__typename === "Product")
+    .map((product) => ({
+      id: String(product.id || "").trim(),
+      name: String(product.name || "").trim(),
+      npTitleId: String(product.npTitleId || "").trim(),
+      storeDisplayClassification: String(
+        product.storeDisplayClassification || "",
+      ).trim(),
+      localizedStoreDisplayClassification: String(
+        product.localizedStoreDisplayClassification || "",
+      ).trim(),
+      platforms: Array.isArray(product.platforms) ? product.platforms : [],
+    }))
+    .filter((product) => product.id);
+}
+
+function scorePlayStationProductMatch(product, cusa, searchName) {
+  const productId = String(product?.id || "").toUpperCase();
+  const npTitleId = String(product?.npTitleId || "").toUpperCase();
+  const classification = String(
+    product?.storeDisplayClassification || "",
+  ).toUpperCase();
+  const platforms = Array.isArray(product?.platforms)
+    ? product.platforms.map((item) => String(item || "").toUpperCase())
+    : [];
+  let score = 0;
+  if (npTitleId === `${cusa}_00`) score += 500;
+  else if (npTitleId.startsWith(cusa)) score += 450;
+  if (productId.includes(cusa)) score += 400;
+  if (classification === "FULL_GAME") score += 120;
+  if (classification === "BUNDLE") score += 40;
+  if (["LEVEL", "COSTUME", "ADD_ON", "VIRTUAL_CURRENCY"].includes(classification)) {
+    score -= 200;
+  }
+  if (platforms.includes("PS4")) score += 30;
+  const expectedName = normalizePlayStationComparableTitle(searchName);
+  const productName = normalizePlayStationComparableTitle(product?.name || "");
+  if (expectedName && productName) {
+    if (productName === expectedName) score += 35;
+    else if (productName.includes(expectedName) || expectedName.includes(productName)) {
+      score += 15;
+    }
+  }
+  return score;
+}
+
+async function fetchPlayStationStoreSearchProducts(searchTerm, locale) {
+  const url = `https://store.playstation.com/${encodeURIComponent(
+    locale,
+  )}/search/${encodeURIComponent(searchTerm)}`;
+  const res = await axios.get(url, {
+    timeout: 12000,
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": "Achievements",
+    },
+  });
+  return extractPlayStationProductsFromSearchHtml(res?.data || "");
+}
+
+async function resolvePlayStationStoreProductByCusa(cusa, searchTerm) {
+  const cleanSearchTerm = normalizePlayStationSearchTitle(searchTerm);
+  if (!cusa || !cleanSearchTerm) return null;
+  const batches = [
+    PLAYSTATION_STORE_SEARCH_LOCALES.slice(0, 4),
+    PLAYSTATION_STORE_SEARCH_LOCALES.slice(4),
+  ];
+  let best = null;
+  for (const batch of batches) {
+    const results = await Promise.allSettled(
+      batch.map(async (locale) => {
+        const products = await fetchPlayStationStoreSearchProducts(
+          cleanSearchTerm,
+          locale,
+        );
+        return products
+          .filter((product) => {
+            const productId = String(product?.id || "").toUpperCase();
+            const npTitleId = String(product?.npTitleId || "").toUpperCase();
+            return productId.includes(cusa) || npTitleId.startsWith(cusa);
+          })
+          .map((product) => ({
+            ...product,
+            locale,
+            score: scorePlayStationProductMatch(product, cusa, cleanSearchTerm),
+          }));
+      }),
+    );
+    for (const result of results) {
+      if (result.status !== "fulfilled") continue;
+      for (const candidate of result.value || []) {
+        if (!best || candidate.score > best.score) {
+          best = candidate;
+        }
+      }
+    }
+    if (best && best.score >= 900) break;
+  }
+  return best;
+}
+
+function persistPlayStationStoreMetadata(configName, contentId, storeUrl) {
+  const safeName = String(configName || "").trim();
+  if (!safeName || !contentId || !storeUrl) return false;
+  const configPath = path.join(configsDir, `${safeName}.json`);
+  try {
+    if (!fs.existsSync(configPath)) return false;
+    const raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    if (normalizePlatform(raw?.platform) !== "shadps4") return false;
+    const next = {
+      ...raw,
+      ps_content_id: contentId,
+      ps_store_url: storeUrl,
+    };
+    if (
+      raw?.ps_content_id === next.ps_content_id &&
+      raw?.ps_store_url === next.ps_store_url
+    ) {
+      return false;
+    }
+    fs.writeFileSync(configPath, JSON.stringify(next, null, 2));
+    ipcLogger.info("playstation:store-url:persisted", {
+      configName: safeName,
+      contentId,
+      url: storeUrl,
+    });
+    return true;
+  } catch (err) {
+    ipcLogger.warn("playstation:store-url:persist-failed", {
+      configName: safeName,
+      error: err?.message || String(err),
+    });
+    return false;
+  }
+}
+
+ipcMain.handle("playstation:store-url", async (_evt, payload = {}) => {
+  const cusa = normalizePlayStationCusa(
+    payload?.appid || payload?.cusa || payload?.titleId || "",
+  );
+  const rawContentId = normalizePlayStationContentId(
+    payload?.ps_content_id ||
+      payload?.psContentId ||
+      payload?.content_id ||
+      payload?.contentId ||
+      payload?.playstation_content_id ||
+      payload?.playstationContentId ||
+      "",
+  );
+  const explicitUrl = String(
+    payload?.ps_store_url ||
+      payload?.psStoreUrl ||
+      payload?.playstation_store_url ||
+      payload?.playstationStoreUrl ||
+      "",
+  ).trim();
+  const configName = String(payload?.configName || payload?.name || "").trim();
+  try {
+    if (/^https:\/\/store\.playstation\.com\//i.test(explicitUrl)) {
+      return { ok: true, url: explicitUrl, source: "config-url" };
+    }
+    if (rawContentId) {
+      const url = buildPlayStationStoreProductUrl(rawContentId);
+      persistPlayStationStoreMetadata(configName, rawContentId, url);
+      return {
+        ok: true,
+        url,
+        contentId: rawContentId,
+        source: "config-content-id",
+      };
+    }
+    if (!cusa) throw new Error("invalid-playstation-cusa");
+    const searchName = normalizePlayStationSearchTitle(
+      payload?.displayName || payload?.title || payload?.name || "",
+    );
+    if (!searchName) throw new Error("playstation-search-term-required");
+    const product = await resolvePlayStationStoreProductByCusa(cusa, searchName);
+    const contentId = normalizePlayStationContentId(product?.id || "");
+    if (!product || !contentId) {
+      throw new Error("playstation-product-not-found");
+    }
+    const url = buildPlayStationStoreProductUrl(contentId, product.locale);
+    const persisted = persistPlayStationStoreMetadata(configName, contentId, url);
+    return {
+      ok: true,
+      url,
+      contentId,
+      title: product.name || "",
+      locale: product.locale || "",
+      source: "store-search-cusa",
+      persisted,
+    };
+  } catch (err) {
+    ipcLogger.warn("playstation:store-url:failed", {
+      appid: cusa || null,
+      configName: configName || null,
+      error: err?.message || String(err),
+    });
+    return {
+      ok: false,
+      message: String(err?.message || err),
+    };
+  }
+});
+
+function normalizeStoreSearchTitle(value) {
+  return String(value || "")
+    .replace(/\s*\((?:Epic|Epic Official)\)\s*$/i, "")
+    .trim();
+}
+
+function normalizeStoreComparableTitle(value) {
+  return normalizeStoreSearchTitle(value)
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function pickEpicStorePageSlug(element) {
+  const mappings = Array.isArray(element?.catalogNs?.mappings)
+    ? element.catalogNs.mappings
+    : [];
+  const productHome =
+    mappings.find(
+      (mapping) =>
+        String(mapping?.pageType || "").toLowerCase() === "producthome" &&
+        String(mapping?.pageSlug || "").trim(),
+    ) || mappings.find((mapping) => String(mapping?.pageSlug || "").trim());
+  return String(
+    productHome?.pageSlug || element?.productSlug || element?.urlSlug || "",
+  ).trim();
+}
+
+ipcMain.handle("epic:store-url", async (_evt, payload = {}) => {
+  const rawName = normalizeStoreSearchTitle(
+    payload?.displayName || payload?.name || payload?.configName || "",
+  );
+  const namespace = String(
+    payload?.namespace || payload?.epic_namespace || payload?.epicNamespace || "",
+  )
+    .trim()
+    .toLowerCase();
+  try {
+    if (!rawName) throw new Error("epic-search-term-required");
+    const query = `query searchStoreQuery($allowCountries: String, $category: String, $count: Int, $country: String!, $keywords: String, $locale: String, $namespace: String, $itemNs: String, $sortBy: String, $sortDir: String, $start: Int, $tag: String, $releaseDate: String) {
+  Catalog {
+    searchStore(allowCountries: $allowCountries, category: $category, count: $count, country: $country, keywords: $keywords, locale: $locale, namespace: $namespace, itemNs: $itemNs, sortBy: $sortBy, sortDir: $sortDir, releaseDate: $releaseDate, start: $start, tag: $tag) {
+      elements {
+        title
+        id
+        namespace
+        productSlug
+        urlSlug
+        url
+        catalogNs { mappings(pageType: "productHome") { pageSlug pageType } }
+      }
+    }
+  }
+}`;
+    const res = await axios.post(
+      "https://store.epicgames.com/graphql",
+      {
+        query,
+        variables: {
+          count: 5,
+          category: "games/edition/base|bundles/games|editors",
+          allowCountries: "US",
+          country: "US",
+          keywords: rawName,
+          locale: "en-US",
+          namespace: "",
+          itemNs: "",
+          sortBy: "relevancy",
+          sortDir: "DESC",
+          start: 0,
+          tag: "",
+          releaseDate: null,
+        },
+      },
+      {
+        timeout: 10000,
+        validateStatus: (status) => status >= 200 && status < 500,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "User-Agent": "Achievements",
+        },
+      },
+    );
+    if (res.status >= 400) {
+      throw new Error(`epic-store-search-${res.status}`);
+    }
+    const elements =
+      res?.data?.data?.Catalog?.searchStore?.elements || [];
+    if (!Array.isArray(elements) || !elements.length) {
+      throw new Error("epic-store-search-empty");
+    }
+    const expectedTitle = normalizeStoreComparableTitle(rawName);
+    const picked =
+      (namespace &&
+        elements.find(
+          (element) =>
+            String(element?.namespace || "").trim().toLowerCase() === namespace &&
+            pickEpicStorePageSlug(element),
+        )) ||
+      elements.find(
+        (element) =>
+          normalizeStoreComparableTitle(element?.title) === expectedTitle &&
+          pickEpicStorePageSlug(element),
+      ) ||
+      elements.find((element) => pickEpicStorePageSlug(element));
+    const slug = pickEpicStorePageSlug(picked);
+    if (!slug) throw new Error("epic-store-slug-missing");
+    return {
+      ok: true,
+      url: `https://store.epicgames.com/en-US/p/${encodeURIComponent(slug)}`,
+      slug,
+      title: String(picked?.title || "").trim(),
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      message: String(err?.message || err),
+    };
+  }
+});
+
 const {
   fetchSteamDbLibraryCover,
   fetchSteamGridDbImage,
@@ -20441,7 +22721,8 @@ ipcMain.handle("covers:steam-product-assets", async (_evt, payload = {}) => {
       message: String(err?.message || err),
     };
   }
-});
+  },
+);
 
 ipcMain.handle("covers:steamdb", async (_evt, payload) => {
   try {
@@ -20704,6 +22985,157 @@ ipcMain.handle("platinum:manual", async (_event, payload = {}) => {
     });
   }
   return { flagged: flagged || alreadyFlagged };
+});
+
+function resolveManualAchievementCacheContext(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return null;
+  const configPath = path.join(configsDir, `${safeName}.json`);
+  if (!fs.existsSync(configPath)) return null;
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  const platform = normalizePlatform(config?.platform) || "steam";
+  const options = {
+    appid: config?.appid || "",
+    savePath: config?.save_path || "",
+  };
+  if (platform === "steam-official") {
+    options.statsDir = config?.save_path || "";
+    options.preferences = cachedPreferences;
+  } else if (platform === "epic-official") {
+    const accountId = resolveEpicOfficialCacheAccountId(
+      safeName,
+      platform,
+      null,
+    );
+    if (accountId) options.accountId = accountId;
+  } else if (platform === "shadps4") {
+    const progressPath = resolvePs4ProgressPathForConfig(config);
+    options.progressPath = progressPath || "";
+    options.filePath = progressPath || "";
+    options.shadps4UserId =
+      getPs4UserIdFromProgressPath(progressPath) ||
+      config?.shadps4_user_id ||
+      "";
+  }
+  return { safeName, config, platform, options };
+}
+
+ipcMain.handle("achievement:manual-state", async (_event, payload = {}) => {
+  const configName = String(payload?.configName || "").trim();
+  const achievementNames = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(payload?.achievementNames)
+          ? payload.achievementNames
+          : []),
+        payload?.achievementName,
+      ]
+        .map((name) => String(name || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const action = String(payload?.action || "").trim();
+  if (!configName || !achievementNames.length) {
+    return {
+      success: false,
+      error: "configName and achievementName are required",
+    };
+  }
+  if (action !== "mark-unlocked" && action !== "clear-manual") {
+    return { success: false, error: "unsupported manual achievement action" };
+  }
+  try {
+    const context = resolveManualAchievementCacheContext(configName);
+    if (!context) {
+      return { success: false, error: "config not found" };
+    }
+    const cached =
+      (await loadPreviousAchievements(
+        context.safeName,
+        context.platform,
+        context.options,
+      )) || {};
+    const next = { ...(cached && typeof cached === "object" ? cached : {}) };
+    let updatedCount = 0;
+
+    for (const achievementName of achievementNames) {
+      const existing =
+        next[achievementName] && typeof next[achievementName] === "object"
+          ? next[achievementName]
+          : {};
+
+      if (action === "mark-unlocked") {
+        next[achievementName] = {
+          ...existing,
+          earned: true,
+          earned_time: Number(existing.earned_time || 0) || Date.now(),
+          manual: true,
+        };
+        updatedCount += 1;
+        continue;
+      }
+
+      if (action === "clear-manual" && existing.manual === true) {
+        const cleared = { ...existing };
+        delete cleared.manual;
+        cleared.earned = false;
+        cleared.earned_time = 0;
+        next[achievementName] = cleared;
+        updatedCount += 1;
+      }
+    }
+
+    if (!updatedCount) {
+      return {
+        success: true,
+        changed: false,
+        updatedCount,
+        achievements: next,
+      };
+    }
+
+    const changed = savePreviousAchievements(
+      context.safeName,
+      next,
+      context.platform,
+      action === "clear-manual"
+        ? { ...context.options, skipManualMerge: true }
+        : context.options,
+    );
+    persistenceLogger.info("manual-achievement-state", {
+      config: context.safeName,
+      achievement:
+        achievementNames.length === 1 ? achievementNames[0] : undefined,
+      achievements: achievementNames.length > 1 ? achievementNames : undefined,
+      updatedCount,
+      action,
+      platform: context.platform,
+      changed: changed !== false,
+    });
+    broadcastToAll("refresh-achievements-table", {
+      configName: context.safeName,
+      skipPlatinumCheck: true,
+      reason: "manual-achievement-state",
+    });
+    requestDashboardRefresh("manual-achievement-state");
+    return {
+      success: true,
+      changed: changed !== false,
+      updatedCount,
+      achievements: next,
+    };
+  } catch (error) {
+    persistenceLogger.error("manual-achievement-state:error", {
+      config: configName,
+      achievements: achievementNames,
+      action,
+      error: error?.message || String(error),
+    });
+    return {
+      success: false,
+      error: error?.message || String(error),
+    };
+  }
 });
 // Flag already-complete configs at boot to avoid retroactive platinum popups
 async function flagPlatinumFromCacheOnBoot() {

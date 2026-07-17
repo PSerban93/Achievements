@@ -5,6 +5,13 @@ const DEFAULT_RESTART_DELAY_MS = 1500;
 const DEFAULT_HOST_TAG = "ACH_EVENTS_HOST_V1";
 const WARN_DEDUP_WINDOW_MS = 5000;
 const MAX_WARN_CACHE_SIZE = 128;
+const DEFAULT_MAX_BATCH_SIZE = 128;
+const DEFAULT_MAX_PENDING_EVENTS = 1024;
+const DEFAULT_BATCH_WINDOW_MS = 50;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
+const DEFAULT_MAX_WORKING_SET_MB = 256;
+const HOST_WATCHDOG_INTERVAL_MS = 15000;
+const HOST_WATCHDOG_TIMEOUT_MS = 60000;
 
 const CHANNEL_PROCESS = "process";
 const CHANNEL_LUMAPLAY = "lumaplay";
@@ -14,7 +21,9 @@ const hubState = {
   watcherProcess: null,
   launching: false,
   restartTimer: null,
+  watchdogTimer: null,
   ready: false,
+  lastMessageAt: 0,
   warnCache: new Map(),
 };
 
@@ -44,12 +53,37 @@ function buildUnifiedEventWatchScript(options = {}) {
   );
   const enableProcess = options.enableProcess !== false;
   const enableLumaplay = options.enableLumaplay !== false;
+  const maxBatchSize = Math.max(
+    1,
+    Number(options.maxBatchSize) || DEFAULT_MAX_BATCH_SIZE,
+  );
+  const maxPendingEvents = Math.max(
+    maxBatchSize,
+    Number(options.maxPendingEvents) || DEFAULT_MAX_PENDING_EVENTS,
+  );
+  const batchWindowMs = Math.max(
+    0,
+    Number(options.batchWindowMs) || DEFAULT_BATCH_WINDOW_MS,
+  );
+  const heartbeatIntervalMs = Math.max(
+    1000,
+    Number(options.heartbeatIntervalMs) || DEFAULT_HEARTBEAT_INTERVAL_MS,
+  );
+  const maxWorkingSetMb = Math.max(
+    64,
+    Number(options.maxWorkingSetMb) || DEFAULT_MAX_WORKING_SET_MB,
+  );
   return [
     "$ErrorActionPreference = 'Stop'",
     `$hostTag = '${hostTag}'`,
     `$sourceBase = '${sourceBase}'`,
     `$enableProcess = $${enableProcess ? "true" : "false"}`,
     `$enableLumaplay = $${enableLumaplay ? "true" : "false"}`,
+    `$maxBatchSize = ${Math.floor(maxBatchSize)}`,
+    `$maxPendingEvents = ${Math.floor(maxPendingEvents)}`,
+    `$batchWindowMs = ${Math.floor(batchWindowMs)}`,
+    `$heartbeatIntervalMs = ${Math.floor(heartbeatIntervalMs)}`,
+    `$maxWorkingSetMb = ${Math.floor(maxWorkingSetMb)}`,
     "$procStartSource = \"$sourceBase-proc-start\"",
     "$procStopSource  = \"$sourceBase-proc-stop\"",
     "$lumaSource      = \"$sourceBase-lumaplay\"",
@@ -59,6 +93,9 @@ function buildUnifiedEventWatchScript(options = {}) {
     "function Emit([hashtable]$obj) {",
     "  try { [Console]::WriteLine(($obj | ConvertTo-Json -Compress -Depth 6)) } catch {}",
     "}",
+    "$processedCount = 0",
+    "$droppedCount = 0",
+    "$lastHeartbeatAt = [DateTime]::UtcNow",
     "try {",
     "  $procEnabled = $false",
     "  $lumaEnabled = $false",
@@ -96,43 +133,53 @@ function buildUnifiedEventWatchScript(options = {}) {
     "      Start-Sleep -Seconds 3600",
     "      continue",
     "    }",
-    "    $event = Wait-Event -Timeout 3600",
-    "    if (-not $event) { continue }",
-    "    try {",
-    "      $src = [string]$event.SourceIdentifier",
-    "      $evt = $event.SourceEventArgs.NewEvent",
-    "      if ($procEnabled -and $src -eq $procStartSource) {",
-    "        try {",
-    "          $procId = [int]$evt.ProcessID",
-    "          $name = [string]$evt.ProcessName",
-    "          $cmd = ''",
-    "          $ppid = 0",
-    "          try {",
-    "            $proc = Get-CimInstance Win32_Process -Filter \"ProcessId=$procId\" -ErrorAction Stop",
-    "            if ($proc -and $proc.CommandLine) { $cmd = [string]$proc.CommandLine }",
-    "            if ($proc -and $proc.ParentProcessId) { $ppid = [int]$proc.ParentProcessId }",
-    "          } catch {}",
-    "          Emit @{ kind='process'; type='start'; pid=$procId; name=$name; cmd=$cmd; ppid=$ppid; tag=$hostTag }",
-    "        } catch {",
-    "          [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:process:$($_.Exception.Message)\")",
-    "        }",
-    "      } elseif ($procEnabled -and $src -eq $procStopSource) {",
-    "        try {",
-    "          Emit @{ kind='process'; type='stop'; pid=[int]$evt.ProcessID; name=[string]$evt.ProcessName; tag=$hostTag }",
-    "        } catch {",
-    "          [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:process:$($_.Exception.Message)\")",
-    "        }",
-    "      } elseif ($lumaEnabled -and $src -eq $lumaSource) {",
-    "        try {",
-    "          Emit @{ kind='lumaplay'; type='change'; tag=$hostTag }",
-    "        } catch {",
-    "          [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:lumaplay:$($_.Exception.Message)\")",
-    "        }",
+    "    $null = Wait-Event -Timeout 1",
+    "    if ($batchWindowMs -gt 0 -and (Get-Event)) { Start-Sleep -Milliseconds $batchWindowMs }",
+    "    $queuedEvents = @(Get-Event)",
+    "    $queueDepthBefore = $queuedEvents.Count",
+    "    $droppedNow = 0",
+    "    if ($queueDepthBefore -gt $maxPendingEvents) {",
+    "      $droppedNow = $queueDepthBefore - $maxPendingEvents",
+    "      foreach ($staleEvent in @($queuedEvents | Select-Object -First $droppedNow)) {",
+    "        Remove-Event -EventIdentifier $staleEvent.EventIdentifier -ErrorAction SilentlyContinue",
     "      }",
-    "    } catch {",
-    "      [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:$($_.Exception.Message)\")",
-    "    } finally {",
-    "      Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue",
+    "      $droppedCount += $droppedNow",
+    "      $queuedEvents = @($queuedEvents | Select-Object -Last $maxPendingEvents)",
+    "    }",
+    "    $selectedEvents = @($queuedEvents | Select-Object -First $maxBatchSize)",
+    "    $batch = New-Object System.Collections.ArrayList",
+    "    foreach ($event in $selectedEvents) {",
+    "      try {",
+    "        $src = [string]$event.SourceIdentifier",
+    "        $evt = $event.SourceEventArgs.NewEvent",
+    "        if ($procEnabled -and $src -eq $procStartSource) {",
+    "          $item = @{ kind='process'; type='start'; pid=[int]$evt.ProcessID; name=[string]$evt.ProcessName; ppid=[int]$evt.ParentProcessID }",
+    "          [void]$batch.Add($item)",
+    "        } elseif ($procEnabled -and $src -eq $procStopSource) {",
+    "          $item = @{ kind='process'; type='stop'; pid=[int]$evt.ProcessID; name=[string]$evt.ProcessName }",
+    "          [void]$batch.Add($item)",
+    "        } elseif ($lumaEnabled -and $src -eq $lumaSource) {",
+    "          [void]$batch.Add(@{ kind='lumaplay'; type='change' })",
+    "        }",
+    "      } catch {",
+    "        [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:$($_.Exception.Message)\")",
+    "      } finally {",
+    "        Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue",
+    "      }",
+    "    }",
+    "    if ($batch.Count -gt 0 -or $droppedNow -gt 0) {",
+    "      $processedCount += $batch.Count",
+    "      Emit @{ kind='batch'; type='events'; events=$batch.ToArray(); queueDepth=[Math]::Max(0, $queuedEvents.Count - $selectedEvents.Count); dropped=$droppedNow; resync=($droppedNow -gt 0); tag=$hostTag }",
+    "    }",
+    "    $now = [DateTime]::UtcNow",
+    "    if (($now - $lastHeartbeatAt).TotalMilliseconds -ge $heartbeatIntervalMs) {",
+    "      $workingSetMb = [Math]::Round(([System.Diagnostics.Process]::GetCurrentProcess().WorkingSet64 / 1MB), 1)",
+    "      Emit @{ kind='control'; type='heartbeat'; queueDepth=@(Get-Event).Count; processed=$processedCount; dropped=$droppedCount; workingSetMb=$workingSetMb; tag=$hostTag }",
+    "      $lastHeartbeatAt = $now",
+    "      if ($workingSetMb -gt $maxWorkingSetMb) {",
+    "        Emit @{ kind='control'; type='resource-limit'; workingSetMb=$workingSetMb; limitMb=$maxWorkingSetMb; tag=$hostTag }",
+    "        exit 75",
+    "      }",
     "    }",
     "  }",
     "} catch {",
@@ -200,6 +247,32 @@ function clearRestartTimer() {
   }
 }
 
+function clearWatchdogTimer() {
+  if (hubState.watchdogTimer) {
+    clearInterval(hubState.watchdogTimer);
+    hubState.watchdogTimer = null;
+  }
+}
+
+function startWatchdogTimer(watcherProcess) {
+  clearWatchdogTimer();
+  hubState.lastMessageAt = Date.now();
+  hubState.watchdogTimer = setInterval(() => {
+    if (hubState.watcherProcess !== watcherProcess) return;
+    const silenceMs = Date.now() - hubState.lastMessageAt;
+    if (silenceMs < HOST_WATCHDOG_TIMEOUT_MS) return;
+    notifyWarn(`Windows event host unresponsive for ${silenceMs}ms`);
+    try {
+      watcherProcess.__achSuppressRestart = false;
+      watcherProcess.kill();
+    } catch {
+      hubState.watcherProcess = null;
+      clearWatchdogTimer();
+      scheduleRestart();
+    }
+  }, HOST_WATCHDOG_INTERVAL_MS);
+}
+
 function pruneWarnCache(now) {
   if (hubState.warnCache.size <= MAX_WARN_CACHE_SIZE) return;
   for (const [key, lastAt] of hubState.warnCache) {
@@ -249,6 +322,21 @@ function emitProcessEvent(payload) {
   }
 }
 
+function emitProcessEvents(payloads, meta = {}) {
+  const events = Array.isArray(payloads) ? payloads.filter(Boolean) : [];
+  if (!events.length) return;
+  for (const sub of Array.from(hubState.subscriptions)) {
+    if (sub?.channel !== CHANNEL_PROCESS) continue;
+    try {
+      if (typeof sub?.onBatch === "function") {
+        sub.onBatch(events, meta);
+      } else if (typeof sub?.onEvent === "function") {
+        for (const payload of events) sub.onEvent(payload);
+      }
+    } catch {}
+  }
+}
+
 function emitLumaplayEvent(payload) {
   for (const sub of Array.from(hubState.subscriptions)) {
     if (sub?.channel !== CHANNEL_LUMAPLAY) continue;
@@ -258,10 +346,78 @@ function emitLumaplayEvent(payload) {
   }
 }
 
+function notifyResync(meta = {}) {
+  for (const sub of Array.from(hubState.subscriptions)) {
+    try {
+      if (typeof sub?.onResync === "function") sub.onResync(meta);
+    } catch {}
+  }
+}
+
+function notifyHostStatus(status = {}) {
+  for (const sub of Array.from(hubState.subscriptions)) {
+    try {
+      if (typeof sub?.onStatus === "function") sub.onStatus(status);
+    } catch {}
+  }
+}
+
+function normalizeHostMetric(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+function handleHostPayload(parsed) {
+  if (!parsed || typeof parsed !== "object") return false;
+  const kind = String(parsed.kind || "").toLowerCase();
+  const type = String(parsed.type || "").toLowerCase();
+
+  if (kind === "batch" && type === "events") {
+    const processEvents = [];
+    let lumaPlayChanged = false;
+    for (const entry of Array.isArray(parsed.events) ? parsed.events : []) {
+      const processPayload = normalizeProcessEventPayload(entry);
+      if (processPayload) {
+        processEvents.push(processPayload);
+        continue;
+      }
+      if (normalizeLumaplayEventPayload(entry)) lumaPlayChanged = true;
+    }
+    const meta = {
+      queueDepth: normalizeHostMetric(parsed.queueDepth),
+      dropped: normalizeHostMetric(parsed.dropped),
+    };
+    emitProcessEvents(processEvents, meta);
+    if (lumaPlayChanged) emitLumaplayEvent({ type: "change" });
+    if (parsed.resync === true || meta.dropped > 0) notifyResync(meta);
+    return true;
+  }
+
+  if (kind === "control") {
+    const status = {
+      type,
+      queueDepth: normalizeHostMetric(parsed.queueDepth),
+      processed: normalizeHostMetric(parsed.processed),
+      dropped: normalizeHostMetric(parsed.dropped),
+      workingSetMb: normalizeHostMetric(parsed.workingSetMb),
+      limitMb: normalizeHostMetric(parsed.limitMb),
+    };
+    notifyHostStatus(status);
+    if (type === "resource-limit") {
+      notifyWarn(
+        `Windows event host exceeded ${status.limitMb || "the"} MB memory limit`,
+      );
+    }
+    return true;
+  }
+  return false;
+}
+
 function parseStream(stream, isError = false) {
   if (!stream || typeof stream.on !== "function") return;
   let buffer = "";
   stream.on("data", (chunk) => {
+    hubState.lastMessageAt = Date.now();
     buffer += String(chunk || "");
     const lines = buffer.split(/\r?\n/);
     buffer = lines.pop() || "";
@@ -286,6 +442,7 @@ function parseStream(stream, isError = false) {
       }
       try {
         const parsed = JSON.parse(line);
+        if (handleHostPayload(parsed)) continue;
         const processPayload = normalizeProcessEventPayload(parsed);
         if (processPayload) {
           emitProcessEvent(processPayload);
@@ -304,7 +461,9 @@ function parseStream(stream, isError = false) {
 
 function stopHubProcess() {
   clearRestartTimer();
+  clearWatchdogTimer();
   hubState.ready = false;
+  hubState.lastMessageAt = 0;
   const watcherProcess = hubState.watcherProcess;
   if (watcherProcess) {
     try {
@@ -344,6 +503,11 @@ function launchHubProcess() {
     sourceBase: `ach-events-host-${process.pid}-${Date.now()}`,
     enableProcess: channelFlags.hasProcess,
     enableLumaplay: channelFlags.hasLumaplay,
+    maxBatchSize: process.env.ACH_EVENT_HOST_MAX_BATCH_SIZE,
+    maxPendingEvents: process.env.ACH_EVENT_HOST_MAX_PENDING,
+    batchWindowMs: process.env.ACH_EVENT_HOST_BATCH_WINDOW_MS,
+    heartbeatIntervalMs: process.env.ACH_EVENT_HOST_HEARTBEAT_MS,
+    maxWorkingSetMb: process.env.ACH_EVENT_HOST_MAX_WORKING_SET_MB,
   });
   const powershellPath = resolvePowerShellPath();
   let watcherProcess = null;
@@ -368,6 +532,7 @@ function launchHubProcess() {
     );
     watcherProcess.__achSuppressRestart = false;
     hubState.watcherProcess = watcherProcess;
+    startWatchdogTimer(watcherProcess);
   } catch (err) {
     hubState.launching = false;
     notifyWarn(err?.message || String(err));
@@ -384,8 +549,10 @@ function launchHubProcess() {
   watcherProcess.on("exit", () => {
     const suppressRestart = watcherProcess.__achSuppressRestart === true;
     if (hubState.watcherProcess !== watcherProcess) return;
+    clearWatchdogTimer();
     hubState.watcherProcess = null;
     hubState.ready = false;
+    hubState.lastMessageAt = 0;
     hubState.launching = false;
     if (!suppressRestart) scheduleRestart();
   });
@@ -415,6 +582,9 @@ function createSubscription(channel, options = {}) {
   const sub = {
     channel,
     onEvent: typeof options.onEvent === "function" ? options.onEvent : () => {},
+    onBatch: typeof options.onBatch === "function" ? options.onBatch : null,
+    onResync: typeof options.onResync === "function" ? options.onResync : null,
+    onStatus: typeof options.onStatus === "function" ? options.onStatus : null,
     onReady: typeof options.onReady === "function" ? options.onReady : () => {},
     onWarn: typeof options.onWarn === "function" ? options.onWarn : () => {},
     restartDelayMs: Math.max(
@@ -463,6 +633,9 @@ function createSubscription(channel, options = {}) {
 function startProcessEventWatcher(options = {}) {
   return createSubscription(CHANNEL_PROCESS, {
     onEvent: options.onEvent,
+    onBatch: options.onBatch,
+    onResync: options.onResync,
+    onStatus: options.onStatus,
     onReady: options.onReady,
     onWarn: options.onWarn,
     restartDelayMs: options.restartDelayMs,
@@ -472,6 +645,8 @@ function startProcessEventWatcher(options = {}) {
 function subscribeLumaPlayRegistryEvents(options = {}) {
   return createSubscription(CHANNEL_LUMAPLAY, {
     onEvent: options.onChange,
+    onResync: options.onChange,
+    onStatus: options.onStatus,
     onReady: options.onReady,
     onWarn: options.onWarn,
     restartDelayMs: options.restartDelayMs,

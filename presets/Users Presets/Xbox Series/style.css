@@ -15,9 +15,11 @@ body {
   --ach-width: 700px;
   --ach-collapsed-width: 100px;
   --timeline-scale: 1;
-  --ach-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+  /* Sombra reduzida */
+  --ach-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
   --ach-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --rare-glow: 0 0 40px rgba(16, 124, 16, 0.85), 0 0 15px rgba(16, 124, 16, 0.4);
+  /* Brilho contido para não cortar */
+  --rare-glow: 0 0 15px rgba(16, 124, 16, 0.6), 0 0 5px rgba(16, 124, 16, 0.3);
 }
 
 .ach {
@@ -230,109 +232,75 @@ body {
 
 @keyframes loader1Anim {
   0% { transform: scale(0); }
-  4% { transform: scale(1); }
-  96% { transform: scale(1); animation-timing-function: ease-in; }
-  100% { transform: scale(0); }
+  4%, 90% { transform: scale(1); animation-timing-function: ease-in; }
+  94%, 100% { transform: scale(0); }
 }
 
 @keyframes loader2Anim {
-  0% { transform: scale(0); }
-  2% { transform: scale(0); }
-  6% { transform: scale(1); }
-  94% { transform: scale(1); animation-timing-function: ease-in; }
-  98% { transform: scale(0); }
-  100% { transform: scale(0); }
+  0%, 2% { transform: scale(0); }
+  6%, 89% { transform: scale(1); animation-timing-function: ease-in; }
+  93%, 100% { transform: scale(0); }
 }
 
 @keyframes loader3Anim {
-  0% { transform: scale(0); }
-  4% { transform: scale(0); }
-  8% { transform: scale(1); }
-  92% { transform: scale(1); animation-timing-function: ease-in; }
-  96% { transform: scale(0); }
-  100% { transform: scale(0); }
+  0%, 3% { transform: scale(0); }
+  7%, 88% { transform: scale(1); animation-timing-function: ease-in; }
+  92%, 100% { transform: scale(0); }
 }
 
 @keyframes loader4Anim {
-  0% { transform: scale(0); }
-  6% { transform: scale(0); }
-  10% { transform: scale(1); }
-  90% { transform: scale(1); animation-timing-function: ease-in; }
-  94% { transform: scale(0); }
-  100% { transform: scale(0); }
+  0%, 5% { transform: scale(0); }
+  9%, 87% { transform: scale(1); animation-timing-function: ease-in; }
+  91%, 100% { transform: scale(0); }
 }
 
 @keyframes loader5Anim {
-  0% { transform: scale(0); }
-  8% { transform: scale(0); }
-  12% { transform: scale(1); }
-  88% { transform: scale(1); animation-timing-function: ease-in; }
-  92% { transform: scale(0); }
-  100% { transform: scale(0); }
+  0%, 6% { transform: scale(0); }
+  10%, 86% { transform: scale(1); animation-timing-function: ease-in; }
+  90%, 100% { transform: scale(0); }
 }
 
 @keyframes titleAnim {
-  0% { opacity: 0; transform: translateY(20px); }
-  20% { opacity: 0; transform: translateY(20px); } 
-  25% { opacity: 1; transform: translateY(0); }
-  45% { opacity: 1; transform: translateY(0); }
-  50% { opacity: 0; transform: translateY(-20px); }
-  100% { opacity: 0; transform: translateY(-20px); }
+  0%, 20% { opacity: 0; transform: translateY(20px); } 
+  25%, 45% { opacity: 1; transform: translateY(0); }
+  50%, 100% { opacity: 0; transform: translateY(-20px); }
 }
 
 @keyframes detailAnim {
-  0% { opacity: 0; transform: translateY(20px); }
-  45% { opacity: 0; transform: translateY(20px); }
-  50% { opacity: 1; transform: translateY(0); } 
-  75% { opacity: 1; transform: translateY(0); }
-  80% { opacity: 0; transform: translateY(-20px); }
-  100% { opacity: 0; transform: translateY(-20px); }
+  0%, 45% { opacity: 0; transform: translateY(20px); }
+  50%, 73% { opacity: 1; transform: translateY(0); } 
+  78%, 100% { opacity: 0; transform: translateY(-20px); }
 }
 
+/* Ícone sem quicada: transição linear suave de 0 para 1 */
 @keyframes iconFrames {
-  0% { transform: scale(0); opacity: 0; }
-  8% { transform: scale(0); opacity: 0; }
-  12% { transform: scale(1); opacity: 1; }
-  88% { transform: scale(1); opacity: 1; animation-timing-function: ease-in; } 
-  92% { transform: scale(0); opacity: 0; } 
-  100% { transform: scale(0); opacity: 0; }
+  0%, 6% { transform: scale(0); opacity: 0; }
+  10%, 86% { transform: scale(1); opacity: 1; } 
+  90%, 100% { transform: scale(0); opacity: 0; }
 }
 
 @keyframes xboxLogoAnimationFrames {
-  0% { transform: scale(0); }
-  8% { transform: scale(0); }
-  12% { transform: scale(1.2); }
-  14% { transform: scale(1); }
-  88% { transform: scale(1); animation-timing-function: ease-in; }
-  92% { transform: scale(0); } 
-  100% { transform: scale(0); }
+  0%, 6% { transform: scale(0); }
+  10%, 86% { transform: scale(1); }
+  90%, 100% { transform: scale(0); }
 }
 
 @keyframes containerAnimationFrames {
-  0% { width: 100px; }
-  12% { width: 100px; animation-timing-function: var(--ach-ease); }
-  20% { width: var(--ach-width, 700px); } 
-  80% { width: var(--ach-width, 700px); animation-timing-function: var(--ach-ease); } 
-  88% { width: 100px; } 
-  100% { width: 100px; }
+  0%, 10% { width: 100px; animation-timing-function: var(--ach-ease); }
+  18%, 78% { width: var(--ach-width, 700px); animation-timing-function: var(--ach-ease); } 
+  86%, 100% { width: 100px; }
 }
 
 @keyframes mainAnimationFrames {
-  0% { background-color: transparent; box-shadow: none; }
-  11.9% { background-color: transparent; box-shadow: none; }
-  12% { background-color: #107c10; box-shadow: var(--ach-shadow); }
-  88% { background-color: #107c10; box-shadow: var(--ach-shadow); }
-  88.1% { background-color: transparent; box-shadow: none; }
-  100% { background-color: transparent; box-shadow: none; }
+  0%, 9.9% { background-color: transparent; box-shadow: none; }
+  10%, 86% { background-color: #107c10; box-shadow: var(--ach-shadow); }
+  86.1%, 100% { background-color: transparent; box-shadow: none; }
 }
 
 @keyframes glowAnimationFrames {
-  0% { opacity: 0; transform: scale(1); }
-  11.9% { opacity: 0; transform: scale(1); }
-  12% { opacity: 1; transform: scale(1); }
-  88% { opacity: 1; transform: scale(1); } 
-  96% { opacity: 0; transform: scale(0); } 
-  100% { opacity: 0; transform: scale(0); }
+  0%, 9.9% { opacity: 0; transform: scale(1); }
+  10%, 86% { opacity: 1; transform: scale(1); } 
+  90%, 100% { opacity: 0; transform: scale(0); }
 }
 
 @keyframes shimmerAnimationFrames {

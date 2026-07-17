@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SAN Notification</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: transparent;
+        display: grid;
+        place-content: center;
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+      function safeNumber(value, fallback = 0) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+      }
+
+      function fileUrl(value) {
+        if (!value) return "";
+        const raw = String(value);
+        if (raw.startsWith("file://") || raw.startsWith("http://") || raw.startsWith("https://")) {
+          return raw;
+        }
+        return `file:///${raw.replace(/\\/g, "/")}`;
+      }
+
+      function cssUrl(value) {
+        const url = fileUrl(value);
+        return url ? `url("${url.replace(/"/g, '\\"')}")` : "none";
+      }
+
+      function setVar(name, value) {
+        document.documentElement.style.setProperty(name, String(value));
+      }
+
+      function loadCss(id, href) {
+        return new Promise((resolve) => {
+          if (!href || document.getElementById(id)) {
+            resolve();
+            return;
+          }
+          const link = document.createElement("link");
+          link.id = id;
+          link.rel = "stylesheet";
+          link.href = href;
+          link.onload = () => resolve();
+          link.onerror = () => resolve();
+          document.head.appendChild(link);
+        });
+      }
+
+      function getPositionAttribute(position) {
+        const normalized = String(position || "").toLowerCase();
+        const map = {
+          "center-bottom": "bottomcenter",
+          "center-top": "topcenter",
+          "top-right": "topright",
+          "bottom-right": "bottomright",
+          "middle-right": "topright",
+          "top-left": "topleft",
+          "bottom-left": "bottomleft",
+          "middle-left": "topleft",
+        };
+        return map[normalized] || "bottomcenter";
+      }
+
+      function getPercentInfo(payload) {
+        const explicitTier = String(payload?.rarityTier || payload?.trophyType || "")
+          .trim()
+          .toLowerCase();
+        const tierFromPayload =
+          explicitTier === "gold" || explicitTier === "silver" || explicitTier === "bronze"
+            ? explicitTier
+            : "";
+        const rawValue = payload?.rarityPct;
+        const raw =
+          rawValue === null || rawValue === undefined || rawValue === ""
+            ? NaN
+            : Number(rawValue);
+        const hasPercent = Number.isFinite(raw);
+        const value = hasPercent ? Math.max(raw, 0.1) : 50;
+        const rarity = 1;
+        const semirarity = 5;
+        const tier =
+          tierFromPayload ||
+          (value <= rarity ? "gold" : value <= semirarity ? "silver" : "bronze");
+        return { value, rarity, semirarity, tier, hasPercent };
+      }
+
+      function shouldShowSanPercent(payload, customisation) {
+        if (!getPercentInfo(payload).hasPercent) return false;
+        if (payload?.showRarityPercentage === false) return false;
+        if (payload?.showRarityPercentage === true) return true;
+        if (customisation.usepercent) return true;
+        return payload?.isRare === true;
+      }
+
+      function pickRarityAsset(value, tier) {
+        if (Array.isArray(value)) {
+          const index = tier === "gold" ? 2 : tier === "silver" ? 1 : 0;
+          return value[index] || value[0] || "";
+        }
+        return value || "";
+      }
+
+      function getPresetIcons(customisation) {
+        const preset = String(customisation?.preset || "default").toLowerCase();
+        const icons = customisation?.customicons || {};
+        return icons[customisation.preset] || icons[preset] || {};
+      }
+
+      function getPresetIndexValue(customisation, key) {
+        const icons = getPresetIcons(customisation);
+        const value = Number(icons?.index?.[key]);
+        return Number.isFinite(value) ? value : 0;
+      }
+
+      function hasIndexedSanPercent(customisation) {
+        return getPresetIndexValue(customisation, "percent") > 0;
+      }
+
+      function shouldRenderIndexedPercentAsBadge(customisation) {
+        return customisation?.percentbadge === true || customisation?.sspercentbadge === true;
+      }
+
+      function isScreenshotSanMode(payload, customisation) {
+        return customisation?.ss === true || payload?.screenshotMode === true;
+      }
+
+      function getSanElementPosition(payload, customisation, key, fallbackKey, ssFallbackKey) {
+        const indexed = getPresetIndexValue(customisation, key);
+        if (indexed > 0) return indexed;
+        if (isScreenshotSanMode(payload, customisation) && ssFallbackKey) {
+          return safeNumber(customisation[ssFallbackKey], 0);
+        }
+        return safeNumber(customisation[fallbackKey], 0);
+      }
+
+      function getSanPercentPosition(payload, customisation) {
+        return getSanElementPosition(payload, customisation, "percent", "percentpos", "sspercentpos");
+      }
+
+      function getSanDecorationPosition(payload, customisation) {
+        return getSanElementPosition(payload, customisation, "decoration", "decorationpos", "ssdecorationpos");
+      }
+
+      function getSanHiddenIconPosition(payload, customisation) {
+        return getSanElementPosition(payload, customisation, "hiddenicon", "hiddeniconpos", "sshiddeniconpos");
+      }
+
+      function resolveSanBadgePosition(value) {
+        const normalized = String(value || "bottomcenter").toLowerCase().replace(/[\s_-]+/g, "");
+        const map = {
+          top: { left: "50%", right: "auto", top: "0", bottom: "auto", translate: "-50% -50%" },
+          bottom: { left: "50%", right: "auto", top: "auto", bottom: "0", translate: "-50% 50%" },
+          left: { left: "0", right: "auto", top: "50%", bottom: "auto", translate: "-50% -50%" },
+          right: { left: "auto", right: "0", top: "50%", bottom: "auto", translate: "50% -50%" },
+          topcenter: { left: "50%", right: "auto", top: "0", bottom: "auto", translate: "-50% -50%" },
+          bottomcenter: { left: "50%", right: "auto", top: "auto", bottom: "0", translate: "-50% 50%" },
+          topleft: { left: "0", right: "auto", top: "0", bottom: "auto", translate: "-50% -50%" },
+          topright: { left: "auto", right: "0", top: "0", bottom: "auto", translate: "50% -50%" },
+          bottomleft: { left: "0", right: "auto", top: "auto", bottom: "0", translate: "-50% 50%" },
+          bottomright: { left: "auto", right: "0", top: "auto", bottom: "0", translate: "50% 50%" },
+          center: { left: "50%", right: "auto", top: "50%", bottom: "auto", translate: "-50% -50%" },
+        };
+        return map[normalized] || map.bottomcenter;
+      }
+
+      function applySanBadgePosition(badge, position) {
+        badge.style.left = position.left;
+        badge.style.right = position.right;
+        badge.style.top = position.top;
+        badge.style.bottom = position.bottom;
+        badge.style.translate = position.translate;
+      }
+
+      function getSanTierValue(customisation, flagKey, prefix, fallback, tier) {
+        if (!customisation?.[flagKey]) return fallback;
+        if (tier === "gold") return customisation[`${prefix}gold`] || fallback;
+        if (tier === "silver") return customisation[`${prefix}silver`] || fallback;
+        return customisation[`${prefix}bronze`] || fallback;
+      }
+
+      function getActiveSanBadgeValue(payload, customisation, key, fallback = "") {
+        const ssKey = `ss${key}`;
+        if (isScreenshotSanMode(payload, customisation) && customisation[ssKey] !== undefined) {
+          return customisation[ssKey];
+        }
+        return customisation[key] !== undefined ? customisation[key] : fallback;
+      }
+
+      function getPlatinumIcon(customisation) {
+        const icons = customisation?.customicons || {};
+        return icons.plat || icons.platinum || customisation?.platIcon || "";
+      }
+
+      function setBodyAttributes(payload, customisation) {
+        const body = document.body;
+        body.removeAttribute("style");
+        for (const attr of Array.from(body.attributes)) {
+          if (attr.name !== "class") body.removeAttribute(attr.name);
+        }
+
+        const preset = String(customisation.preset || "default").toLowerCase();
+        const percent = getPercentInfo(payload);
+        body.setAttribute("san-preset", preset);
+        body.setAttribute(getPositionAttribute(payload?.position || customisation.pos), "");
+        if (percent.tier) body.setAttribute(`tier-${percent.tier}`, "");
+        if (payload?.trophyType) {
+          body.setAttribute(`trophy-${String(payload.trophyType).toLowerCase()}`, "");
+        }
+        if (customisation.bgstyle) body.setAttribute(customisation.bgstyle, "");
+        if (customisation.bgonly) body.setAttribute("bgonly", "");
+        if (customisation.alldetails) body.setAttribute("alldetails", "");
+        if (payload?.isRare) body.setAttribute("rare", "");
+        if (payload?.isPlatinum) body.setAttribute("plat", "");
+        if (customisation.fastanim) body.setAttribute("fastanim", "");
+        if (isScreenshotSanMode(payload, customisation)) body.setAttribute("ss", "");
+        if (customisation.ssdisplay) body.setAttribute("ssdisplay", "");
+        if (!customisation.iconanim) body.setAttribute("noiconanim", "");
+      }
+
+      function applyCustomFont(customisation) {
+        if (!customisation.customfont) return;
+        const style = document.createElement("style");
+        style.textContent = `
+          @font-face {
+            font-family: "customfont";
+            src: url("${fileUrl(customisation.customfont)}");
+          }
+        `;
+        document.head.appendChild(style);
+      }
+
+      function setTextElements(payload, customisation, percent) {
+        const icons = getPresetIcons(customisation);
+        const useScreenshotElems = isScreenshotSanMode(payload, customisation);
+        const elems = useScreenshotElems && Array.isArray(customisation.sselems)
+          ? customisation.sselems
+          : Array.isArray(customisation.elems)
+          ? customisation.elems
+          : useScreenshotElems && Array.isArray(icons.sselems)
+            ? icons.sselems
+            : Array.isArray(icons.elems)
+            ? icons.elems
+            : ["unlockmsg", "title", "desc"];
+        const strings = {
+          unlockmsg: customisation.unlockmsg || "Achievement Unlocked",
+          title: payload?.displayName || "Achievement Unlocked",
+          desc: payload?.description || "",
+        };
+        const filter = elems.filter((elem) => elem !== null);
+
+        const offset = ["steamdeck", "epicgames", "ps5"].includes(customisation.preset) &&
+          filter.length < 3
+          ? 1
+          : 0;
+        const positions = new Map([
+          ["unlockmsg", [1, 0]],
+          ["title", [2 - offset, 1 - offset]],
+          ["desc", [3 - offset, 2 - offset]],
+        ]);
+        const decorationPosition = getSanDecorationPosition(payload, customisation);
+        const hiddenIconPosition = getSanHiddenIconPosition(payload, customisation);
+        const indexedPercent = hasIndexedSanPercent(customisation);
+        const badgeOnlyIndexedPercent = indexedPercent && shouldRenderIndexedPercentAsBadge(customisation);
+        const textPercentPosition = badgeOnlyIndexedPercent
+          ? 0
+          : getSanPercentPosition(payload, customisation);
+        const percentText = shouldShowSanPercent(payload, customisation) && textPercentPosition > 0
+          ? ` (${percent.value.toFixed(1)}%)`
+          : "";
+
+        for (const [id, [pos, index]] of positions.entries()) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          const typeValue = filter[index] || "";
+          const decoration = pos === decorationPosition
+            ? `<span id="decoration"></span>`
+            : "";
+          const hiddenIcon =
+            customisation.showhiddenicon && payload?.hidden === true &&
+            pos === hiddenIconPosition
+              ? `<span id="hiddenicon"></span>`
+              : "";
+          const percentPart =
+            pos === textPercentPosition ? percentText : "";
+          const html = `${decoration}${hiddenIcon}${strings[typeValue] || ""}${percentPart}`;
+          el.innerHTML = html;
+          if (!el.textContent) el.innerHTML = "";
+        }
+
+        document.body.toggleAttribute("alldetails", filter.length === 3);
+        setVar("--decorationindex", decorationPosition || 1);
+      }
+
+      function setBadge(payload, customisation, percent) {
+        const wrapper = document.getElementById("achiconwrapper");
+        const indexedPercent = hasIndexedSanPercent(customisation);
+        const screenshotBadge = isScreenshotSanMode(payload, customisation) && customisation.sspercentbadge;
+        const indexedBadge = indexedPercent && shouldRenderIndexedPercentAsBadge(customisation);
+        if (!wrapper || (!customisation.percentbadge && !screenshotBadge && !indexedBadge)) return;
+        if (!shouldShowSanPercent(payload, { ...customisation, usepercent: true })) return;
+        const badge = document.createElement("span");
+        badge.id = "badge";
+        const usesBadgeImage = getActiveSanBadgeValue(payload, customisation, "percentbadgeimg") === true;
+        if (usesBadgeImage) badge.setAttribute("badgeimg", "");
+        badge.textContent = usesBadgeImage ? "" : `${percent.value.toFixed(1)}%`;
+
+        if (indexedBadge && !customisation.percentbadge && !screenshotBadge) {
+          Object.assign(badge.style, {
+            left: "50%",
+            top: "calc(100% + 0.15rem)",
+            right: "auto",
+            bottom: "auto",
+            translate: "-50% 0",
+            whiteSpace: "nowrap",
+            zIndex: "120",
+          });
+        } else {
+          const position = isScreenshotSanMode(payload, customisation)
+            ? customisation.sspercentbadgepos
+            : customisation.percentbadgepos;
+          const badgePosition = resolveSanBadgePosition(position);
+          applySanBadgePosition(badge, badgePosition);
+        }
+        const offsetX = safeNumber(getActiveSanBadgeValue(payload, customisation, "percentbadgex"), 0);
+        const offsetY = safeNumber(getActiveSanBadgeValue(payload, customisation, "percentbadgey"), 0);
+        if (offsetX) badge.style.marginLeft = `calc(${offsetX}px * var(--scale))`;
+        if (offsetY) badge.style.marginTop = `calc(${offsetY}px * var(--scale))`;
+        wrapper.appendChild(badge);
+      }
+
+      function applySanVariables(payload, customisation) {
+        const theme = payload?.sanTheme || {};
+        const dimensions = theme.presetDimensions || {};
+        const scale = Math.max(0.1, safeNumber(customisation.scale, 100) / 100);
+        const percent = getPercentInfo(payload);
+        const icons = getPresetIcons(customisation);
+        const decoration = pickRarityAsset(icons.decoration || "", percent.tier);
+        const gameIcon =
+          payload?.iconPath ||
+          payload?.gameIconPath ||
+          payload?.appIconPath ||
+          customisation.gameicon ||
+          "";
+        const logo = pickRarityAsset(
+          customisation.replacelogo && icons.decoration
+            ? icons.decoration
+            : customisation.usegameicon && gameIcon
+              ? gameIcon
+              : icons.logo || customisation.logo || "",
+          percent.tier,
+        );
+        const bgImage =
+          customisation.bgstyle === "gameart"
+            ? payload?.headerPath || customisation.gameart || customisation.bgImage || customisation.bgimg
+            : customisation.bgstyle === "bgimg"
+              ? customisation.bgimg || customisation.bgImage
+              : "";
+
+        const displayTimeSec = Math.max(1, safeNumber(customisation.displaytime, 8));
+        const requestedTransitionMs = Math.max(50, safeNumber(customisation.transition, 150));
+        const transitionMs = Math.max(
+          50,
+          Math.min(requestedTransitionMs, Math.floor((displayTimeSec * 1000) / 16)),
+        );
+
+        setVar("--notifywidth", `${Math.max(1, safeNumber(dimensions.width, 300)) * scale}px`);
+        setVar("--notifyheight", `${Math.max(1, safeNumber(dimensions.height, 50)) * scale}px`);
+        setVar("--displaytime", `${displayTimeSec}s`);
+        setVar("--transition", `${transitionMs}ms`);
+        setVar("--scale", scale);
+        setVar("--gradientangle", `${safeNumber(customisation.gradientangle, 90)}deg`);
+        setVar("--bgimg", cssUrl(bgImage));
+        setVar("--gameart", cssUrl(payload?.headerPath || customisation.gameart));
+        setVar("--gameicon", cssUrl(gameIcon || payload?.iconPath));
+        setVar("--base64", cssUrl(customisation.base64));
+        setVar("--bgimgbrightness", `${safeNumber(customisation.bgimgbrightness, 100)}%`);
+        setVar("--brightness", `${safeNumber(customisation.brightness, 100)}%`);
+        setVar("--roundness", `${(safeNumber(customisation.roundness, 0) / 4) * scale}px`);
+        setVar("--fontsize", safeNumber(customisation.fontsize, 100) / 100);
+        setVar("--opacity", safeNumber(customisation.opacity, 100) / 100);
+        setVar(
+          "--iconroundness",
+          safeNumber(customisation.iconroundness, 0) === 100
+            ? "50%"
+            : `${(safeNumber(customisation.iconroundness, 0) / 6) * scale}px`,
+        );
+        setVar(
+          "--fontoutline",
+          customisation.fontoutline
+            ? `${scale * safeNumber(customisation.fontoutlinescale, 1)}px ${customisation.fontoutlinecolor || "#000"}`
+            : "none",
+        );
+        setVar(
+          "--fontshadow",
+          customisation.fontshadow
+            ? `drop-shadow(${safeNumber(customisation.fontshadowx, 0)}px ${safeNumber(customisation.fontshadowy, 0)}px ${scale * safeNumber(customisation.fontshadowscale, 1)}px ${customisation.fontshadowcolor || "#000"})`
+            : "none",
+        );
+        setVar("--iconanimcolor", customisation.iconanimcolor || "#ffb84e");
+        setVar("--iconshadowcolor", customisation.iconshadowcolor || "#ffb84e99");
+        setVar("--logo", cssUrl(logo));
+        setVar("--decoration", cssUrl(decoration));
+        const decorationPosition = getSanDecorationPosition(payload, customisation);
+        const hasDecorationPosition = decorationPosition > 0;
+        const shouldShowDecoration = decoration && (hasDecorationPosition || customisation.preset === "epicgames");
+        setVar("--decorationdisplaytype", shouldShowDecoration ? "block" : "none");
+        document.body.toggleAttribute("nodecoration", !shouldShowDecoration);
+        setVar("--hiddenicon", cssUrl(customisation.hiddenicon));
+        setVar("--primarycolor", customisation.primarycolor || "#203e7a");
+        setVar("--secondarycolor", customisation.secondarycolor || "#0c2a66");
+        setVar("--tertiarycolor", customisation.tertiarycolor || "#ffffff");
+        setVar("--fontcolor", customisation.fontcolor || "#ffffff");
+        setVar(
+          "--glow",
+          customisation.glow
+            ? `drop-shadow(${(safeNumber(customisation.glowx, 0) * scale) / 10}px ${(safeNumber(customisation.glowy, 0) * scale) / 10}px var(--glowsize) var(--glowcolor))`
+            : "none",
+        );
+        setVar("--glowsize", `${(safeNumber(customisation.glowsize, 50) / 100) * 0.6}rem`);
+        setVar(
+          "--glowcolor",
+          getSanTierValue(customisation, "glowrarity", "glowcolor", customisation.glowcolor || "#8a2be2", percent.tier),
+        );
+        setVar(
+          "--glowanim",
+          customisation.glow && customisation.glowanim && customisation.glowanim !== "off"
+            ? `${customisation.glowanim} calc(var(--transition) * ${safeNumber(customisation.glowspeed, 50)}) linear infinite`
+            : "none",
+        );
+        setVar("--blur", `${(safeNumber(customisation.blur, 0) * scale) / 50}px`);
+        setVar(
+          "--mask",
+          customisation.mask && customisation.maskimg
+            ? `${cssUrl(customisation.maskimg)} center / cover no-repeat`
+            : "none",
+        );
+        setVar("--outline", customisation.useoutline ? customisation.outline || "solid" : "none");
+        setVar("--outlinecolor", customisation.outlinecolor || "transparent");
+        setVar("--outlinewidth", `${(safeNumber(customisation.outlinewidth, 0) / 25) * scale}px`);
+        setVar("--iconscale", safeNumber(customisation.iconscale, 100) / 100);
+        setVar("--logoscale", safeNumber(customisation.logoscale, 100) / 100);
+        setVar("--decorationscale", safeNumber(customisation.decorationscale, 100) / 100);
+        setVar(
+          "--unlockmsgfontsize",
+          safeNumber(
+            customisation.usecustomfontsizes ? customisation.unlockmsgfontsize : customisation.fontsize,
+            100,
+          ) / 100,
+        );
+        setVar(
+          "--titlefontsize",
+          safeNumber(
+            customisation.usecustomfontsizes ? customisation.titlefontsize : customisation.fontsize,
+            100,
+          ) / 100,
+        );
+        setVar(
+          "--descfontsize",
+          safeNumber(
+            customisation.usecustomfontsizes ? customisation.descfontsize : customisation.fontsize,
+            100,
+          ) / 100,
+        );
+        setVar(
+          "--unlockmsgfontcolor",
+          customisation.usecustomfontcolors
+            ? customisation.unlockmsgfontcolor || customisation.fontcolor || "#fff"
+            : customisation.fontcolor || "#fff",
+        );
+        setVar(
+          "--titlefontcolor",
+          customisation.usecustomfontcolors
+            ? customisation.titlefontcolor || customisation.fontcolor || "#fff"
+            : customisation.fontcolor || "#fff",
+        );
+        setVar(
+          "--descfontcolor",
+          customisation.usecustomfontcolors
+            ? customisation.descfontcolor || customisation.fontcolor || "#fff"
+            : customisation.fontcolor || "#fff",
+        );
+
+        const iconBorder = customisation.iconborderrarity
+          ? percent.tier === "bronze"
+            ? customisation.iconborderimgbronze
+            : percent.tier === "silver"
+              ? customisation.iconborderimgsilver
+              : customisation.iconborderimg
+          : customisation.iconborderimg;
+        setVar("--iconborder", customisation.showiconborder ? cssUrl(iconBorder) : "none");
+        setVar("--iconborderpos", customisation.iconborderpos === "back" ? -1 : 99);
+        setVar("--iconborderscale", safeNumber(customisation.iconborderscale, 100) / 100);
+        setVar("--iconborderx", safeNumber(customisation.iconborderx, 0));
+        setVar("--iconbordery", safeNumber(customisation.iconbordery, 0));
+        setVar("--textvspace", safeNumber(customisation.textvspace, 0));
+        setVar("--badgecolor", getActiveSanBadgeValue(payload, customisation, "percentbadgecolor", "#203e7a"));
+        setVar(
+          "--badgefontcolor",
+          getActiveSanBadgeValue(payload, customisation, "percentbadgefontcolor", "#ffffff"),
+        );
+        const badgePosition = resolveSanBadgePosition(
+          isScreenshotSanMode(payload, customisation)
+            ? customisation.sspercentbadgepos
+            : customisation.percentbadgepos,
+        );
+        setVar("--badgeposx", "auto");
+        setVar("--badgeposy", "auto");
+        const badgeFontSize = safeNumber(
+          getActiveSanBadgeValue(payload, customisation, "percentbadgefontsize", 100),
+          100,
+        );
+        setVar("--badgesize", `${(badgeFontSize / 10) * scale}px`);
+        const badgeRoundness = safeNumber(
+          getActiveSanBadgeValue(payload, customisation, "percentbadgeroundness", 50),
+          50,
+        );
+        setVar(
+          "--badgeroundness",
+          badgeRoundness === 100
+            ? "50%"
+            : `${badgeFontSize / 4 / Math.max(0.1, badgeRoundness / 10)}px`,
+        );
+        const badgeAsset =
+          percent.tier === "gold"
+            ? getActiveSanBadgeValue(payload, customisation, "percentbadgeimggold")
+            : percent.tier === "silver"
+              ? getActiveSanBadgeValue(payload, customisation, "percentbadgeimgsilver")
+              : getActiveSanBadgeValue(payload, customisation, "percentbadgeimgbronze");
+        setVar(
+          "--badgeimg",
+          getActiveSanBadgeValue(payload, customisation, "percentbadgeimg") ? cssUrl(badgeAsset) : "none",
+        );
+
+        const achicon = document.getElementById("achicon");
+        if (achicon) {
+          const defaultAchIcon = customisation.defaultAchIcon || "";
+          const platinumIcon = payload?.isPlatinum
+            ? getPlatinumIcon(customisation)
+            : "";
+          const customIcon =
+            platinumIcon ||
+            payload?.iconPath ||
+            (customisation.usecustomimgicon && customisation.customimgicon
+              ? customisation.customimgicon
+              : "");
+          const fallbackIconUrl = fileUrl(defaultAchIcon);
+          achicon.onerror = () => {
+            if (fallbackIconUrl && achicon.src !== fallbackIconUrl) {
+              achicon.src = fallbackIconUrl;
+            }
+          };
+          achicon.src = fileUrl(customIcon || defaultAchIcon);
+        }
+
+        setTextElements(payload, customisation, percent);
+        setBadge(payload, customisation, percent);
+      }
+
+      function notifyReady() {
+        setVar("--bodyopacity", "1");
+        setTimeout(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              window.api?.notificationRenderReady?.();
+            });
+          });
+        }, 120);
+      }
+
+      window.api?.onNotification?.((payload) => {
+        const theme = payload?.sanTheme || {};
+        const customisation = {
+          ...(theme.customisation || {}),
+        };
+        customisation.preset = String(customisation.preset || theme.preset || "default").toLowerCase();
+
+        Promise.all([
+          loadCss("san-global-css", theme.runtime?.globalCssUrl),
+          loadCss("san-base-css", theme.runtime?.baseCssUrl),
+          loadCss("san-baseanim-css", theme.runtime?.baseAnimCssUrl),
+          loadCss("san-preset-css", theme.runtime?.presetCssUrl),
+        ]).then(() => {
+          document.body.insertAdjacentHTML("beforeend", theme.presetHtml || "");
+          setBodyAttributes(payload, customisation);
+          applyCustomFont(customisation);
+          applySanVariables(payload, customisation);
+          notifyReady();
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -5149,6 +5149,7 @@ module.exports = function makeWatchedFolders({
       meta.platinum === true ||
       platinumNotified.has(meta.name) ||
       platinumNotifiedByApp.has(platinumKey);
+    const completedPlatinumThisPass = isFull && !alreadyPlatinum;
     if (isFull && !alreadyPlatinum) {
       // persist flag once
       const cfgFile =
@@ -5261,6 +5262,24 @@ module.exports = function makeWatchedFolders({
         continue;
       touched = true;
       const cfgEntry = getConfigEntry(meta, achKey);
+      const trophyType = String(
+        cfgEntry?.trophyType || cfgEntry?.trophy_type || "",
+      )
+        .trim()
+        .toLowerCase();
+      if (
+        becameEarned &&
+        completedPlatinumThisPass &&
+        (isRpcs3 || isPs4) &&
+        (trophyType === "platinum" || trophyType === "p")
+      ) {
+        watcherLogger.info("earned-skip:platinum-trophy-completion-duplicate", {
+          appid: String(appid),
+          config: meta?.name || null,
+          achievement: achKey,
+        });
+        continue;
+      }
       if (!initial && isActiveConfig) {
         continue;
       }
@@ -5308,6 +5327,7 @@ module.exports = function makeWatchedFolders({
           configName: meta?.name || null,
           rarityPct: cfgEntry?.rarityPct,
           raritySource: cfgEntry?.raritySource,
+          trophyType: cfgEntry?.trophyType || cfgEntry?.trophy_type,
           preset: null,
           position: null,
           sound: null,
@@ -8346,6 +8366,7 @@ module.exports = function makeWatchedFolders({
                   npcommid,
                   progressPath: progress?.progressPath || "",
                   userId: progress?.userId || "",
+                  bootMode,
                 },
               );
               if (!result || result.skipped) {
@@ -8545,6 +8566,7 @@ module.exports = function makeWatchedFolders({
                   schemaRoot,
                   appid,
                   npcommid,
+                  bootMode,
                 },
               );
               if (!result || result.skipped) {
@@ -9934,6 +9956,7 @@ module.exports = function makeWatchedFolders({
               configsDir,
               {
                 schemaRoot: path.join(configsDir, "schema"),
+                bootMode,
               },
             );
             if (!result || result.skipped) {
@@ -10181,6 +10204,7 @@ module.exports = function makeWatchedFolders({
               configsDir,
               {
                 schemaRoot: path.join(configsDir, "schema"),
+                bootMode,
               },
             );
             if (!result || result.skipped) {

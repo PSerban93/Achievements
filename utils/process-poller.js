@@ -7,6 +7,7 @@ const { createLogger } = require("./logger");
 const DEFAULT_INTERVAL_MS = 2000;
 const WINDOWS_EVENT_FALLBACK_INTERVAL_MS = 12000;
 const WINDOWS_EVENT_RESTART_DELAY_MS = 1500;
+const EVENT_SNAPSHOT_DEBOUNCE_MS = 100;
 const EVENT_WATCHER_ENABLED =
   process.platform === "win32" && process.env.ACH_PROCESS_EVENT_WATCHER !== "0";
 let pollerEnabled = process.env.ACH_DISABLE_PROCESS_WATCHER !== "1";
@@ -33,6 +34,11 @@ const subscribers = new Set();
 const processByPid = new Map();
 let eventWatcher = null;
 let eventWatcherReady = false;
+let eventSnapshotTimer = null;
+let pendingEventMeta = null;
+let forcedTickPending = false;
+let forcedTickSource = "event-resync";
+let lastEventHostStatus = null;
 
 let psListModulePromise = null;
 async function loadPsListModule() {
@@ -113,6 +119,29 @@ function emitSnapshot(meta = {}) {
   }
 }
 
+function clearEventSnapshotTimer() {
+  if (eventSnapshotTimer) {
+    clearTimeout(eventSnapshotTimer);
+    eventSnapshotTimer = null;
+  }
+  pendingEventMeta = null;
+}
+
+function scheduleEventSnapshot(meta = {}) {
+  pendingEventMeta = {
+    source: "event",
+    ...(pendingEventMeta || {}),
+    ...meta,
+  };
+  if (eventSnapshotTimer) return;
+  eventSnapshotTimer = setTimeout(() => {
+    eventSnapshotTimer = null;
+    const nextMeta = pendingEventMeta || { source: "event" };
+    pendingEventMeta = null;
+    emitSnapshot(nextMeta);
+  }, EVENT_SNAPSHOT_DEBOUNCE_MS);
+}
+
 function updateSnapshotMapFromList(list) {
   const nextMap = new Map();
   for (const raw of Array.isArray(list) ? list : []) {
@@ -184,12 +213,19 @@ function applyProcessEvent(event) {
 }
 
 async function tick(source = "poll", forceEmit = false) {
-  if (inflight) return;
+  if (inflight) {
+    if (forceEmit) {
+      forcedTickPending = true;
+      forcedTickSource = source || "event-resync";
+    }
+    return;
+  }
   inflight = true;
   try {
     const list = await fetchProcesses();
     const changed = updateSnapshotMapFromList(list);
     if (changed || forceEmit || !lastUpdated) {
+      clearEventSnapshotTimer();
       emitSnapshot({ source });
     } else {
       lastError = null;
@@ -198,6 +234,14 @@ async function tick(source = "poll", forceEmit = false) {
     lastError = err;
   } finally {
     inflight = false;
+    if (forcedTickPending) {
+      const nextSource = forcedTickSource;
+      forcedTickPending = false;
+      forcedTickSource = "event-resync";
+      setImmediate(() => {
+        tick(nextSource, true).catch(() => {});
+      });
+    }
   }
 }
 
@@ -238,16 +282,45 @@ function startEventWatcherIfNeeded() {
     onEvent: (payload) => {
       const changed = applyProcessEvent(payload);
       if (changed || !lastUpdated) {
-        emitSnapshot({
-          source: "event",
+        scheduleEventSnapshot({
           eventType: String(payload?.type || ""),
         });
       }
+    },
+    onBatch: (payloads, meta = {}) => {
+      let changed = false;
+      let lastType = "";
+      for (const payload of Array.isArray(payloads) ? payloads : []) {
+        if (applyProcessEvent(payload)) changed = true;
+        lastType = String(payload?.type || lastType);
+      }
+      if (changed || !lastUpdated) {
+        scheduleEventSnapshot({
+          eventType: lastType,
+          eventCount: Array.isArray(payloads) ? payloads.length : 0,
+          queueDepth: Number(meta?.queueDepth) || 0,
+        });
+      }
+    },
+    onResync: (meta = {}) => {
+      const dropped = Number(meta?.dropped) || 0;
+      appLogger.warn("process-poller:event-resync", {
+        dropped,
+        queueDepth: Number(meta?.queueDepth) || 0,
+      });
+      tick("event-resync", true).catch(() => {});
+    },
+    onStatus: (status = {}) => {
+      lastEventHostStatus = {
+        ...status,
+        updatedAt: Date.now(),
+      };
     },
   });
 }
 
 function stopEventWatcher() {
+  lastEventHostStatus = null;
   if (!eventWatcher) return;
   try {
     eventWatcher.stop();
@@ -266,6 +339,9 @@ function start() {
 function stop() {
   stopFallbackPoller();
   stopEventWatcher();
+  clearEventSnapshotTimer();
+  forcedTickPending = false;
+  forcedTickSource = "event-resync";
 }
 
 function subscribe(callback) {
@@ -301,6 +377,7 @@ function getStatus() {
     pollIntervalMs,
     eventWatcherRunning,
     eventWatcherReady,
+    eventHostStatus: lastEventHostStatus,
     lastError: lastError ? String(lastError?.message || lastError) : "",
   };
 }

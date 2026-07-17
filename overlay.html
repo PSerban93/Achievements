@@ -4,27 +4,6 @@
     <meta charset="UTF-8" />
     <title>Achievements Overlay</title>
     <link rel="stylesheet" href="assets/vendor/fontawesome/css/all.min.css" />
-    <link
-      rel="preload"
-      href="assets/vendor/fontawesome/webfonts/fa-solid-900.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="assets/vendor/fontawesome/webfonts/fa-regular-400.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="assets/vendor/fontawesome/webfonts/fa-brands-400.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
     <script src="utils/app-theme.js"></script>
     <script>
       (() => {
@@ -43,7 +22,6 @@
             }
             return (
               document.fonts.check('16px "Font Awesome 6 Free"') ||
-              document.fonts.check('16px "Font Awesome 6 Brands"') ||
               document.fonts.check("16px FontAwesome")
             );
           } catch {
@@ -59,7 +37,6 @@
             await Promise.allSettled([
               document.fonts.load('900 16px "Font Awesome 6 Free"'),
               document.fonts.load('400 16px "Font Awesome 6 Free"'),
-              document.fonts.load('400 16px "Font Awesome 6 Brands"'),
             ]);
           } catch {}
         };
@@ -1036,15 +1013,16 @@
 
       function formatRarityPercent(achievement) {
         const rarityPct = resolveRarityPercent(achievement);
+        const trophyType = formatTrophyTypeAsRarity(
+          achievement?.trophyType || achievement?.trophy_type,
+        );
         if (rarityPct !== null) {
           const rounded = Number.isInteger(rarityPct)
             ? String(rarityPct)
             : String(rarityPct.toFixed(2)).replace(/\.?0+$/, "");
+          if (trophyType) return `${trophyType} · ${rounded}%`;
           return `${rounded}%`;
         }
-        const trophyType = formatTrophyTypeAsRarity(
-          achievement?.trophyType || achievement?.trophy_type,
-        );
         if (trophyType) return trophyType;
         return "N/A";
       }

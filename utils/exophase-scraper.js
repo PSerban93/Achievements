@@ -25,12 +25,14 @@ const { chromium } = require("playwright");
 
 const DEFAULT_WAIT_MS = 30000;
 const BASE_EXOPHASE_URL = "https://www.exophase.com/game/";
+const EXOPHASE_RARITY_SOURCE = "exophase-achievement-percentages";
 const DEFAULT_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
 
 const EXOPHASE_PLATFORM_MAP = {
   xenia: "xbox-360",
   rpcs3: "ps3",
+  shadps4: "ps4",
 };
 
 const EXOPHASE_LANG_MAP = {
@@ -217,6 +219,82 @@ function ensureLangUrl(baseUrl, code) {
   return u + encodeURIComponent(code) + "/";
 }
 
+function normalizeExophaseRarityPercent(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : null;
+  }
+  const raw = String(value || "")
+    .replace(",", ".")
+    .trim();
+  if (!raw) return null;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) {
+    const parsed = Number(raw);
+    return Number.isFinite(parsed)
+      ? Number(Math.min(100, Math.max(0, parsed)).toFixed(4))
+      : null;
+  }
+  const match = raw.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed)) return null;
+  return Number(parsed.toFixed(4));
+}
+
+function extractRarityPctFromText(value) {
+  return normalizeExophaseRarityPercent(value);
+}
+
+function elementLooksLikeRarityNode($, el) {
+  const node = $(el);
+  const haystack = [
+    node.attr("class"),
+    node.attr("id"),
+    node.attr("title"),
+    node.attr("aria-label"),
+    node.attr("data-title"),
+    node.attr("data-label"),
+    node.attr("data-percent"),
+    node.attr("data-percentage"),
+    node.attr("data-rarity"),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return /\b(rarity|rare|percent|percentage|unlock|unlocked|earned|owners|players|completion|completed)\b/i.test(
+    haystack,
+  );
+}
+
+function extractRarityPctFromCard($, card) {
+  const average = card.find(".award-average.text-center > span").first();
+  if (average && average.length) {
+    const pct = extractRarityPctFromText(average.text());
+    if (pct !== null) return pct;
+  }
+
+  const nodes = card.find("*").toArray();
+  for (const el of nodes) {
+    if (!elementLooksLikeRarityNode($, el)) continue;
+    const node = $(el);
+    const values = [
+      node.attr("data-percent"),
+      node.attr("data-percentage"),
+      node.attr("data-rarity"),
+      node.attr("title"),
+      node.attr("aria-label"),
+      node.text(),
+    ];
+    for (const value of values) {
+      const pct = extractRarityPctFromText(value);
+      if (pct !== null) return pct;
+    }
+  }
+
+  const clone = card.clone();
+  clone.find("[class*=award-title], [class*=award-description]").remove();
+  return extractRarityPctFromText(clone.text());
+}
+
 function isAdHost(host) {
   const h = (host || "").toLowerCase();
   return (
@@ -359,11 +437,15 @@ function extractAchievementsFromHtml(html, baseUrl) {
       if (m && m[1]) iconUrl = abs(m[1]);
     }
 
+    const rarityPct = extractRarityPctFromCard($, card);
+
     items.push({
       index: idx + 1,
       title,
       description,
       icon_url: iconUrl,
+      rarityPct,
+      raritySource: rarityPct !== null ? EXOPHASE_RARITY_SOURCE : "",
     });
   });
 
@@ -470,7 +552,7 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
     let baseItems = [];
     for (const slug of slugCandidates) {
       const candidateBase =
-        platform === "ps3"
+        platform === "ps3" || platform === "ps4"
           ? `${BASE_EXOPHASE_URL}${slug}/trophies/`
           : `${BASE_EXOPHASE_URL}${slug}-${platform}/achievements/`;
       const testUrl = ensureLangUrl(candidateBase, langMap.english);
@@ -511,6 +593,11 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
       titles: { english: it.title },
       descriptions: { english: it.description },
       icon_url: it.icon_url || "",
+      rarityPct: normalizeExophaseRarityPercent(it.rarityPct),
+      raritySource:
+        normalizeExophaseRarityPercent(it.rarityPct) !== null
+          ? EXOPHASE_RARITY_SOURCE
+          : "",
     }));
 
     const normalizePair = (a, b) =>
@@ -562,6 +649,11 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
       for (let i = 0; i < min; i += 1) {
         achievements[i].titles[langKey] = items[i].title;
         achievements[i].descriptions[langKey] = items[i].description;
+        const rarityPct = normalizeExophaseRarityPercent(items[i].rarityPct);
+        if (achievements[i].rarityPct === null && rarityPct !== null) {
+          achievements[i].rarityPct = rarityPct;
+          achievements[i].raritySource = EXOPHASE_RARITY_SOURCE;
+        }
       }
     }
 
@@ -586,6 +678,7 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
 module.exports = {
   EXOPHASE_LANG_KEYS,
   EXOPHASE_LANG_MAP,
+  EXOPHASE_RARITY_SOURCE,
   mapExophasePlatform,
   buildExophaseSlug,
   buildExophaseSlugVariants,

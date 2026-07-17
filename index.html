@@ -7,27 +7,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="stylesheet" href="style.css" />
     <link rel="stylesheet" href="assets/vendor/fontawesome/css/all.min.css" />
-    <link
-      rel="preload"
-      href="assets/vendor/fontawesome/webfonts/fa-solid-900.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="assets/vendor/fontawesome/webfonts/fa-regular-400.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
-    <link
-      rel="preload"
-      href="assets/vendor/fontawesome/webfonts/fa-brands-400.woff2"
-      as="font"
-      type="font/woff2"
-      crossorigin
-    />
     <script src="utils/app-theme.js"></script>
     <script>
       (() => {
@@ -80,7 +59,6 @@
             }
             return (
               document.fonts.check('16px "Font Awesome 6 Free"') ||
-              document.fonts.check('16px "Font Awesome 6 Brands"') ||
               document.fonts.check("16px FontAwesome")
             );
           } catch {
@@ -96,7 +74,6 @@
             await Promise.allSettled([
               document.fonts.load('900 16px "Font Awesome 6 Free"'),
               document.fonts.load('400 16px "Font Awesome 6 Free"'),
-              document.fonts.load('400 16px "Font Awesome 6 Brands"'),
             ]);
           } catch {}
         };
@@ -232,6 +209,59 @@
         color: var(--app-accent);
         font-size: 12px;
         font-weight: 700;
+      }
+
+      .status-manual {
+        margin-top: 4px;
+        color: var(--text-secondary);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      #achievementsTableBody tr.achievement-row-selected {
+        background: transparent;
+      }
+
+      #achievementsTableBody tr.achievement-row-selected td {
+        border-top: 2px solid var(--dracula-cyan) !important;
+        border-bottom: 2px solid var(--dracula-cyan) !important;
+      }
+
+      #achievementsTableBody tr.achievement-row-selected td:first-child {
+        border-left: 2px solid var(--dracula-cyan) !important;
+      }
+
+      #achievementsTableBody tr.achievement-row-selected td:last-child {
+        border-right: 2px solid var(--dracula-cyan) !important;
+      }
+
+      #achievementManualContextMenu {
+        min-width: 215px;
+        padding: 6px;
+        background: var(--app-panel-bg);
+        border: 1px solid var(--app-border);
+        border-radius: var(--app-radius-lg);
+        box-shadow: var(--app-shadow-menu);
+      }
+
+      #achievementManualContextMenu .dash-menu-item {
+        padding: 10px 13px;
+        border-radius: var(--app-radius-md);
+        border: 1px solid transparent;
+        background: transparent;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      #achievementManualContextMenu .dash-menu-item:hover,
+      #achievementManualContextMenu .dash-menu-item:focus-visible {
+        background: var(--app-hover-bg);
+        border-color: var(--app-accent);
+        color: var(--app-text);
+        opacity: 1;
+        outline: 1px solid var(--app-accent);
+        outline-offset: 1px;
       }
 
       .locked {
@@ -975,6 +1005,15 @@
                   >
                 </div>
 
+                <div class="checkbox-control">
+                  <input type="checkbox" id="settings-useSanPresetCheckbox" />
+                  <label
+                    for="settings-useSanPresetCheckbox"
+                    data-i18n="label.settings-useSanPresetCheckbox"
+                    >Use SAN notification presets</label
+                  >
+                </div>
+
                 <hr style="margin: 18px 0 14px" />
                 <h4
                   id="settings-notificationTimingTitle"
@@ -1081,6 +1120,14 @@
                   <label for="settings-soundSelect">Achievement Sound:</label>
                   <select id="settings-soundSelect"></select>
                 </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-sanPresetDropdown"
+                    data-i18n="label.settings-sanPresetDropdown"
+                    >Achievement SAN Preset:</label
+                  >
+                  <select id="settings-sanPresetDropdown"></select>
+                </div>
                 <button
                   id="settings-testAchievementBtn"
                   class="settings-test-button"
@@ -1173,6 +1220,14 @@
                   >
                   <select id="settings-rareSoundSelect"></select>
                 </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-rareSanPresetDropdown"
+                    data-i18n="label.settings-rareSanPresetDropdown"
+                    >Rare Achievement SAN Preset:</label
+                  >
+                  <select id="settings-rareSanPresetDropdown"></select>
+                </div>
                 <button
                   id="settings-testRareNotificationBtn"
                   class="settings-test-button"
@@ -1180,6 +1235,180 @@
                   style="width: 100%; margin: 10px 0; padding: 10px"
                 >
                   Test Rare Notification
+                </button>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-xeniaNotificationTitle"
+                  data-i18n="settings-xeniaNotificationTitle"
+                  style="margin-top: 10px"
+                >
+                  Xenia Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-xeniaPositionDropdown"
+                    data-i18n="label.settings-xeniaPositionDropdown"
+                    >Xenia Achievement Position:</label
+                  >
+                  <select id="settings-xeniaPositionDropdown">
+                    <option value="center-bottom" data-i18n="option.positionDropdown.center-bottom">Center Bottom</option>
+                    <option value="center-top" data-i18n="option.positionDropdown.center-top">Center Top</option>
+                    <option value="top-right" data-i18n="option.positionDropdown.top-right">Top Right</option>
+                    <option value="bottom-right" data-i18n="option.positionDropdown.bottom-right">Bottom Right</option>
+                    <option value="middle-right" data-i18n="option.positionDropdown.middle-right">Middle Right</option>
+                    <option value="top-left" data-i18n="option.positionDropdown.top-left">Top Left</option>
+                    <option value="bottom-left" data-i18n="option.positionDropdown.bottom-left">Bottom Left</option>
+                    <option value="middle-left" data-i18n="option.positionDropdown.middle-left">Middle Left</option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-xeniaPresetDropdown"
+                    data-i18n="label.settings-xeniaPresetDropdown"
+                    >Xenia Achievement Preset:</label
+                  >
+                  <select id="settings-xeniaPresetDropdown"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-xeniaSoundSelect"
+                    data-i18n="label.settings-xeniaSoundSelect"
+                    >Xenia Achievement Sound:</label
+                  >
+                  <select id="settings-xeniaSoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-xeniaSanPresetDropdown"
+                    data-i18n="label.settings-xeniaSanPresetDropdown"
+                    >Xenia Achievement SAN Preset:</label
+                  >
+                  <select id="settings-xeniaSanPresetDropdown"></select>
+                </div>
+                <button
+                  id="settings-testXeniaNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testXeniaNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test Xenia Notification
+                </button>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-rpcs3NotificationTitle"
+                  data-i18n="settings-rpcs3NotificationTitle"
+                  style="margin-top: 10px"
+                >
+                  RPCS3 Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-rpcs3PositionDropdown"
+                    data-i18n="label.settings-rpcs3PositionDropdown"
+                    >RPCS3 Achievement Position:</label
+                  >
+                  <select id="settings-rpcs3PositionDropdown">
+                    <option value="center-bottom" data-i18n="option.positionDropdown.center-bottom">Center Bottom</option>
+                    <option value="center-top" data-i18n="option.positionDropdown.center-top">Center Top</option>
+                    <option value="top-right" data-i18n="option.positionDropdown.top-right">Top Right</option>
+                    <option value="bottom-right" data-i18n="option.positionDropdown.bottom-right">Bottom Right</option>
+                    <option value="middle-right" data-i18n="option.positionDropdown.middle-right">Middle Right</option>
+                    <option value="top-left" data-i18n="option.positionDropdown.top-left">Top Left</option>
+                    <option value="bottom-left" data-i18n="option.positionDropdown.bottom-left">Bottom Left</option>
+                    <option value="middle-left" data-i18n="option.positionDropdown.middle-left">Middle Left</option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-rpcs3PresetDropdown"
+                    data-i18n="label.settings-rpcs3PresetDropdown"
+                    >RPCS3 Achievement Preset:</label
+                  >
+                  <select id="settings-rpcs3PresetDropdown"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-rpcs3SoundSelect"
+                    data-i18n="label.settings-rpcs3SoundSelect"
+                    >RPCS3 Achievement Sound:</label
+                  >
+                  <select id="settings-rpcs3SoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-rpcs3SanPresetDropdown"
+                    data-i18n="label.settings-rpcs3SanPresetDropdown"
+                    >RPCS3 Achievement SAN Preset:</label
+                  >
+                  <select id="settings-rpcs3SanPresetDropdown"></select>
+                </div>
+                <button
+                  id="settings-testRpcs3NotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testRpcs3NotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test RPCS3 Notification
+                </button>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-shadps4NotificationTitle"
+                  data-i18n="settings-shadps4NotificationTitle"
+                  style="margin-top: 10px"
+                >
+                  ShadPS4 Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-shadps4PositionDropdown"
+                    data-i18n="label.settings-shadps4PositionDropdown"
+                    >ShadPS4 Achievement Position:</label
+                  >
+                  <select id="settings-shadps4PositionDropdown">
+                    <option value="center-bottom" data-i18n="option.positionDropdown.center-bottom">Center Bottom</option>
+                    <option value="center-top" data-i18n="option.positionDropdown.center-top">Center Top</option>
+                    <option value="top-right" data-i18n="option.positionDropdown.top-right">Top Right</option>
+                    <option value="bottom-right" data-i18n="option.positionDropdown.bottom-right">Bottom Right</option>
+                    <option value="middle-right" data-i18n="option.positionDropdown.middle-right">Middle Right</option>
+                    <option value="top-left" data-i18n="option.positionDropdown.top-left">Top Left</option>
+                    <option value="bottom-left" data-i18n="option.positionDropdown.bottom-left">Bottom Left</option>
+                    <option value="middle-left" data-i18n="option.positionDropdown.middle-left">Middle Left</option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-shadps4PresetDropdown"
+                    data-i18n="label.settings-shadps4PresetDropdown"
+                    >ShadPS4 Achievement Preset:</label
+                  >
+                  <select id="settings-shadps4PresetDropdown"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-shadps4SoundSelect"
+                    data-i18n="label.settings-shadps4SoundSelect"
+                    >ShadPS4 Achievement Sound:</label
+                  >
+                  <select id="settings-shadps4SoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-shadps4SanPresetDropdown"
+                    data-i18n="label.settings-shadps4SanPresetDropdown"
+                    >ShadPS4 Achievement SAN Preset:</label
+                  >
+                  <select id="settings-shadps4SanPresetDropdown"></select>
+                </div>
+                <button
+                  id="settings-testShadps4NotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testShadps4NotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test ShadPS4 Notification
                 </button>
 
                 <hr style="margin: 18px 0 14px" />
@@ -1214,6 +1443,14 @@
                     >Platinum Achievement Sound:</label
                   >
                   <select id="settings-platinumSoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-platinumSanPresetDropdown"
+                    data-i18n="label.settings-platinumSanPresetDropdown"
+                    >Platinum Achievement SAN Preset:</label
+                  >
+                  <select id="settings-platinumSanPresetDropdown"></select>
                 </div>
                 <button
                   id="settings-testPlatinumNotificationBtn"
@@ -4369,6 +4606,46 @@
           SteamDB
         </button>
         <button
+          id="dashboardMenuEpicStore"
+          class="dash-menu-item"
+          type="button"
+          data-action="epic-store"
+        >
+          Epic Store
+        </button>
+        <button
+          id="dashboardMenuGogStore"
+          class="dash-menu-item"
+          type="button"
+          data-action="gog-store"
+        >
+          GOG Store
+        </button>
+        <button
+          id="dashboardMenuPlayStationStore"
+          class="dash-menu-item"
+          type="button"
+          data-action="playstation-store"
+        >
+          PlayStation Store
+        </button>
+        <button
+          id="dashboardMenuRpcs3Wiki"
+          class="dash-menu-item"
+          type="button"
+          data-action="rpcs3-wiki"
+        >
+          RPCS3 Wiki
+        </button>
+        <button
+          id="dashboardMenuEaApp"
+          class="dash-menu-item"
+          type="button"
+          data-action="ea-app"
+        >
+          Open in EA App
+        </button>
+        <button
           id="dashboardMenuIgnore"
           class="dash-menu-item"
           type="button"
@@ -4684,6 +4961,10 @@
         const saved = savedAchievementsObj?.achievements || {};
         const earned = Object.values(saved).filter((x) => x?.earned).length;
         if (earned !== total) return { triggered: false };
+        const hasManualEarned = Object.values(saved).some(
+          (x) => x?.earned && x?.manual === true,
+        );
+        if (hasManualEarned) return { triggered: false };
 
         window.__platinumManualSent = window.__platinumManualSent || new Set();
         const key =
@@ -7095,12 +7376,323 @@
       }
       window.focusAchievementsSearch = focusAchievementsSearch;
 
+      let achievementManualContextTarget = null;
+      let achievementSelectionAnchor = "";
+      const achievementSelection = new Set();
+
+      function getAchievementRows() {
+        const tableBody = document.getElementById("achievementsTableBody");
+        return tableBody
+          ? Array.from(
+              tableBody.querySelectorAll("tr[data-achievement-name]"),
+            )
+          : [];
+      }
+
+      function setAchievementRowSelected(row, selected) {
+        if (!row?.dataset?.achievementName) return;
+        const name = row.dataset.achievementName;
+        if (selected) {
+          achievementSelection.add(name);
+        } else {
+          achievementSelection.delete(name);
+        }
+        row.classList.toggle("achievement-row-selected", !!selected);
+        row.setAttribute("aria-selected", selected ? "true" : "false");
+      }
+
+      function clearAchievementSelection() {
+        achievementSelection.clear();
+        achievementSelectionAnchor = "";
+        getAchievementRows().forEach((row) => {
+          row.classList.remove("achievement-row-selected");
+          row.setAttribute("aria-selected", "false");
+        });
+      }
+
+      function syncAchievementSelectionToRenderedRows() {
+        const rows = getAchievementRows();
+        const rendered = new Set(
+          rows.map((row) => row.dataset.achievementName).filter(Boolean),
+        );
+        for (const name of Array.from(achievementSelection)) {
+          if (!rendered.has(name)) achievementSelection.delete(name);
+        }
+        rows.forEach((row) => {
+          const selected = achievementSelection.has(row.dataset.achievementName);
+          row.classList.toggle("achievement-row-selected", selected);
+          row.setAttribute("aria-selected", selected ? "true" : "false");
+        });
+      }
+
+      function selectAchievementRange(targetRow) {
+        const rows = getAchievementRows().filter(
+          (row) => row.style.display !== "none",
+        );
+        const targetName = targetRow?.dataset?.achievementName || "";
+        const anchorName = achievementSelectionAnchor || targetName;
+        const start = rows.findIndex(
+          (row) => row.dataset.achievementName === anchorName,
+        );
+        const end = rows.findIndex(
+          (row) => row.dataset.achievementName === targetName,
+        );
+        if (start < 0 || end < 0) {
+          setAchievementRowSelected(targetRow, true);
+          achievementSelectionAnchor = targetName;
+          return;
+        }
+        const [from, to] = start <= end ? [start, end] : [end, start];
+        for (let i = from; i <= to; i += 1) {
+          setAchievementRowSelected(rows[i], true);
+        }
+      }
+
+      function handleAchievementRowSelection(row, event) {
+        const name = row?.dataset?.achievementName || "";
+        if (!name) return;
+        if (event.shiftKey) {
+          selectAchievementRange(row);
+          return;
+        }
+        if (event.ctrlKey || event.metaKey) {
+          setAchievementRowSelected(row, !achievementSelection.has(name));
+          achievementSelectionAnchor = name;
+          return;
+        }
+        if (achievementSelection.size === 1 && achievementSelection.has(name)) {
+          clearAchievementSelection();
+          return;
+        }
+        clearAchievementSelection();
+        setAchievementRowSelected(row, true);
+        achievementSelectionAnchor = name;
+      }
+
+      function getAchievementManualTargets(row) {
+        const selectedRows = getAchievementRows().filter((candidate) =>
+          achievementSelection.has(candidate.dataset.achievementName),
+        );
+        if (
+          row &&
+          achievementSelection.has(row.dataset.achievementName) &&
+          selectedRows.length > 1
+        ) {
+          return selectedRows;
+        }
+        return row ? [row] : [];
+      }
+
+      function getAchievementManualContextMenu() {
+        let menu = document.getElementById("achievementManualContextMenu");
+        if (menu) return menu;
+        menu = document.createElement("div");
+        menu.id = "achievementManualContextMenu";
+        menu.className = "dash-context-menu achievement-manual-context hidden";
+        menu.setAttribute("role", "menu");
+        menu.setAttribute("aria-hidden", "true");
+        menu.style.position = "fixed";
+        menu.style.zIndex = "100000";
+        const actionBtn = document.createElement("button");
+        actionBtn.type = "button";
+        actionBtn.className = "dash-menu-item";
+        actionBtn.dataset.action = "manual-achievement-state";
+        menu.appendChild(actionBtn);
+        document.body.appendChild(menu);
+        return menu;
+      }
+
+      function closeAchievementManualContextMenu() {
+        const menu = document.getElementById("achievementManualContextMenu");
+        if (!menu) return;
+        menu.classList.add("hidden");
+        menu.setAttribute("aria-hidden", "true");
+        achievementManualContextTarget = null;
+      }
+
+      function positionAchievementManualContextMenu(menu, x, y) {
+        const pad = 8;
+        menu.style.left = "0px";
+        menu.style.top = "0px";
+        const rect = menu.getBoundingClientRect();
+        const maxLeft = Math.max(pad, window.innerWidth - rect.width - pad);
+        const maxTop = Math.max(pad, window.innerHeight - rect.height - pad);
+        const left = Math.min(Math.max(pad, x), maxLeft);
+        const top = Math.min(Math.max(pad, y), maxTop);
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+      }
+
+      function openAchievementManualContextMenu(row, event) {
+        const rows = getAchievementManualTargets(row);
+        const names = rows
+          .map((item) => String(item?.dataset?.achievementName || ""))
+          .filter(Boolean);
+        if (!names.length) return false;
+        const manualRows = rows.filter((item) => item.dataset.manual === "1");
+        const unlockableRows = rows.filter(
+          (item) =>
+            item.dataset.earned !== "1" && item.dataset.manual !== "1",
+        );
+        const clickedManual = row?.dataset?.manual === "1";
+        const clickedUnlockable =
+          row?.dataset?.earned !== "1" && row?.dataset?.manual !== "1";
+        const action = clickedManual
+          ? "clear-manual"
+          : clickedUnlockable
+            ? "mark-unlocked"
+            : manualRows.length > 0
+              ? "clear-manual"
+              : "mark-unlocked";
+        const actionableNames =
+          action === "clear-manual"
+            ? manualRows.map((item) => item.dataset.achievementName)
+            : unlockableRows.map((item) => item.dataset.achievementName);
+        if (!actionableNames.length) return false;
+        if (!action) return false;
+        const configName = document.getElementById("configList")?.value || "";
+        if (!configName) return false;
+        const menu = getAchievementManualContextMenu();
+        const actionBtn = menu.querySelector(
+          '.dash-menu-item[data-action="manual-achievement-state"]',
+        );
+        if (!actionBtn) return false;
+        achievementManualContextTarget = {
+          configName,
+          achievementNames: actionableNames,
+          action,
+        };
+        const count = actionableNames.length;
+        actionBtn.textContent =
+          action === "clear-manual"
+            ? count > 1
+              ? tUiFmt(
+                  "achievementManualClearSelected",
+                  { count },
+                  `Clear Manual Unlock (${count})`,
+                )
+              : tUi("achievementManualClear", "Clear Manual Unlock")
+            : count > 1
+              ? tUiFmt(
+                  "achievementManualUnlockSelected",
+                  { count },
+                  `Mark Selected as Manually Unlocked (${count})`,
+                )
+              : tUi("achievementManualUnlock", "Mark as Manually Unlocked");
+        actionBtn.title = actionBtn.textContent;
+        menu.classList.remove("hidden");
+        menu.setAttribute("aria-hidden", "false");
+        positionAchievementManualContextMenu(menu, event.clientX, event.clientY);
+        actionBtn.focus({ preventScroll: true });
+        return true;
+      }
+
+      function ensureAchievementManualContextMenuAttached() {
+        if (window.__achievementManualContextMenuAttached) return;
+        const tableBody = document.getElementById("achievementsTableBody");
+        if (!tableBody) return;
+        window.__achievementManualContextMenuAttached = true;
+        tableBody.addEventListener("click", (event) => {
+          const row = event.target.closest("tr[data-achievement-name]");
+          if (!row) return;
+          handleAchievementRowSelection(row, event);
+        });
+        tableBody.addEventListener("contextmenu", (event) => {
+          const row = event.target.closest("tr[data-achievement-name]");
+          if (!row) return;
+          if (!achievementSelection.has(row.dataset.achievementName)) {
+            clearAchievementSelection();
+            setAchievementRowSelected(row, true);
+            achievementSelectionAnchor = row.dataset.achievementName || "";
+          }
+          if (!openAchievementManualContextMenu(row, event)) return;
+          event.preventDefault();
+          event.stopPropagation();
+        });
+        document.addEventListener(
+          "pointerdown",
+          (event) => {
+            const menu = document.getElementById(
+              "achievementManualContextMenu",
+            );
+            if (!menu || menu.classList.contains("hidden")) return;
+            if (event.target.closest("#achievementManualContextMenu")) return;
+            closeAchievementManualContextMenu();
+          },
+          true,
+        );
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeAchievementManualContextMenu();
+        });
+        getAchievementManualContextMenu().addEventListener(
+          "click",
+          async (event) => {
+            const btn = event.target.closest(".dash-menu-item");
+            if (!btn || !achievementManualContextTarget) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const target = achievementManualContextTarget;
+            closeAchievementManualContextMenu();
+            const result = await window.api?.setAchievementManualState?.({
+              configName: target.configName,
+              achievementNames: target.achievementNames,
+              action: target.action,
+            });
+            if (!result?.success) {
+              showNotification(
+                result?.error ||
+                  tUi(
+                    "achievementManualFailed",
+                    "Failed to update achievement state.",
+                  ),
+                "#f44336",
+              );
+              return;
+            }
+            showNotification(
+              target.action === "clear-manual"
+                ? Number(result?.updatedCount || 0) > 1
+                  ? tUiFmt(
+                      "achievementManualClearSelectedDone",
+                      { count: result.updatedCount },
+                      `${result.updatedCount} manual unlocks cleared.`,
+                    )
+                  : tUi(
+                      "achievementManualClearDone",
+                      "Manual unlock cleared.",
+                    )
+                : Number(result?.updatedCount || 0) > 1
+                  ? tUiFmt(
+                      "achievementManualUnlockSelectedDone",
+                      { count: result.updatedCount },
+                      `${result.updatedCount} achievements marked as manually unlocked.`,
+                    )
+                  : tUi(
+                      "achievementManualUnlockDone",
+                      "Achievement marked as manually unlocked.",
+                    ),
+              "#4CAF50",
+            );
+            const activeConfig =
+              document.getElementById("configList")?.value || "";
+            if (activeConfig === target.configName) {
+              const lang =
+                document.getElementById("languageSelect")?.value || "english";
+              await buildMainAchievementsTable(target.configName, lang, {
+                skipPlatinumCheck: true,
+              });
+            }
+          },
+        );
+      }
+
       async function buildMainAchievementsTable(
         selectedConfig,
         lang = "english",
         options = {},
       ) {
         ensureAchievementsSearchAttached();
+        ensureAchievementManualContextMenuAttached();
         if (!selectedConfig) {
           setAchievementsHeaderVisible(false);
           return;
@@ -7117,6 +7709,10 @@
         if (achSearchInput && window.__achSearchConfig !== selectedConfig) {
           achSearchInput.value = "";
           window.__achSearchConfig = selectedConfig;
+        }
+        if (window.__achievementSelectionConfig !== selectedConfig) {
+          clearAchievementSelection();
+          window.__achievementSelectionConfig = selectedConfig;
         }
 
         const achievementsDataObj = await window.api.loadAchievementData(
@@ -7287,15 +7883,16 @@
 
         function formatRarityPercent(achievement) {
           const rarityPct = resolveRarityPercent(achievement);
+          const trophyType = formatTrophyTypeAsRarity(
+            achievement?.trophyType || achievement?.trophy_type,
+          );
           if (rarityPct !== null) {
             const rounded = Number.isInteger(rarityPct)
               ? String(rarityPct)
               : String(rarityPct.toFixed(2)).replace(/\.?0+$/, "");
+            if (trophyType) return `${trophyType} · ${rounded}%`;
             return `${rounded}%`;
           }
-          const trophyType = formatTrophyTypeAsRarity(
-            achievement?.trophyType || achievement?.trophy_type,
-          );
           if (trophyType) return trophyType;
           return "N/A";
         }
@@ -7376,6 +7973,16 @@
             .replace(/\s+/g, " ")
             .toLowerCase();
           row.dataset.sortUnlocked = saved?.earned ? "1" : "0";
+          row.dataset.achievementName = achievement.name || "";
+          row.dataset.earned = saved?.earned ? "1" : "0";
+          row.dataset.manual = saved?.manual === true ? "1" : "0";
+          row.setAttribute(
+            "aria-selected",
+            achievementSelection.has(achievement.name) ? "true" : "false",
+          );
+          if (achievementSelection.has(achievement.name)) {
+            row.classList.add("achievement-row-selected");
+          }
           const earnedTimeValue = Number(saved?.earned_time);
           row.dataset.sortEarnedTime =
             Number.isFinite(earnedTimeValue) && earnedTimeValue > 0
@@ -7448,6 +8055,15 @@
           st.className = saved?.earned ? "unlocked" : "locked";
           st.textContent = saved?.earned ? statusUnlocked : statusLocked;
           tdStatus.appendChild(st);
+          if (saved?.manual === true) {
+            const manualLine = document.createElement("div");
+            manualLine.className = "status-manual";
+            manualLine.textContent = tUi(
+              "achievementManualBadge",
+              "Manual",
+            );
+            tdStatus.appendChild(manualLine);
+          }
           if (saved?.earned_time) {
             tdStatus.appendChild(document.createElement("br"));
             tdStatus.appendChild(
@@ -7468,6 +8084,7 @@
             imgRel,
           );
         }
+        syncAchievementSelectionToRenderedRows();
         applyAchievementsSearchFilter();
 
         // Main Progress Bar
@@ -7483,14 +8100,24 @@
         if (window.__refreshAchievementsHandlerAttached) return;
         window.__refreshAchievementsHandlerAttached = true;
 
-        window.api.on("refresh-achievements-table", async (configName) => {
+        window.api.on("refresh-achievements-table", async (payload) => {
+          const configName =
+            payload && typeof payload === "object"
+              ? payload.configName || payload.name || ""
+              : payload;
+          const refreshOptions =
+            payload && typeof payload === "object"
+              ? {
+                  skipPlatinumCheck: payload.skipPlatinumCheck === true,
+                }
+              : {};
           const cfg =
             configName || document.getElementById("configList")?.value;
           if (cfg) {
             const lang =
               document.getElementById("languageSelect")?.value || "english";
             try {
-              await buildMainAchievementsTable(cfg, lang);
+              await buildMainAchievementsTable(cfg, lang, refreshOptions);
             } catch {}
           }
 
@@ -8429,7 +9056,10 @@
         document.getElementById("appid").value = "";
         document.getElementById("configPath").value = "";
         document.getElementById("savePath").value = "";
-        document.getElementById("executablePath").value = "";
+        const executablePathInput = document.getElementById("executablePath");
+        executablePathInput.value = "";
+        executablePathInput.dataset.shortcutPath = "";
+        executablePathInput.dataset.workingDirectory = "";
         document.getElementById("exeArgs").value = "";
         document.getElementById("processName").value = "";
         if (platformSelect) {
@@ -8489,8 +9119,13 @@
           document.getElementById("configPath").value =
             currentConfig.config_path;
           document.getElementById("savePath").value = currentConfig.save_path;
-          document.getElementById("executablePath").value =
-            currentConfig.executable || "";
+          const executablePathInput =
+            document.getElementById("executablePath");
+          executablePathInput.value = currentConfig.executable || "";
+          executablePathInput.dataset.shortcutPath =
+            currentConfig.shortcut_path || "";
+          executablePathInput.dataset.workingDirectory =
+            currentConfig.working_directory || "";
           document.getElementById("exeArgs").value =
             currentConfig.arguments || "";
           document.getElementById("processName").value =
@@ -8587,7 +9222,11 @@
         const appid = document.getElementById("appid").value;
         const configPath = document.getElementById("configPath").value;
         const savePath = document.getElementById("savePath").value;
-        const executable = document.getElementById("executablePath").value;
+        const executablePathInput = document.getElementById("executablePath");
+        const executable = executablePathInput.value;
+        const shortcutPath = executablePathInput.dataset.shortcutPath || "";
+        const workingDirectory =
+          executablePathInput.dataset.workingDirectory || "";
         const launchArguments = document.getElementById("exeArgs").value;
         const processName = document.getElementById("processName").value;
         const selectedPlatform = platformSelect?.value?.toLowerCase() || "auto";
@@ -8648,6 +9287,8 @@
           executable: executable || null,
           arguments: launchArguments || "",
           process_name: processName || "",
+          shortcut_path: shortcutPath || null,
+          working_directory: workingDirectory || null,
         };
         if (selectedPlatform && selectedPlatform !== "auto") {
           config.platform = selectedPlatform;
@@ -8880,11 +9521,46 @@
         });
 
       document
+        .getElementById("executablePath")
+        .addEventListener("input", function () {
+          this.dataset.shortcutPath = "";
+          this.dataset.workingDirectory = "";
+        });
+
+      document
         .getElementById("selectExecutable")
         .addEventListener("click", async () => {
-          const selectedExe = await window.api.selectExecutable();
+          const executablePathInput =
+            document.getElementById("executablePath");
+          const selectedExe = await window.api.selectExecutable(
+            executablePathInput.value,
+          );
           if (selectedExe) {
-            document.getElementById("executablePath").value = selectedExe;
+            const details =
+              typeof selectedExe === "string"
+                ? { executable: selectedExe, isShortcut: false }
+                : selectedExe;
+            if (details.shortcutReadFailed) {
+              showNotification(
+                tUi(
+                  "alert.shortcutReadFailed",
+                  "Unable to read the selected Windows shortcut.",
+                ),
+                "#f44336",
+              );
+              return;
+            }
+            executablePathInput.value = details.executable || "";
+            executablePathInput.dataset.shortcutPath =
+              details.shortcutPath || "";
+            executablePathInput.dataset.workingDirectory =
+              details.workingDirectory || "";
+            if (details.isShortcut) {
+              document.getElementById("exeArgs").value =
+                details.arguments || "";
+              document.getElementById("processName").value =
+                details.processName || "";
+            }
           }
         });
 
@@ -8899,7 +9575,11 @@
           return;
         }
         const args = config.arguments || "";
-        await window.api.launchExecutable(config.executable, args);
+        await window.api.launchExecutable(
+          config.executable,
+          args,
+          config.working_directory || "",
+        );
       });
 
       const languageSelect = document.getElementById("languageSelect");
@@ -9376,6 +10056,17 @@
             process_name: "",
             custom_cover_path: "",
             custom_cover_source_path: "",
+            epic_product_id: "",
+            epic_catalog_item_id: "",
+            epic_namespace: "",
+            epic_app_name: "",
+            epic_store_slug: "",
+            gog_client_id: "",
+            gog_user_id: "",
+            gog_gameplay_db: "",
+            ea_offer_id: "",
+            ps_content_id: "",
+            ps_store_url: "",
           };
         }
         const name = entry.name || entry.configName || "";
@@ -9392,6 +10083,30 @@
           process_name: entry.process_name || entry.processName || "",
           custom_cover_path: entry.custom_cover_path || "",
           custom_cover_source_path: entry.custom_cover_source_path || "",
+          epic_product_id: entry.epic_product_id || entry.epicProductId || "",
+          epic_catalog_item_id:
+            entry.epic_catalog_item_id || entry.epicCatalogItemId || "",
+          epic_namespace: entry.epic_namespace || entry.epicNamespace || "",
+          epic_app_name: entry.epic_app_name || entry.epicAppName || "",
+          epic_store_slug: entry.epic_store_slug || entry.epicStoreSlug || "",
+          gog_client_id: entry.gog_client_id || entry.gogClientId || "",
+          gog_user_id: entry.gog_user_id || entry.gogUserId || "",
+          gog_gameplay_db: entry.gog_gameplay_db || entry.gogGameplayDb || "",
+          ea_offer_id: entry.ea_offer_id || entry.eaOfferId || "",
+          ps_content_id:
+            entry.ps_content_id ||
+            entry.psContentId ||
+            entry.content_id ||
+            entry.contentId ||
+            entry.playstation_content_id ||
+            entry.playstationContentId ||
+            "",
+          ps_store_url:
+            entry.ps_store_url ||
+            entry.psStoreUrl ||
+            entry.playstation_store_url ||
+            entry.playstationStoreUrl ||
+            "",
         };
       }
 
@@ -11343,6 +12058,8 @@
             soundSelect.value = prefs.sound;
           }
 
+          await populateSanPresetControls(prefs);
+
           const settingsSoundVolumeSlider = document.getElementById(
             "settings-soundVolumeSlider",
           );
@@ -11618,6 +12335,115 @@
         }
       }
 
+      let cachedSanPresets = [];
+
+      const EMULATOR_NOTIFICATION_SETTINGS = Object.freeze([
+        {
+          platform: "xenia",
+          prefix: "xenia",
+          label: "Xenia",
+          positionId: "settings-xeniaPositionDropdown",
+          presetId: "settings-xeniaPresetDropdown",
+          soundId: "settings-xeniaSoundSelect",
+          sanPresetId: "settings-xeniaSanPresetDropdown",
+          testButtonId: "settings-testXeniaNotificationBtn",
+        },
+        {
+          platform: "rpcs3",
+          prefix: "rpcs3",
+          label: "RPCS3",
+          positionId: "settings-rpcs3PositionDropdown",
+          presetId: "settings-rpcs3PresetDropdown",
+          soundId: "settings-rpcs3SoundSelect",
+          sanPresetId: "settings-rpcs3SanPresetDropdown",
+          testButtonId: "settings-testRpcs3NotificationBtn",
+        },
+        {
+          platform: "shadps4",
+          prefix: "shadps4",
+          label: "ShadPS4",
+          positionId: "settings-shadps4PositionDropdown",
+          presetId: "settings-shadps4PresetDropdown",
+          soundId: "settings-shadps4SoundSelect",
+          sanPresetId: "settings-shadps4SanPresetDropdown",
+          testButtonId: "settings-testShadps4NotificationBtn",
+        },
+      ]);
+
+      function getEmulatorPrefKey(setting, suffix) {
+        return `${setting.prefix}${suffix}`;
+      }
+
+      function fillSanPresetSelect(select, selectedPreset = "") {
+        if (!select) return;
+        select.innerHTML = "";
+
+        const noneOption = document.createElement("option");
+        noneOption.value = "";
+        noneOption.textContent = cachedSanPresets.length
+          ? "None"
+          : "No SAN presets found";
+        select.appendChild(noneOption);
+
+        cachedSanPresets.forEach((preset) => {
+          const option = document.createElement("option");
+          option.value = preset.id;
+          option.textContent =
+            preset.displayLabel || preset.label || preset.fileName || preset.id;
+          select.appendChild(option);
+        });
+
+        const matchedPreset = selectedPreset
+          ? cachedSanPresets.find(
+              (preset) =>
+                preset.id === selectedPreset || preset.legacyId === selectedPreset,
+            )
+          : null;
+        select.value = matchedPreset ? matchedPreset.id : "";
+        return matchedPreset || null;
+      }
+
+      async function populateSanPresetControls(prefs = getCachedPreferences()) {
+        const useSanCheckbox = document.getElementById(
+          "settings-useSanPresetCheckbox",
+        );
+
+        let result = null;
+        try {
+          result = await window.api.loadSanPresets();
+        } catch (err) {
+          console.error("Failed to load SAN presets:", err);
+        }
+
+        cachedSanPresets = Array.isArray(result?.presets) ? result.presets : [];
+
+        const mappings = [
+          ["settings-sanPresetDropdown", "sanPreset"],
+          ["settings-rareSanPresetDropdown", "rareSanPreset"],
+          ["settings-platinumSanPresetDropdown", "platinumSanPreset"],
+          ...EMULATOR_NOTIFICATION_SETTINGS.map((setting) => [
+            setting.sanPresetId,
+            getEmulatorPrefKey(setting, "SanPreset"),
+          ]),
+        ];
+        const migrated = {};
+        for (const [selectId, prefKey] of mappings) {
+          const select = document.getElementById(selectId);
+          if (!select) continue;
+          const selectedPreset = prefs?.[prefKey] || "";
+          const matchedPreset = fillSanPresetSelect(select, selectedPreset);
+          if (matchedPreset && matchedPreset.id !== selectedPreset) {
+            migrated[prefKey] = matchedPreset.id;
+          }
+        }
+        if (Object.keys(migrated).length > 0) {
+          window.api.savePreferences(migrated);
+        }
+        if (useSanCheckbox) {
+          useSanCheckbox.checked = prefs?.useSanPreset === true;
+        }
+      }
+
       async function playCustomSound(fileName) {
         if (!fileName || fileName === "mute") return;
 
@@ -11819,6 +12645,46 @@
         if (hiddenSound) hiddenSound.value = rareSound;
       }
 
+      function applyEmulatorNotificationPreferences(prefs = {}) {
+        for (const setting of EMULATOR_NOTIFICATION_SETTINGS) {
+          const position =
+            prefs[getEmulatorPrefKey(setting, "Position")] ||
+            prefs.position ||
+            "center-bottom";
+          const preset =
+            prefs[getEmulatorPrefKey(setting, "Preset")] ||
+            prefs.preset ||
+            "default";
+          const sound =
+            prefs[getEmulatorPrefKey(setting, "Sound")] ||
+            prefs.sound ||
+            "mute";
+
+          const positionSelect = document.getElementById(setting.positionId);
+          if (positionSelect) positionSelect.value = position;
+
+          const presetSelect = document.getElementById(setting.presetId);
+          if (
+            presetSelect &&
+            Array.from(presetSelect.options).some(
+              (option) => option.value === preset,
+            )
+          ) {
+            presetSelect.value = preset;
+          }
+
+          const soundSelect = document.getElementById(setting.soundId);
+          if (
+            soundSelect &&
+            Array.from(soundSelect.options).some(
+              (option) => option.value === sound,
+            )
+          ) {
+            soundSelect.value = sound;
+          }
+        }
+      }
+
       function applyNotificationTogglePreferences(prefs = {}) {
         const rarityPercentageCheckbox = document.getElementById(
           "settings-showNotificationRarityPercentageCheckbox",
@@ -11909,6 +12775,7 @@
           if (el) el.value = prefs.progressPosition;
         }
         applyRareNotificationPreferences(prefs);
+        applyEmulatorNotificationPreferences(prefs);
         applyNotificationTogglePreferences(prefs);
         const hiddenPlatPos = document.getElementById("platinumPositionValue");
         if (prefs.platinumPosition) {
@@ -13496,6 +14363,11 @@
             "settings-positionDropdown",
           ).value;
           const sound = document.getElementById("settings-soundSelect").value;
+          const useSanPreset = document.getElementById(
+            "settings-useSanPresetCheckbox",
+          )?.checked === true;
+          const sanPreset =
+            document.getElementById("settings-sanPresetDropdown")?.value || "";
           const scale = parseFloat(
             document.getElementById("settings-scaleSlider").value,
           );
@@ -13505,6 +14377,8 @@
             preset,
             position,
             sound,
+            useSanPreset,
+            sanPreset,
             scale,
           });
         });
@@ -13536,6 +14410,12 @@
           const sound =
             document.getElementById("settings-rareSoundSelect")?.value ||
             "mute";
+          const useSanPreset = document.getElementById(
+            "settings-useSanPresetCheckbox",
+          )?.checked === true;
+          const sanPreset =
+            document.getElementById("settings-rareSanPresetDropdown")?.value ||
+            "";
           const scale = parseFloat(
             document.getElementById("settings-scaleSlider")?.value || 1,
           );
@@ -13545,6 +14425,8 @@
             preset,
             position,
             sound,
+            useSanPreset,
+            sanPreset,
             scale,
           });
         });
@@ -13561,6 +14443,12 @@
           const sound =
             document.getElementById("settings-platinumSoundSelect")?.value ||
             "mute";
+          const useSanPreset = document.getElementById(
+            "settings-useSanPresetCheckbox",
+          )?.checked === true;
+          const sanPreset =
+            document.getElementById("settings-platinumSanPresetDropdown")
+              ?.value || "";
           const scale = parseFloat(
             document.getElementById("settings-scaleSlider")?.value || 1,
           );
@@ -13570,9 +14458,61 @@
             preset,
             position,
             sound,
+            useSanPreset,
+            sanPreset,
             scale,
           });
         });
+
+      function registerEmulatorNotificationSettings(setting) {
+        const positionSelect = document.getElementById(setting.positionId);
+        const presetSelect = document.getElementById(setting.presetId);
+        const soundSelect = document.getElementById(setting.soundId);
+        const sanPresetSelect = document.getElementById(setting.sanPresetId);
+        const testButton = document.getElementById(setting.testButtonId);
+
+        positionSelect?.addEventListener("change", (e) => {
+          window.api.savePreferences({
+            [getEmulatorPrefKey(setting, "Position")]: e.target.value,
+          });
+        });
+        presetSelect?.addEventListener("change", (e) => {
+          window.api.savePreferences({
+            [getEmulatorPrefKey(setting, "Preset")]: e.target.value,
+          });
+        });
+        soundSelect?.addEventListener("change", (e) => {
+          window.api.savePreferences({
+            [getEmulatorPrefKey(setting, "Sound")]: e.target.value,
+          });
+          playPreviewSound(e.target.value, setting.soundId);
+        });
+        sanPresetSelect?.addEventListener("change", (e) => {
+          window.api.savePreferences({
+            [getEmulatorPrefKey(setting, "SanPreset")]: e.target.value,
+          });
+        });
+        testButton?.addEventListener("click", () => {
+          const useSanPreset = document.getElementById(
+            "settings-useSanPresetCheckbox",
+          )?.checked === true;
+          const scale = parseFloat(
+            document.getElementById("settings-scaleSlider")?.value || 1,
+          );
+          stopUiAudioPlayback();
+          window.api.showTestEmulatorNotification({
+            platform: setting.platform,
+            preset: presetSelect?.value || "default",
+            position: positionSelect?.value || "center-bottom",
+            sound: soundSelect?.value || "mute",
+            useSanPreset,
+            sanPreset: sanPresetSelect?.value || "",
+            scale,
+          });
+        });
+      }
+
+      EMULATOR_NOTIFICATION_SETTINGS.forEach(registerEmulatorNotificationSettings);
 
       // Settings scale slider
       const settingsScaleSlider = document.getElementById(
@@ -13825,6 +14765,30 @@
         });
 
       document
+        .getElementById("settings-useSanPresetCheckbox")
+        ?.addEventListener("change", (e) => {
+          window.api.savePreferences({ useSanPreset: e.target.checked === true });
+        });
+
+      document
+        .getElementById("settings-sanPresetDropdown")
+        ?.addEventListener("change", (e) => {
+          window.api.savePreferences({ sanPreset: e.target.value });
+        });
+
+      document
+        .getElementById("settings-rareSanPresetDropdown")
+        ?.addEventListener("change", (e) => {
+          window.api.savePreferences({ rareSanPreset: e.target.value });
+        });
+
+      document
+        .getElementById("settings-platinumSanPresetDropdown")
+        ?.addEventListener("change", (e) => {
+          window.api.savePreferences({ platinumSanPreset: e.target.value });
+        });
+
+      document
         .getElementById("settings-rareSoundSelect")
         .addEventListener("change", (e) => {
           const hidden = document.getElementById("rareSoundValue");
@@ -13874,6 +14838,15 @@
             platinumPresetDropdown.value =
               prefs.platinumPreset || platinumPresetDropdown.value || "default";
           }
+          for (const setting of EMULATOR_NOTIFICATION_SETTINGS) {
+            const presetDropdown = document.getElementById(setting.presetId);
+            if (!presetDropdown) continue;
+            presetDropdown.innerHTML = mainPresetDropdown.innerHTML;
+            presetDropdown.value =
+              prefs[getEmulatorPrefKey(setting, "Preset")] ||
+              presetDropdown.value ||
+              "default";
+          }
         }
 
         // Copy sound options
@@ -13903,7 +14876,17 @@
             platinumSoundSelect.value =
               prefs.platinumSound || platinumSoundSelect.value || "mute";
           }
+          for (const setting of EMULATOR_NOTIFICATION_SETTINGS) {
+            const soundSelect = document.getElementById(setting.soundId);
+            if (!soundSelect) continue;
+            soundSelect.innerHTML = mainSoundSelect.innerHTML;
+            soundSelect.value =
+              prefs[getEmulatorPrefKey(setting, "Sound")] ||
+              soundSelect.value ||
+              "mute";
+          }
         }
+        void populateSanPresetControls(prefs);
 
         // Sync position dropdown
         const mainPositionDropdown =
@@ -13931,6 +14914,14 @@
           if (!settingsPlatinumPositionDropdown.value) {
             settingsPlatinumPositionDropdown.value = mainPositionDropdown.value;
           }
+        }
+        for (const setting of EMULATOR_NOTIFICATION_SETTINGS) {
+          const positionDropdown = document.getElementById(setting.positionId);
+          if (!positionDropdown) continue;
+          positionDropdown.value =
+            prefs[getEmulatorPrefKey(setting, "Position")] ||
+            positionDropdown.value ||
+            "center-bottom";
         }
         const settingsProgressPositionDropdown = document.getElementById(
           "settings-progressPositionDropdown",
@@ -14130,6 +15121,8 @@
             getVal("settings-soundSelect") || getVal("soundSelect"),
             base.sound || "mute",
           ),
+          useSanPreset: checkbox("settings-useSanPresetCheckbox"),
+          sanPreset: getVal("settings-sanPresetDropdown") || "",
           notificationScale: Number.isFinite(settingsScale)
             ? settingsScale
             : base.notificationScale || 1,
@@ -14211,6 +15204,8 @@
             getVal("rareSoundValue"),
           base.rareSound || snapshot.sound,
         );
+        snapshot.rareSanPreset =
+          getVal("settings-rareSanPresetDropdown") || "";
         snapshot.platinumPreset = pick(
           getVal("settings-platinumPresetDropdown") ||
             getVal("platinumPresetValue"),
@@ -14230,6 +15225,24 @@
             getVal("platinumSoundValue"),
           base.platinumSound || snapshot.sound,
         );
+        snapshot.platinumSanPreset =
+          getVal("settings-platinumSanPresetDropdown") || "";
+        for (const setting of EMULATOR_NOTIFICATION_SETTINGS) {
+          snapshot[getEmulatorPrefKey(setting, "Preset")] = pick(
+            getVal(setting.presetId),
+            base[getEmulatorPrefKey(setting, "Preset")] || snapshot.preset,
+          );
+          snapshot[getEmulatorPrefKey(setting, "Position")] = pick(
+            getVal(setting.positionId),
+            base[getEmulatorPrefKey(setting, "Position")] || snapshot.position,
+          );
+          snapshot[getEmulatorPrefKey(setting, "Sound")] = pick(
+            getVal(setting.soundId),
+            base[getEmulatorPrefKey(setting, "Sound")] || snapshot.sound,
+          );
+          snapshot[getEmulatorPrefKey(setting, "SanPreset")] =
+            getVal(setting.sanPresetId) || "";
+        }
 
         return snapshot;
       }
@@ -17234,6 +18247,14 @@
           btn.classList.toggle("is-disabled", !!disabled);
         }
 
+        function setMenuItemVisible(btn, visible) {
+          if (!btn) return;
+          btn.hidden = !visible;
+          btn.style.display = visible ? "" : "none";
+          btn.setAttribute("aria-hidden", visible ? "false" : "true");
+          if (!visible) setMenuItemDisabled(btn, true);
+        }
+
         async function resolveDashboardSteamLinkAppId(target) {
           if (!target?.name) return "";
           const cfg = await getConfigCached(target.name);
@@ -17241,6 +18262,8 @@
             target.platform || cfg?.platform || "",
           );
           const localAppId = String(target.appid || cfg?.appid || "").trim();
+          const supportsDirectSteamLink =
+            !platform || platform === "steam" || platform === "steam-official";
 
           if (platform === "uplay" || platform === "ubisoft-official") {
             const configSteamAppId = String(cfg?.steamAppId || "").trim();
@@ -17259,7 +18282,379 @@
             return "";
           }
 
-          return /^\d+$/.test(localAppId) ? localAppId : "";
+          return supportsDirectSteamLink && /^\d+$/.test(localAppId)
+            ? localAppId
+            : "";
+        }
+
+        async function resolveDashboardEpicStoreSlug(target) {
+          if (!target?.name) return "";
+          const metaCfg = configMetaIndex.get(target.name) || null;
+          const cfg = (await getConfigCached(target.name)) || metaCfg;
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || metaCfg?.platform || cfg?.platform || "",
+          );
+          if (platform !== "epic" && platform !== "epic-official") return "";
+          const targetAppId = String(
+            target.appid ||
+              metaCfg?.appid ||
+              cfg?.appid ||
+              cfg?.appId ||
+              metaCfg?.epic_product_id ||
+              cfg?.epic_product_id ||
+              cfg?.epicProductId ||
+              "",
+          ).trim();
+          const explicitSlug = String(
+            target.epicStoreSlug ||
+              target.epic_store_slug ||
+              metaCfg?.epic_store_slug ||
+              metaCfg?.epicStoreSlug ||
+              cfg?.epic_store_slug ||
+              cfg?.epicStoreSlug ||
+              "",
+          ).trim();
+          if (explicitSlug) return explicitSlug;
+          if (
+            typeof loadEpicProductMapForCover === "function" &&
+            typeof buildEpicStoreSlugCandidates === "function"
+          ) {
+            try {
+              const map = await loadEpicProductMapForCover();
+              for (const candidate of buildEpicStoreSlugCandidates(
+                targetAppId,
+                cfg,
+              )) {
+                const slug =
+                  map?.[candidate] || map?.[candidate.toLowerCase()] || "";
+                if (slug) return String(slug).trim();
+              }
+            } catch {}
+          }
+          if (typeof resolveEpicStoreSlugForCover === "function") {
+            try {
+              const resolved = await resolveEpicStoreSlugForCover(
+                targetAppId,
+                platform,
+                { configName: target.name },
+              );
+              return String(resolved?.slug || "").trim();
+            } catch {}
+          }
+          return "";
+        }
+
+        async function buildDashboardEpicStoreFallbackSearchUrl(target) {
+          const metaCfg = target?.name
+            ? configMetaIndex.get(target.name) || null
+            : null;
+          const cfg = target?.name
+            ? (await getConfigCached(target.name)) || metaCfg
+            : null;
+          const searchTerm = String(
+            target?.displayName ||
+              metaCfg?.displayName ||
+              cfg?.displayName ||
+              cfg?.name ||
+              target?.name ||
+              "",
+          )
+            .replace(/\s*\((?:Epic|Epic Official)\)\s*$/i, "")
+            .trim();
+          if (!searchTerm) return "";
+          return `https://store.epicgames.com/en-US/browse?q=${encodeURIComponent(
+            searchTerm,
+          )}&sortBy=relevancy&sortDir=DESC&count=40`;
+        }
+
+        async function resolveDashboardEpicStoreUrl(target) {
+          if (!target?.name) return "";
+          const metaCfg = configMetaIndex.get(target.name) || null;
+          const cfg = (await getConfigCached(target.name)) || metaCfg;
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || metaCfg?.platform || cfg?.platform || "",
+          );
+          if (platform !== "epic" && platform !== "epic-official") return "";
+          const targetAppId = String(
+            target.appid ||
+              metaCfg?.appid ||
+              cfg?.appid ||
+              cfg?.appId ||
+              metaCfg?.epic_product_id ||
+              cfg?.epic_product_id ||
+              cfg?.epicProductId ||
+              "",
+          ).trim();
+          if (window.api?.resolveEpicStoreUrl) {
+            try {
+              const result = await window.api.resolveEpicStoreUrl({
+                appid: targetAppId,
+                name:
+                  target?.displayName ||
+                  metaCfg?.displayName ||
+                  cfg?.displayName ||
+                  cfg?.name ||
+                  target?.name ||
+                  "",
+                namespace:
+                  cfg?.epic_namespace ||
+                  cfg?.epicNamespace ||
+                  metaCfg?.epic_namespace ||
+                  metaCfg?.epicNamespace ||
+                  "",
+                catalogItemId:
+                  cfg?.epic_catalog_item_id ||
+                  cfg?.epicCatalogItemId ||
+                  metaCfg?.epic_catalog_item_id ||
+                  metaCfg?.epicCatalogItemId ||
+                  "",
+                appName:
+                  cfg?.epic_app_name ||
+                  cfg?.epicAppName ||
+                  metaCfg?.epic_app_name ||
+                  metaCfg?.epicAppName ||
+                  "",
+              });
+              const url = String(result?.url || "").trim();
+              if (result?.ok && url) return url;
+            } catch {}
+          }
+          return "";
+        }
+
+        async function buildDashboardGogStoreFallbackSearchUrl(target) {
+          const metaCfg = target?.name
+            ? configMetaIndex.get(target.name) || null
+            : null;
+          const cfg = target?.name
+            ? (await getConfigCached(target.name)) || metaCfg
+            : null;
+          const searchTerm = String(
+            target?.displayName ||
+              metaCfg?.displayName ||
+              cfg?.displayName ||
+              cfg?.name ||
+              target?.name ||
+              "",
+          )
+            .replace(/\s*\((?:GOG|GOG Official)\)\s*$/i, "")
+            .trim();
+          if (!searchTerm) return "";
+          return `https://www.gog.com/en/games?query=${encodeURIComponent(
+            searchTerm,
+          )}`;
+        }
+
+        async function resolveDashboardGogStoreUrl(target) {
+          if (!target?.name) return "";
+          const metaCfg = configMetaIndex.get(target.name) || null;
+          const cfg = (await getConfigCached(target.name)) || metaCfg;
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || metaCfg?.platform || cfg?.platform || "",
+          );
+          if (platform !== "gog" && platform !== "gog-official") return "";
+          const gogAppId = String(
+            target.appid ||
+              metaCfg?.appid ||
+              cfg?.appid ||
+              cfg?.gog_product_id ||
+              cfg?.gogProductId ||
+              "",
+          ).trim();
+          if (/^\d+$/.test(gogAppId) && window.api?.resolveGogStoreUrl) {
+            try {
+              const result = await window.api.resolveGogStoreUrl({
+                appid: gogAppId,
+              });
+              const url = String(result?.url || "").trim();
+              if (result?.ok && url) return url;
+            } catch {}
+          }
+          return buildDashboardGogStoreFallbackSearchUrl(target);
+        }
+
+        async function resolveDashboardEaLaunchId(target) {
+          if (!target?.name) return "";
+          const metaCfg = configMetaIndex.get(target.name) || null;
+          const cfg = (await getConfigCached(target.name)) || metaCfg;
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || metaCfg?.platform || cfg?.platform || "",
+          );
+          if (platform !== "ea-official") return "";
+          const contentId = String(
+            target.appid ||
+              metaCfg?.appid ||
+              cfg?.appid ||
+              cfg?.ea_content_id ||
+              cfg?.eaContentId ||
+              "",
+          ).trim();
+          if (/^\d+$/.test(contentId)) return contentId;
+          return String(
+            target.ea_offer_id ||
+              target.eaOfferId ||
+              metaCfg?.ea_offer_id ||
+              metaCfg?.eaOfferId ||
+              cfg?.ea_offer_id ||
+              cfg?.eaOfferId ||
+              "",
+          ).trim();
+        }
+
+        async function resolveDashboardShadps4Cusa(target) {
+          if (!target?.name) return "";
+          const metaCfg = configMetaIndex.get(target.name) || null;
+          const cfg = (await getConfigCached(target.name)) || metaCfg;
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || metaCfg?.platform || cfg?.platform || "",
+          );
+          if (platform !== "shadps4") return "";
+          const cusa = String(
+            target.appid ||
+              metaCfg?.appid ||
+              cfg?.appid ||
+              cfg?.title_id ||
+              cfg?.titleId ||
+              "",
+          )
+            .trim()
+            .toUpperCase();
+          return /^CUSA\d{5}$/i.test(cusa) ? cusa : "";
+        }
+
+        function normalizePlayStationContentId(value) {
+          const raw = String(value || "").trim().toUpperCase();
+          return /^[A-Z]{2}\d{4}-CUSA\d{5}_00-[A-Z0-9_]+$/.test(raw)
+            ? raw
+            : "";
+        }
+
+        function getPlayStationStoreLocaleForContentId(contentId) {
+          const prefix = String(contentId || "").slice(0, 2).toUpperCase();
+          if (prefix === "EP") return "en-gb";
+          if (prefix === "JP") return "ja-jp";
+          if (prefix === "HP") return "en-hk";
+          if (prefix === "UP") return "en-us";
+          return "en-us";
+        }
+
+        async function resolveDashboardPlayStationStoreUrl(target) {
+          if (!target?.name) return "";
+          const metaCfg = configMetaIndex.get(target.name) || null;
+          const cfg = (await getConfigCached(target.name)) || metaCfg;
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || metaCfg?.platform || cfg?.platform || "",
+          );
+          if (platform !== "shadps4") return "";
+          const explicitUrl = String(
+            target.ps_store_url ||
+              target.psStoreUrl ||
+              metaCfg?.ps_store_url ||
+              metaCfg?.psStoreUrl ||
+              cfg?.ps_store_url ||
+              cfg?.psStoreUrl ||
+              cfg?.playstation_store_url ||
+              cfg?.playstationStoreUrl ||
+              "",
+          ).trim();
+          if (/^https:\/\/store\.playstation\.com\//i.test(explicitUrl)) {
+            return explicitUrl;
+          }
+          const contentId = normalizePlayStationContentId(
+            target.ps_content_id ||
+              target.psContentId ||
+              metaCfg?.ps_content_id ||
+              metaCfg?.psContentId ||
+              metaCfg?.content_id ||
+              metaCfg?.contentId ||
+              cfg?.ps_content_id ||
+              cfg?.psContentId ||
+              cfg?.content_id ||
+              cfg?.contentId ||
+              cfg?.playstation_content_id ||
+              cfg?.playstationContentId ||
+              "",
+          );
+          if (contentId) {
+            const locale = getPlayStationStoreLocaleForContentId(contentId);
+            return `https://store.playstation.com/${locale}/product/${encodeURIComponent(
+              contentId,
+            )}`;
+          }
+          if (window.api?.resolvePlayStationStoreUrl) {
+            try {
+              const result = await window.api.resolvePlayStationStoreUrl({
+                appid:
+                  target.appid ||
+                  metaCfg?.appid ||
+                  cfg?.appid ||
+                  cfg?.title_id ||
+                  cfg?.titleId ||
+                  "",
+                name: target.name || metaCfg?.name || cfg?.name || "",
+                displayName:
+                  target?.displayName ||
+                  metaCfg?.displayName ||
+                  cfg?.displayName ||
+                  cfg?.name ||
+                  target?.name ||
+                  "",
+                ps_content_id: contentId,
+                ps_store_url: explicitUrl,
+              });
+              const resolvedUrl = String(result?.url || "").trim();
+              if (result?.ok && resolvedUrl) {
+                if (cfg && result.contentId) cfg.ps_content_id = result.contentId;
+                if (cfg && resolvedUrl) cfg.ps_store_url = resolvedUrl;
+                if (metaCfg && result.contentId) {
+                  metaCfg.ps_content_id = result.contentId;
+                }
+                if (metaCfg && resolvedUrl) metaCfg.ps_store_url = resolvedUrl;
+                return resolvedUrl;
+              }
+            } catch {}
+          }
+          const searchTerm = String(
+            target?.displayName ||
+              metaCfg?.displayName ||
+              cfg?.displayName ||
+              cfg?.name ||
+              target?.name ||
+              "",
+          )
+            .replace(/\s*\((?:PS4|shadps4)\)\s*$/i, "")
+            .trim();
+          return searchTerm
+            ? `https://store.playstation.com/en-us/search/${encodeURIComponent(
+                searchTerm,
+              )}`
+            : "";
+        }
+
+        async function resolveDashboardRpcs3WikiUrl(target) {
+          if (!target?.name) return "";
+          const metaCfg = configMetaIndex.get(target.name) || null;
+          const cfg = (await getConfigCached(target.name)) || metaCfg;
+          const platform = normalizeDashboardPlatformValue(
+            target.platform || metaCfg?.platform || cfg?.platform || "",
+          );
+          if (platform !== "rpcs3") return "";
+          const rawTitle = String(
+            target?.displayName ||
+              metaCfg?.displayName ||
+              cfg?.displayName ||
+              cfg?.name ||
+              target?.name ||
+              "",
+          )
+            .replace(/\s*\(RPCS3\)\s*$/i, "")
+            .replace(/[™®©]/g, "")
+            .trim();
+          if (!rawTitle) return "";
+          const wikiTitle = rawTitle.replace(/\s+/g, "_");
+          return `https://wiki.rpcs3.net/index.php?title=${encodeURIComponent(
+            wikiTitle,
+          )}`;
         }
 
         function updateDashboardContextMenuLabels(target) {
@@ -17290,6 +18685,21 @@
           );
           const steamDbBtn = dashboardContextMenu.querySelector(
             '.dash-menu-item[data-action="steamdb"]',
+          );
+          const epicStoreBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="epic-store"]',
+          );
+          const gogStoreBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="gog-store"]',
+          );
+          const playStationStoreBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="playstation-store"]',
+          );
+          const rpcs3WikiBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="rpcs3-wiki"]',
+          );
+          const eaAppBtn = dashboardContextMenu.querySelector(
+            '.dash-menu-item[data-action="ea-app"]',
           );
           const scope = getDashboardSelectionScope(target);
           const selectedEntries = getDashboardSelectedEntriesFromCards();
@@ -17342,15 +18752,84 @@
             deleteBtn.title = deleteBtn.textContent;
           }
           const normalizedPlatform = normalizeDashboardPlatformValue(
-            target.platform || "",
+            target.platform ||
+              configMetaIndex.get(target.name)?.platform ||
+              "",
           );
           const hasSteamAppId = /^\d+$/.test(String(target.appid || "").trim());
+          const supportsDirectSteamLink =
+            !normalizedPlatform ||
+            normalizedPlatform === "steam" ||
+            normalizedPlatform === "steam-official";
+          const supportsSteamMetadata =
+            supportsDirectSteamLink ||
+            normalizedPlatform === "uplay" ||
+            normalizedPlatform === "ubisoft-official";
+          const supportsEpicStoreMetadata =
+            normalizedPlatform === "epic" ||
+            normalizedPlatform === "epic-official";
+          const supportsGogStoreMetadata =
+            normalizedPlatform === "gog" ||
+            normalizedPlatform === "gog-official";
+          const supportsPlayStationStoreMetadata =
+            normalizedPlatform === "shadps4";
+          const supportsRpcs3WikiMetadata = normalizedPlatform === "rpcs3";
+          const supportsEaAppMetadata = normalizedPlatform === "ea-official";
           const hasResolvedSteamTarget =
             normalizedPlatform === "uplay" ||
             normalizedPlatform === "ubisoft-official"
               ? /^\d+$/.test(String(target.steamAppId || "").trim()) ||
                 hasSteamAppId
-              : hasSteamAppId;
+              : supportsDirectSteamLink && hasSteamAppId;
+          const hasEpicStoreTarget = supportsEpicStoreMetadata;
+          const hasGogStoreTarget = supportsGogStoreMetadata;
+          const shadps4Cusa = String(
+            target.appid || configMetaIndex.get(target.name)?.appid || "",
+          )
+            .trim()
+            .toUpperCase();
+          const shadps4StoreMeta = configMetaIndex.get(target.name) || {};
+          const hasShadps4StoreData = !!String(
+            target.ps_store_url ||
+              target.psStoreUrl ||
+              shadps4StoreMeta.ps_store_url ||
+              shadps4StoreMeta.psStoreUrl ||
+              target.ps_content_id ||
+              target.psContentId ||
+              shadps4StoreMeta.ps_content_id ||
+              shadps4StoreMeta.psContentId ||
+              shadps4Cusa ||
+              target.displayName ||
+              target.name ||
+              "",
+          ).trim();
+          const hasPlayStationStoreTarget =
+            supportsPlayStationStoreMetadata && hasShadps4StoreData;
+          const hasRpcs3WikiTarget =
+            supportsRpcs3WikiMetadata &&
+            !!String(target.displayName || target.name || "").trim();
+          const eaLaunchId = String(
+            target.appid ||
+              configMetaIndex.get(target.name)?.appid ||
+              target.ea_offer_id ||
+              target.eaOfferId ||
+              configMetaIndex.get(target.name)?.ea_offer_id ||
+              configMetaIndex.get(target.name)?.eaOfferId ||
+              "",
+          ).trim();
+          const hasEaAppTarget =
+            supportsEaAppMetadata &&
+            /^[A-Za-z0-9:._,-]+$/.test(eaLaunchId);
+          setMenuItemVisible(steamBtn, supportsSteamMetadata);
+          setMenuItemVisible(steamDbBtn, supportsSteamMetadata);
+          setMenuItemVisible(epicStoreBtn, supportsEpicStoreMetadata);
+          setMenuItemVisible(gogStoreBtn, supportsGogStoreMetadata);
+          setMenuItemVisible(
+            playStationStoreBtn,
+            supportsPlayStationStoreMetadata,
+          );
+          setMenuItemVisible(rpcs3WikiBtn, supportsRpcs3WikiMetadata);
+          setMenuItemVisible(eaAppBtn, supportsEaAppMetadata);
           if (steamBtn) {
             steamBtn.textContent = tUi("dashboardMenuSteam", "Steam");
             steamBtn.title = steamBtn.textContent;
@@ -17358,6 +18837,41 @@
           if (steamDbBtn) {
             steamDbBtn.textContent = tUi("dashboardMenuSteamDb", "SteamDB");
             steamDbBtn.title = steamDbBtn.textContent;
+          }
+          if (epicStoreBtn) {
+            epicStoreBtn.textContent = tUi(
+              "dashboardMenuEpicStore",
+              "Epic Store",
+            );
+            epicStoreBtn.title = epicStoreBtn.textContent;
+          }
+          if (gogStoreBtn) {
+            gogStoreBtn.textContent = tUi(
+              "dashboardMenuGogStore",
+              "GOG Store",
+            );
+            gogStoreBtn.title = gogStoreBtn.textContent;
+          }
+          if (eaAppBtn) {
+            eaAppBtn.textContent = tUi(
+              "dashboardMenuEaApp",
+              "EA App",
+            );
+            eaAppBtn.title = eaAppBtn.textContent;
+          }
+          if (playStationStoreBtn) {
+            playStationStoreBtn.textContent = tUi(
+              "dashboardMenuPlayStationStore",
+              "PlayStation Store",
+            );
+            playStationStoreBtn.title = playStationStoreBtn.textContent;
+          }
+          if (rpcs3WikiBtn) {
+            rpcs3WikiBtn.textContent = tUi(
+              "dashboardMenuRpcs3Wiki",
+              "RPCS3 Wiki",
+            );
+            rpcs3WikiBtn.title = rpcs3WikiBtn.textContent;
           }
           if (redownloadCoverBtn) {
             const hasCustomCover = !!String(
@@ -17394,6 +18908,11 @@
           );
           setMenuItemDisabled(steamBtn, !hasResolvedSteamTarget);
           setMenuItemDisabled(steamDbBtn, !hasResolvedSteamTarget);
+          setMenuItemDisabled(epicStoreBtn, !hasEpicStoreTarget);
+          setMenuItemDisabled(gogStoreBtn, !hasGogStoreTarget);
+          setMenuItemDisabled(playStationStoreBtn, !hasPlayStationStoreTarget);
+          setMenuItemDisabled(rpcs3WikiBtn, !hasRpcs3WikiTarget);
+          setMenuItemDisabled(eaAppBtn, !hasEaAppTarget);
         }
 
         function focusDashboardMenuItem(index) {
@@ -18509,6 +20028,127 @@
                   }
                 } else {
                   window.open(url, "_blank", "noopener");
+                }
+                return;
+              }
+              if (action === "epic-store") {
+                const slug = await resolveDashboardEpicStoreSlug(target);
+                let url = slug
+                  ? `https://store.epicgames.com/en-US/p/${encodeURIComponent(
+                      slug,
+                    )}`
+                  : "";
+                if (!url) {
+                  url = await resolveDashboardEpicStoreUrl(target);
+                }
+                if (!url) {
+                  url = await buildDashboardEpicStoreFallbackSearchUrl(target);
+                }
+                if (!url) {
+                  showNotification(
+                    tUi(
+                      "alert.missingAppIdConfigShort",
+                      "Missing AppID for this config.",
+                    ),
+                    "#f44336",
+                  );
+                  return;
+                }
+                if (window.api?.openExternalUrl) {
+                  const result = await window.api.openExternalUrl(url);
+                  if (!result?.success) {
+                    throw new Error(result?.error || "open-external-failed");
+                  }
+                } else {
+                  window.open(url, "_blank", "noopener");
+                }
+                return;
+              }
+              if (action === "gog-store") {
+                const url = await resolveDashboardGogStoreUrl(target);
+                if (!url) {
+                  showNotification(
+                    tUi(
+                      "alert.missingAppIdConfigShort",
+                      "Missing AppID for this config.",
+                    ),
+                    "#f44336",
+                  );
+                  return;
+                }
+                if (window.api?.openExternalUrl) {
+                  const result = await window.api.openExternalUrl(url);
+                  if (!result?.success) {
+                    throw new Error(result?.error || "open-external-failed");
+                  }
+                } else {
+                  window.open(url, "_blank", "noopener");
+                }
+                return;
+              }
+              if (action === "playstation-store") {
+                const url = await resolveDashboardPlayStationStoreUrl(target);
+                if (!url) {
+                  showNotification(
+                    tUi(
+                      "alert.missingPlayStationStoreConfig",
+                      "Missing PlayStation Store data for this config.",
+                    ),
+                    "#f44336",
+                  );
+                  return;
+                }
+                if (window.api?.openExternalUrl) {
+                  const result = await window.api.openExternalUrl(url);
+                  if (!result?.success) {
+                    throw new Error(result?.error || "open-external-failed");
+                  }
+                } else {
+                  window.open(url, "_blank", "noopener");
+                }
+                return;
+              }
+              if (action === "rpcs3-wiki") {
+                const url = await resolveDashboardRpcs3WikiUrl(target);
+                if (!url) {
+                  showNotification(
+                    tUi(
+                      "alert.missingRpcs3WikiConfig",
+                      "Missing RPCS3 Wiki data for this config.",
+                    ),
+                    "#f44336",
+                  );
+                  return;
+                }
+                if (window.api?.openExternalUrl) {
+                  const result = await window.api.openExternalUrl(url);
+                  if (!result?.success) {
+                    throw new Error(result?.error || "open-external-failed");
+                  }
+                } else {
+                  window.open(url, "_blank", "noopener");
+                }
+                return;
+              }
+              if (action === "ea-app") {
+                const launchId = await resolveDashboardEaLaunchId(target);
+                if (!/^[A-Za-z0-9:._,-]+$/.test(launchId)) {
+                  showNotification(
+                    tUi(
+                      "alert.missingEaOfferIdConfig",
+                      "Missing EA launch ID for this config.",
+                    ),
+                    "#f44336",
+                  );
+                  return;
+                }
+                if (window.api?.openEaApp) {
+                  const result = await window.api.openEaApp({ launchId });
+                  if (!result?.success) {
+                    throw new Error(result?.error || "open-ea-app-failed");
+                  }
+                } else {
+                  throw new Error("open-ea-app-unavailable");
                 }
                 return;
               }
