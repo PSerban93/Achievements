@@ -1501,6 +1501,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
   let created = 0;
   let updated = 0;
   let skipped = 0;
+  let blacklistedSkipped = 0;
   let skippedUnchanged = 0;
   let skippedNoAchievementsCached = 0;
   let failed = 0;
@@ -1543,6 +1544,34 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
       const existingBeforeSchema = getExistingForAsset(asset, {
         allowNamespace: false,
       });
+      const existingForBlacklist =
+        existingBeforeSchema ||
+        getExistingForAsset(asset, {
+          allowNamespace: true,
+        });
+      const blacklistProductId = firstNonEmpty(
+        existingForBlacklist?.config?.epic_product_id,
+        existingForBlacklist?.config?.epicProductId,
+        existingForBlacklist?.config?.appid,
+        asset.productId,
+        asset.namespace,
+      );
+      if (
+        typeof options?.isTitleBlacklisted === "function" &&
+        options.isTitleBlacklisted(blacklistProductId, "epic-official")
+      ) {
+        skipped += 1;
+        blacklistedSkipped += 1;
+        epicOfficialLogger.info(
+          "epic-official:import-library:skip-blacklisted",
+          {
+            appid: blacklistProductId || null,
+            namespace: asset.namespace || null,
+            title: detail || null,
+          },
+        );
+        return;
+      }
       const existingSchema = resolveExistingEpicOfficialSchema(
         existingBeforeSchema,
         schemaRoot,
@@ -1960,6 +1989,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     created,
     updated,
     skipped,
+    blacklistedSkipped,
     skippedUnchanged,
     skippedNoAchievementsCached,
     failed,
@@ -1984,6 +2014,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     created,
     updated,
     skipped,
+    blacklistedSkipped,
     skippedUnchanged,
     skippedNoAchievementsCached,
     failed,

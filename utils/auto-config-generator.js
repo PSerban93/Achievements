@@ -53,6 +53,7 @@ const userDataDir = app?.getPath("userData")
   : path.join(os.tmpdir(), "Achievements");
 let preferencesPath = path.join(userDataDir, "preferences.json");
 const BLACKLIST_PREF_KEY = "blacklistedAppIds";
+const BLACKLIST_CONFIG_PREF_KEY = "blacklistedConfigKeys";
 const defaultUplaySteamMapPath = path.join(
   __dirname,
   "..",
@@ -351,6 +352,32 @@ function getBlacklistedAppIdsSet() {
     list
       .map((id) => String(id || "").trim())
       .filter((id) => /^[0-9a-fA-F]+$/.test(id)),
+  );
+}
+function getBlacklistedConfigKeysSet() {
+  const prefs = readPrefsSafe();
+  const list = Array.isArray(prefs[BLACKLIST_CONFIG_PREF_KEY])
+    ? prefs[BLACKLIST_CONFIG_PREF_KEY]
+    : [];
+  return new Set(
+    list
+      .map((entry) => String(entry || "").trim().toLowerCase())
+      .filter((entry) => /^[0-9a-f]+::[^:]+$/.test(entry)),
+  );
+}
+function isGeneratorTargetBlacklisted(
+  appid,
+  platform,
+  appIds,
+  configKeys,
+) {
+  const normalizedAppId = String(appid || "").trim();
+  if (!normalizedAppId) return false;
+  if (appIds.has(normalizedAppId)) return true;
+  const normalizedPlatform = normalizePlatform(platform);
+  if (!normalizedPlatform) return false;
+  return configKeys.has(
+    `${normalizedAppId.toLowerCase()}::${normalizedPlatform}`,
   );
 }
 function readJsonSafe(fp) {
@@ -2492,6 +2519,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
   const folders = dirents.filter((d) => d.isDirectory()).map((d) => d.name);
   const appidFolders = folders.filter((f) => /^[0-9a-fA-F]+$/.test(f));
   const blacklist = getBlacklistedAppIdsSet();
+  const configBlacklist = getBlacklistedConfigKeysSet();
   // nothing found
   if (appidFolders.length === 0) {
     autoConfigLogger.warn("scan:no-appids", { folderPath });
@@ -2560,8 +2588,18 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       phase: "preparing",
       detail: "Preparing config generation",
     });
-    if (blacklist.has(String(appid))) {
-      autoConfigLogger.info("scan:skip-blacklisted", { appid });
+    if (
+      isGeneratorTargetBlacklisted(
+        appid,
+        itemForcedPlatform,
+        blacklist,
+        configBlacklist,
+      )
+    ) {
+      autoConfigLogger.info("scan:skip-blacklisted", {
+        appid,
+        platform: itemForcedPlatform || null,
+      });
       skipped++;
       emitBatchProgress(itemIndex, 100, {
         appid,
@@ -2599,6 +2637,32 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       mapping: mappingForRun,
       forcePlatform: itemForcedPlatform,
     });
+    const blacklistPlatform =
+      itemForcedPlatform ||
+      normalizePlatform(existingByPath?.config?.platform) ||
+      normalizePlatform(initialPlatformMeta.platform) ||
+      null;
+    if (
+      isGeneratorTargetBlacklisted(
+        appid,
+        blacklistPlatform,
+        blacklist,
+        configBlacklist,
+      )
+    ) {
+      autoConfigLogger.info("scan:skip-blacklisted", {
+        appid,
+        platform: blacklistPlatform,
+      });
+      skipped++;
+      emitBatchProgress(itemIndex, 100, {
+        appid,
+        itemName: appid,
+        phase: "skipped",
+        detail: "AppID is blacklisted",
+      });
+      continue;
+    }
     let name = existingByPath?.name || null;
     autoConfigLogger.info("scan:processing-appid", {
       appid,

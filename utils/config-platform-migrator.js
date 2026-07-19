@@ -11,6 +11,7 @@ const VALID_PLATFORMS = new Set([
   "epic-official",
   "gog",
   "gog-official",
+  "xbox-pc",
   "xenia",
   "rpcs3",
   "shadps4",
@@ -33,12 +34,20 @@ function sanitizeEpicOfficialAppId(value) {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(raw) ? raw : "";
 }
 
+function sanitizeXboxPcTitleId(value) {
+  const raw = String(value || "").trim();
+  return /^\d{1,20}$/.test(raw) ? raw : "";
+}
+
 function sanitizeAppIdForPlatform(value, platform) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   const normalized = normalizePlatform(platform);
   if (normalized === "epic-official") {
     return sanitizeEpicOfficialAppId(raw);
+  }
+  if (normalized === "xbox-pc") {
+    return sanitizeXboxPcTitleId(raw);
   }
   if (normalized === "rpcs3") {
     // Trophy set ids like NPWR12345_00
@@ -75,6 +84,9 @@ function inferOfficialPlatformFromMarkers(config = {}) {
   if (configPath.includes(`${schemaNeedle}epic-official${path.sep}`)) {
     return "epic-official";
   }
+  if (configPath.includes(`${schemaNeedle}xbox-pc${path.sep}`)) {
+    return "xbox-pc";
+  }
 
   const hasEpicOfficialProductMarker = Boolean(
     config?.epic_product_id || config?.epicProductId,
@@ -108,6 +120,14 @@ function inferOfficialPlatformFromMarkers(config = {}) {
   }
   if (config?.ea_log_file) {
     return "ea-official";
+  }
+  if (
+    config?.xbox_title_id ||
+    config?.xbox_xuid ||
+    config?.xbox_package_family_name ||
+    config?.xbox_aumid
+  ) {
+    return "xbox-pc";
   }
   return "";
 }
@@ -155,7 +175,8 @@ function inferPlatformAndSteamId({ config, mapping }) {
     platform === "epic" ||
     platform === "epic-official" ||
     platform === "gog" ||
-    platform === "gog-official"
+    platform === "gog-official" ||
+    platform === "xbox-pc"
   ) {
     steamAppId = "";
   } else if (platform === "xenia" || platform === "rpcs3") {
@@ -314,6 +335,12 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
       !platforms?.has("uplay") &&
       !platforms?.has("gog") &&
       !platforms?.has("epic");
+    const prefersXboxPc =
+      platforms?.has("xbox-pc") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog") &&
+      !platforms?.has("epic");
     const targetPlatform = prefersUplay
       ? "uplay"
       : prefersGogOfficial
@@ -322,6 +349,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
         ? "ea-official"
       : prefersEpicOfficial
         ? "epic-official"
+      : prefersXboxPc
+        ? "xbox-pc"
       : prefersGog
         ? "gog"
         : "steam";
@@ -379,6 +408,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
                 ? "epic-official"
               : platform === "gog-official"
                 ? "gog-official"
+              : platform === "xbox-pc"
+                ? "xbox-pc"
               : platform === "xenia"
                 ? "xenia"
                 : platform === "rpcs3"

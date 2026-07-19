@@ -6,6 +6,7 @@ const RARITY_SOURCES = Object.freeze({
   steamGlobal: "steam-global-achievement-percentages",
   epicPublic: "epic-public-achievement-percentages",
   gogGameplay: "gog-gameplay-achievement-percentages",
+  xboxNetwork: "xbox-network",
 });
 
 const DEFAULT_SOURCE = RARITY_SOURCES.steamGlobal;

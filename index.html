@@ -1671,6 +1671,58 @@
                   </div>
                 </div>
                 <hr style="margin: 18px 0 14px" />
+                <div class="settings-section" style="margin-bottom: 5px">
+                  <h4
+                    id="settings-xboxPcTitle"
+                    data-i18n="settings.xboxPc.title"
+                  >
+                    Xbox PC (Microsoft / Xbox Network)
+                  </h4>
+                  <div
+                    id="settings-xboxPcStatus"
+                    data-i18n="settings.xboxPc.notConnected"
+                    class="hint"
+                    style="margin-top: 6px"
+                  >
+                    Not connected.
+                  </div>
+                  <div class="settings-control" style="gap: 8px">
+                    <button
+                      type="button"
+                      id="settings-xboxPcConnectBtn"
+                      data-i18n="settings.xboxPc.connect"
+                    >
+                      Connect Xbox
+                    </button>
+                    <button
+                      type="button"
+                      id="settings-xboxPcDisconnectBtn"
+                      data-i18n="settings.xboxPc.disconnect"
+                    >
+                      Disconnect
+                    </button>
+                    <button
+                      type="button"
+                      id="settings-xboxPcImportBtn"
+                      data-i18n="settings.xboxPc.importLibrary"
+                    >
+                      Import Xbox PC
+                    </button>
+                  </div>
+                  <div
+                    id="settings-xboxPcHint"
+                    data-i18n="settings.xboxPc.hint"
+                    class="hint"
+                    style="margin-top: 6px; margin-bottom: 30px"
+                  >
+                    Sign in with the Microsoft account used by the Xbox app.
+                    Authentication and Xbox Network tokens are stored encrypted;
+                    your Microsoft password is never stored. This direct Xbox
+                    OAuth route is experimental and can be restricted by
+                    Microsoft.
+                  </div>
+                </div>
+                <hr style="margin: 18px 0 14px" />
                 <div class="settings-section">
                   <h4 id="settings-blacklistTitle">Blacklist</h4>
                   <div class="checkbox-control">
@@ -3368,6 +3420,35 @@
 
               <div class="settings-section">
                 <details class="platform-guide-item">
+                  <summary id="platformGuideXboxPcSummary">
+                    Xbox PC (Microsoft / Xbox Network)
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideXboxPcItem1">
+                      Select <strong>Connect Xbox</strong>, sign in to the
+                      Microsoft account used by the Xbox app, then use
+                      <strong>Import Xbox PC</strong>.
+                    </li>
+                    <li id="platformGuideXboxPcItem2">
+                      Only Windows/PC achievement titles and locally matched
+                      Xbox App installations are imported.
+                    </li>
+                    <li id="platformGuideXboxPcItem3">
+                      Local discovery reads <code>MicrosoftGame.config</code>
+                      from GDK packages and <code>XboxGames</code> folders.
+                    </li>
+                    <li id="platformGuideXboxPcItem4">
+                      The active title is first refreshed after 45 seconds,
+                      then every 5 seconds. Existing
+                      unlocks seed the cache silently; later unlocks trigger
+                      notifications.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
                   <summary id="platformGuideUbisoftOfficialSummary">
                     Ubisoft Connect (Official)
                   </summary>
@@ -4024,6 +4105,9 @@
                           <option value="gog">GOG</option>
                           <option value="gog-official" disabled>
                             GOG (Official)
+                          </option>
+                          <option value="xbox-pc" disabled>
+                            Xbox PC (Microsoft / Xbox Network)
                           </option>
                           <option value="xenia" disabled>Xenia</option>
                           <option value="rpcs3" disabled>RPCS3</option>
@@ -9256,6 +9340,7 @@
               "epic-official",
               "gog",
               "gog-official",
+              "xbox-pc",
               "xenia",
               "rpcs3",
               "shadps4",
@@ -10019,6 +10104,7 @@
         }
         syncAppLanguageOptions();
         await syncSteamOfficialAccountDropdown(getCachedPreferences());
+        await syncXboxPcStatus();
         if (appLanguageSelect) appLanguageSelect.value = uiLanguage;
         refreshAppThemeText();
         renderSchemaLanguageSelection(getCachedPreferences());
@@ -12757,6 +12843,51 @@
         if (hiddenSound) hiddenSound.value = rareSound;
       }
 
+      let __xboxPcStatusSyncActive = false;
+
+      async function syncXboxPcStatus() {
+        if (__xboxPcStatusSyncActive) return null;
+        __xboxPcStatusSyncActive = true;
+        try {
+          const statusEl = document.getElementById("settings-xboxPcStatus");
+          const connectBtn = document.getElementById(
+            "settings-xboxPcConnectBtn",
+          );
+          const disconnectBtn = document.getElementById(
+            "settings-xboxPcDisconnectBtn",
+          );
+          const importBtn = document.getElementById("settings-xboxPcImportBtn");
+          if (!statusEl || !window.api?.getXboxPcStatus) return null;
+          const status = await window.api.getXboxPcStatus();
+          if (status?.connected) {
+            const account =
+              String(status.gamertag || "").trim() ||
+              String(status.xuid || "").trim();
+            statusEl.textContent = tUiFmt(
+              "settings.xboxPc.connected",
+              { account },
+              `Connected directly to Xbox Network: ${account}`,
+            );
+          } else if (status?.configured) {
+            statusEl.textContent = tUi(
+              "settings.xboxPc.refreshFailed",
+              "Microsoft/Xbox tokens could not be refreshed.",
+            );
+          } else {
+            statusEl.textContent = tUi(
+              "settings.xboxPc.notConnected",
+              "Not connected.",
+            );
+          }
+          if (connectBtn) connectBtn.disabled = status?.connected === true;
+          if (disconnectBtn) disconnectBtn.disabled = !status?.configured;
+          if (importBtn) importBtn.disabled = !status?.connected;
+          return status;
+        } finally {
+          __xboxPcStatusSyncActive = false;
+        }
+      }
+
       function applyEmulatorNotificationPreferences(prefs = {}) {
         for (const setting of EMULATOR_NOTIFICATION_SETTINGS) {
           const position =
@@ -12814,6 +12945,7 @@
         renderSteamApiKeyStatusFromPrefs(prefs);
         await syncSteamOfficialAccountDropdown(prefs);
         await syncEpicOfficialAccountStatus();
+        await syncXboxPcStatus();
         applyShowBlacklistPreference(prefs?.showBlacklistedGames);
         await syncBlacklistList();
         renderBlacklistList();
@@ -13494,6 +13626,107 @@
               await syncEpicOfficialAccountStatus();
             });
           }
+
+          const xboxPcConnectBtn = document.getElementById(
+            "settings-xboxPcConnectBtn",
+          );
+          if (xboxPcConnectBtn && !xboxPcConnectBtn.dataset.bound) {
+            xboxPcConnectBtn.dataset.bound = "1";
+            xboxPcConnectBtn.addEventListener("click", async () => {
+              xboxPcConnectBtn.disabled = true;
+              try {
+                const result = await window.api.connectXboxPc();
+                showNotification(
+                  result?.success
+                    ? tUiFmt(
+                        "settings.xboxPc.connectSuccess",
+                        {
+                          account:
+                            result.gamertag ||
+                            result.xuid ||
+                            "Xbox Network",
+                        },
+                        `Xbox PC connected: ${result.gamertag || result.xuid || "Xbox Network"}`,
+                      )
+                    : tUi(
+                        "settings.xboxPc.connectFailed",
+                        "Xbox PC connection failed.",
+                      ),
+                  result?.success ? "#4CAF50" : "#f44336",
+                );
+              } finally {
+                await syncXboxPcStatus();
+              }
+            });
+          }
+
+          const xboxPcDisconnectBtn = document.getElementById(
+            "settings-xboxPcDisconnectBtn",
+          );
+          if (xboxPcDisconnectBtn && !xboxPcDisconnectBtn.dataset.bound) {
+            xboxPcDisconnectBtn.dataset.bound = "1";
+            xboxPcDisconnectBtn.addEventListener("click", async () => {
+              const result = await window.api.disconnectXboxPc();
+              if (!result?.success) {
+                showNotification(
+                  tUi(
+                    "settings.xboxPc.disconnectFailed",
+                    "Xbox PC disconnect failed.",
+                  ),
+                  "#f44336",
+                );
+              }
+              await syncXboxPcStatus();
+            });
+          }
+
+          const xboxPcImportBtn = document.getElementById(
+            "settings-xboxPcImportBtn",
+          );
+          if (xboxPcImportBtn && !xboxPcImportBtn.dataset.bound) {
+            xboxPcImportBtn.dataset.bound = "1";
+            xboxPcImportBtn.addEventListener("click", async () => {
+              xboxPcImportBtn.disabled = true;
+              try {
+                const result = await window.api.importXboxPcLibrary();
+                showNotification(
+                  result?.success
+                    ? tUiFmt(
+                        "settings.xboxPc.importComplete",
+                        {
+                          created: Number(result.created) || 0,
+                          updated: Number(result.updated) || 0,
+                          skipped: Number(result.skipped) || 0,
+                          failed: Number(result.failed) || 0,
+                        },
+                        `Xbox PC import complete. Created ${Number(result.created) || 0}, updated ${Number(result.updated) || 0}, skipped ${Number(result.skipped) || 0}, failed ${Number(result.failed) || 0}.`,
+                      )
+                    : tUi(
+                        "settings.xboxPc.importFailed",
+                        "Xbox PC library import failed.",
+                      ),
+                  result?.success ? "#4CAF50" : "#f44336",
+                );
+                if (result?.success) {
+                  if (typeof reloadConfigsDropdown === "function") {
+                    await reloadConfigsDropdown(true).catch(() => {});
+                  }
+                  if (typeof window.refreshFoldersList === "function") {
+                    window.refreshFoldersList();
+                  }
+                }
+              } catch (error) {
+                showNotification(
+                  tUi(
+                    "settings.xboxPc.importFailed",
+                    "Xbox PC library import failed.",
+                  ),
+                  "#f44336",
+                );
+              }
+              await syncXboxPcStatus();
+            });
+          }
         } catch (e) {
           console.warn(
             tUi("log.settingsLoadFailed", "Settings cannot be loaded:"),
@@ -13513,6 +13746,7 @@
         const prefs = getCachedPreferences();
         renderSteamApiKeyStatusFromPrefs(prefs);
         await syncEpicOfficialAccountStatus();
+        await syncXboxPcStatus();
         renderSchemaLanguageSelection(prefs);
         bindSchemaLanguageSelectionEvents();
         const startMaxEl = document.getElementById(
@@ -14373,6 +14607,7 @@
           capture: true,
         });
         void syncEpicOfficialAccountStatus();
+        void syncXboxPcStatus();
       }
 
       if (window.api?.on) {
@@ -19251,6 +19486,8 @@
               return "GOG";
             case "gog-official":
               return "GOG Official";
+            case "xbox-pc":
+              return "Xbox PC";
             case "xenia":
               return "Xenia";
             case "rpcs3":

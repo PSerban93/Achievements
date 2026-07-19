@@ -6,6 +6,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test:xbox-pc": "node tests/xbox-pc.test.js",
     "pack": "electron-builder --dir",
     "dl-browsers": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 node ./node_modules/playwright-core/cli.js install chromium chromium-headless-shell",
     "dist": "npm run dl-browsers && electron-builder --win --x64"
@@ -100,6 +101,7 @@
     ]
   },
   "dependencies": {
+    "@xboxreplay/xboxlive-auth": "^5.1.0",
     "adm-zip": "^0.6.0",
     "axios": "^1.12.0",
     "cheerio": "^1.1.2",

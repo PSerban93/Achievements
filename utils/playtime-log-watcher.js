@@ -320,7 +320,8 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
     platform === "gog-official" ||
     platform === "epic" ||
     platform === "epic-official" ||
-    platform === "ea-official";
+    platform === "ea-official" ||
+    platform === "xbox-pc";
   const imageDir = path.join(userDataDir, "images", platform, String(appid));
   try {
     if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
@@ -567,6 +568,7 @@ function startPlaytimeLogWatcher(configData) {
     platform === "epic" ||
     platform === "epic-official" ||
     platform === "ea-official" ||
+    platform === "xbox-pc" ||
     isSteamGridOnly
       ? pathToFileURL(logoFallbackPath).toString()
       : remoteHeaderUrl;

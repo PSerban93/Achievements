@@ -125,6 +125,9 @@ const epicOfficialPassiveLoadSync = new Map();
 const epicOfficialSilentSeedState = new Map();
 const epicOfficialCacheOnlyLogState = new Map();
 const epicOfficialRecentUnlockNotificationState = new Map();
+const xboxPcLoadSyncInflight = new Map();
+const xboxPcRecentLoadSync = new Map();
+const XBOX_PC_RECENT_SYNC_MAX_ENTRIES = 500;
 const EPIC_OFFICIAL_LOAD_SYNC_DEDUPE_MS = 2000;
 const EPIC_OFFICIAL_RECENT_SYNC_TTL_MS = 5 * 60 * 1000;
 const EPIC_OFFICIAL_PASSIVE_SYNC_TTL_MS = 10 * 60 * 1000;
@@ -160,6 +163,9 @@ const rarityLogger = createLogger("rarity");
 const updateLogger = createLogger("updates");
 const epicOfficialLogger = createLogger("epic-official", {
   level: process.env.EPIC_OFFICIAL_LOG_LEVEL || "info",
+});
+const xboxPcLogger = createLogger("xbox-pc", {
+  level: process.env.XBOX_PC_LOG_LEVEL || "info",
 });
 const controllerLogger = createLogger("controller", {
   level: process.env.CONTROLLER_LOG_LEVEL || "info",
@@ -2536,6 +2542,7 @@ function findConfigDirFromSelection(selDir, appid = "", platform = "") {
       "epic-official",
       "gog",
       "gog-official",
+      "xbox-pc",
     ].forEach((plat) =>
       pushCandidate(path.join(selDir, plat, normalizedAppId)),
     );
@@ -7503,6 +7510,7 @@ async function seedEpicOfficialImportCaches(imported = [], options = {}) {
     seeded: 0,
     unchanged: 0,
     skipped: 0,
+    blacklistedSkipped: 0,
     skippedExistingCache: 0,
     failed: 0,
   };
@@ -7597,6 +7605,18 @@ async function seedEpicOfficialImportCaches(imported = [], options = {}) {
       stats.skipped += 1;
       return;
     }
+    if (isAppIdBlacklisted(entry?.appid, "epic-official")) {
+      stats.skipped += 1;
+      stats.blacklistedSkipped += 1;
+      epicOfficialLogger.info(
+        "epic-official:import-cache-seed:skip-blacklisted",
+        {
+          configName: safeName,
+          appid: entry?.appid || null,
+        },
+      );
+      return;
+    }
 
     try {
       const configPath = path.join(configsDir, `${safeName}.json`);
@@ -7607,6 +7627,25 @@ async function seedEpicOfficialImportCaches(imported = [], options = {}) {
       const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
       if (normalizePlatform(config?.platform) !== "epic-official") {
         stats.skipped += 1;
+        return;
+      }
+      const configProductId = String(
+        config?.epic_product_id ||
+          config?.epicProductId ||
+          config?.appid ||
+          entry?.appid ||
+          "",
+      ).trim();
+      if (isAppIdBlacklisted(configProductId, "epic-official")) {
+        stats.skipped += 1;
+        stats.blacklistedSkipped += 1;
+        epicOfficialLogger.info(
+          "epic-official:import-cache-seed:skip-blacklisted",
+          {
+            configName: safeName,
+            appid: configProductId || null,
+          },
+        );
         return;
       }
       const schemaPath = resolveAchievementsSchemaPath(config);
@@ -7747,6 +7786,8 @@ ipcMain.handle("epic-official:import-library", async () => {
         accountId,
         schemaRootDir: SCHEMA_ROOT_PATH,
         timeoutMs: 15000,
+        isTitleBlacklisted: (productId, platform) =>
+          isAppIdBlacklisted(productId, platform || "epic-official"),
         onProgress: (progress = {}) => {
           progressJob?.update({
             itemName: progress?.itemName || progress?.detail || "Epic Official",
@@ -7809,6 +7850,7 @@ ipcMain.handle("epic-official:import-library", async () => {
       created: result?.created || 0,
       updated: result?.updated || 0,
       skipped: result?.skipped || 0,
+      blacklistedSkipped: result?.blacklistedSkipped || 0,
       skippedUnchanged: result?.skippedUnchanged || 0,
       skippedNoAchievementsCached: result?.skippedNoAchievementsCached || 0,
       withoutAchievements: result?.withoutAchievements || 0,
@@ -7822,7 +7864,7 @@ ipcMain.handle("epic-official:import-library", async () => {
     });
     return {
       success: true,
-      message: `Epic library imported. Created ${result.created}, updated ${result.updated}, unchanged ${result.skippedUnchanged || 0}, skipped ${result.withoutAchievements} without achievements.`,
+      message: `Epic library imported. Created ${result.created}, updated ${result.updated}, unchanged ${result.skippedUnchanged || 0}, skipped ${result.withoutAchievements} without achievements and ${result.blacklistedSkipped || 0} blacklisted.`,
       cacheSeed,
       ...result,
     };
@@ -7892,6 +7934,232 @@ ipcMain.handle("get-sound-files", () => {
     .readdirSync(userSoundsFolder)
     .filter((file) => isSupportedNotificationSoundFile(file));
   return files;
+});
+
+const XBOX_PC_AUTH_PARTITION = "persist:xbox-pc-microsoft-auth";
+
+async function clearXboxPcAuthSession(reason = "unknown") {
+  try {
+    const authSession = session.fromPartition(XBOX_PC_AUTH_PARTITION);
+    await authSession.clearStorageData({
+      storages: [
+        "cookies",
+        "localstorage",
+        "indexdb",
+        "serviceworkers",
+        "cachestorage",
+      ],
+    });
+    try {
+      await authSession.clearCache();
+    } catch {}
+    xboxPcLogger.info("xbox-pc:auth-session-cleared", { reason });
+  } catch (error) {
+    xboxPcLogger.warn("xbox-pc:auth-session-clear-failed", {
+      reason,
+      error: error?.message || String(error),
+    });
+  }
+}
+
+function waitForXboxPcAuthCode(parentWindow, clientId) {
+  return new Promise((resolve, reject) => {
+    const state = crypto.randomBytes(24).toString("hex");
+    let settled = false;
+    let authWindow = null;
+    const settle = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      try {
+        if (authWindow && !authWindow.isDestroyed()) authWindow.close();
+      } catch {}
+      fn(value);
+    };
+    try {
+      const loginUrl = buildXboxDirectAuthorizeUrl(clientId, state);
+      authWindow = new BrowserWindow({
+        width: 980,
+        height: 720,
+        parent:
+          parentWindow && !parentWindow.isDestroyed()
+            ? parentWindow
+            : undefined,
+        modal: false,
+        show: true,
+        title: "Connect Microsoft / Xbox Network",
+        webPreferences: {
+          partition: XBOX_PC_AUTH_PARTITION,
+          contextIsolation: true,
+          nodeIntegration: false,
+          sandbox: true,
+        },
+      });
+      const handleUrl = (url) => {
+        const result = extractXboxDirectAuthResult(url, state);
+        if (!result) return false;
+        if (result.tokens || result.code) settle(resolve, result);
+        else settle(reject, new Error(result.error || "xbox-pc-oauth-failed"));
+        return true;
+      };
+      const interceptNavigation = (event, url) => {
+        if (handleUrl(url)) event.preventDefault();
+      };
+      authWindow.webContents.on("will-navigate", interceptNavigation);
+      authWindow.webContents.on("will-redirect", interceptNavigation);
+      authWindow.webContents.on("did-navigate", (_event, url) =>
+        handleUrl(url),
+      );
+      authWindow.webContents.on("did-navigate-in-page", (_event, url) =>
+        handleUrl(url),
+      );
+      authWindow.on("closed", () => {
+        authWindow = null;
+        if (!settled) reject(new Error("xbox-pc-auth-cancelled"));
+      });
+      authWindow.loadURL(loginUrl).catch((error) => settle(reject, error));
+    } catch (error) {
+      settle(reject, error);
+    }
+  });
+}
+
+ipcMain.handle("xbox-pc:status", async () => {
+  const status = await getXboxPcStatus({
+    userDataDir: app.getPath("userData"),
+    timeoutMs: 15000,
+  });
+  return { success: status.connected === true, ...status };
+});
+
+ipcMain.handle("xbox-pc:connect", async (event) => {
+  try {
+    await clearXboxPcAuthSession("connect-start");
+    const parentWindow = BrowserWindow.fromWebContents(event.sender);
+    const authResult = await waitForXboxPcAuthCode(
+      parentWindow,
+      XBOX_PC_CLIENT_ID,
+    );
+    await completeXboxDirectAuthentication(
+      app.getPath("userData"),
+      authResult,
+    );
+    const status = await getXboxPcStatus({
+      userDataDir: app.getPath("userData"),
+      timeoutMs: 15000,
+    });
+    if (!status.connected) {
+      return {
+        success: false,
+        error: status.error || "Xbox Network account validation failed.",
+      };
+    }
+    xboxPcLogger.info("xbox-pc:connect-success", {
+      xuid: status.xuid || null,
+      gamertag: status.gamertag || null,
+    });
+    return { success: true, ...status };
+  } catch (error) {
+    const authError = getXboxPcAuthErrorInfo(error);
+    xboxPcLogger.warn("xbox-pc:connect-failed", {
+      error: error?.message || String(error),
+      ...authError,
+    });
+    const diagnostic = [
+      authError.stage ? `stage ${authError.stage}` : "",
+      authError.statusCode ? `HTTP ${authError.statusCode}` : "",
+      authError.xerr ? `XErr ${authError.xerr}` : "",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return {
+      success: false,
+      error: diagnostic
+        ? `Xbox authentication failed (${diagnostic}).`
+        : error?.message || String(error),
+    };
+  }
+});
+
+ipcMain.handle("xbox-pc:disconnect", async () => {
+  try {
+    stopXboxPcActivePoll("disconnect");
+    await clearXboxDirectAuth(app.getPath("userData"));
+    await clearXboxPcAuthSession("disconnect");
+    xboxPcLogger.info("xbox-pc:disconnect-success");
+    return { success: true, connected: false, configured: false };
+  } catch (error) {
+    xboxPcLogger.warn("xbox-pc:disconnect-failed", {
+      error: error?.message || String(error),
+    });
+    return { success: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle("xbox-pc:import-library", async () => {
+  let progressJob = null;
+  try {
+    progressJob = createGenerationProgressJob({
+      kind: "config-generate",
+      scope: "batch",
+      status: "running",
+      itemName: "Xbox PC",
+      appid: "",
+      phase: "fetchingLibrary",
+      detail: "Fetching Xbox PC achievement history",
+      current: 0,
+      total: 0,
+      percent: 5,
+    });
+    const result = await importXboxPcLibrary(configsDir, {
+      userDataDir: app.getPath("userData"),
+      schemaRootDir: SCHEMA_ROOT_PATH,
+      schemaLanguages: getSchemaLanguagesFromPreferences(),
+      timeoutMs: 15000,
+      isTitleBlacklisted: (titleId, platform) =>
+        isAppIdBlacklisted(titleId, platform || "xbox-pc"),
+      onProgress: (progress = {}) => {
+        progressJob?.update({
+          itemName: progress.detail || "Xbox PC",
+          appid: progress.appid || "",
+          phase: "importingLibrary",
+          detail: progress.detail || "",
+          current: Number(progress.current) || 0,
+          total: Number(progress.total) || 0,
+          percent: clampGenerationPercent(progress.percent, 5),
+        });
+      },
+    });
+    for (const entry of result.imported || []) {
+      savePreviousAchievements(entry.name, entry.snapshot || {}, "xbox-pc");
+    }
+    notifyConfigsChanged();
+    progressJob?.succeed({
+      phase: "completed",
+      detail: "Xbox PC library imported",
+      current: result.pcTitles || 0,
+      total: result.pcTitles || 0,
+      percent: 100,
+    });
+    return {
+      success: true,
+      message:
+        `Xbox PC import complete. Created ${result.created}, updated ` +
+        `${result.updated}, skipped ${result.skipped}, failed ${result.failed}.`,
+      ...result,
+    };
+  } catch (error) {
+    progressJob?.fail({
+      phase: "failed",
+      detail: error?.message || "Xbox PC import failed",
+    });
+    xboxPcLogger.warn("xbox-pc:import-library-failed", {
+      error: error?.message || String(error),
+    });
+    return {
+      success: false,
+      message: error?.message || "Xbox PC library import failed.",
+    };
+  }
 });
 
 ipcMain.handle("get-sound-path", (_event, fileName) => {
@@ -9226,6 +9494,7 @@ ipcMain.handle(
         "ea-official",
         "gog",
         "gog-official",
+        "xbox-pc",
         "epic",
         "epic-official",
         "shadps4",
@@ -9249,6 +9518,102 @@ ipcMain.handle(
               )) || {};
         return mergeManualAchievementOverrides(snapshot || {}, cached || {});
       };
+
+      if (normalizedPlatform === "xbox-pc") {
+        const cached = await getCacheFallback();
+        const titleId = String(
+          config?.xbox_title_id || config?.appid || "",
+        ).trim();
+        const xuid = String(config?.xbox_xuid || "").trim();
+        const syncKey = `${xuid}:${titleId}`;
+        if (titleId && isAppIdBlacklisted(titleId, "xbox-pc")) {
+          return {
+            achievements: await applyManualOverridesForReturn(
+              cached || {},
+              null,
+              cached || {},
+            ),
+            save_path: config.save_path || "",
+          };
+        }
+        const lastSync = Number(xboxPcRecentLoadSync.get(syncKey) || 0);
+        const activePollOwnsSync =
+          xboxPcActivePollState?.configName === safeName &&
+          isXboxPcConfigActiveForPolling(safeName);
+        const shouldSync =
+          Boolean(titleId && xuid) &&
+          !activePollOwnsSync &&
+          (safeName === sanitizeConfigName(selectedConfig || "") ||
+            !Object.keys(cached || {}).length) &&
+          Date.now() - lastSync >= 30000;
+        if (!shouldSync) {
+          return {
+            achievements: await applyManualOverridesForReturn(
+              cached || {},
+              null,
+              cached || {},
+            ),
+            save_path: config.save_path || "",
+          };
+        }
+        let job = xboxPcLoadSyncInflight.get(syncKey);
+        if (!job) {
+          job = syncXboxPcAchievements(config, {
+            userDataDir: app.getPath("userData"),
+            timeoutMs: 15000,
+          }).finally(() => {
+            xboxPcLoadSyncInflight.delete(syncKey);
+          });
+          xboxPcLoadSyncInflight.set(syncKey, job);
+        }
+        try {
+          const synced = await job;
+          const snapshot = mergeEarnedTimeFromCached(
+            synced?.snapshot || {},
+            cached || {},
+          );
+          savePreviousAchievements(safeName, snapshot, "xbox-pc");
+          markXboxPcRecentSync(syncKey);
+          const statePath = path.join(
+            String(config.save_path || ""),
+            "achievements.json",
+          );
+          if (config.save_path) {
+            try {
+              fs.mkdirSync(config.save_path, { recursive: true });
+              fs.writeFileSync(statePath, JSON.stringify(snapshot, null, 2));
+            } catch (error) {
+              xboxPcLogger.warn("xbox-pc:state-write-failed", {
+                configName: safeName,
+                error: error?.message || String(error),
+              });
+            }
+          }
+          return {
+            achievements: await applyManualOverridesForReturn(
+              snapshot,
+              null,
+              snapshot,
+            ),
+            save_path: config.save_path || "",
+          };
+        } catch (error) {
+          xboxPcLogger.warn("xbox-pc:load-sync-failed", {
+            configName: safeName,
+            titleId: titleId || null,
+            error: error?.message || String(error),
+          });
+          return {
+            achievements: await applyManualOverridesForReturn(
+              cached || {},
+              null,
+              cached || {},
+            ),
+            save_path: config.save_path || "",
+            error: error?.message || String(error),
+          };
+        }
+      }
 
       if (normalizedPlatform === "xenia") {
         const gpdPath = resolveGpdPathForConfig(config);
@@ -10265,7 +10630,8 @@ ipcMain.handle("delete-config", async (_event, payload) => {
           platform === "epic-official" ||
           platform === "gog-official" ||
           platform === "ubisoft-official" ||
-          platform === "ea-official"
+          platform === "ea-official" ||
+          platform === "xbox-pc"
         ) {
           logDeleteInfo("delete-config:save-delete-skip", {
             configName,
@@ -10473,6 +10839,49 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
         ? addConfigKeyToBlacklist(resolvedAppId, resolvedPlatform)
         : addAppIdToBlacklist(resolvedAppId);
 
+    if (!removeFlag) {
+      const activeEpicPollName = epicOfficialActivePollState?.configName || "";
+      if (
+        activeEpicPollName &&
+        isEpicOfficialConfigBlacklisted(activeEpicPollName)
+      ) {
+        stopEpicOfficialActivePoll("blacklisted", {
+          configName: activeEpicPollName,
+          appid: resolvedAppId,
+        });
+      }
+      const activeXboxPollName = xboxPcActivePollState?.configName || "";
+      if (
+        activeXboxPollName &&
+        isXboxPcConfigBlacklisted(activeXboxPollName)
+      ) {
+        stopXboxPcActivePoll("blacklisted", {
+          configName: activeXboxPollName,
+          appid: resolvedAppId,
+        });
+      }
+      if (selectedConfig) {
+        const activeConfigName = sanitizeConfigName(selectedConfig);
+        const activeConfig = activeConfigName
+          ? readConfigForAchievementCache(activeConfigName)
+          : null;
+        const activeAppId = String(
+          activeConfig?.xbox_title_id || activeConfig?.appid || "",
+        ).trim();
+        const activePlatform =
+          normalizePlatform(activeConfig?.platform) || null;
+        if (
+          activeAppId &&
+          isAppIdBlacklisted(activeAppId, activePlatform)
+        ) {
+          await clearActiveConfigSelection({
+            reason: "config-blacklisted",
+            configName: activeConfigName,
+          });
+        }
+      }
+    }
+
     if (removeFlag) {
       try {
         ipcMain.emit("blacklist:removed-appid", null, resolvedAppId);
@@ -10647,6 +11056,13 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
           {},
           "EA (Official) schemas are generated from EA Desktop achievement logs. Rescan the EA Desktop Logs root instead.",
         ),
+      };
+    }
+    if (platform === "xbox-pc") {
+      return {
+        success: false,
+        message:
+          "Xbox PC schemas are generated from Xbox Network. Use Import Xbox PC in Settings.",
       };
     }
     const appid = sanitizeAppIdForPlatform(rawAppId, platform);
@@ -14915,6 +15331,10 @@ async function clearActiveConfigSelection(options = {}) {
       reason,
       activeConfig: previousConfig || null,
     });
+    stopXboxPcActivePoll("clear-active-config", {
+      reason,
+      activeConfig: previousConfig || null,
+    });
     await monitorAchievementsFile(null);
   } catch (err) {
     appLogger.warn("active-config:clear:monitor-stop-failed", {
@@ -15063,6 +15483,12 @@ ipcMain.on(
         nextPlatform: normalizedPlatform || null,
       });
     }
+    if (normalizedPlatform !== "xbox-pc") {
+      stopXboxPcActivePoll("config-switch", {
+        nextConfig: safeName,
+        nextPlatform: normalizedPlatform || null,
+      });
+    }
     if (isLumaPlayConfig(config)) {
       const appid = String(config.appid || "");
       currentAppId = appid || null;
@@ -15091,6 +15517,24 @@ ipcMain.on(
           uiLanguage: selectedUiLanguage,
         });
       }
+      return;
+    }
+    if (normalizedPlatform === "xbox-pc") {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      achievementsFilePath = null;
+      monitorAchievementsFile(null);
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      startXboxPcActivePoll(safeName, "update-config");
       return;
     }
     if (normalizedPlatform === "xenia") {
@@ -17788,12 +18232,19 @@ ipcMain.handle(
       return;
     }
     const args = splitArgsString(argsString);
+    const isAppsFolderTarget = /^shell:AppsFolder\\/i.test(
+      String(exePath || "").trim(),
+    );
     const requestedCwd = String(workingDirectory || "").trim();
     const cwd =
       requestedCwd && fs.existsSync(requestedCwd)
         ? requestedCwd
-        : path.dirname(exePath);
-    const child = spawn(exePath, args, {
+        : isAppsFolderTarget
+          ? undefined
+          : path.dirname(exePath);
+    const launchExecutable = isAppsFolderTarget ? "explorer.exe" : exePath;
+    const launchArgs = isAppsFolderTarget ? [exePath] : args;
+    const child = spawn(launchExecutable, launchArgs, {
       cwd,
       detached: true,
       stdio: "ignore",
@@ -17865,6 +18316,12 @@ let epicOfficialActivePollTimer = null;
 let epicOfficialActivePollInFlight = null;
 let epicOfficialActivePollState = null;
 let epicOfficialActivePollGeneration = 0;
+const XBOX_PC_ACTIVE_POLL_INITIAL_MS = 45000;
+const XBOX_PC_ACTIVE_POLL_INTERVAL_MS = 5000;
+let xboxPcActivePollTimer = null;
+let xboxPcActivePollState = null;
+let xboxPcActivePollInFlight = null;
+let xboxPcActivePollGeneration = 0;
 
 function isEpicOfficialBackgroundWorkBootReady() {
   if (
@@ -18160,6 +18617,294 @@ function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
       sound: getUserPreferredSound() || "mute",
     });
   }
+}
+
+function notifyXboxPcProgress(
+  config,
+  configName,
+  schemaAchievements,
+  snapshot,
+  progressKeys,
+) {
+  if (!Array.isArray(schemaAchievements) || !schemaAchievements.length) return 0;
+  if (!Array.isArray(progressKeys) || !progressKeys.length) return 0;
+  const schemaMap = new Map();
+  for (const entry of schemaAchievements) {
+    const key = String(entry?.name || entry?.api || "").trim();
+    if (key) schemaMap.set(key, entry);
+  }
+  let queued = 0;
+  for (const key of progressKeys) {
+    const normalizedKey = String(key || "").trim();
+    const achievementConfig = schemaMap.get(normalizedKey);
+    const current = snapshot?.[key];
+    if (!achievementConfig || !current || current.earned === true) continue;
+    queueProgressNotification({
+      name: achievementConfig.name || achievementConfig.api || normalizedKey,
+      displayName: getSafeLocalizedText(
+        achievementConfig.displayName,
+        selectedLanguage,
+      ),
+      icon: achievementConfig.icon,
+      progress: current.progress,
+      max_progress: current.max_progress,
+      progress_is_float:
+        current.progress_is_float ||
+        (!Number.isInteger(Number(current.progress)) ? true : undefined),
+      appid: config?.appid || currentAppId || null,
+      platform: "xbox-pc",
+      config_path: config?.config_path || selectedConfigPath || "",
+      configName,
+    });
+    queued += 1;
+  }
+  return queued;
+}
+
+function isXboxPcConfigActiveForPolling(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  if (isXboxPcConfigBlacklisted(safeName)) return false;
+  if (sanitizeConfigName(selectedConfig || "") === safeName) return true;
+  if (sanitizeConfigName(detectedConfigName || "") === safeName) return true;
+  for (const activeName of activePlaytimeConfigs) {
+    if (sanitizeConfigName(activeName || "") === safeName) return true;
+  }
+  return false;
+}
+
+function isXboxPcConfigBlacklisted(configName, config = null) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  const resolvedConfig =
+    config && typeof config === "object"
+      ? config
+      : readConfigForAchievementCache(safeName);
+  if (
+    !resolvedConfig ||
+    normalizePlatform(resolvedConfig?.platform) !== "xbox-pc"
+  ) {
+    return false;
+  }
+  const titleId = String(
+    resolvedConfig?.xbox_title_id || resolvedConfig?.appid || "",
+  ).trim();
+  return titleId ? isAppIdBlacklisted(titleId, "xbox-pc") : false;
+}
+
+function markXboxPcRecentSync(syncKey) {
+  const key = String(syncKey || "").trim();
+  if (!key) return;
+  xboxPcRecentLoadSync.set(key, Date.now());
+  if (xboxPcRecentLoadSync.size <= XBOX_PC_RECENT_SYNC_MAX_ENTRIES) return;
+  const entries = [...xboxPcRecentLoadSync.entries()].sort(
+    (left, right) => Number(left[1] || 0) - Number(right[1] || 0),
+  );
+  for (
+    let index = 0;
+    index < entries.length - XBOX_PC_RECENT_SYNC_MAX_ENTRIES;
+    index += 1
+  ) {
+    xboxPcRecentLoadSync.delete(entries[index][0]);
+  }
+}
+
+function stopXboxPcActivePoll(reason = "manual", meta = {}) {
+  if (xboxPcActivePollTimer) {
+    clearTimeout(xboxPcActivePollTimer);
+    xboxPcActivePollTimer = null;
+  }
+  const previous = xboxPcActivePollState;
+  xboxPcActivePollGeneration += 1;
+  xboxPcActivePollState = null;
+  xboxPcActivePollInFlight = null;
+  if (previous) {
+    xboxPcLogger.info("xbox-pc:poll-stopped", {
+      reason,
+      configName: previous.configName || null,
+      ...meta,
+    });
+  }
+}
+
+function scheduleXboxPcActivePoll(delayMs, reason = "reschedule") {
+  if (!xboxPcActivePollState) return;
+  if (xboxPcActivePollTimer) clearTimeout(xboxPcActivePollTimer);
+  const safeDelay = Math.max(5000, Number(delayMs) || 0);
+  xboxPcActivePollTimer = setTimeout(() => {
+    xboxPcActivePollTimer = null;
+    void runXboxPcActivePoll("timer");
+  }, safeDelay);
+  xboxPcLogger.debug?.("xbox-pc:poll-scheduled", {
+    reason,
+    configName: xboxPcActivePollState.configName || null,
+    delayMs: safeDelay,
+  });
+}
+
+async function runXboxPcActivePoll(trigger = "manual") {
+  const state = xboxPcActivePollState;
+  if (!state || xboxPcActivePollInFlight) return;
+  if (!isXboxPcConfigActiveForPolling(state.configName)) {
+    stopXboxPcActivePoll("inactive", { trigger });
+    return;
+  }
+  const safeName = sanitizeConfigName(state.configName || "");
+  const configPath = path.join(configsDir, `${safeName}.json`);
+  if (!safeName || !fs.existsSync(configPath)) {
+    stopXboxPcActivePoll("config-missing", { trigger });
+    return;
+  }
+  const generation = xboxPcActivePollGeneration;
+  const job = (async () => {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    if (normalizePlatform(config?.platform) !== "xbox-pc") {
+      stopXboxPcActivePoll("platform-changed", { trigger });
+      return;
+    }
+    if (isXboxPcConfigBlacklisted(safeName, config)) {
+      stopXboxPcActivePoll("blacklisted", {
+        trigger,
+        appid: config?.xbox_title_id || config?.appid || null,
+      });
+      return;
+    }
+    const cached =
+      (await loadPreviousAchievements(safeName, "xbox-pc")) || {};
+    const synced = await syncXboxPcAchievements(config, {
+      userDataDir: app.getPath("userData"),
+      timeoutMs: 15000,
+    });
+    if (generation !== xboxPcActivePollGeneration) return;
+    const preserved = preserveEpicOfficialEarnedStateFromCache(
+      synced.snapshot || {},
+      cached,
+    );
+    const snapshot = mergeEarnedTimeFromCached(
+      preserved.snapshot || {},
+      cached,
+    );
+    const delta = getXboxPcSnapshotDelta(cached, snapshot);
+    const snapshotChanged = !deepEqual(cached || {}, snapshot || {});
+    const hadCachedSnapshot = Object.keys(cached || {}).length > 0;
+    savePreviousAchievements(safeName, snapshot, "xbox-pc");
+    markXboxPcRecentSync(
+      `${synced.xuid || config.xbox_xuid}:${synced.titleId || config.appid}`,
+    );
+    if (config.save_path) {
+      try {
+        fs.mkdirSync(config.save_path, { recursive: true });
+        fs.writeFileSync(
+          path.join(config.save_path, "achievements.json"),
+          JSON.stringify(snapshot, null, 2),
+        );
+      } catch (error) {
+        xboxPcLogger.warn("xbox-pc:poll-state-write-failed", {
+          configName: safeName,
+          error: error?.message || String(error),
+        });
+      }
+    }
+    if (snapshotChanged) {
+      let schemaAchievements = [];
+      try {
+        const schemaPath = resolveAchievementsSchemaPath(config);
+        schemaAchievements = schemaPath
+          ? JSON.parse(fs.readFileSync(schemaPath, "utf8"))
+          : [];
+      } catch {}
+      if (hadCachedSnapshot && delta.unlockedKeys.length) {
+        notifyEpicOfficialUnlocks(
+          config,
+          schemaAchievements,
+          delta.unlockedKeys,
+        );
+        xboxPcLogger.info("xbox-pc:poll-unlocks-detected", {
+          configName: safeName,
+          unlockedCount: delta.unlockedKeys.length,
+        });
+      }
+      if (hadCachedSnapshot && delta.progressKeys.length) {
+        const progressCount = notifyXboxPcProgress(
+          config,
+          safeName,
+          schemaAchievements,
+          snapshot,
+          delta.progressKeys,
+        );
+        if (progressCount > 0) {
+          xboxPcLogger.info("xbox-pc:poll-progress-detected", {
+            configName: safeName,
+            progressCount,
+          });
+        }
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("refresh-achievements-table", safeName);
+      }
+      if (
+        overlayWindow &&
+        !overlayWindow.isDestroyed() &&
+        sanitizeConfigName(selectedConfig || "") === safeName
+      ) {
+        overlayWindow.webContents.send("load-overlay-data", safeName);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      broadcastToAll("achievements:file-updated", {
+        appid: config.appid || null,
+        configName: safeName,
+      });
+    }
+    state.errorCount = 0;
+    xboxPcLogger.debug?.("xbox-pc:poll-success", {
+      trigger,
+      configName: safeName,
+      changed: snapshotChanged,
+      unlockedCount: delta.unlockedKeys.length,
+    });
+    scheduleXboxPcActivePoll(XBOX_PC_ACTIVE_POLL_INTERVAL_MS, "success");
+  })()
+    .catch((error) => {
+      if (!xboxPcActivePollState) return;
+      state.errorCount = (state.errorCount || 0) + 1;
+      const retryMs = Math.min(
+        5 * 60 * 1000,
+        30000 * 2 ** Math.min(state.errorCount, 4),
+      );
+      xboxPcLogger.warn("xbox-pc:poll-failed", {
+        trigger,
+        configName: safeName,
+        error: error?.message || String(error),
+        retryInMs: retryMs,
+      });
+      scheduleXboxPcActivePoll(retryMs, "error-backoff");
+    })
+    .finally(() => {
+      if (xboxPcActivePollInFlight === job) {
+        xboxPcActivePollInFlight = null;
+      }
+    });
+  xboxPcActivePollInFlight = job;
+  await job;
+}
+
+function startXboxPcActivePoll(configName, reason = "active-config") {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  if (!isXboxPcConfigActiveForPolling(safeName)) return false;
+  if (xboxPcActivePollState?.configName === safeName) return true;
+  stopXboxPcActivePoll("restart", { nextConfig: safeName });
+  xboxPcActivePollState = { configName: safeName, errorCount: 0 };
+  xboxPcLogger.info("xbox-pc:poll-started", {
+    reason,
+    configName: safeName,
+    intervalMs: XBOX_PC_ACTIVE_POLL_INTERVAL_MS,
+  });
+  scheduleXboxPcActivePoll(XBOX_PC_ACTIVE_POLL_INITIAL_MS, reason);
+  return true;
 }
 
 function filterRecentEpicOfficialUnlockNotificationKeys(
@@ -20358,6 +21103,19 @@ const {
 const {
   resolveEpicLocalInstallation,
 } = require("./utils/epic-local-installations");
+const {
+  XBOX_PC_CLIENT_ID,
+  buildXboxDirectAuthorizeUrl,
+  clearXboxDirectAuth,
+  completeXboxDirectAuthentication,
+  extractXboxDirectAuthResult,
+  getXboxPcAuthErrorInfo,
+  getXboxPcStatus,
+  fetchXboxAchievementRarityPercentages,
+  getXboxPcSnapshotDelta,
+  importXboxPcLibrary,
+  syncXboxPcAchievements,
+} = require("./utils/xbox-pc");
 
 async function seedManualConfigsAtBoot() {
   if (bootManualSeedRunning) return;
@@ -20957,7 +21715,8 @@ function applyConfigPlatformDefaults(payload = {}) {
     normalizedPlatform === "epic-official" ||
     normalizedPlatform === "gog-official" ||
     normalizedPlatform === "ubisoft-official" ||
-    normalizedPlatform === "ea-official"
+    normalizedPlatform === "ea-official" ||
+    normalizedPlatform === "xbox-pc"
   ) {
     const sanitizedSpecial = sanitizeAppIdForPlatform(
       payload.appid || payload.appId || payload.steamAppId,
@@ -21008,6 +21767,7 @@ const SCHEMA_PLATFORM_DIRS = [
   "gog-official",
   "epic",
   "epic-official",
+  "xbox-pc",
   "xenia",
   "rpcs3",
   "shadps4",
@@ -21023,6 +21783,7 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "gog-official") return "gog-official";
   if (normalized === "epic") return "epic";
   if (normalized === "epic-official") return "epic-official";
+  if (normalized === "xbox-pc") return "xbox-pc";
   if (normalized === "xenia") return "xenia";
   if (normalized === "rpcs3") return "rpcs3";
   if (normalized === "shadps4") return "shadps4";
@@ -21706,6 +22467,7 @@ ipcMain.handle(
       platform === "epic-official" ||
       platform === "gog" ||
       platform === "gog-official" ||
+      platform === "xbox-pc" ||
       platform === "xenia" ||
       platform === "rpcs3" ||
       platform === "shadps4";
@@ -21714,8 +22476,92 @@ ipcMain.handle(
       return {
         success: false,
         code: "unsupported-platform",
-        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG/Xenia/RPCS3/ShadPS4 configs (current: ${platform}).`,
+        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG/Xbox PC/Xenia/RPCS3/ShadPS4 configs (current: ${platform}).`,
       };
+    }
+
+    if (platform === "xbox-pc") {
+      const titleId = String(
+        config?.xbox_title_id || config?.appid || "",
+      ).trim();
+      const xuid = String(config?.xbox_xuid || "").trim();
+      if (!/^\d{1,20}$/.test(titleId)) {
+        return {
+          success: false,
+          code: "invalid-xbox-title-id",
+          message: "Xbox Title ID for rarity refresh is invalid.",
+        };
+      }
+      if (!/^\d{8,20}$/.test(xuid)) {
+        return {
+          success: false,
+          code: "invalid-xbox-xuid",
+          message: "Xbox account ID for rarity refresh is invalid.",
+        };
+      }
+      const source = RARITY_SOURCES.xboxNetwork;
+      rarityLogger.info("rarity:manual-refresh:start", {
+        configName: config?.name || safeName,
+        platform,
+        appid: titleId,
+        source,
+      });
+      try {
+        const fetchedMap = await fetchXboxAchievementRarityPercentages(
+          xuid,
+          titleId,
+          {
+            userDataDir: app.getPath("userData"),
+            timeoutMs: 15000,
+            locale: "en-US,en",
+          },
+        );
+        const entries = buildRarityEntriesForSchema(
+          fetchedMap,
+          schemaAchievements,
+          {
+            normalizeName: (name) => String(name || "").trim(),
+          },
+        );
+        const sidecarPath = writeAchievementPercentagesSidecar(
+          path.dirname(schemaPath),
+          titleId,
+          entries,
+          { source },
+        );
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config?.name || safeName,
+          platform,
+          appid: titleId,
+          source,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        });
+        broadcastToAll("refresh-achievements-table", config?.name || safeName);
+        return {
+          success: true,
+          configName: config?.name || safeName,
+          platform,
+          appid: titleId,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config?.name || safeName,
+          platform,
+          appid: titleId,
+          source,
+          error: err?.message || String(err),
+        });
+        return {
+          success: false,
+          code: "fetch-failed",
+          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+        };
+      }
     }
 
     if (platform === "xenia" || platform === "rpcs3" || platform === "shadps4") {

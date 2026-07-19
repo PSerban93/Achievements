@@ -108,6 +108,7 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
 | `utils/epic-auth.js`                    | Epic authentication                                  |
 | `utils/epic-local-installations.js`     | Epic local installations detection                   |
 | `utils/epic-official.js`                | Epic official achievements                           |
+| `utils/xbox-pc.js`                      | Xbox App PC discovery and direct Xbox Network sync   |
 | `utils/fileCopy.js`                     | File copying utilities                               |
 | `utils/game-cover.js`                   | Game cover image handling                            |
 | `utils/gog-auth.js`                     | GOG authentication                                   |
@@ -239,7 +240,7 @@ Creates a standalone `.exe` installer in the `dist/` folder.
 **Config JSON fields (reference):**
 
 - `appid` (string) – game id
-- `platform` (string) – steam/uplay/gog/gog-official/epic/epic-official/xenia/rpcs3/shadps4/steam-official/ubisoft-official/ea-official
+- `platform` (string) – steam/uplay/gog/gog-official/epic/epic-official/xbox-pc/xenia/rpcs3/shadps4/steam-official/ubisoft-official/ea-official
 - `config_path` (string) – folder containing `achievements.json` and `img/`
 - `save_path` (string) – location of save/achievement progress
 - `process_name` (string) – executable name for process tracking
@@ -390,6 +391,36 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 **Important notes:**
 
 - `ea-official` is auto-generated from manually watched EA Desktop log roots. It is not meant to be created manually from the platform dropdown.
+
+### Xbox PC (Microsoft / Xbox Network)
+
+1. Open Settings - Advanced and select **Connect Xbox** under **Xbox PC (Microsoft / Xbox
+   Network)**.
+2. Sign in through Microsoft OAuth with the account used by the Windows Xbox
+   app.
+3. Use **Import Xbox PC** to:
+   - read achievement-enabled Windows/PC titles from the Xbox profile,
+   - scan local `XboxGames` and packaged GDK installations,
+   - generate `xbox-pc` configs and achievement schemas,
+   - correlate local executable/AUMID information when available.
+4. Achievement state is refreshed directly from Xbox Network for the selected
+   Xbox PC config, with a request throttle and local cache fallback.
+
+Notes:
+
+- Xbox console-only history is excluded. A title is imported only when Xbox
+  reports a Windows/PC device or its Title ID matches a locally installed game.
+- Games delegated to EA App, Ubisoft Connect, or another launcher may not
+  provide Xbox achievements on PC.
+- The app stores the Microsoft refresh token and Xbox XSTS session encrypted;
+  it never asks for or stores the Microsoft account password or an Entra client
+  secret.
+- The experimental authentication route uses the public desktop OAuth identity
+  published by the [OpenXbox Xbox-WebAPI project](https://github.com/OpenXbox/xbox-webapi-python).
+- This client identity is not owned by the Achievements project. Microsoft can
+  restrict or revoke its use, and direct Xbox Network endpoints can still reject
+  requests.
+- `xbox-pc` configs are auto-generated and are not meant to be created manually.
 - The app does not assume the EA Desktop logs path automatically; the logs root must be added manually in **Settings → Folders**.
 - The config is created only after EA Desktop has logged a full achievement set for that game, so the schema can be generated first.
 - After creation, the config `save_path` points to the EA Desktop `Logs` folder, while runtime progress is read from `EADesktopVerbose.log`.

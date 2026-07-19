@@ -594,6 +594,10 @@ contextBridge.exposeInMainWorld("api", {
   disconnectEpicOfficial: () => ipcRenderer.invoke("epic-official:disconnect"),
   importEpicOfficialLibrary: () =>
     ipcRenderer.invoke("epic-official:import-library"),
+  getXboxPcStatus: () => ipcRenderer.invoke("xbox-pc:status"),
+  connectXboxPc: () => ipcRenderer.invoke("xbox-pc:connect"),
+  disconnectXboxPc: () => ipcRenderer.invoke("xbox-pc:disconnect"),
+  importXboxPcLibrary: () => ipcRenderer.invoke("xbox-pc:import-library"),
   getSounds: () => ipcRenderer.invoke("get-sound-files"),
   getSoundFullPath: (fileName) =>
     ipcRenderer.invoke("get-sound-path", fileName),
@@ -804,6 +808,10 @@ contextBridge.exposeInMainWorld("electron", {
         "epic-official:connect",
         "epic-official:disconnect",
         "epic-official:import-library",
+        "xbox-pc:status",
+        "xbox-pc:connect",
+        "xbox-pc:disconnect",
+        "xbox-pc:import-library",
         "get-sound-files",
         "get-sound-path",
         "resolve-icon-url",

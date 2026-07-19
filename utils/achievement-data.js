@@ -364,6 +364,7 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
         "epic-official",
         "gog",
         "gog-official",
+        "xbox-pc",
         "xenia",
         "rpcs3",
         "shadps4",
