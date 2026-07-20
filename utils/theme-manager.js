@@ -142,8 +142,80 @@ function ensureUserThemes() {
     const target = path.join(userThemesFolder, entry.name);
     if (!fs.existsSync(target)) {
       fs.copyFileSync(source, target);
+    } else {
+      mergeMissingThemeDefaults(source, target);
     }
   }
+}
+
+function mergeMissingObjectKeys(target, defaults) {
+  if (!target || typeof target !== "object" || Array.isArray(target)) {
+    return false;
+  }
+  if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) {
+    return false;
+  }
+  let changed = false;
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!Object.prototype.hasOwnProperty.call(target, key)) {
+      target[key] = value;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function mergeMissingThemeDefaults(sourcePath, targetPath) {
+  try {
+    const defaults = parseThemeJson(fs.readFileSync(sourcePath, "utf8"));
+    const current = parseThemeJson(fs.readFileSync(targetPath, "utf8"));
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return;
+    }
+    let changed = false;
+    if (!current._comments || typeof current._comments !== "object") {
+      current._comments = {};
+      changed = true;
+    }
+    if (!current.tokens || typeof current.tokens !== "object") {
+      current.tokens = {};
+      changed = true;
+    }
+    changed =
+      mergeMissingObjectKeys(current._comments, defaults?._comments) || changed;
+    changed = mergeMissingObjectKeys(current.tokens, defaults?.tokens) || changed;
+    changed =
+      upgradeGeneratedSelectThemeTokens(current.tokens, defaults?.tokens) ||
+      changed;
+    if (changed) {
+      fs.writeFileSync(
+        targetPath,
+        `${JSON.stringify(current, null, 2)}\n`,
+        "utf8",
+      );
+    }
+  } catch {
+    // Invalid or locked user theme files are ignored so boot remains safe.
+  }
+}
+
+function upgradeGeneratedSelectThemeTokens(tokens, defaults) {
+  if (!tokens || typeof tokens !== "object" || Array.isArray(tokens)) {
+    return false;
+  }
+  if (!defaults || typeof defaults !== "object" || Array.isArray(defaults)) {
+    return false;
+  }
+  const selectedBg = String(tokens["app-select-option-selected-bg"] || "").trim();
+  const hoverBg = String(tokens["app-select-option-hover-bg"] || "").trim();
+  const defaultSelectedBg = String(
+    defaults["app-select-option-selected-bg"] || "",
+  ).trim();
+  if (!selectedBg || !hoverBg || !defaultSelectedBg || selectedBg !== hoverBg) {
+    return false;
+  }
+  tokens["app-select-option-selected-bg"] = defaultSelectedBg;
+  return true;
 }
 
 function listThemes() {

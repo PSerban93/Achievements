@@ -55,6 +55,13 @@
         const detailEl = document.querySelector(".detail");
         const iconEl = document.querySelector(".icon img");
         const durationMeta = document.querySelector('meta[name="duration"]');
+        const frameMeta = document.querySelector("meta[width][height]");
+        const baseFrameWidth = Math.max(
+          0,
+          Number(frameMeta?.getAttribute("width")) || 0
+        );
+        const HORIZONTAL_SAFE_MARGIN_PX = 24;
+        const MIN_EXPANDED_WIDTH_PX = 450;
         const baseTotal = Math.max(1, Number(durationMeta?.content || 10000));
         const extendedModeThreshold = 7000;
         const manualVisualBaseTotal = 8400;
@@ -67,7 +74,7 @@
         }
 
         let closeTimer = null;
-        const MARGIN_X = 0;
+        const MARGIN_X = 30;
         const MARGIN_BOTTOM = 0;
         const MARGIN_TOP = 0;
         const TOP_TRANSLATE_ADJUST_PX = -50;
@@ -357,9 +364,20 @@
           container.style.top = fromTop ? `${MARGIN_TOP}px` : "auto";
           container.style.bottom = fromTop ? "auto" : `${MARGIN_BOTTOM}px`;
           container.style.setProperty("--origin-y", fromTop ? "top" : "bottom");
+          const topTranslatePx = fromTop
+            ? Math.round(
+                TOP_TRANSLATE_ADJUST_PX *
+                  Math.max(
+                    0.1,
+                    parseFloat(
+                      getComputedStyle(container).getPropertyValue("--scale")
+                    ) || 1
+                  )
+              )
+            : 0;
           container.style.setProperty(
             "--translate-y",
-            fromTop ? `${TOP_TRANSLATE_ADJUST_PX}px` : "0px"
+            `${topTranslatePx}px`
           );
 
           if (atLeft) {
@@ -367,16 +385,34 @@
             container.style.right = "auto";
             container.style.setProperty("--translate-x", "0%");
             container.style.setProperty("--origin-x", "left");
+            container.style.setProperty("--banner-left-collapsed", "0px");
+            container.style.setProperty("--banner-left-expanded", "0px");
+            container.style.setProperty("--banner-right-collapsed", "auto");
+            container.style.setProperty("--banner-right-expanded", "auto");
           } else if (atRight) {
             container.style.right = `${MARGIN_X}px`;
             container.style.left = "auto";
             container.style.setProperty("--translate-x", "0%");
             container.style.setProperty("--origin-x", "right");
+            container.style.setProperty("--banner-left-collapsed", "auto");
+            container.style.setProperty("--banner-left-expanded", "auto");
+            container.style.setProperty("--banner-right-collapsed", "0px");
+            container.style.setProperty("--banner-right-expanded", "0px");
           } else {
             container.style.left = "50%";
             container.style.right = "auto";
             container.style.setProperty("--translate-x", "-50%");
             container.style.setProperty("--origin-x", "center");
+            container.style.setProperty(
+              "--banner-left-collapsed",
+              "calc(50% - (var(--ach-collapsed-width, 100px) / 2))"
+            );
+            container.style.setProperty(
+              "--banner-left-expanded",
+              "calc(50% - (var(--ach-width, 600px) / 2))"
+            );
+            container.style.setProperty("--banner-right-collapsed", "auto");
+            container.style.setProperty("--banner-right-expanded", "auto");
           }
         };
 
@@ -427,7 +463,36 @@
           const constructedWidth = Math.ceil(offsetLeft + textWidth + padding);
 
           const baseWidth = Math.max(autoWidth, constructedWidth, collapsedPx);
-          const finalWidth = Math.max(baseWidth + 4, collapsedPx);
+          const requestedWidth = Math.max(
+            baseWidth + 4,
+            collapsedPx,
+            MIN_EXPANDED_WIDTH_PX
+          );
+          const currentScale = Math.max(
+            0.1,
+            parseFloat(styles.getPropertyValue("--scale")) || 1
+          );
+          const viewportWidth =
+            window.innerWidth || document.documentElement.clientWidth || 0;
+          const scaledWindowLimit =
+            viewportWidth > 0
+              ? Math.max(
+                  collapsedPx,
+                  Math.floor(viewportWidth / currentScale) -
+                    HORIZONTAL_SAFE_MARGIN_PX * 2
+                )
+              : baseFrameWidth;
+          const maxExpandedWidth = Math.max(
+            collapsedPx,
+            Math.min(
+              baseFrameWidth || requestedWidth,
+              scaledWindowLimit || requestedWidth
+            )
+          );
+          const finalWidth = Math.max(
+            Math.min(requestedWidth, maxExpandedWidth),
+            collapsedPx
+          );
           container.style.setProperty("--ach-width", `${finalWidth}px`);
         };
 

@@ -73,7 +73,6 @@
           0,
           Number(frameMeta?.getAttribute("width")) || 0,
         );
-        const SCALE_WIDTH_CLAMP_THRESHOLD = 1.26;
         const HORIZONTAL_SAFE_MARGIN_PX = 24;
         const getCloseDelay = () =>
           Math.max(0, Number(durationMeta?.content || 10000));
@@ -86,7 +85,7 @@
         let closeTimer = null;
         let gifStartTimer = null;
         let gifHideTimer = null;
-        const MARGIN_X = 0;
+        const MARGIN_X = 30;
         const MARGIN_BOTTOM = 10;
         const MARGIN_TOP = 0;
         const TOP_TRANSLATE_ADJUST_PX = -50;
@@ -368,9 +367,20 @@
           container.style.top = fromTop ? `${MARGIN_TOP}px` : "auto";
           container.style.bottom = fromTop ? "auto" : `${MARGIN_BOTTOM}px`;
           container.style.setProperty("--origin-y", fromTop ? "top" : "bottom");
+          const topTranslatePx = fromTop
+            ? Math.round(
+                TOP_TRANSLATE_ADJUST_PX *
+                  Math.max(
+                    0.1,
+                    parseFloat(
+                      getComputedStyle(container).getPropertyValue("--scale")
+                    ) || 1
+                  )
+              )
+            : 0;
           container.style.setProperty(
             "--translate-y",
-            fromTop ? `${TOP_TRANSLATE_ADJUST_PX}px` : "0px",
+            `${topTranslatePx}px`,
           );
 
           if (atLeft) {
@@ -464,16 +474,13 @@
                     HORIZONTAL_SAFE_MARGIN_PX * 2,
                 )
               : baseFrameWidth;
-          const maxExpandedWidth =
-            currentScale > SCALE_WIDTH_CLAMP_THRESHOLD
-              ? Math.max(
-                  collapsedPx,
-                  Math.min(
-                    baseFrameWidth || requestedWidth,
-                    scaledWindowLimit || requestedWidth,
-                  ),
-                )
-              : Infinity;
+          const maxExpandedWidth = Math.max(
+            collapsedPx,
+            Math.min(
+              baseFrameWidth || requestedWidth,
+              scaledWindowLimit || requestedWidth,
+            ),
+          );
           const finalWidth = Math.max(
             Math.min(requestedWidth, maxExpandedWidth),
             collapsedPx,

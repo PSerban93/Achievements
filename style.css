@@ -832,8 +832,8 @@ select {
   margin: 3px 0;
   border-radius: var(--app-radius-md);
   border: none;
-  background-color: var(--dracula-current-line);
-  color: var(--dracula-foreground);
+  background-color: var(--app-surface);
+  color: var(--app-text);
   transition: all 0.2s ease;
   box-sizing: border-box;
   box-shadow: var(--app-shadow-control);
@@ -841,7 +841,7 @@ select {
 
 button:hover,
 select:hover {
-  background-color: var(--dracula-comment);
+  background-color: var(--app-select-hover-bg, var(--app-hover-bg));
   cursor: pointer;
   transform: none;
   box-shadow: var(--app-shadow-control);
@@ -998,15 +998,64 @@ label {
 }
 
 input[type="text"] {
-  background-color: var(--dracula-background);
-  border: 1px solid var(--dracula-comment);
-  color: var(--dracula-foreground);
+  background-color: var(--app-input-bg);
+  border: 1px solid var(--app-border-subtle);
+  color: var(--app-text);
 }
 
 select {
-  background-color: var(--dracula-background);
-  border: 1px solid var(--dracula-comment);
-  color: var(--dracula-foreground);
+  background-color: var(--app-select-bg, var(--app-input-bg));
+  border: 1px solid var(--app-select-border, var(--app-border-subtle));
+  color: var(--app-select-text, var(--app-text));
+}
+
+select:focus,
+select.sel-open {
+  background-color: var(--app-select-bg-focus, var(--app-input-bg-focus));
+  border-color: var(--app-select-border-focus, var(--app-accent));
+  color: var(--app-select-text, var(--app-text));
+  outline: none;
+}
+
+select option {
+  background-color: var(--app-select-option-bg, var(--app-input-bg-focus));
+  color: var(--app-select-option-text, var(--app-select-text, var(--app-text)));
+}
+
+select option:hover,
+select option:focus {
+  background-color: var(--app-select-option-hover-bg, var(--app-hover-bg));
+  color: var(--app-select-option-text, var(--app-select-text, var(--app-text)));
+}
+
+select option:checked,
+select:focus option:checked,
+select.sel-open option:checked {
+  background: var(
+    --app-select-option-selected-bg,
+    color-mix(in srgb, var(--app-accent) 58%, var(--app-input-bg-focus))
+  ) !important;
+  background-color: var(
+    --app-select-option-selected-bg,
+    color-mix(in srgb, var(--app-accent) 58%, var(--app-input-bg-focus))
+  ) !important;
+  color: var(
+    --app-select-option-selected-text,
+    var(--app-select-option-text, var(--app-select-text, var(--app-text)))
+  ) !important;
+  -webkit-text-fill-color: var(
+    --app-select-option-selected-text,
+    var(--app-select-option-text, var(--app-select-text, var(--app-text)))
+  ) !important;
+  box-shadow: inset 0 0 0 9999px
+    var(
+      --app-select-option-selected-bg,
+      color-mix(in srgb, var(--app-accent) 58%, var(--app-input-bg-focus))
+    ) !important;
+}
+
+select option:disabled {
+  color: var(--app-select-option-disabled-text, var(--app-muted));
 }
 
 .config-controls select,

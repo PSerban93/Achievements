@@ -28,8 +28,9 @@ body {
   top: auto;
   width: var(--ach-collapsed-width, 100px);
   height: 160px;
-  transform: translate(-50%, var(--translate-y, 0)) scale(var(--scale, 1));
-  transform-origin: center bottom;
+  transform: translate(var(--translate-x, -50%), var(--translate-y, 0))
+    scale(var(--scale, 1));
+  transform-origin: var(--origin-x, center) var(--origin-y, bottom);
   pointer-events: none;
   animation: containerAnimationFrames linear calc(10s * var(--timeline-scale));
   animation-delay: calc(0.5s * var(--timeline-scale));
