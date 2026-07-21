@@ -110,7 +110,7 @@
     "electron-updater": "^6.8.3",
     "ini": "6.0.0",
     "jsdom": "29.1.1",
-    "koffi": "^3.1.1",
+    "koffi": "^3.1.2",
     "playwright": "^1.55.0",
     "playwright-extra": "^4.3.6",
     "ps-list": "9.0.0",
@@ -136,9 +136,9 @@
     }
   },
   "allowScripts": {
-    "electron-winstaller@5.4.0": true,
-    "electron@43.1.1": true,
-    "koffi@3.1.1": true,
-    "uiohook-napi@1.5.5": true
+    "electron-winstaller": true,
+    "electron": true,
+    "koffi": true,
+    "uiohook-napi": true
   }
 }
