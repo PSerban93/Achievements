@@ -53,7 +53,7 @@
   "version": 1,
   "base": "aero-dark",
   "tokens": {
-    "app-bg": "rgba(57, 0, 117, 0.99)",
+    "app-bg": "#381062",
     "app-surface": "#24003B",
     "app-text": "#FBEFFF",
     "app-muted": "#DBC6ED",
@@ -64,11 +64,11 @@
     "app-attention": "#f1d46b",
     "app-danger": "#CB1A1A",
     "app-pink": "#e184d8",
-    "app-backdrop": "rgba(31, 50, 68, 0.5)",
-    "app-panel-bg": "rgba(60, 22, 90, 0.3)",
+    "app-backdrop": "rgba(60, 22, 90, 0.3)",
+    "app-panel-bg": "rgba(60, 22, 90, 0.1)",
     "app-panel-bg-strong": "rgba(38, 5, 63, 0.87)",
     "app-card-bg": "rgba(62, 0, 128, 0.1)",
-    "app-card-footer-bg": "linear-gradient(135deg, #3B0083 0%, #020026 95%)",
+    "app-card-footer-bg": "linear-gradient(90deg, rgba(225, 15, 255, 0.27) 20%, rgba(2, 0, 38, 0.27) 100%)",
     "app-hover-bg": "rgba(57, 0, 117, 0.9)",
     "app-border-subtle": "rgba(205, 163, 255, 0.2)",
     "app-input-bg": "rgba(34, 0, 49, 0.5)",
@@ -96,6 +96,6 @@
   },
   "effects": {
     "glass": true,
-    "bodyBackground": "linear-gradient(225deg, #A44CF1 0%, #1D0041 50%)"
+    "bodyBackground": "linear-gradient(135deg, #A44CF1 -10%, #1D0041 80%)"
   }
 }
