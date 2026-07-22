@@ -492,7 +492,7 @@
   "settings-appScaleTitle": "ขนาดแอปพลิเคชัน",
   "settings-appThemeTitle": "ธีมแอป",
   "label.appThemeSelect": "ธีมแอป:",
-  "settings-appThemePerformanceHint": "If Aero, Aero Dark, or other visual themes feel slow, turn off the Disable Hardware Acceleration option in Advanced > Rendering and restart the app.",
+  "settings-appThemePerformanceHint": "หาก Aero, Aero Dark หรือธีมภาพอื่น ๆ ทำงานช้า ให้ปิดการเร่งด้วยฮาร์ดแวร์ใน ขั้นสูง > การแสดงผล แล้วรีสตาร์ตแอป",
   "option.appTheme.dracula": "Dracula",
   "option.appTheme.dark": "มืด",
   "option.appTheme.light": "สว่าง",
