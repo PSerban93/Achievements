@@ -1,7 +1,9 @@
 const path = require("path");
-const { spawnSync, spawn } = require("child_process");
+const { spawnSync } = require("child_process");
 const { getNameIndexFromConfigPath } = require("./achievement-data");
-const { subscribeLumaPlayRegistryEvents } = require("./process-event-watcher");
+const {
+  subscribeLumaPlayRegistryEvents,
+} = require("./lumaplay-event-watcher");
 
 const LUMAPLAY_ROOT_KEY = "HKCU\\SOFTWARE\\LumaPlay";
 const LUMAPLAY_SHARED_READ_CACHE_TTL_MS = Math.max(
@@ -208,48 +210,6 @@ function resolveLumaPlayAchievementsQuery(options = {}) {
   });
 }
 
-function resolvePowerShellPath() {
-  if (process.env.SystemRoot) {
-    return path.join(
-      process.env.SystemRoot,
-      "System32",
-      "WindowsPowerShell",
-      "v1.0",
-      "powershell.exe",
-    );
-  }
-  return "powershell.exe";
-}
-
-function buildLumaPlayRegistryWatchScript(sourceIdentifier) {
-  const source = String(sourceIdentifier || "").trim() || "lumaplay-watch";
-  return [
-    "$ErrorActionPreference = 'Stop'",
-    "$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
-    "$rootPath = \"$sid\\\\Software\\\\LumaPlay\"",
-    "$escapedRootPath = $rootPath -replace '\\\\', '\\\\\\\\'",
-    `$source = '${source}'`,
-    "$query = \"SELECT * FROM RegistryTreeChangeEvent WHERE Hive='HKEY_USERS' AND RootPath='$escapedRootPath'\"",
-    "try {",
-    "  Register-WmiEvent -Namespace root/default -Query $query -SourceIdentifier $source | Out-Null",
-    "  [Console]::WriteLine('__LUMAPLAY_WATCH_READY__')",
-    "  while ($true) {",
-    "    $event = Wait-Event -SourceIdentifier $source -Timeout 3600",
-    "    if ($event) {",
-    "      [Console]::WriteLine('__LUMAPLAY_CHANGE__')",
-    "      Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue",
-    "    }",
-    "  }",
-    "} catch {",
-    "  [Console]::Error.WriteLine(\"__LUMAPLAY_WATCH_ERROR__:$($_.Exception.Message)\")",
-    "  exit 1",
-    "} finally {",
-    "  Unregister-Event -SourceIdentifier $source -ErrorAction SilentlyContinue",
-    "  Remove-Event -SourceIdentifier $source -ErrorAction SilentlyContinue",
-    "}",
-  ].join("\n");
-}
-
 function startLumaPlayRegistryEventWatcher(options = {}) {
   if (process.platform !== "win32") {
     return {
@@ -259,147 +219,26 @@ function startLumaPlayRegistryEventWatcher(options = {}) {
       },
     };
   }
-  const useUnifiedHost = process.env.ACH_UNIFIED_EVENT_HOST !== "0";
-  if (useUnifiedHost) {
-    const subscription = subscribeLumaPlayRegistryEvents({
-      restartDelayMs: options.restartDelayMs,
-      onReady: options.onReady,
-      onWarn: options.onWarn,
-      onChange: options.onChange,
-    });
-    return {
-      stop() {
-        try {
-          subscription.stop();
-        } catch {}
-      },
-      isRunning() {
-        try {
-          return subscription.isRunning();
-        } catch {
-          return false;
-        }
-      },
-    };
-  }
-  const onChange =
-    typeof options.onChange === "function" ? options.onChange : () => {};
-  const onReady =
-    typeof options.onReady === "function" ? options.onReady : () => {};
-  const onWarn =
-    typeof options.onWarn === "function" ? options.onWarn : () => {};
-  const restartDelayMs = Math.max(
-    500,
-    Number(options.restartDelayMs) || 1500,
-  );
-
-  const sourceIdentifier = `lumaplay-watch-${process.pid}-${Date.now()}`;
-  const script = buildLumaPlayRegistryWatchScript(sourceIdentifier);
-  const powershellPath = resolvePowerShellPath();
-  let watcherProcess = null;
-  let stopped = false;
-  let restartTimer = null;
-  let launching = false;
-
-  const clearRestartTimer = () => {
-    if (restartTimer) {
-      clearTimeout(restartTimer);
-      restartTimer = null;
-    }
-  };
-
-  const parseStream = (stream, isError = false) => {
-    if (!stream || typeof stream.on !== "function") return;
-    let buffer = "";
-    stream.on("data", (chunk) => {
-      buffer += String(chunk || "");
-      const parts = buffer.split(/\r?\n/);
-      buffer = parts.pop() || "";
-      for (const part of parts) {
-        const line = String(part || "").trim();
-        if (!line) continue;
-        if (line === "__LUMAPLAY_WATCH_READY__") {
-          onReady();
-          continue;
-        }
-        if (line === "__LUMAPLAY_CHANGE__") {
-          onChange();
-          continue;
-        }
-        if (line.startsWith("__LUMAPLAY_WATCH_ERROR__:")) {
-          const msg = line.replace("__LUMAPLAY_WATCH_ERROR__:", "").trim();
-          onWarn(msg || "LumaPlay registry watcher error");
-          continue;
-        }
-        if (isError) {
-          onWarn(line);
-        }
-      }
-    });
-  };
-
-  const scheduleRestart = () => {
-    if (stopped) return;
-    clearRestartTimer();
-    restartTimer = setTimeout(() => {
-      launch();
-    }, restartDelayMs);
-  };
-
-  function launch() {
-    if (stopped || launching) return;
-    launching = true;
-    clearRestartTimer();
-    try {
-      watcherProcess = spawn(
-        powershellPath,
-        [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-Command",
-          script,
-        ],
-        {
-          windowsHide: true,
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
-    } catch (err) {
-      launching = false;
-      onWarn(err?.message || String(err));
-      scheduleRestart();
-      return;
-    }
-    parseStream(watcherProcess.stdout, false);
-    parseStream(watcherProcess.stderr, true);
-    watcherProcess.on("error", (err) => {
-      onWarn(err?.message || String(err));
-    });
-    watcherProcess.on("exit", () => {
-      watcherProcess = null;
-      launching = false;
-      scheduleRestart();
-    });
-    launching = false;
-  }
-
-  launch();
-
+  const subscription = subscribeLumaPlayRegistryEvents({
+    restartDelayMs: options.restartDelayMs,
+    onReady: options.onReady,
+    onWarn: options.onWarn,
+    onChange: options.onChange,
+    onStatus: options.onStatus,
+    onLifecycle: options.onLifecycle,
+  });
   return {
     stop() {
-      stopped = true;
-      clearRestartTimer();
-      if (watcherProcess) {
-        try {
-          watcherProcess.kill();
-        } catch {}
-      }
-      watcherProcess = null;
+      try {
+        subscription.stop();
+      } catch {}
     },
     isRunning() {
-      return !!watcherProcess && !watcherProcess.killed;
+      try {
+        return subscription.isRunning();
+      } catch {
+        return false;
+      }
     },
   };
 }

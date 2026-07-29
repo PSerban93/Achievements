@@ -1,3 +1,5 @@
+const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
@@ -10,21 +12,299 @@ const DEFAULT_MAX_PENDING_EVENTS = 1024;
 const DEFAULT_BATCH_WINDOW_MS = 50;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
 const DEFAULT_MAX_WORKING_SET_MB = 256;
+const DEFAULT_MAX_PRIVATE_MEMORY_MB = 384;
+const DEFAULT_MAX_HANDLE_COUNT = 2500;
 const HOST_WATCHDOG_INTERVAL_MS = 15000;
 const HOST_WATCHDOG_TIMEOUT_MS = 60000;
+const HOST_GRACEFUL_STOP_TIMEOUT_MS = 2500;
+const HOST_RESTART_WINDOW_MS = 60000;
+const HOST_RESTART_THRESHOLD = 3;
+const HOST_CIRCUIT_COOLDOWN_MS = 5 * 60 * 1000;
+const HOST_STABLE_RESET_MS = 10 * 60 * 1000;
+const HOST_MAX_RESTART_DELAY_MS = 30000;
 
 const CHANNEL_PROCESS = "process";
 const CHANNEL_LUMAPLAY = "lumaplay";
+
+const PROCESS_EVENT_BRIDGE_CSHARP = String.raw`
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Threading;
+
+public sealed class AchievementsProcessEventRecord
+{
+    public string Type;
+    public int Pid;
+    public string Name;
+    public int Ppid;
+}
+
+public sealed class AchievementsProcessEventBridge : IDisposable
+{
+    private const uint TH32CS_SNAPPROCESS = 0x00000002;
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct PROCESSENTRY32
+    {
+        public uint dwSize;
+        public uint cntUsage;
+        public uint th32ProcessID;
+        public IntPtr th32DefaultHeapID;
+        public uint th32ModuleID;
+        public uint cntThreads;
+        public uint th32ParentProcessID;
+        public int pcPriClassBase;
+        public uint dwFlags;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
+        public string szExeFile;
+    }
+
+    private sealed class ProcessSnapshotEntry
+    {
+        public int Pid;
+        public int Ppid;
+        public string Name;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateToolhelp32Snapshot(
+        uint dwFlags,
+        uint th32ProcessID);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32FirstW(
+        IntPtr hSnapshot,
+        ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool Process32NextW(
+        IntPtr hSnapshot,
+        ref PROCESSENTRY32 lppe);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    private readonly Queue<AchievementsProcessEventRecord> queue =
+        new Queue<AchievementsProcessEventRecord>();
+    private readonly int maxPending;
+    private Dictionary<int, ProcessSnapshotEntry> previous =
+        new Dictionary<int, ProcessSnapshotEntry>();
+    private int dropped;
+    private int disposed;
+
+    public AchievementsProcessEventBridge(int maxPending)
+    {
+        this.maxPending = Math.Max(1, maxPending);
+    }
+
+    public int QueueDepth
+    {
+        get { return queue.Count; }
+    }
+
+    public void Start()
+    {
+        ThrowIfDisposed();
+        previous = CaptureSnapshot();
+    }
+
+    public AchievementsProcessEventRecord[] TakeBatch(int maxBatchSize, int waitMs)
+    {
+        ThrowIfDisposed();
+        int limit = Math.Max(1, maxBatchSize);
+        if (queue.Count == 0)
+        {
+            if (waitMs > 0) Thread.Sleep(waitMs);
+            Refresh();
+        }
+
+        List<AchievementsProcessEventRecord> batch =
+            new List<AchievementsProcessEventRecord>(limit);
+        while (batch.Count < limit && queue.Count > 0)
+        {
+            batch.Add(queue.Dequeue());
+        }
+        return batch.ToArray();
+    }
+
+    public int DrainDroppedCount()
+    {
+        return Interlocked.Exchange(ref dropped, 0);
+    }
+
+    private void Refresh()
+    {
+        Dictionary<int, ProcessSnapshotEntry> current = CaptureSnapshot();
+
+        foreach (KeyValuePair<int, ProcessSnapshotEntry> pair in current)
+        {
+            ProcessSnapshotEntry oldEntry;
+            if (!previous.TryGetValue(pair.Key, out oldEntry))
+            {
+                Enqueue("start", pair.Value);
+                continue;
+            }
+            if (!String.Equals(
+                    oldEntry.Name,
+                    pair.Value.Name,
+                    StringComparison.OrdinalIgnoreCase) ||
+                oldEntry.Ppid != pair.Value.Ppid)
+            {
+                Enqueue("stop", oldEntry);
+                Enqueue("start", pair.Value);
+            }
+        }
+
+        foreach (KeyValuePair<int, ProcessSnapshotEntry> pair in previous)
+        {
+            if (current.ContainsKey(pair.Key)) continue;
+            Enqueue("stop", pair.Value);
+        }
+
+        previous = current;
+    }
+
+    private void Enqueue(string type, ProcessSnapshotEntry entry)
+    {
+        if (entry == null || entry.Pid <= 0 ||
+            String.IsNullOrWhiteSpace(entry.Name))
+        {
+            return;
+        }
+
+        if (queue.Count >= maxPending)
+        {
+            Interlocked.Increment(ref dropped);
+            return;
+        }
+
+        AchievementsProcessEventRecord record =
+            new AchievementsProcessEventRecord();
+        record.Type = type;
+        record.Pid = entry.Pid;
+        record.Name = entry.Name;
+        record.Ppid = entry.Ppid;
+        queue.Enqueue(record);
+    }
+
+    private static Dictionary<int, ProcessSnapshotEntry> CaptureSnapshot()
+    {
+        Dictionary<int, ProcessSnapshotEntry> result =
+            new Dictionary<int, ProcessSnapshotEntry>();
+        IntPtr snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snapshot == INVALID_HANDLE_VALUE)
+        {
+            throw new System.ComponentModel.Win32Exception(
+                Marshal.GetLastWin32Error());
+        }
+
+        try
+        {
+            PROCESSENTRY32 entry = new PROCESSENTRY32();
+            entry.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+            if (!Process32FirstW(snapshot, ref entry))
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (error == 18) return result;
+                throw new System.ComponentModel.Win32Exception(error);
+            }
+
+            do
+            {
+                int pid = unchecked((int)entry.th32ProcessID);
+                string name = entry.szExeFile ?? String.Empty;
+                if (pid > 0 && !String.IsNullOrWhiteSpace(name))
+                {
+                    ProcessSnapshotEntry item = new ProcessSnapshotEntry();
+                    item.Pid = pid;
+                    item.Ppid = unchecked((int)entry.th32ParentProcessID);
+                    item.Name = name;
+                    result[pid] = item;
+                }
+                entry.dwSize =
+                    (uint)Marshal.SizeOf(typeof(PROCESSENTRY32));
+            }
+            while (Process32NextW(snapshot, ref entry));
+        }
+        finally
+        {
+            CloseHandle(snapshot);
+        }
+        return result;
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (Volatile.Read(ref disposed) != 0)
+        {
+            throw new ObjectDisposedException(
+                "AchievementsProcessEventBridge");
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref disposed, 1) != 0) return;
+        queue.Clear();
+        previous.Clear();
+    }
+}
+`;
+
+function pruneStaleWatcherControlFiles() {
+  if (process.platform !== "win32") return;
+  let names = [];
+  try {
+    names = fs.readdirSync(os.tmpdir());
+  } catch {
+    return;
+  }
+  let inspected = 0;
+  for (const name of names) {
+    const match = /^ach-events-host-(\d+)-.*\.stop$/i.exec(name);
+    if (!match) continue;
+    inspected += 1;
+    if (inspected > 256) break;
+    const ownerPid = Number(match[1]) || 0;
+    let ownerAlive = false;
+    if (ownerPid > 0) {
+      try {
+        process.kill(ownerPid, 0);
+        ownerAlive = true;
+      } catch {}
+    }
+    if (ownerAlive) continue;
+    try {
+      fs.unlinkSync(path.join(os.tmpdir(), name));
+    } catch {}
+  }
+}
+
+pruneStaleWatcherControlFiles();
 
 const hubState = {
   subscriptions: new Set(),
   watcherProcess: null,
   launching: false,
   restartTimer: null,
+  circuitTimer: null,
+  stableTimer: null,
   watchdogTimer: null,
   ready: false,
   lastMessageAt: 0,
   warnCache: new Map(),
+  generation: 0,
+  restartCount: 0,
+  consecutiveFailures: 0,
+  restartTimestamps: [],
+  circuitOpenUntil: 0,
+  startedAt: 0,
 };
 
 function resolvePowerShellPath() {
@@ -53,6 +333,8 @@ function buildUnifiedEventWatchScript(options = {}) {
   );
   const enableProcess = options.enableProcess !== false;
   const enableLumaplay = options.enableLumaplay !== false;
+  const stopFilePath = toSafeQuoted(options.stopFilePath, "");
+  const parentPid = Math.max(0, Math.floor(Number(options.parentPid) || 0));
   const maxBatchSize = Math.max(
     1,
     Number(options.maxBatchSize) || DEFAULT_MAX_BATCH_SIZE,
@@ -73,20 +355,35 @@ function buildUnifiedEventWatchScript(options = {}) {
     64,
     Number(options.maxWorkingSetMb) || DEFAULT_MAX_WORKING_SET_MB,
   );
+  const maxPrivateMemoryMb = Math.max(
+    128,
+    Number(options.maxPrivateMemoryMb) || DEFAULT_MAX_PRIVATE_MEMORY_MB,
+  );
+  const maxHandleCount = Math.max(
+    256,
+    Number(options.maxHandleCount) || DEFAULT_MAX_HANDLE_COUNT,
+  );
+  const processBridgeSourceBase64 = Buffer.from(
+    PROCESS_EVENT_BRIDGE_CSHARP,
+    "utf8",
+  ).toString("base64");
   return [
     "$ErrorActionPreference = 'Stop'",
     `$hostTag = '${hostTag}'`,
     `$sourceBase = '${sourceBase}'`,
     `$enableProcess = $${enableProcess ? "true" : "false"}`,
     `$enableLumaplay = $${enableLumaplay ? "true" : "false"}`,
+    `$stopFile = '${stopFilePath}'`,
+    `$parentPid = ${parentPid}`,
     `$maxBatchSize = ${Math.floor(maxBatchSize)}`,
     `$maxPendingEvents = ${Math.floor(maxPendingEvents)}`,
     `$batchWindowMs = ${Math.floor(batchWindowMs)}`,
     `$heartbeatIntervalMs = ${Math.floor(heartbeatIntervalMs)}`,
     `$maxWorkingSetMb = ${Math.floor(maxWorkingSetMb)}`,
-    "$procStartSource = \"$sourceBase-proc-start\"",
-    "$procStopSource  = \"$sourceBase-proc-stop\"",
+    `$maxPrivateMemoryMb = ${Math.floor(maxPrivateMemoryMb)}`,
+    `$maxHandleCount = ${Math.floor(maxHandleCount)}`,
     "$lumaSource      = \"$sourceBase-lumaplay\"",
+    `$processBridgeSourceBase64 = '${processBridgeSourceBase64}'`,
     "$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
     "$rootPath = \"$sid\\\\Software\\\\LumaPlay\"",
     "$escapedRootPath = $rootPath -replace '\\\\', '\\\\\\\\'",
@@ -95,21 +392,23 @@ function buildUnifiedEventWatchScript(options = {}) {
     "}",
     "$processedCount = 0",
     "$droppedCount = 0",
+    "$startedAt = [DateTime]::UtcNow",
     "$lastHeartbeatAt = [DateTime]::UtcNow",
+    "$procBridge = $null",
     "try {",
     "  $procEnabled = $false",
     "  $lumaEnabled = $false",
     "  if ($enableProcess) {",
     "    try {",
-    "      Register-WmiEvent -Class Win32_ProcessStartTrace -SourceIdentifier $procStartSource | Out-Null",
-    "      Register-WmiEvent -Class Win32_ProcessStopTrace -SourceIdentifier $procStopSource | Out-Null",
+    "      $processBridgeSource = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($processBridgeSourceBase64))",
+    "      Add-Type -TypeDefinition $processBridgeSource",
+    "      $procBridge = New-Object AchievementsProcessEventBridge -ArgumentList ([int]$maxPendingEvents)",
+    "      $procBridge.Start()",
     "      $procEnabled = $true",
     "    } catch {",
     "      [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:process:$($_.Exception.Message)\")",
-    "      Unregister-Event -SourceIdentifier $procStartSource -ErrorAction SilentlyContinue",
-    "      Unregister-Event -SourceIdentifier $procStopSource -ErrorAction SilentlyContinue",
-    "      Remove-Event -SourceIdentifier $procStartSource -ErrorAction SilentlyContinue",
-    "      Remove-Event -SourceIdentifier $procStopSource -ErrorAction SilentlyContinue",
+    "      if ($null -ne $procBridge) { try { $procBridge.Dispose() } catch {} }",
+    "      $procBridge = $null",
     "    }",
     "  }",
     "  if ($enableLumaplay) {",
@@ -128,70 +427,94 @@ function buildUnifiedEventWatchScript(options = {}) {
     "    [Console]::Error.WriteLine('__ACH_EVENT_HOST_WARN__:No event channels could be registered')",
     "  }",
     "  [Console]::WriteLine(\"__ACH_EVENT_HOST_READY__:$hostTag\")",
+    "  Emit @{ kind='control'; type='ready'; processEnabled=$procEnabled; lumaplayEnabled=$lumaEnabled; watchMode=$(if ($procEnabled) { 'native-snapshot' } else { '' }); tag=$hostTag }",
     "  while ($true) {",
-    "    if (-not $hasAnyChannel) {",
-    "      Start-Sleep -Seconds 3600",
-    "      continue",
-    "    }",
-    "    $null = Wait-Event -Timeout 1",
-    "    if ($batchWindowMs -gt 0 -and (Get-Event)) { Start-Sleep -Milliseconds $batchWindowMs }",
-    "    $queuedEvents = @(Get-Event)",
-    "    $queueDepthBefore = $queuedEvents.Count",
-    "    $droppedNow = 0",
-    "    if ($queueDepthBefore -gt $maxPendingEvents) {",
-    "      $droppedNow = $queueDepthBefore - $maxPendingEvents",
-    "      foreach ($staleEvent in @($queuedEvents | Select-Object -First $droppedNow)) {",
-    "        Remove-Event -EventIdentifier $staleEvent.EventIdentifier -ErrorAction SilentlyContinue",
-    "      }",
-    "      $droppedCount += $droppedNow",
-    "      $queuedEvents = @($queuedEvents | Select-Object -Last $maxPendingEvents)",
-    "    }",
-    "    $selectedEvents = @($queuedEvents | Select-Object -First $maxBatchSize)",
-    "    $batch = New-Object System.Collections.ArrayList",
-    "    foreach ($event in $selectedEvents) {",
+    "    if ($stopFile -and [System.IO.File]::Exists($stopFile)) { break }",
+    "    if ($parentPid -gt 0) {",
+    "      $parentProcess = $null",
     "      try {",
-    "        $src = [string]$event.SourceIdentifier",
-    "        $evt = $event.SourceEventArgs.NewEvent",
-    "        if ($procEnabled -and $src -eq $procStartSource) {",
-    "          $item = @{ kind='process'; type='start'; pid=[int]$evt.ProcessID; name=[string]$evt.ProcessName; ppid=[int]$evt.ParentProcessID }",
-    "          [void]$batch.Add($item)",
-    "        } elseif ($procEnabled -and $src -eq $procStopSource) {",
-    "          $item = @{ kind='process'; type='stop'; pid=[int]$evt.ProcessID; name=[string]$evt.ProcessName }",
-    "          [void]$batch.Add($item)",
-    "        } elseif ($lumaEnabled -and $src -eq $lumaSource) {",
-    "          [void]$batch.Add(@{ kind='lumaplay'; type='change' })",
-    "        }",
+    "        $parentProcess = [System.Diagnostics.Process]::GetProcessById($parentPid)",
+    "        if ($parentProcess.HasExited) { break }",
     "      } catch {",
-    "        [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:$($_.Exception.Message)\")",
+    "        break",
     "      } finally {",
-    "        Remove-Event -EventIdentifier $event.EventIdentifier -ErrorAction SilentlyContinue",
+    "        if ($null -ne $parentProcess) { $parentProcess.Dispose() }",
+    "        $parentProcess = $null",
     "      }",
     "    }",
+    "    $batch = New-Object System.Collections.ArrayList",
+    "    $droppedNow = 0",
+    "    if ($procEnabled -and $null -ne $procBridge) {",
+    "      $processRecords = @($procBridge.TakeBatch($maxBatchSize, 1000))",
+    "      if ($processRecords.Count -gt 0 -and $batchWindowMs -gt 0) {",
+    "        Start-Sleep -Milliseconds $batchWindowMs",
+    "        $remaining = [Math]::Max(0, $maxBatchSize - $processRecords.Count)",
+    "        if ($remaining -gt 0) {",
+    "          $processRecords += @($procBridge.TakeBatch($remaining, 0))",
+    "        }",
+    "      }",
+    "      foreach ($record in $processRecords) {",
+    "        [void]$batch.Add(@{ kind='process'; type=[string]$record.Type; pid=[int]$record.Pid; name=[string]$record.Name; ppid=[int]$record.Ppid })",
+    "      }",
+    "      $droppedNow += [int]$procBridge.DrainDroppedCount()",
+    "    } elseif (-not $lumaEnabled) {",
+    "      Start-Sleep -Seconds 1",
+    "    }",
+    "    if ($lumaEnabled -and $batch.Count -lt $maxBatchSize) {",
+    "      $remaining = [Math]::Max(1, $maxBatchSize - $batch.Count)",
+    "      $lumaEvents = @(Get-Event -SourceIdentifier $lumaSource -ErrorAction SilentlyContinue | Select-Object -First $remaining)",
+    "      foreach ($lumaEvent in $lumaEvents) {",
+    "        [void]$batch.Add(@{ kind='lumaplay'; type='change' })",
+    "        Remove-Event -EventIdentifier $lumaEvent.EventIdentifier -ErrorAction SilentlyContinue",
+    "      }",
+    "      if (-not $procEnabled -and $lumaEvents.Count -eq 0) { Start-Sleep -Milliseconds 250 }",
+    "    }",
+    "    $queueDepth = 0",
+    "    if ($procEnabled -and $null -ne $procBridge) { $queueDepth += [int]$procBridge.QueueDepth }",
+    "    if ($lumaEnabled -and $null -ne (Get-Event -SourceIdentifier $lumaSource -ErrorAction SilentlyContinue | Select-Object -First 1)) { $queueDepth += 1 }",
+    "    if ($droppedNow -gt 0) { $droppedCount += $droppedNow }",
     "    if ($batch.Count -gt 0 -or $droppedNow -gt 0) {",
     "      $processedCount += $batch.Count",
-    "      Emit @{ kind='batch'; type='events'; events=$batch.ToArray(); queueDepth=[Math]::Max(0, $queuedEvents.Count - $selectedEvents.Count); dropped=$droppedNow; resync=($droppedNow -gt 0); tag=$hostTag }",
+    "      Emit @{ kind='batch'; type='events'; events=$batch.ToArray(); queueDepth=$queueDepth; dropped=$droppedNow; resync=($droppedNow -gt 0); tag=$hostTag }",
     "    }",
+    "    $processRecords = $null",
+    "    $record = $null",
+    "    $lumaEvents = $null",
+    "    $lumaEvent = $null",
+    "    $batch = $null",
     "    $now = [DateTime]::UtcNow",
     "    if (($now - $lastHeartbeatAt).TotalMilliseconds -ge $heartbeatIntervalMs) {",
-    "      $workingSetMb = [Math]::Round(([System.Diagnostics.Process]::GetCurrentProcess().WorkingSet64 / 1MB), 1)",
-    "      Emit @{ kind='control'; type='heartbeat'; queueDepth=@(Get-Event).Count; processed=$processedCount; dropped=$droppedCount; workingSetMb=$workingSetMb; tag=$hostTag }",
+    "      $currentProcess = [System.Diagnostics.Process]::GetCurrentProcess()",
+    "      $workingSetMb = [Math]::Round(($currentProcess.WorkingSet64 / 1MB), 1)",
+    "      $privateMemoryMb = [Math]::Round(($currentProcess.PrivateMemorySize64 / 1MB), 1)",
+    "      $uptimeMs = [Math]::Round(($now - $startedAt).TotalMilliseconds)",
+    "      $heartbeatQueueDepth = 0",
+    "      if ($procEnabled -and $null -ne $procBridge) { $heartbeatQueueDepth += [int]$procBridge.QueueDepth }",
+    "      if ($lumaEnabled -and $null -ne (Get-Event -SourceIdentifier $lumaSource -ErrorAction SilentlyContinue | Select-Object -First 1)) { $heartbeatQueueDepth += 1 }",
+    "      Emit @{ kind='control'; type='heartbeat'; queueDepth=$heartbeatQueueDepth; processed=$processedCount; dropped=$droppedCount; workingSetMb=$workingSetMb; privateMemoryMb=$privateMemoryMb; handleCount=$currentProcess.HandleCount; uptimeMs=$uptimeMs; watchMode=$(if ($procEnabled) { 'native-snapshot' } else { '' }); tag=$hostTag }",
     "      $lastHeartbeatAt = $now",
-    "      if ($workingSetMb -gt $maxWorkingSetMb) {",
-    "        Emit @{ kind='control'; type='resource-limit'; workingSetMb=$workingSetMb; limitMb=$maxWorkingSetMb; tag=$hostTag }",
+    "      $resourceReason = ''",
+    "      if ($workingSetMb -gt $maxWorkingSetMb) { $resourceReason = 'working-set' }",
+    "      elseif ($privateMemoryMb -gt $maxPrivateMemoryMb) { $resourceReason = 'private-memory' }",
+    "      elseif ($currentProcess.HandleCount -gt $maxHandleCount) { $resourceReason = 'handle-count' }",
+    "      if ($resourceReason) {",
+    "        Emit @{ kind='control'; type='resource-limit'; reason=$resourceReason; workingSetMb=$workingSetMb; privateMemoryMb=$privateMemoryMb; handleCount=$currentProcess.HandleCount; uptimeMs=$uptimeMs; limitMb=$maxWorkingSetMb; privateLimitMb=$maxPrivateMemoryMb; handleLimit=$maxHandleCount; tag=$hostTag }",
     "        exit 75",
     "      }",
+    "      $currentProcess = $null",
+    "      $heartbeatQueueDepth = 0",
+    "      $resourceReason = ''",
     "    }",
     "  }",
     "} catch {",
     "  [Console]::Error.WriteLine(\"__ACH_EVENT_HOST_WARN__:$($_.Exception.Message)\")",
     "  exit 1",
     "} finally {",
-    "  Unregister-Event -SourceIdentifier $procStartSource -ErrorAction SilentlyContinue",
-    "  Unregister-Event -SourceIdentifier $procStopSource -ErrorAction SilentlyContinue",
+    "  if ($null -ne $procBridge) { try { $procBridge.Dispose() } catch {} }",
+    "  $procBridge = $null",
     "  Unregister-Event -SourceIdentifier $lumaSource -ErrorAction SilentlyContinue",
-    "  Remove-Event -SourceIdentifier $procStartSource -ErrorAction SilentlyContinue",
-    "  Remove-Event -SourceIdentifier $procStopSource -ErrorAction SilentlyContinue",
     "  Remove-Event -SourceIdentifier $lumaSource -ErrorAction SilentlyContinue",
+    "  if ($stopFile) { Remove-Item -LiteralPath $stopFile -Force -ErrorAction SilentlyContinue }",
     "}",
   ].join("\n");
 }
@@ -247,11 +570,101 @@ function clearRestartTimer() {
   }
 }
 
+function clearCircuitTimer() {
+  if (hubState.circuitTimer) {
+    clearTimeout(hubState.circuitTimer);
+    hubState.circuitTimer = null;
+  }
+}
+
+function clearStableTimer() {
+  if (hubState.stableTimer) {
+    clearTimeout(hubState.stableTimer);
+    hubState.stableTimer = null;
+  }
+}
+
 function clearWatchdogTimer() {
   if (hubState.watchdogTimer) {
     clearInterval(hubState.watchdogTimer);
     hubState.watchdogTimer = null;
   }
+}
+
+function armForcedWatcherStop(watcherProcess, reason) {
+  if (!watcherProcess || watcherProcess.__achForceKillTimer) return;
+  watcherProcess.__achForceKillTimer = setTimeout(() => {
+    watcherProcess.__achForceKillTimer = null;
+    if (hubState.watcherProcess !== watcherProcess) return;
+    notifyLifecycle({
+      state: "force-stopping",
+      pid: Number(watcherProcess.pid) || 0,
+      reason,
+    });
+    let killRequested = false;
+    try {
+      killRequested = watcherProcess.kill() !== false;
+    } catch {}
+    watcherProcess.__achForceKillTimer = setTimeout(() => {
+      watcherProcess.__achForceKillTimer = null;
+      if (hubState.watcherProcess !== watcherProcess) return;
+      const pid = Number(watcherProcess.pid) || 0;
+      notifyWarn(
+        `Windows event host PID ${pid || "unknown"} did not stop after ${
+          killRequested ? "termination" : "the first force-stop attempt"
+        }`,
+      );
+      if (process.platform === "win32" && pid > 0) {
+        try {
+          const forceStop = spawn(
+            "taskkill.exe",
+            ["/pid", String(pid), "/t", "/f"],
+            {
+              windowsHide: true,
+              stdio: "ignore",
+            },
+          );
+          forceStop.unref();
+        } catch {}
+      } else {
+        try {
+          watcherProcess.kill("SIGKILL");
+        } catch {}
+      }
+    }, 1500);
+  }, HOST_GRACEFUL_STOP_TIMEOUT_MS);
+}
+
+function requestWatcherStop(
+  watcherProcess,
+  {
+    reason = "stop",
+    suppressRestart = true,
+    relaunchAfterStop = false,
+  } = {},
+) {
+  if (!watcherProcess || hubState.watcherProcess !== watcherProcess) {
+    return false;
+  }
+  watcherProcess.__achSuppressRestart = suppressRestart === true;
+  watcherProcess.__achStopReason = String(reason || "stop");
+  watcherProcess.__achRelaunchAfterStop = relaunchAfterStop === true;
+  if (watcherProcess.__achStopRequested !== true) {
+    watcherProcess.__achStopRequested = true;
+    const controlFilePath = String(
+      watcherProcess.__achControlFilePath || "",
+    ).trim();
+    try {
+      if (!controlFilePath) throw new Error("Missing event host control file");
+      fs.writeFileSync(controlFilePath, watcherProcess.__achStopReason, "utf8");
+    } catch {
+      try {
+        watcherProcess.kill();
+      } catch {}
+    }
+  }
+  armForcedWatcherStop(watcherProcess, watcherProcess.__achStopReason);
+  return true;
 }
 
 function startWatchdogTimer(watcherProcess) {
@@ -261,14 +674,22 @@ function startWatchdogTimer(watcherProcess) {
     if (hubState.watcherProcess !== watcherProcess) return;
     const silenceMs = Date.now() - hubState.lastMessageAt;
     if (silenceMs < HOST_WATCHDOG_TIMEOUT_MS) return;
+    hubState.ready = false;
+    notifyLifecycle({
+      state: "restarting",
+      pid: Number(watcherProcess?.pid) || 0,
+      reason: "watchdog-timeout",
+    });
     notifyWarn(`Windows event host unresponsive for ${silenceMs}ms`);
-    try {
-      watcherProcess.__achSuppressRestart = false;
-      watcherProcess.kill();
-    } catch {
+    clearWatchdogTimer();
+    if (
+      !requestWatcherStop(watcherProcess, {
+        reason: "watchdog-timeout",
+        suppressRestart: false,
+      })
+    ) {
       hubState.watcherProcess = null;
-      clearWatchdogTimer();
-      scheduleRestart();
+      scheduleRestart("watchdog-timeout");
     }
   }, HOST_WATCHDOG_INTERVAL_MS);
 }
@@ -304,8 +725,52 @@ function notifyWarn(message, channel = "") {
   }
 }
 
+function notifyLifecycle(event = {}) {
+  const rawExitCode = event?.exitCode;
+  const payload = {
+    state: String(event?.state || "").trim() || "unknown",
+    pid: Number(event?.pid) || 0,
+    generation: Number(event?.generation) || hubState.generation || 0,
+    restartCount: Number(event?.restartCount) || hubState.restartCount || 0,
+    consecutiveFailures:
+      Number(event?.consecutiveFailures) || hubState.consecutiveFailures || 0,
+    circuitOpenUntil:
+      Number(event?.circuitOpenUntil) || hubState.circuitOpenUntil || 0,
+    startedAt: Number(event?.startedAt) || hubState.startedAt || 0,
+    reason: String(event?.reason || "").trim(),
+    exitCode:
+      rawExitCode !== null &&
+      rawExitCode !== undefined &&
+      Number.isFinite(Number(rawExitCode))
+        ? Number(rawExitCode)
+        : null,
+    signal: event?.signal ? String(event.signal) : "",
+    at: Date.now(),
+  };
+  for (const sub of Array.from(hubState.subscriptions)) {
+    try {
+      if (typeof sub?.onLifecycle === "function") sub.onLifecycle(payload);
+    } catch {}
+  }
+}
+
 function notifyReady() {
   hubState.ready = true;
+  clearStableTimer();
+  hubState.stableTimer = setTimeout(() => {
+    hubState.consecutiveFailures = 0;
+    hubState.restartTimestamps = [];
+    hubState.circuitOpenUntil = 0;
+    notifyLifecycle({
+      state: "stable",
+      pid: Number(hubState.watcherProcess?.pid) || 0,
+      reason: "stable-window-complete",
+    });
+  }, HOST_STABLE_RESET_MS);
+  notifyLifecycle({
+    state: "ready",
+    pid: Number(hubState.watcherProcess?.pid) || 0,
+  });
   for (const sub of Array.from(hubState.subscriptions)) {
     try {
       if (typeof sub?.onReady === "function") sub.onReady();
@@ -400,12 +865,34 @@ function handleHostPayload(parsed) {
       processed: normalizeHostMetric(parsed.processed),
       dropped: normalizeHostMetric(parsed.dropped),
       workingSetMb: normalizeHostMetric(parsed.workingSetMb),
+      privateMemoryMb: normalizeHostMetric(parsed.privateMemoryMb),
+      handleCount: normalizeHostMetric(parsed.handleCount),
+      uptimeMs: normalizeHostMetric(parsed.uptimeMs),
       limitMb: normalizeHostMetric(parsed.limitMb),
+      privateLimitMb: normalizeHostMetric(parsed.privateLimitMb),
+      handleLimit: normalizeHostMetric(parsed.handleLimit),
+      reason: String(parsed.reason || "").trim(),
+      watchMode: String(parsed.watchMode || "").trim(),
     };
+    if (typeof parsed.processEnabled === "boolean") {
+      status.processEnabled = parsed.processEnabled;
+    }
+    if (typeof parsed.lumaplayEnabled === "boolean") {
+      status.lumaplayEnabled = parsed.lumaplayEnabled;
+    }
     notifyHostStatus(status);
     if (type === "resource-limit") {
+      hubState.ready = false;
+      notifyLifecycle({
+        state: "restarting",
+        pid: Number(hubState.watcherProcess?.pid) || 0,
+        reason: "resource-limit",
+        exitCode: 75,
+      });
+      const channels = getSubscribedChannelFlags();
       notifyWarn(
-        `Windows event host exceeded ${status.limitMb || "the"} MB memory limit`,
+        `Windows event host exceeded the ${status.reason || "resource"} limit`,
+        channels.hasProcess ? CHANNEL_PROCESS : CHANNEL_LUMAPLAY,
       );
     }
     return true;
@@ -459,25 +946,85 @@ function parseStream(stream, isError = false) {
   });
 }
 
-function stopHubProcess() {
+function cleanupWatcherControlFile(watcherProcess) {
+  const controlFilePath = String(
+    watcherProcess?.__achControlFilePath || "",
+  ).trim();
+  if (!controlFilePath) return;
+  try {
+    fs.unlinkSync(controlFilePath);
+  } catch {}
+  watcherProcess.__achControlFilePath = "";
+}
+
+function stopHubProcess(reason = "stop") {
   clearRestartTimer();
+  if (reason === "no-subscribers") {
+    clearCircuitTimer();
+    clearStableTimer();
+    hubState.consecutiveFailures = 0;
+    hubState.restartTimestamps = [];
+    hubState.circuitOpenUntil = 0;
+  }
   clearWatchdogTimer();
   hubState.ready = false;
   hubState.lastMessageAt = 0;
   const watcherProcess = hubState.watcherProcess;
   if (watcherProcess) {
-    try {
-      watcherProcess.__achSuppressRestart = true;
-      watcherProcess.kill();
-    } catch {}
+    notifyLifecycle({
+      state: "stopping",
+      pid: Number(watcherProcess.pid) || 0,
+      reason,
+    });
+    requestWatcherStop(watcherProcess, {
+      reason,
+      suppressRestart: true,
+      relaunchAfterStop:
+        reason === "channels-changed" && hubState.subscriptions.size > 0,
+    });
+    return;
   }
-  hubState.watcherProcess = null;
+  hubState.startedAt = 0;
 }
 
-function scheduleRestart() {
+function scheduleRestart(reason = "unexpected-exit") {
   if (!hubState.subscriptions.size) return;
   clearRestartTimer();
-  const delayMs = getMaxRestartDelayMs();
+  clearStableTimer();
+  const now = Date.now();
+  hubState.restartTimestamps = hubState.restartTimestamps.filter(
+    (timestamp) => now - timestamp <= HOST_RESTART_WINDOW_MS,
+  );
+  hubState.restartTimestamps.push(now);
+  hubState.consecutiveFailures += 1;
+  if (hubState.restartTimestamps.length >= HOST_RESTART_THRESHOLD) {
+    clearCircuitTimer();
+    hubState.circuitOpenUntil = now + HOST_CIRCUIT_COOLDOWN_MS;
+    notifyLifecycle({
+      state: "circuit-open",
+      reason,
+    });
+    hubState.circuitTimer = setTimeout(() => {
+      hubState.circuitTimer = null;
+      hubState.circuitOpenUntil = 0;
+      hubState.restartTimestamps = [];
+      notifyLifecycle({
+        state: "circuit-half-open",
+        reason: "cooldown-complete",
+      });
+      launchHubProcess();
+    }, HOST_CIRCUIT_COOLDOWN_MS);
+    return;
+  }
+  const baseDelayMs = getMaxRestartDelayMs();
+  const delayMs = Math.min(
+    HOST_MAX_RESTART_DELAY_MS,
+    baseDelayMs * 2 ** Math.max(0, hubState.consecutiveFailures - 1),
+  );
+  notifyLifecycle({
+    state: "restart-scheduled",
+    reason,
+  });
   hubState.restartTimer = setTimeout(() => {
     launchHubProcess();
   }, delayMs);
@@ -487,10 +1034,15 @@ function launchHubProcess() {
   if (process.platform !== "win32") return;
   if (!hubState.subscriptions.size) return;
   if (hubState.launching || hubState.watcherProcess) return;
+  if (hubState.circuitOpenUntil > Date.now()) return;
 
   hubState.launching = true;
   hubState.ready = false;
   clearRestartTimer();
+  notifyLifecycle({
+    state: "starting",
+    reason: hubState.generation > 0 ? "restart" : "initial-start",
+  });
 
   const hostTag =
     process.env.ACH_EVENT_HOST_TAG &&
@@ -498,6 +1050,15 @@ function launchHubProcess() {
       ? String(process.env.ACH_EVENT_HOST_TAG).trim()
       : DEFAULT_HOST_TAG;
   const channelFlags = getSubscribedChannelFlags();
+  const controlFilePath = path.join(
+    os.tmpdir(),
+    `ach-events-host-${process.pid}-${Date.now()}-${Math.random()
+      .toString(16)
+      .slice(2)}.stop`,
+  );
+  try {
+    fs.unlinkSync(controlFilePath);
+  } catch {}
   const script = buildUnifiedEventWatchScript({
     hostTag,
     sourceBase: `ach-events-host-${process.pid}-${Date.now()}`,
@@ -508,6 +1069,11 @@ function launchHubProcess() {
     batchWindowMs: process.env.ACH_EVENT_HOST_BATCH_WINDOW_MS,
     heartbeatIntervalMs: process.env.ACH_EVENT_HOST_HEARTBEAT_MS,
     maxWorkingSetMb: process.env.ACH_EVENT_HOST_MAX_WORKING_SET_MB,
+    maxPrivateMemoryMb:
+      process.env.ACH_EVENT_HOST_MAX_PRIVATE_MEMORY_MB,
+    maxHandleCount: process.env.ACH_EVENT_HOST_MAX_HANDLE_COUNT,
+    stopFilePath: controlFilePath,
+    parentPid: process.pid,
   });
   const powershellPath = resolvePowerShellPath();
   let watcherProcess = null;
@@ -531,12 +1097,32 @@ function launchHubProcess() {
       },
     );
     watcherProcess.__achSuppressRestart = false;
+    watcherProcess.__achStopReason = "";
+    watcherProcess.__achRelaunchAfterStop = false;
+    watcherProcess.__achForceKillTimer = null;
+    watcherProcess.__achStopRequested = false;
+    watcherProcess.__achControlFilePath = controlFilePath;
+    hubState.generation += 1;
+    if (hubState.generation > 1) hubState.restartCount += 1;
+    hubState.startedAt = Date.now();
+    watcherProcess.__achStartedAt = hubState.startedAt;
     hubState.watcherProcess = watcherProcess;
     startWatchdogTimer(watcherProcess);
+    notifyLifecycle({
+      state: "spawned",
+      pid: Number(watcherProcess.pid) || 0,
+    });
   } catch (err) {
+    try {
+      fs.unlinkSync(controlFilePath);
+    } catch {}
     hubState.launching = false;
+    notifyLifecycle({
+      state: "failed",
+      reason: "spawn-failed",
+    });
     notifyWarn(err?.message || String(err));
-    scheduleRestart();
+    scheduleRestart("spawn-failed");
     return;
   }
 
@@ -546,15 +1132,39 @@ function launchHubProcess() {
   watcherProcess.on("error", (err) => {
     notifyWarn(err?.message || String(err));
   });
-  watcherProcess.on("exit", () => {
+  watcherProcess.on("close", (code, signal) => {
     const suppressRestart = watcherProcess.__achSuppressRestart === true;
+    const relaunchAfterStop =
+      hubState.subscriptions.size > 0 &&
+      (watcherProcess.__achRelaunchAfterStop === true || suppressRestart);
+    if (watcherProcess.__achForceKillTimer) {
+      clearTimeout(watcherProcess.__achForceKillTimer);
+      watcherProcess.__achForceKillTimer = null;
+    }
+    cleanupWatcherControlFile(watcherProcess);
     if (hubState.watcherProcess !== watcherProcess) return;
     clearWatchdogTimer();
     hubState.watcherProcess = null;
     hubState.ready = false;
     hubState.lastMessageAt = 0;
+    hubState.startedAt = 0;
     hubState.launching = false;
-    if (!suppressRestart) scheduleRestart();
+    const reason =
+      watcherProcess.__achStopReason ||
+      (code === 75 ? "resource-limit" : "unexpected-exit");
+    notifyLifecycle({
+      state: suppressRestart ? "stopped" : "exited",
+      pid: Number(watcherProcess.pid) || 0,
+      reason,
+      exitCode: code,
+      signal,
+      startedAt: Number(watcherProcess.__achStartedAt) || 0,
+    });
+    if (relaunchAfterStop) {
+      launchHubProcess();
+    } else if (!suppressRestart) {
+      scheduleRestart(reason);
+    }
   });
   hubState.launching = false;
 }
@@ -585,6 +1195,8 @@ function createSubscription(channel, options = {}) {
     onBatch: typeof options.onBatch === "function" ? options.onBatch : null,
     onResync: typeof options.onResync === "function" ? options.onResync : null,
     onStatus: typeof options.onStatus === "function" ? options.onStatus : null,
+    onLifecycle:
+      typeof options.onLifecycle === "function" ? options.onLifecycle : null,
     onReady: typeof options.onReady === "function" ? options.onReady : () => {},
     onWarn: typeof options.onWarn === "function" ? options.onWarn : () => {},
     restartDelayMs: Math.max(
@@ -599,8 +1211,8 @@ function createSubscription(channel, options = {}) {
   const channelsChanged =
     prevFlags.hasProcess !== nextFlags.hasProcess ||
     prevFlags.hasLumaplay !== nextFlags.hasLumaplay;
-  if (channelsChanged) {
-    stopHubProcess();
+  if (channelsChanged && hubState.watcherProcess) {
+    stopHubProcess("channels-changed");
   }
   launchHubProcess();
   if (hubState.ready) {
@@ -615,12 +1227,12 @@ function createSubscription(channel, options = {}) {
       hubState.subscriptions.delete(sub);
       const nextStopFlags = getSubscribedChannelFlags();
       if (!hubState.subscriptions.size) {
-        stopHubProcess();
+        stopHubProcess("no-subscribers");
       } else if (
         prevStopFlags.hasProcess !== nextStopFlags.hasProcess ||
         prevStopFlags.hasLumaplay !== nextStopFlags.hasLumaplay
       ) {
-        stopHubProcess();
+        stopHubProcess("channels-changed");
         launchHubProcess();
       }
     },
@@ -636,6 +1248,7 @@ function startProcessEventWatcher(options = {}) {
     onBatch: options.onBatch,
     onResync: options.onResync,
     onStatus: options.onStatus,
+    onLifecycle: options.onLifecycle,
     onReady: options.onReady,
     onWarn: options.onWarn,
     restartDelayMs: options.restartDelayMs,
@@ -643,14 +1256,10 @@ function startProcessEventWatcher(options = {}) {
 }
 
 function subscribeLumaPlayRegistryEvents(options = {}) {
-  return createSubscription(CHANNEL_LUMAPLAY, {
-    onEvent: options.onChange,
-    onResync: options.onChange,
-    onStatus: options.onStatus,
-    onReady: options.onReady,
-    onWarn: options.onWarn,
-    restartDelayMs: options.restartDelayMs,
-  });
+  const {
+    subscribeLumaPlayRegistryEvents: subscribeDedicatedLumaPlayHost,
+  } = require("./lumaplay-event-watcher");
+  return subscribeDedicatedLumaPlayHost(options);
 }
 
 module.exports = {

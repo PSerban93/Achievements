@@ -7544,6 +7544,8 @@ module.exports = function makeWatchedFolders({
           mode: "registry-event",
           restartDelayMs: LUMAPLAY_EVENT_WATCH_RESTART_MS,
         });
+        clearLumaPlayReadCache();
+        scheduleLumaPlayDiscoveryTick({ autoRebuild: true }, 0);
       },
       onChange: () => {
         clearLumaPlayReadCache();
@@ -7553,6 +7555,28 @@ module.exports = function makeWatchedFolders({
         watcherLogger.warn("lumaplay:realtime-event-warning", {
           error: String(error || ""),
         });
+      },
+      onLifecycle: (lifecycle = {}) => {
+        const state = String(lifecycle?.state || "");
+        if (state === "ready" || state === "spawned") return;
+        const details = {
+          state,
+          pid: Number(lifecycle?.pid) || 0,
+          restartCount: Number(lifecycle?.restartCount) || 0,
+          consecutiveFailures: Number(lifecycle?.consecutiveFailures) || 0,
+          circuitOpenUntil: Number(lifecycle?.circuitOpenUntil) || 0,
+          reason: String(lifecycle?.reason || ""),
+        };
+        if (
+          state === "exited" ||
+          state === "failed" ||
+          state === "circuit-open" ||
+          state === "force-stopping"
+        ) {
+          watcherLogger.warn("lumaplay:realtime-event-lifecycle", details);
+        } else {
+          watcherLogger.info("lumaplay:realtime-event-lifecycle", details);
+        }
       },
     });
   }

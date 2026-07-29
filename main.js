@@ -8,6 +8,7 @@ const {
   globalShortcut,
   Tray,
   shell,
+  Notification,
 } = require("electron");
 // Polyfill File for environments where undici expects it (Electron main may lack global File)
 if (typeof globalThis.File === "undefined") {
@@ -25,6 +26,9 @@ if (typeof globalThis.File === "undefined") {
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-hid-blocklist");
 app.setName("Achievements");
+if (process.platform === "win32") {
+  app.setAppUserModelId("com.achievements.app");
+}
 const {
   spawn,
   fork,
@@ -12600,7 +12604,15 @@ function handlePlatinumComplete({
 }
 
 ipcMain.handle("load-presets", async () => {
-  if (!fs.existsSync(userPresetsFolder)) return [];
+  if (!fs.existsSync(userPresetsFolder)) {
+    return {
+      defaultPresets: [NATIVE_WINDOWS_PRESET_NAME],
+      userPresets: [],
+      scalable: [NATIVE_WINDOWS_PRESET_NAME],
+      nonScalable: [],
+      isStructured: true,
+    };
+  }
 
   try {
     const defaultPresetRoots = getPresetCategoryRoots(
@@ -12639,6 +12651,13 @@ ipcMain.handle("load-presets", async () => {
     });
 
     if (defaultPresets.length || userPresets.length) {
+      if (
+        !defaultPresets.some((preset) =>
+          isNativeWindowsNotificationPreset(preset),
+        )
+      ) {
+        defaultPresets.push(NATIVE_WINDOWS_PRESET_NAME);
+      }
       return {
         defaultPresets,
         userPresets,
@@ -12661,6 +12680,11 @@ ipcMain.handle("load-presets", async () => {
         dir !== PRESET_FOLDER_USERS_LEGACY,
     );
 
+    if (
+      !flatDirs.some((preset) => isNativeWindowsNotificationPreset(preset))
+    ) {
+      flatDirs.push(NATIVE_WINDOWS_PRESET_NAME);
+    }
     return flatDirs;
   } catch (error) {
     notifyError(
@@ -12680,6 +12704,15 @@ let platinumFallbackTimer = null;
 const pendingNotificationScreenshots = new Map();
 const RECENT_ACHIEVEMENT_NOTIFICATION_DEDUPE_MS = 1500;
 const recentAchievementNotificationKeys = new Map();
+const NATIVE_WINDOWS_PRESET_NAME = "Native Windows";
+
+function isNativeWindowsNotificationPreset(preset) {
+  return (
+    String(preset || "")
+      .trim()
+      .toLowerCase() === NATIVE_WINDOWS_PRESET_NAME.toLowerCase()
+  );
+}
 
 function pruneRecentAchievementNotificationKeys(now = Date.now()) {
   for (const [key, timestamp] of recentAchievementNotificationKeys) {
@@ -13001,6 +13034,8 @@ function queueAchievementNotification(achievement) {
   const useSanPreset =
     (achievement.useSanPreset === true || prefs.useSanPreset === true) &&
     sanPresetCandidate;
+  const usesNativeWindowsPreset =
+    isNativeWindowsNotificationPreset(resolvedPreset);
   const resolvedSkipScreenshot =
     achievement.skipScreenshot === true
       ? true
@@ -13025,8 +13060,8 @@ function queueAchievementNotification(achievement) {
     preset: resolvedPreset,
     position: resolvedPosition,
     sound: requestedSound,
-    sanPreset: useSanPreset ? sanPresetCandidate : "",
-    useSanPreset: !!useSanPreset,
+    sanPreset: !usesNativeWindowsPreset && useSanPreset ? sanPresetCandidate : "",
+    useSanPreset: !usesNativeWindowsPreset && !!useSanPreset,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: resolvedSkipScreenshot,
     isPlatinum,
@@ -13117,11 +13152,289 @@ function resolveGameCoverHeaderPathForNotification(
   return useFallbackImage ? getNotificationFallbackHeaderPath() : "";
 }
 
+async function captureAchievementUnlockScreenshot(notificationData = {}) {
+  try {
+    if (!screenshot) {
+      console.warn(
+        tUi(
+          "main.log.screenshotDesktopMissing",
+          {},
+          "screenshot-desktop not installed",
+        ),
+      );
+      return;
+    }
+    const gameName =
+      selectedConfig || notificationData.configName || "Unknown Game";
+    const achName = notificationData.displayName || "Achievement";
+    notificationLogger.info("notification:screenshot:start", {
+      displayName: achName,
+      config: notificationData.config_path || null,
+    });
+    const saved = await saveFullScreenShot(gameName, achName);
+    notificationLogger.info("notification:screenshot:success", {
+      displayName: achName,
+      path: saved,
+    });
+  } catch (err) {
+    const code = err?.code || null;
+    const error = err?.message || String(err);
+    const payload = {
+      displayName: notificationData.displayName || "Achievement",
+      code,
+      error,
+    };
+    if (code === "capture-timeout") {
+      notificationLogger.warn("notification:screenshot:timeout", payload);
+    } else {
+      notificationLogger.warn("notification:screenshot:failed", payload);
+    }
+  }
+}
+
+const activeNativeAchievementNotifications = new Set();
+const NATIVE_WINDOWS_REFERENCE_TIMEOUT_MS = 30000;
+const NATIVE_WINDOWS_QUEUE_INTERVAL_MS = 1250;
+const NATIVE_WINDOWS_SHOW_WATCHDOG_MS = 3000;
+
+function buildNativeWindowsNotificationGroupId(notificationData = {}) {
+  const source =
+    notificationData.config_path ||
+    notificationData.configName ||
+    notificationData.appid ||
+    "achievements";
+  return crypto
+    .createHash("sha256")
+    .update(String(source))
+    .digest("hex")
+    .slice(0, 32);
+}
+
+function formatNativeWindowsNotificationRarity(notificationData = {}) {
+  if (
+    notificationData.showRarityPercentage !== true ||
+    notificationData.isPlatinum === true
+  ) {
+    return "";
+  }
+  const rarityPct = normalizeNotificationRarityPercent(
+    notificationData.rarityPct,
+  );
+  if (rarityPct === null) return "";
+  const formatted = Number(rarityPct.toFixed(2)).toString();
+  const label = tUi("overlay.rarityLabel", {}, "Rarity");
+  return `${label}: ${formatted}%`;
+}
+
+function invokeNativeWindowsNotificationCallback(callback, ...args) {
+  if (typeof callback !== "function") return;
+  try {
+    callback(...args);
+  } catch (error) {
+    notificationLogger.warn("native-windows-notification:callback-failed", {
+      error: error?.message || String(error),
+    });
+  }
+}
+
+function showNativeWindowsAchievementNotification(
+  notificationData = {},
+  callbacks = {},
+) {
+  if (
+    process.platform !== "win32" ||
+    !Notification ||
+    typeof Notification.isSupported !== "function" ||
+    !Notification.isSupported()
+  ) {
+    notificationLogger.warn("native-windows-notification:unsupported", {
+      platform: process.platform,
+    });
+    return null;
+  }
+
+  const iconPath =
+    notificationData.iconPath && fs.existsSync(notificationData.iconPath)
+      ? notificationData.iconPath
+      : ICON_PATH;
+  const title = notificationData.displayName || "Achievement";
+  const body = [
+    notificationData.description || notificationData.configName || "",
+    formatNativeWindowsNotificationRarity(notificationData),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const groupId = buildNativeWindowsNotificationGroupId(notificationData);
+
+  let nativeNotification = null;
+  let referenceTimer = null;
+  let referenceReleased = false;
+  const releaseReference = () => {
+    if (referenceReleased) return;
+    referenceReleased = true;
+    if (referenceTimer) {
+      clearTimeout(referenceTimer);
+      referenceTimer = null;
+    }
+    if (nativeNotification) {
+      activeNativeAchievementNotifications.delete(nativeNotification);
+    }
+  };
+
+  try {
+    nativeNotification = new Notification({
+      id: crypto
+        .createHash("sha1")
+        .update(
+          [
+            notificationData.config_path || "",
+            notificationData.name || "",
+            notificationData.displayName || "",
+            Date.now(),
+          ].join("::"),
+        )
+        .digest("hex"),
+      groupId,
+      groupTitle: notificationData.configName || "Achievements",
+      title,
+      body,
+      icon: iconPath,
+      silent: true,
+      timeoutType: "default",
+      urgency: "normal",
+    });
+
+    activeNativeAchievementNotifications.add(nativeNotification);
+    referenceTimer = setTimeout(() => {
+      releaseReference();
+    }, NATIVE_WINDOWS_REFERENCE_TIMEOUT_MS);
+    referenceTimer.unref?.();
+
+    nativeNotification.once("show", () => {
+      releaseReference();
+      notificationLogger.info("native-windows-notification:show", {
+        displayName: notificationData.displayName,
+        config: notificationData.config_path || null,
+        groupId,
+      });
+      invokeNativeWindowsNotificationCallback(callbacks.onShow);
+    });
+    nativeNotification.once("failed", (_event, error) => {
+      releaseReference();
+      notificationLogger.warn("native-windows-notification:failed", {
+        displayName: notificationData.displayName,
+        error: error || null,
+      });
+      invokeNativeWindowsNotificationCallback(callbacks.onFailed, error);
+    });
+    nativeNotification.once("close", (details) => {
+      releaseReference();
+      const reason = details?.reason || null;
+      notificationLogger.info("native-windows-notification:closed", {
+        displayName: notificationData.displayName,
+        reason,
+      });
+      invokeNativeWindowsNotificationCallback(callbacks.onClose, reason);
+    });
+    nativeNotification.show();
+    return nativeNotification;
+  } catch (error) {
+    releaseReference();
+    notificationLogger.warn("native-windows-notification:show-failed", {
+      displayName: notificationData.displayName,
+      error: error?.message || String(error),
+    });
+    return null;
+  }
+}
+
+function playAchievementNotificationSound(achievement = {}) {
+  if (
+    mainWindow &&
+    !mainWindow.isDestroyed() &&
+    achievement.sound &&
+    achievement.sound !== "mute"
+  ) {
+    mainWindow.webContents.send("play-sound", achievement.sound);
+  }
+}
+
+function showCustomAchievementNotification({
+  achievement,
+  notificationData,
+  duration,
+  shouldScreenshot,
+  playSound = true,
+  onFinished,
+}) {
+  let notificationWindow = null;
+  try {
+    notificationWindow = createNotificationWindow(notificationData);
+  } catch (error) {
+    notificationLogger.warn("show-notification:custom-create-failed", {
+      displayName: notificationData.displayName,
+      preset: notificationData.preset || "default",
+      error: error?.message || String(error),
+    });
+    onFinished();
+    return null;
+  }
+
+  const notificationWebContentsId = notificationWindow.webContents.id;
+  if (playSound) {
+    playAchievementNotificationSound(achievement);
+  }
+
+  if (shouldScreenshot) {
+    const armScreenshot = () =>
+      armPendingNotificationScreenshot(
+        notificationWindow,
+        () => captureAchievementUnlockScreenshot(notificationData),
+        notificationData.durationMs,
+      );
+    if (notificationWindow.webContents.isLoading()) {
+      notificationWindow.webContents.once("did-finish-load", armScreenshot);
+    } else {
+      armScreenshot();
+    }
+  }
+
+  let closeTimer = null;
+  notificationWindow.on("closed", () => {
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+    clearPendingNotificationScreenshot(notificationWebContentsId);
+    windowLogger.info("create-notification-window:closed", {
+      preset: notificationData.preset || "default",
+      position: notificationData.position || "center-bottom",
+    });
+    onFinished();
+  });
+
+  closeTimer = setTimeout(() => {
+    closeTimer = null;
+    if (!notificationWindow.isDestroyed()) {
+      notificationWindow.close();
+    }
+  }, duration);
+  return notificationWindow;
+}
+
 function processNextNotification() {
   if (isNotificationShowing || earnedNotificationQueue.length === 0) return;
 
   const achievement = earnedNotificationQueue.shift();
   isNotificationShowing = true;
+  let queueEntryFinished = false;
+  const finishCurrentNotification = () => {
+    if (queueEntryFinished) return;
+    queueEntryFinished = true;
+    isNotificationShowing = false;
+    processNextNotification();
+    flushPendingPlatinum();
+  };
 
   const lang = selectedLanguage || "english";
 
@@ -13155,9 +13468,17 @@ function processNextNotification() {
   };
 
   const preset = achievement.preset || "default";
-  const { presetFolder } = resolveNotificationPresetFolder(preset);
   const normalizedPreset = String(preset || "").trim().toLowerCase();
-  if (notificationData.useSanPreset && notificationData.sanPreset) {
+  const isNativeWindowsPreset = isNativeWindowsNotificationPreset(preset);
+  const { presetFolder } = isNativeWindowsPreset
+    ? { presetFolder: null }
+    : resolveNotificationPresetFolder(preset);
+
+  if (
+    !isNativeWindowsPreset &&
+    notificationData.useSanPreset &&
+    notificationData.sanPreset
+  ) {
     try {
       const sanTheme = buildSanThemeForNotification(
         notificationData.sanPreset,
@@ -13182,6 +13503,7 @@ function processNextNotification() {
   );
 
   if (
+    !isNativeWindowsPreset &&
     notificationData.isPlatinum &&
     ["xbox series platinum - purple", "xbox series platinum"].includes(
       normalizedPreset,
@@ -13230,7 +13552,9 @@ function processNextNotification() {
       : 0;
   const duration =
     overrideDurationMs ||
-    (notificationData.sanTheme
+    (isNativeWindowsPreset
+      ? 5000
+      : notificationData.sanTheme
       ? Math.round(
           (Number(notificationData.sanTheme?.customisation?.displaytime) || 8) *
             1000,
@@ -13244,94 +13568,126 @@ function processNextNotification() {
       duration / 1000,
     );
   }
-  const notificationWindow = createNotificationWindow(notificationData);
-  const notificationWebContentsId = notificationWindow.webContents.id;
-
-  if (
-    mainWindow &&
-    !mainWindow.isDestroyed() &&
-    achievement.sound &&
-    achievement.sound !== "mute"
-  ) {
-    mainWindow.webContents.send("play-sound", achievement.sound);
-  }
-
-  // Screenshot
   const disableByPrefs = !!cachedPreferences.disableAchievementScreenshot;
   const shouldScreenshot =
     !notificationData.isTest &&
     !notificationData.skipScreenshot &&
     !disableByPrefs;
 
-  const doShot = async () => {
-    try {
-      if (!screenshot) {
-        console.warn(
-          tUi(
-            "main.log.screenshotDesktopMissing",
-            {},
-            "screenshot-desktop not installed",
-          ),
-        );
-        return;
-      }
-      const gameName = selectedConfig || "Unknown Game";
-      const achName = notificationData.displayName || "Achievement";
-      notificationLogger.info("notification:screenshot:start", {
-        displayName: achName,
-        config: notificationData.config_path || null,
+  if (isNativeWindowsPreset) {
+    let nativeCompletionTimer = null;
+    let nativeFallbackStarted = false;
+    let nativeActionsStarted = false;
+    let nativeShowReceived = false;
+    const clearNativeCompletionTimer = () => {
+      if (!nativeCompletionTimer) return;
+      clearTimeout(nativeCompletionTimer);
+      nativeCompletionTimer = null;
+    };
+    const scheduleNativeCompletion = (delayMs, reason) => {
+      clearNativeCompletionTimer();
+      nativeCompletionTimer = setTimeout(() => {
+        nativeCompletionTimer = null;
+        if (reason === "no-show-signal") {
+          notificationLogger.warn(
+            "native-windows-notification:no-show-signal",
+            {
+              displayName: notificationData.displayName,
+              config: notificationData.config_path || null,
+            },
+          );
+        }
+        finishCurrentNotification();
+      }, delayMs);
+      nativeCompletionTimer.unref?.();
+    };
+    const startNativeFallback = (reason, error = null) => {
+      if (nativeFallbackStarted || queueEntryFinished) return;
+      nativeFallbackStarted = true;
+      clearNativeCompletionTimer();
+      notificationData.preset = "Default";
+      const { presetFolder: fallbackPresetFolder } =
+        resolveNotificationPresetFolder(notificationData.preset);
+      const fallbackDuration =
+        overrideDurationMs ||
+        getPresetAnimationDuration(fallbackPresetFolder);
+      notificationData.durationMs = fallbackDuration;
+      notificationData.durationOverridden = overrideDurationMs > 0;
+      notificationLogger.warn("native-windows-notification:fallback", {
+        displayName: notificationData.displayName,
+        reason,
+        error: error ? error?.message || String(error) : null,
       });
-      const saved = await saveFullScreenShot(gameName, achName);
-      notificationLogger.info("notification:screenshot:success", {
-        displayName: achName,
-        path: saved,
+      showCustomAchievementNotification({
+        achievement,
+        notificationData,
+        duration: fallbackDuration,
+        shouldScreenshot: shouldScreenshot && !nativeActionsStarted,
+        playSound: !nativeActionsStarted,
+        onFinished: finishCurrentNotification,
       });
-    } catch (err) {
-      const code = err?.code || null;
-      const error = err?.message || String(err);
-      const payload = {
-        displayName: notificationData.displayName || "Achievement",
-        code,
-        error,
-      };
-      if (code === "capture-timeout") {
-        notificationLogger.warn("notification:screenshot:timeout", payload);
-      } else {
-        notificationLogger.warn("notification:screenshot:failed", payload);
-      }
-    }
-  };
+    };
 
-  if (shouldScreenshot) {
-    const armScreenshot = () =>
-      armPendingNotificationScreenshot(
-        notificationWindow,
-        doShot,
-        notificationData.durationMs,
-      );
-    if (notificationWindow.webContents.isLoading()) {
-      notificationWindow.webContents.once("did-finish-load", armScreenshot);
-    } else {
-      armScreenshot();
+    const nativeNotification = showNativeWindowsAchievementNotification(
+      notificationData,
+      {
+        onShow: () => {
+          if (nativeFallbackStarted || queueEntryFinished) return;
+          nativeShowReceived = true;
+          scheduleNativeCompletion(
+            NATIVE_WINDOWS_QUEUE_INTERVAL_MS,
+            "shown",
+          );
+        },
+        onFailed: (error) => {
+          startNativeFallback("failed-event", error);
+        },
+        onClose: () => {
+          if (!nativeFallbackStarted) {
+            clearNativeCompletionTimer();
+            finishCurrentNotification();
+          }
+        },
+      },
+    );
+
+    if (!nativeNotification) {
+      startNativeFallback("show-failed");
+      return;
     }
+    if (nativeFallbackStarted || queueEntryFinished) {
+      return;
+    }
+    nativeActionsStarted = true;
+    playAchievementNotificationSound(achievement);
+    if (shouldScreenshot) {
+      notificationLogger.info("notification:screenshot-trigger", {
+        reason: "native-windows",
+      });
+      setImmediate(() => {
+        void captureAchievementUnlockScreenshot(notificationData);
+      });
+    }
+    if (
+      !nativeFallbackStarted &&
+      !nativeShowReceived &&
+      !queueEntryFinished
+    ) {
+      scheduleNativeCompletion(
+        NATIVE_WINDOWS_SHOW_WATCHDOG_MS,
+        "no-show-signal",
+      );
+    }
+    return;
   }
 
-  notificationWindow.on("closed", () => {
-    clearPendingNotificationScreenshot(notificationWebContentsId);
-    windowLogger.info("create-notification-window:closed", {
-      preset: notificationData.preset || "default",
-      position: notificationData.position || "center-bottom",
-    });
-    isNotificationShowing = false;
-    processNextNotification();
-    flushPendingPlatinum();
+  showCustomAchievementNotification({
+    achievement,
+    notificationData,
+    duration,
+    shouldScreenshot,
+    onFinished: finishCurrentNotification,
   });
-
-  setTimeout(() => {
-    if (!notificationWindow.isDestroyed()) {
-      notificationWindow.close();
-    }
-  }, duration);
 }
 
 function flushPendingPlatinum() {
@@ -15041,6 +15397,8 @@ async function monitorAchievementsFile(filePath) {
           appid: activeAppId || null,
           restartDelayMs,
         });
+        clearLumaPlayReadCache();
+        scheduleSnapshotFromEvent(0);
       },
       onWarn: (error) => {
         appLogger.warn("active-lumaplay:event-warning", {
@@ -15048,6 +15406,30 @@ async function monitorAchievementsFile(filePath) {
           appid: activeAppId || null,
           error: String(error || ""),
         });
+      },
+      onLifecycle: (lifecycle = {}) => {
+        const state = String(lifecycle?.state || "");
+        if (state === "ready" || state === "spawned") return;
+        const details = {
+          config: activeConfigName,
+          appid: activeAppId || null,
+          state,
+          pid: Number(lifecycle?.pid) || 0,
+          restartCount: Number(lifecycle?.restartCount) || 0,
+          consecutiveFailures: Number(lifecycle?.consecutiveFailures) || 0,
+          circuitOpenUntil: Number(lifecycle?.circuitOpenUntil) || 0,
+          reason: String(lifecycle?.reason || ""),
+        };
+        if (
+          state === "exited" ||
+          state === "failed" ||
+          state === "circuit-open" ||
+          state === "force-stopping"
+        ) {
+          appLogger.warn("active-lumaplay:event-lifecycle", details);
+        } else {
+          appLogger.info("active-lumaplay:event-lifecycle", details);
+        }
       },
       onChange: () => {
         clearLumaPlayReadCache();
@@ -20642,6 +21024,7 @@ function scheduleAutoSelectProcessPollerAfterBoot() {
 let detectedConfigName = null;
 const activePlaytimeConfigs = new Set();
 let autoSelectRunningGameConfigInFlight = false;
+let autoSelectPendingProcesses = null;
 
 function splitArgsString(input) {
   const argStr = String(input || "").trim();
@@ -20800,9 +21183,7 @@ function processMatchesConfig(proc, configData, configName) {
   return argTokens.every((token) => cmdLine.includes(token));
 }
 
-async function autoSelectRunningGameConfig(processes) {
-  if (autoSelectRunningGameConfigInFlight) return;
-  autoSelectRunningGameConfigInFlight = true;
+async function autoSelectRunningGameConfigOnce(processes) {
   try {
     const list = Array.isArray(processes) ? processes : [];
     if (!list.length) return;
@@ -21029,8 +21410,31 @@ async function autoSelectRunningGameConfig(processes) {
         error: err?.message || String(err),
       }),
     );
+  }
+}
+
+async function autoSelectRunningGameConfig(processes) {
+  autoSelectPendingProcesses = Array.isArray(processes) ? processes : [];
+  if (autoSelectRunningGameConfigInFlight) return;
+
+  autoSelectRunningGameConfigInFlight = true;
+  try {
+    while (autoSelectPendingProcesses !== null) {
+      const nextProcesses = autoSelectPendingProcesses;
+      autoSelectPendingProcesses = null;
+      await autoSelectRunningGameConfigOnce(nextProcesses);
+    }
   } finally {
     autoSelectRunningGameConfigInFlight = false;
+    if (autoSelectPendingProcesses !== null) {
+      const trailingProcesses = autoSelectPendingProcesses;
+      autoSelectPendingProcesses = null;
+      autoSelectRunningGameConfig(trailingProcesses).catch((err) => {
+        appLogger.warn("auto-select:pending-snapshot-failed", {
+          error: err?.message || String(err),
+        });
+      });
+    }
   }
 }
 

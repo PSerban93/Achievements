@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -111,7 +111,7 @@
     "ini": "6.0.0",
     "jsdom": "29.1.1",
     "koffi": "^3.1.2",
-    "playwright": "^1.55.0",
+    "playwright": "^1.62.0",
     "playwright-extra": "^4.3.6",
     "ps-list": "9.0.0",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
@@ -121,9 +121,9 @@
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "43.1.1",
+    "electron": "^43.2.0",
     "electron-builder": "^26.8.1",
-    "eslint": "^10.7.0",
+    "eslint": "^10.8.0",
     "rcedit": "^5.0.2"
   },
   "overrides": {

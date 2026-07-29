@@ -11699,79 +11699,217 @@
         });
       });
 
-      window.addEventListener("DOMContentLoaded", async () => {
-        try {
-          const presetsData = await window.api.loadPresets();
-          const presetDropdown = document.getElementById("presetDropdown");
-          presetDropdown.innerHTML = "";
+      let presetOptionsLoadPromise = null;
+      const NATIVE_WINDOWS_PRESET_VALUE = "native windows";
+      const NATIVE_WINDOWS_NOTIFICATION_CONTROL_MAP = Object.freeze([
+        {
+          presetId: "presetDropdown",
+          controlIds: ["positionDropdown", "scaleSlider"],
+        },
+        {
+          presetId: "settings-presetDropdown",
+          controlIds: [
+            "settings-positionDropdown",
+            "settings-scaleSlider",
+            "settings-sanPresetDropdown",
+          ],
+        },
+        {
+          presetId: "settings-rarePresetDropdown",
+          controlIds: [
+            "settings-rarePositionDropdown",
+            "settings-rareSanPresetDropdown",
+          ],
+        },
+        {
+          presetId: "settings-platinumPresetDropdown",
+          controlIds: [
+            "settings-platinumPositionDropdown",
+            "settings-platinumSanPresetDropdown",
+          ],
+        },
+        {
+          presetId: "settings-xeniaPresetDropdown",
+          controlIds: [
+            "settings-xeniaPositionDropdown",
+            "settings-xeniaSanPresetDropdown",
+          ],
+        },
+        {
+          presetId: "settings-rpcs3PresetDropdown",
+          controlIds: [
+            "settings-rpcs3PositionDropdown",
+            "settings-rpcs3SanPresetDropdown",
+          ],
+        },
+        {
+          presetId: "settings-shadps4PresetDropdown",
+          controlIds: [
+            "settings-shadps4PositionDropdown",
+            "settings-shadps4SanPresetDropdown",
+          ],
+        },
+      ]);
 
-          const defaultPresetsGroup = document.createElement("optgroup");
-          defaultPresetsGroup.label = "Default Presets";
+      function isNativeWindowsPresetValue(value) {
+        return (
+          String(value || "").trim().toLowerCase() ===
+          NATIVE_WINDOWS_PRESET_VALUE
+        );
+      }
 
-          const userPresetsGroup = document.createElement("optgroup");
-          userPresetsGroup.label = "Users Presets";
-
-          // Check if we have the new structured format or old format
-          if (presetsData.isStructured) {
-            // Handle new structured format with separate folders
-
-            const defaultPresetsList = Array.isArray(presetsData.defaultPresets)
-              ? presetsData.defaultPresets
-              : Array.isArray(presetsData.scalable)
-                ? presetsData.scalable
-                : [];
-            const userPresetsList = Array.isArray(presetsData.userPresets)
-              ? presetsData.userPresets
-              : Array.isArray(presetsData.nonScalable)
-                ? presetsData.nonScalable
-                : [];
-
-            // Add bundled/default presets
-            defaultPresetsList.forEach((preset) => {
-              const option = document.createElement("option");
-              option.value = preset;
-              option.textContent = preset;
-              defaultPresetsGroup.appendChild(option);
-            });
-
-            // Add user presets
-            userPresetsList.forEach((preset) => {
-              const option = document.createElement("option");
-              option.value = preset;
-              option.textContent = preset;
-              userPresetsGroup.appendChild(option);
-            });
-          } else {
-            // Handle old format for backwards compatibility
-            presetsData.forEach((preset) => {
-              const option = document.createElement("option");
-              option.value = preset;
-              option.textContent = preset;
-
-              // Fallback grouping for flat structures
-              if (
-                preset === "Modern" ||
-                preset === "xqjan" ||
-                preset === "Neon Future"
-              ) {
-                defaultPresetsGroup.appendChild(option);
-              } else {
-                userPresetsGroup.appendChild(option);
-              }
-            });
+      function setNativeWindowsControlDisabled(control, disabled) {
+        if (!control) return;
+        if (disabled) {
+          if (!control.hasAttribute("data-native-windows-was-disabled")) {
+            control.setAttribute(
+              "data-native-windows-was-disabled",
+              control.disabled ? "true" : "false",
+            );
           }
-
-          presetDropdown.appendChild(defaultPresetsGroup);
-          presetDropdown.appendChild(userPresetsGroup);
-        } catch (error) {
-          console.error(
-            tUi("log.presetsLoadError", "Error loading presets:"),
-            error,
-          );
-        } finally {
-          window.__uiPresetsReady = true;
-          window.__markUiDataReady?.();
+          control.disabled = true;
+          control.setAttribute("aria-disabled", "true");
+          return;
         }
+        if (!control.hasAttribute("data-native-windows-was-disabled")) return;
+        control.disabled =
+          control.getAttribute("data-native-windows-was-disabled") === "true";
+        control.removeAttribute("data-native-windows-was-disabled");
+        if (!control.disabled) {
+          control.removeAttribute("aria-disabled");
+        }
+      }
+
+      function refreshNativeWindowsNotificationControls() {
+        for (const mapping of NATIVE_WINDOWS_NOTIFICATION_CONTROL_MAP) {
+          const presetSelect = document.getElementById(mapping.presetId);
+          if (!presetSelect) continue;
+          const isNative = isNativeWindowsPresetValue(presetSelect.value);
+          for (const controlId of mapping.controlIds) {
+            setNativeWindowsControlDisabled(
+              document.getElementById(controlId),
+              isNative,
+            );
+          }
+        }
+      }
+
+      function populateMainPresetDropdown(presetsData) {
+        const presetDropdown = document.getElementById("presetDropdown");
+        if (!presetDropdown) return;
+        const previousValue = presetDropdown.value;
+        presetDropdown.innerHTML = "";
+
+        const defaultPresetsGroup = document.createElement("optgroup");
+        defaultPresetsGroup.label = "Default Presets";
+
+        const userPresetsGroup = document.createElement("optgroup");
+        userPresetsGroup.label = "Users Presets";
+
+        // Check if we have the new structured format or old format
+        if (presetsData?.isStructured) {
+          // Handle new structured format with separate folders
+          const defaultPresetsList = Array.isArray(presetsData.defaultPresets)
+            ? presetsData.defaultPresets
+            : Array.isArray(presetsData.scalable)
+              ? presetsData.scalable
+              : [];
+          const userPresetsList = Array.isArray(presetsData.userPresets)
+            ? presetsData.userPresets
+            : Array.isArray(presetsData.nonScalable)
+              ? presetsData.nonScalable
+              : [];
+
+          // Add bundled/default presets
+          defaultPresetsList.forEach((preset) => {
+            const option = document.createElement("option");
+            option.value = preset;
+            option.textContent = preset;
+            defaultPresetsGroup.appendChild(option);
+          });
+
+          // Add user presets
+          userPresetsList.forEach((preset) => {
+            const option = document.createElement("option");
+            option.value = preset;
+            option.textContent = preset;
+            userPresetsGroup.appendChild(option);
+          });
+        } else {
+          // Handle old format for backwards compatibility
+          const flatPresets = Array.isArray(presetsData) ? presetsData : [];
+          flatPresets.forEach((preset) => {
+            const option = document.createElement("option");
+            option.value = preset;
+            option.textContent = preset;
+
+            // Fallback grouping for flat structures
+            if (
+              preset === "Modern" ||
+              preset === "xqjan" ||
+              preset === "Neon Future" ||
+              String(preset || "").trim().toLowerCase() === "native windows"
+            ) {
+              defaultPresetsGroup.appendChild(option);
+            } else {
+              userPresetsGroup.appendChild(option);
+            }
+          });
+        }
+
+        presetDropdown.appendChild(defaultPresetsGroup);
+        presetDropdown.appendChild(userPresetsGroup);
+        if (
+          previousValue &&
+          presetDropdown.querySelector(
+            `option[value="${CSS.escape(previousValue)}"]`,
+          )
+        ) {
+          presetDropdown.value = previousValue;
+        }
+        refreshNativeWindowsNotificationControls();
+      }
+
+      document.addEventListener("change", (event) => {
+        const targetId = String(event.target?.id || "");
+        if (
+          NATIVE_WINDOWS_NOTIFICATION_CONTROL_MAP.some(
+            (mapping) => mapping.presetId === targetId,
+          )
+        ) {
+          refreshNativeWindowsNotificationControls();
+        }
+      });
+
+      function ensurePresetOptionsLoaded() {
+        if (presetOptionsLoadPromise) return presetOptionsLoadPromise;
+        presetOptionsLoadPromise = window.api
+          .loadPresets()
+          .then((presetsData) => {
+            populateMainPresetDropdown(presetsData);
+            const presetDropdown = document.getElementById("presetDropdown");
+            if (!presetDropdown || presetDropdown.options.length === 0) {
+              throw new Error("No achievement presets were returned.");
+            }
+            return presetsData;
+          })
+          .catch((error) => {
+            presetOptionsLoadPromise = null;
+            console.error(
+              tUi("log.presetsLoadError", "Error loading presets:"),
+              error,
+            );
+            throw error;
+          })
+          .finally(() => {
+            window.__uiPresetsReady = true;
+            window.__markUiDataReady?.();
+          });
+        return presetOptionsLoadPromise;
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        void ensurePresetOptionsLoaded().catch(() => {});
       });
 
       document.addEventListener("DOMContentLoaded", function () {
@@ -12204,6 +12342,62 @@
         resetConfigForm();
       });
 
+      let soundOptionsLoadPromise = null;
+
+      function populateMainSoundDropdown(sounds, preferredSound = "") {
+        const soundSelect = document.getElementById("soundSelect");
+        if (!soundSelect) return;
+        const previousValue = soundSelect.value;
+        soundSelect.innerHTML = "";
+
+        const muteOption = document.createElement("option");
+        muteOption.value = "mute";
+        muteOption.textContent = tUi("option.soundSelect.mute", "🔇 Mute");
+        soundSelect.appendChild(muteOption);
+
+        const randomOption = document.createElement("option");
+        randomOption.value = "random";
+        randomOption.textContent = tUi(
+          "option.soundSelect.random",
+          "Randomize",
+        );
+        soundSelect.appendChild(randomOption);
+
+        const soundFiles = Array.isArray(sounds) ? sounds : [];
+        soundFiles.forEach((sound) => {
+          const option = document.createElement("option");
+          option.value = sound;
+          option.textContent = sound;
+          soundSelect.appendChild(option);
+        });
+
+        const selectedValue = preferredSound || previousValue;
+        if (
+          selectedValue &&
+          Array.from(soundSelect.options).some(
+            (option) => option.value === selectedValue,
+          )
+        ) {
+          soundSelect.value = selectedValue;
+        }
+      }
+
+      function ensureSoundOptionsLoaded(preferredSound = "") {
+        if (soundOptionsLoadPromise) return soundOptionsLoadPromise;
+        soundOptionsLoadPromise = window.api
+          .getSounds()
+          .then((sounds) => {
+            populateMainSoundDropdown(sounds, preferredSound);
+            return sounds;
+          })
+          .catch((error) => {
+            soundOptionsLoadPromise = null;
+            console.error(tUi("log.soundLoadError", "Sound Load Error:"), error);
+            throw error;
+          });
+        return soundOptionsLoadPromise;
+      }
+
       window.onload = async () => {
         const soundSelect = document.getElementById("soundSelect");
 
@@ -12215,36 +12409,7 @@
             window.__markUiDataReady?.();
           } catch {}
 
-          const sounds = await window.api.getSounds();
-
-          const muteOption = document.createElement("option");
-
-          muteOption.value = "mute";
-
-          muteOption.textContent = tUi("option.soundSelect.mute", "🔇 Mute");
-
-          soundSelect.appendChild(muteOption);
-
-          const randomOption = document.createElement("option");
-
-          randomOption.value = "random";
-
-          randomOption.textContent = tUi(
-            "option.soundSelect.random",
-            "Randomize",
-          );
-
-          soundSelect.appendChild(randomOption);
-
-          sounds.forEach((sound) => {
-            const option = document.createElement("option");
-
-            option.value = sound;
-
-            option.textContent = sound;
-
-            soundSelect.appendChild(option);
-          });
+          await ensureSoundOptionsLoaded(prefs?.sound || "");
 
           renderSteamApiKeyStatusFromPrefs(prefs);
 
@@ -14610,10 +14775,79 @@
         void syncXboxPcStatus();
       }
 
+      let settingsOpenPreparationPromise = null;
+
+      async function retrySettingsOptionLoad(loader) {
+        try {
+          return await loader();
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          return loader();
+        }
+      }
+
+      function showSettingsOptionLoadError(selectId, message) {
+        const select = document.getElementById(selectId);
+        if (!select) return;
+        select.innerHTML = "";
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = message;
+        option.disabled = true;
+        option.selected = true;
+        select.appendChild(option);
+      }
+
+      function openSettingsWithReadyOptions() {
+        if (isSettingsOpen()) {
+          return Promise.resolve();
+        }
+        if (settingsOpenPreparationPromise) {
+          return settingsOpenPreparationPromise;
+        }
+
+        const prefs = getCachedPreferences() || {};
+        settingsOpenPreparationPromise = Promise.allSettled([
+          retrySettingsOptionLoad(() => ensurePresetOptionsLoaded()),
+          retrySettingsOptionLoad(() =>
+            ensureSoundOptionsLoaded(prefs.sound || ""),
+          ),
+          populateSanPresetControls(prefs),
+        ])
+          .then((results) => {
+            syncSettingsToModal({ skipSanPresetLoad: true });
+            const labels = ["presets", "sounds", "SAN presets"];
+            results.forEach((result, index) => {
+              if (result.status !== "rejected") return;
+              console.error(
+                `Failed to prepare Settings ${labels[index]}:`,
+                result.reason,
+              );
+              if (index === 0) {
+                showSettingsOptionLoadError(
+                  "settings-presetDropdown",
+                  tUi("log.presetsLoadError", "Error loading presets"),
+                );
+              } else if (index === 1) {
+                showSettingsOptionLoadError(
+                  "settings-soundSelect",
+                  tUi("log.soundLoadError", "Sound Load Error"),
+                );
+              }
+            });
+            openSettingsModal();
+          })
+          .finally(() => {
+            settingsOpenPreparationPromise = null;
+          });
+
+        return settingsOpenPreparationPromise;
+      }
+
       if (window.api?.on) {
         window.api.on("tray:open-settings", () => {
-          if (typeof openSettingsModal === "function") {
-            openSettingsModal();
+          if (typeof openSettingsWithReadyOptions === "function") {
+            void openSettingsWithReadyOptions();
           } else {
             document.getElementById("settingsBtn")?.click();
           }
@@ -14652,8 +14886,7 @@
         .getElementById("settingsBtn")
         .addEventListener("click", (event) => {
           event.stopPropagation();
-          syncSettingsToModal();
-          openSettingsModal();
+          void openSettingsWithReadyOptions();
         });
 
       document
@@ -15162,7 +15395,7 @@
         });
 
       // Function to sync values between main UI and settings menu
-      function syncSettingsToModal() {
+      function syncSettingsToModal(options = {}) {
         const prefs = getCachedPreferences() || {};
         applyAppTheme(prefs.appTheme);
         applyHardwareAccelerationPreference(prefs?.disableHardwareAcceleration);
@@ -15174,8 +15407,14 @@
 
         if (mainPresetDropdown && settingsPresetDropdown) {
           settingsPresetDropdown.innerHTML = mainPresetDropdown.innerHTML;
-          if (mainPresetDropdown.value) {
-            settingsPresetDropdown.value = mainPresetDropdown.value;
+          const selectedPreset = prefs.preset || mainPresetDropdown.value;
+          if (
+            selectedPreset &&
+            Array.from(settingsPresetDropdown.options).some(
+              (option) => option.value === selectedPreset,
+            )
+          ) {
+            settingsPresetDropdown.value = selectedPreset;
           }
           const rarePresetDropdown = document.getElementById(
             "settings-rarePresetDropdown",
@@ -15202,6 +15441,7 @@
               presetDropdown.value ||
               "default";
           }
+          refreshNativeWindowsNotificationControls();
         }
 
         // Copy sound options
@@ -15212,8 +15452,14 @@
 
         if (mainSoundSelect && settingsSoundSelect) {
           settingsSoundSelect.innerHTML = mainSoundSelect.innerHTML;
-          if (mainSoundSelect.value) {
-            settingsSoundSelect.value = mainSoundSelect.value;
+          const selectedSound = prefs.sound || mainSoundSelect.value;
+          if (
+            selectedSound &&
+            Array.from(settingsSoundSelect.options).some(
+              (option) => option.value === selectedSound,
+            )
+          ) {
+            settingsSoundSelect.value = selectedSound;
           }
           const rareSoundSelect = document.getElementById(
             "settings-rareSoundSelect",
@@ -15241,7 +15487,9 @@
               "mute";
           }
         }
-        void populateSanPresetControls(prefs);
+        if (options.skipSanPresetLoad !== true) {
+          void populateSanPresetControls(prefs);
+        }
 
         // Sync position dropdown
         const mainPositionDropdown =
