@@ -103,7 +103,7 @@
   "label.configList": "Välj konfiguration:",
   "label.configName": "Konfigurationsnamn:",
   "label.configPath": "Konfigurationssökväg: ! Lämna tomt för att generera !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Inaktivera övervakning av processnamn",
+  "label.settings-disableProcessNameWatcherCheckbox": "Inaktivera inbyggd processövervakning (använd reservläge)",
   "label.settings-disableHardwareAccelerationCheckbox": "Inaktivera hårdvaruacceleration",
   "settings-disableHardwareAccelerationHint": "(omstart krävs)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Tvinga globalShortcut för overlayen",

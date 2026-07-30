@@ -103,7 +103,7 @@
   "label.configList": "Wybierz konfigurację:",
   "label.configName": "Nazwa konfiguracji:",
   "label.configPath": "Ścieżka konfiguracyjna: ! Pozostaw puste, aby wygenerować !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Wyłącz monitorowanie nazw procesów",
+  "label.settings-disableProcessNameWatcherCheckbox": "Wyłącz natywne monitorowanie procesów (użyj trybu zapasowego)",
   "label.settings-disableHardwareAccelerationCheckbox": "Wyłącz akcelerację sprzętową",
   "settings-disableHardwareAccelerationHint": "(wymaga ponownego uruchomienia)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Wymuś globalShortcut dla nakładki",

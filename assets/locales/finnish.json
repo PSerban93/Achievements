@@ -103,7 +103,7 @@
   "label.configList": "Valitse Config:",
   "label.configName": "Konfiguraation nimi:",
   "label.configPath": "Konfigurointipolku: ! Jätä tyhjäksi luodaksesi !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Poista prosessin nimen valvonta käytöstä",
+  "label.settings-disableProcessNameWatcherCheckbox": "Poista natiivi prosessien valvonta käytöstä (käytä varatilaa)",
   "label.settings-disableHardwareAccelerationCheckbox": "Poista laitteistokiihdytys käytöstä",
   "settings-disableHardwareAccelerationHint": "(uudelleenkäynnistys vaaditaan)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Pakota globalShortcut overlaylle",

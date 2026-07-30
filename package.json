@@ -1,15 +1,17 @@
 {
   "name": "Achievements",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test:xbox-pc": "node tests/xbox-pc.test.js",
-    "pack": "electron-builder --dir",
+    "verify:process-tree": "node build/run-electron-script.js build/verify-windows-process-tree.js",
+    "prepare:process-tree": "npm run verify:process-tree",
+    "pack": "npm run prepare:process-tree && electron-builder --dir",
     "dl-browsers": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 node ./node_modules/playwright-core/cli.js install chromium chromium-headless-shell",
-    "dist": "npm run dl-browsers && electron-builder --win --x64"
+    "dist": "npm run dl-browsers && npm run prepare:process-tree && electron-builder --win --x64"
   },
   "build": {
     "appId": "com.achievements.app",
@@ -19,6 +21,7 @@
     "asarUnpack": [
       "utils/**",
       "utils/pslist-wrapper.mjs",
+      "**/node_modules/@vscode/windows-process-tree/**",
       "**/node_modules/screenshot-desktop/**",
       "**/node_modules/playwright/**",
       "**/node_modules/playwright-core/**",
@@ -101,16 +104,17 @@
     ]
   },
   "dependencies": {
+    "@vscode/windows-process-tree": ">=0.8.0",
     "@xboxreplay/xboxlive-auth": "^5.1.0",
     "adm-zip": "^0.6.0",
-    "axios": "^1.12.0",
+    "axios": "^1.19.0",
     "cheerio": "^1.1.2",
     "chokidar": "5.0.0",
     "crc-32": "^1.2.2",
     "electron-updater": "^6.8.3",
     "ini": "6.0.0",
     "jsdom": "29.1.1",
-    "koffi": "^3.1.2",
+    "koffi": "^3.1.3",
     "playwright": "^1.62.0",
     "playwright-extra": "^4.3.6",
     "ps-list": "9.0.0",
@@ -139,6 +143,7 @@
     "electron-winstaller": true,
     "electron": true,
     "koffi": true,
+    "@vscode/windows-process-tree": true,
     "uiohook-napi": true
   }
 }

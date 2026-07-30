@@ -103,7 +103,7 @@
   "label.configList": "Pilih Konfigurasi:",
   "label.configName": "Nama Konfigurasi:",
   "label.configPath": "Jalur konfigurasi: ! Biarkan kosong untuk menghasilkan !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Nonaktifkan pemantauan nama proses",
+  "label.settings-disableProcessNameWatcherCheckbox": "Nonaktifkan pemantau proses native (gunakan mode cadangan)",
   "label.settings-disableHardwareAccelerationCheckbox": "Nonaktifkan Akselerasi Perangkat Keras",
   "settings-disableHardwareAccelerationHint": "(perlu mulai ulang)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Paksa globalShortcut untuk overlay",

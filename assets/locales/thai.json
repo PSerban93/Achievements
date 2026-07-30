@@ -103,7 +103,7 @@
   "label.configList": "เลือกการตั้งค่า:",
   "label.configName": "ชื่อการกำหนดค่า:",
   "label.configPath": "เส้นทางกำหนดค่า: ! ปล่อยว่างไว้เพื่อสร้าง!",
-  "label.settings-disableProcessNameWatcherCheckbox": "ปิดใช้งานการเฝ้าดูชื่อกระบวนการ",
+  "label.settings-disableProcessNameWatcherCheckbox": "ปิดตัวตรวจสอบกระบวนการแบบเนทีฟ (ใช้โหมดสำรอง)",
   "label.settings-disableHardwareAccelerationCheckbox": "ปิดใช้งานการเร่งด้วยฮาร์ดแวร์",
   "settings-disableHardwareAccelerationHint": "(ต้องรีสตาร์ต)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "บังคับใช้ globalShortcut สำหรับโอเวอร์เลย์",

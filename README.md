@@ -181,7 +181,8 @@ Creates a standalone `.exe` installer in the `dist/` folder.
 ### Core
 
 - [Electron](https://electronjs.org) - Cross-platform desktop application framework
-- [ps-list](https://www.npmjs.com/package/ps-list) - Process monitoring
+- [@vscode/windows-process-tree](https://www.npmjs.com/package/@vscode/windows-process-tree) - Native Windows process monitoring
+- [ps-list](https://www.npmjs.com/package/ps-list) - Limited process-monitoring fallback
 - [crc-32](https://www.npmjs.com/package/crc-32) - Checksum calculation
 
 ### Achievement Processing
@@ -200,8 +201,9 @@ Creates a standalone `.exe` installer in the `dist/` folder.
 ### Background Services
 
 - `chokidar` keeps config/save directories under watch to trigger UI refreshes
-- `ps-list` (via `utils/pslist-wrapper.mjs`) provides process snapshots for auto-selection and playtime tracking
-- Interval timers (~2s) keep dashboard cards and playtime state up to date
+- `@vscode/windows-process-tree` runs in an isolated Electron utility process and provides process events plus command-line data when required
+- `ps-list` (via `utils/pslist-wrapper.mjs`) reconciles native snapshots and remains active as the limited fallback
+- Native snapshots run at ~1s; fallback detection runs at ~2s and hybrid reconciliation at ~12s
 
 ## 🎮 Setup & Configuration
 

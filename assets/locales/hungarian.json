@@ -103,7 +103,7 @@
   "label.configList": "Válassza a Konfiguráció lehetőséget:",
   "label.configName": "Konfiguráció neve:",
   "label.configPath": "Konfigurációs útvonal: ! Hagyja üresen a generáláshoz !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Folyamatnév-figyelés letiltása",
+  "label.settings-disableProcessNameWatcherCheckbox": "Natív folyamatfigyelő letiltása (tartalék mód használata)",
   "label.settings-disableHardwareAccelerationCheckbox": "Hardveres gyorsítás letiltása",
   "settings-disableHardwareAccelerationHint": "(újraindítás szükséges)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "globalShortcut kényszerítése az overlayhez",

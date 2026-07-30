@@ -103,7 +103,7 @@
   "label.configList": "구성 선택:",
   "label.configName": "구성 이름:",
   "label.configPath": "구성 경로: ! 생성하려면 비워 두세요 !",
-  "label.settings-disableProcessNameWatcherCheckbox": "프로세스 이름 감시 비활성화",
+  "label.settings-disableProcessNameWatcherCheckbox": "네이티브 프로세스 감시 비활성화(대체 모드 사용)",
   "label.settings-disableHardwareAccelerationCheckbox": "하드웨어 가속 비활성화",
   "settings-disableHardwareAccelerationHint": "(재시작 필요)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "오버레이에 globalShortcut 강제 사용",

@@ -103,7 +103,7 @@
   "label.configList": "選擇設定：",
   "label.configName": "設定檔名稱：",
   "label.configPath": "設定路徑： ! 留空以自動生成 !",
-  "label.settings-disableProcessNameWatcherCheckbox": "停用進程名稱偵測",
+  "label.settings-disableProcessNameWatcherCheckbox": "停用原生處理程序監視器（使用備援模式）",
   "label.settings-disableHardwareAccelerationCheckbox": "停用硬體加速",
   "settings-disableHardwareAccelerationHint": "(需要重新啟動)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "為疊加層強制使用 globalShortcut",

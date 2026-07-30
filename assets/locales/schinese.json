@@ -103,7 +103,7 @@
   "label.configList": "选择配置：",
   "label.configName": "配置名称：",
   "label.configPath": "配置路径：! 留空以生成 !",
-  "label.settings-disableProcessNameWatcherCheckbox": "禁用进程名称检测",
+  "label.settings-disableProcessNameWatcherCheckbox": "禁用原生进程监视器（使用备用模式）",
   "label.settings-disableHardwareAccelerationCheckbox": "禁用硬件加速",
   "settings-disableHardwareAccelerationHint": "(需要重启)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "为叠加层强制使用 globalShortcut",

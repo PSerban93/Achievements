@@ -103,7 +103,7 @@
   "label.configList": "Sélectionner la configuration :",
   "label.configName": "Nom de la configuration :",
   "label.configPath": "Chemin de configuration : ! Laisser vide pour générer !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Désactiver la surveillance du nom du processus",
+  "label.settings-disableProcessNameWatcherCheckbox": "Désactiver la surveillance native des processus (utiliser le mode de secours)",
   "label.settings-disableHardwareAccelerationCheckbox": "Désactiver l'accélération matérielle",
   "settings-disableHardwareAccelerationHint": "(redémarrage requis)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Forcer globalShortcut pour l'overlay",

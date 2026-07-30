@@ -103,7 +103,7 @@
   "label.configList": "Select Config:",
   "label.configName": "Config Name:",
   "label.configPath": "Config path: ! Leave empty to generate !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Disable Process Name Watcher",
+  "label.settings-disableProcessNameWatcherCheckbox": "Disable native process watcher (use fallback)",
   "label.settings-disableHardwareAccelerationCheckbox": "Disable Hardware Acceleration",
   "settings-disableHardwareAccelerationHint": "(restart required)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Force globalShortcut for overlay",

@@ -10,9 +10,15 @@ const WINDOWS_EVENT_RESTART_DELAY_MS = 1500;
 const EVENT_SNAPSHOT_DEBOUNCE_MS = 100;
 const EVENT_HOST_STATUS_LOG_INTERVAL_MS = 60 * 1000;
 const EVENT_HOST_MEMORY_LOG_DELTA_MB = 25;
-const EVENT_WATCHER_ENABLED =
-  process.platform === "win32" && process.env.ACH_PROCESS_EVENT_WATCHER !== "0";
+const EVENT_WATCHER_SUPPORTED = process.platform === "win32";
+const EVENT_WATCHER_RUNTIME_ALLOWED =
+  process.env.ACH_PROCESS_EVENT_WATCHER !== "0";
 let pollerEnabled = process.env.ACH_DISABLE_PROCESS_WATCHER !== "1";
+let eventWatcherPreferenceEnabled = true;
+let eventWatcherEnabled =
+  EVENT_WATCHER_SUPPORTED &&
+  EVENT_WATCHER_RUNTIME_ALLOWED &&
+  eventWatcherPreferenceEnabled;
 const appLogger = createLogger("app");
 
 function parseInterval(value, fallback) {
@@ -21,14 +27,22 @@ function parseInterval(value, fallback) {
   return Math.max(250, Math.floor(next));
 }
 
-let configuredPollIntervalMs = EVENT_WATCHER_ENABLED
+let configuredPollIntervalMs = EVENT_WATCHER_SUPPORTED
   ? parseInterval(
       process.env.ACH_PROCESS_FALLBACK_POLL_MS ?? process.env.ACH_PROCESS_POLL_MS,
       WINDOWS_EVENT_FALLBACK_INTERVAL_MS,
     )
   : parseInterval(process.env.ACH_PROCESS_POLL_MS, DEFAULT_INTERVAL_MS);
-let pollIntervalMs = configuredPollIntervalMs;
-let eventWatcherDegraded = false;
+const limitedFallbackIntervalMs = parseInterval(
+  process.env.ACH_PROCESS_LIMITED_FALLBACK_POLL_MS,
+  DEFAULT_INTERVAL_MS,
+);
+let eventWatcherDegraded = eventWatcherEnabled;
+let pollIntervalMs = eventWatcherEnabled
+  ? limitedFallbackIntervalMs
+  : EVENT_WATCHER_SUPPORTED
+    ? limitedFallbackIntervalMs
+    : configuredPollIntervalMs;
 let timer = null;
 let inflight = false;
 let lastSnapshot = [];
@@ -291,33 +305,60 @@ function stopFallbackPoller() {
   timer = null;
 }
 
-function setEventWatcherDegraded(value, reason = "") {
-  if (!EVENT_WATCHER_ENABLED) return;
-  const nextDegraded = value === true;
-  const nextIntervalMs = nextDegraded
-    ? Math.min(DEFAULT_INTERVAL_MS, configuredPollIntervalMs)
-    : configuredPollIntervalMs;
-  const stateChanged = eventWatcherDegraded !== nextDegraded;
+function getProcessDetectionMode() {
+  if (!pollerEnabled) return "disabled";
+  if (!EVENT_WATCHER_SUPPORTED) return "poll";
+  if (!eventWatcherPreferenceEnabled) return "fallback-preference";
+  if (!EVENT_WATCHER_RUNTIME_ALLOWED || !eventWatcherEnabled) {
+    return "fallback-degraded";
+  }
+  if (eventWatcherDegraded) return "fallback-degraded";
+  return "hybrid";
+}
+
+function getDesiredPollIntervalMs() {
+  const mode = getProcessDetectionMode();
+  return mode === "hybrid"
+    ? configuredPollIntervalMs
+    : mode === "disabled"
+      ? configuredPollIntervalMs
+      : limitedFallbackIntervalMs;
+}
+
+function applyDetectionMode(reason = "") {
+  const nextIntervalMs = getDesiredPollIntervalMs();
   const intervalChanged = pollIntervalMs !== nextIntervalMs;
-  eventWatcherDegraded = nextDegraded;
   pollIntervalMs = nextIntervalMs;
   if (intervalChanged && timer) {
     stopFallbackPoller();
     startFallbackPoller();
   }
-  if (stateChanged || intervalChanged) {
-    appLogger.info("process-poller:fallback-mode-changed", {
-      mode: eventWatcherDegraded ? "poll-fallback" : "hybrid",
-      reason: String(reason || ""),
-      pollIntervalMs,
-      configuredPollIntervalMs,
-    });
-  }
+  appLogger.info("process-poller:fallback-mode-changed", {
+    mode: getProcessDetectionMode(),
+    reason: String(reason || ""),
+    pollIntervalMs,
+    configuredPollIntervalMs,
+  });
+}
+
+function setEventWatcherDegraded(value, reason = "") {
+  const nextDegraded = value === true;
+  const stateChanged = eventWatcherDegraded !== nextDegraded;
+  eventWatcherDegraded = nextDegraded;
+  const intervalChanged = pollIntervalMs !== getDesiredPollIntervalMs();
+  if (stateChanged || intervalChanged) applyDetectionMode(reason);
 }
 
 function startEventWatcherIfNeeded() {
-  if (!EVENT_WATCHER_ENABLED || eventWatcher) return;
+  if (
+    !EVENT_WATCHER_SUPPORTED ||
+    !eventWatcherEnabled ||
+    eventWatcher
+  ) {
+    return;
+  }
   eventWatcherReady = false;
+  setEventWatcherDegraded(true, "native-provider-starting");
   const restartDelayMs = parseInterval(
     process.env.ACH_PROCESS_EVENT_RESTART_MS,
     WINDOWS_EVENT_RESTART_DELAY_MS,
@@ -385,6 +426,12 @@ function startEventWatcherIfNeeded() {
             ? "process-channel-ready"
             : "process-channel-unavailable",
         );
+      } else if (String(status?.type || "") === "capacity-limit") {
+        eventWatcherReady = false;
+        setEventWatcherDegraded(true, "snapshot-capacity-limit");
+      } else if (String(status?.type || "") === "resource-limit") {
+        eventWatcherReady = false;
+        setEventWatcherDegraded(true, "native-resource-limit");
       }
       const now = Date.now();
       const workingSetMb = Number(status?.workingSetMb) || 0;
@@ -405,6 +452,8 @@ function startEventWatcherIfNeeded() {
           restartCount: Number(lastEventHostLifecycle?.restartCount) || 0,
           workingSetMb,
           privateMemoryMb: Number(status?.privateMemoryMb) || 0,
+          heapUsedMb: Number(status?.heapUsedMb) || 0,
+          externalMemoryMb: Number(status?.externalMemoryMb) || 0,
           handleCount: Number(status?.handleCount) || 0,
           uptimeMs: Number(status?.uptimeMs) || 0,
           processed: Number(status?.processed) || 0,
@@ -415,6 +464,11 @@ function startEventWatcherIfNeeded() {
           handleLimit: Number(status?.handleLimit) || 0,
           reason: String(status?.reason || ""),
           watchMode: String(status?.watchMode || ""),
+          provider: String(status?.provider || ""),
+          memoryMetricSource: String(status?.memoryMetricSource || ""),
+          processCount: Number(status?.processCount) || 0,
+          capacity: Number(status?.capacity) || 0,
+          capacityLimited: status?.capacityLimited === true,
           processEnabled:
             typeof status?.processEnabled === "boolean"
               ? status.processEnabled
@@ -466,6 +520,7 @@ function startEventWatcherIfNeeded() {
             ? null
             : Number(lifecycle.exitCode),
         signal: String(lifecycle?.signal || ""),
+        runtime: String(lifecycle?.runtime || ""),
       };
       if (
         state === "failed" ||
@@ -499,8 +554,6 @@ function stopEventWatcher() {
   lastEventHostStatusLogAt = 0;
   lastLoggedEventHostWorkingSetMb = 0;
   clearEventHostResyncTimer();
-  eventWatcherDegraded = false;
-  pollIntervalMs = configuredPollIntervalMs;
   if (!eventWatcher) return;
   try {
     eventWatcher.stop();
@@ -560,19 +613,15 @@ function getStatus() {
   return {
     enabled: pollerEnabled,
     running: pollerEnabled && (!!timer || eventWatcherRunning),
-    mode: !pollerEnabled ? "disabled" : EVENT_WATCHER_ENABLED ? "hybrid" : "poll",
-    processDetectionMode: !pollerEnabled
-      ? "disabled"
-      : EVENT_WATCHER_ENABLED && eventWatcherDegraded
-        ? "poll-fallback"
-        : EVENT_WATCHER_ENABLED
-          ? "hybrid"
-          : "poll",
+    mode: getProcessDetectionMode(),
+    processDetectionMode: getProcessDetectionMode(),
     subscribers: subscribers.size,
     updatedAt: lastUpdated,
     pollIntervalMs,
     configuredPollIntervalMs,
     eventWatcherDegraded,
+    eventWatcherEnabled,
+    eventWatcherPreferenceEnabled,
     eventWatcherRunning,
     eventWatcherReady,
     eventHostStatus: lastEventHostStatus,
@@ -583,13 +632,46 @@ function getStatus() {
 
 function setIntervalMs(value) {
   configuredPollIntervalMs = parseInterval(value, configuredPollIntervalMs);
-  pollIntervalMs =
-    EVENT_WATCHER_ENABLED && eventWatcherDegraded
-      ? Math.min(DEFAULT_INTERVAL_MS, configuredPollIntervalMs)
-      : configuredPollIntervalMs;
+  pollIntervalMs = getDesiredPollIntervalMs();
   if (timer) {
     stopFallbackPoller();
     startFallbackPoller();
+  }
+}
+
+function setEventWatcherEnabled(value) {
+  const nextPreference = value !== false;
+  const next =
+    EVENT_WATCHER_SUPPORTED &&
+    EVENT_WATCHER_RUNTIME_ALLOWED &&
+    nextPreference;
+  if (
+    eventWatcherEnabled === next &&
+    eventWatcherPreferenceEnabled === nextPreference
+  ) {
+    return;
+  }
+  eventWatcherPreferenceEnabled = nextPreference;
+  eventWatcherEnabled = next;
+  if (!eventWatcherEnabled) {
+    stopEventWatcher();
+    eventWatcherDegraded = false;
+    const fallbackReason = eventWatcherPreferenceEnabled
+      ? "native-provider-disabled-by-environment"
+      : "disabled-by-preferences";
+    applyDetectionMode(fallbackReason);
+    if (pollerEnabled && subscribers.size > 0) {
+      startFallbackPoller();
+      tick(getProcessDetectionMode(), true).catch(() => {});
+    }
+    return;
+  }
+  eventWatcherDegraded = true;
+  applyDetectionMode("enabled-by-preferences");
+  if (pollerEnabled && subscribers.size > 0) {
+    startEventWatcherIfNeeded();
+    startFallbackPoller();
+    tick("fallback-degraded", true).catch(() => {});
   }
 }
 
@@ -616,5 +698,6 @@ module.exports = {
   getStatus,
   setIntervalMs,
   setEnabled,
+  setEventWatcherEnabled,
   isEnabled,
 };

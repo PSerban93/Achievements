@@ -6202,13 +6202,14 @@ function applyPreferenceSideEffects(
   ) {
     const processWatcherEnabled = isProcessNameWatcherEnabled(prefsSnapshot);
     try {
-      processPoller.setEnabled(processWatcherEnabled);
+      processPoller.setEnabled(true);
+      processPoller.setEventWatcherEnabled(processWatcherEnabled);
     } catch {}
     if (!processWatcherEnabled) {
-      stopAutoSelectProcessPoller();
-      appLogger.info("process-poller:disabled-by-preferences");
+      appLogger.info("process-poller:fallback-enabled-by-preferences");
+      scheduleAutoSelectProcessPollerAfterBoot();
     } else {
-      appLogger.info("process-poller:enabled-by-preferences");
+      appLogger.info("process-poller:native-enabled-by-preferences");
       scheduleAutoSelectProcessPollerAfterBoot();
     }
   }
@@ -18650,29 +18651,21 @@ ipcMain.handle(
       const configPath = path.join(configsDir, `${selectedConfig}.json`);
       if (fs.existsSync(configPath)) {
         const configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
-        if (isProcessNameWatcherEnabled(cachedPreferences)) {
-          const safeConfigName = sanitizeConfigName(selectedConfig);
-          configData.__playtimeKey = safeConfigName;
-          if (child?.pid) {
-            configData.__launchPid = child.pid;
-            manualLaunchPidMap.set(child.pid, selectedConfig);
-            setTimeout(() => {
-              if (manualLaunchPidMap.get(child.pid) === selectedConfig) {
-                manualLaunchPidMap.delete(child.pid);
-              }
-            }, 120000);
-          }
-          manualLaunchInProgress = true;
-          detectedConfigName = configData.name;
-          activePlaytimeConfigs.add(configData.name);
-          startPlaytimeLogWatcher(configData);
-        } else {
-          appLogger.info("process-poller:playtime-watch-skipped", {
-            reason: "process-watcher-disabled",
-            config: selectedConfig,
-            appid: String(configData?.appid || ""),
-          });
+        const safeConfigName = sanitizeConfigName(selectedConfig);
+        configData.__playtimeKey = safeConfigName;
+        if (child?.pid) {
+          configData.__launchPid = child.pid;
+          manualLaunchPidMap.set(child.pid, selectedConfig);
+          setTimeout(() => {
+            if (manualLaunchPidMap.get(child.pid) === selectedConfig) {
+              manualLaunchPidMap.delete(child.pid);
+            }
+          }, 120000);
         }
+        manualLaunchInProgress = true;
+        detectedConfigName = configData.name;
+        activePlaytimeConfigs.add(configData.name);
+        startPlaytimeLogWatcher(configData);
       } else {
         notifyError(
           tUi("main.notify.config.notFound", { config: selectedConfig }),
@@ -18712,9 +18705,6 @@ function isEpicOfficialBackgroundWorkBootReady() {
     global.bootManualSeedComplete !== true
   ) {
     return false;
-  }
-  if (!isProcessNameWatcherEnabled(cachedPreferences)) {
-    return true;
   }
   return autoSelectProcessPollerStarted === true;
 }
@@ -19988,7 +19978,8 @@ app.whenReady().then(async () => {
     global.disableProgress = prefs.disableProgress === true;
     global.disablePlaytime = prefs.disablePlaytime === true;
     try {
-      processPoller.setEnabled(isProcessNameWatcherEnabled(prefs));
+      processPoller.setEnabled(true);
+      processPoller.setEventWatcherEnabled(isProcessNameWatcherEnabled(prefs));
     } catch {}
     selectedSound = prefs.sound || "mute";
     selectedPreset = prefs.preset || "default";
@@ -20714,6 +20705,7 @@ const PROCESS_COMMAND_LINE_FAILURE_TTL_MS = 10 * 1000;
 const PROCESS_COMMAND_LINE_CACHE_MAX_ENTRIES = 256;
 const processCommandLineCache = new Map();
 let processCommandLineWarnLastAt = 0;
+let processMatchAmbiguityWarnLastAt = 0;
 
 function getConfigNameFromConfigFilePath(filePath) {
   try {
@@ -20957,14 +20949,11 @@ function stopAutoSelectProcessPoller() {
 
 function startAutoSelectProcessPoller() {
   if (autoSelectProcessPollerStarted) return;
-  if (!isProcessNameWatcherEnabled(cachedPreferences)) {
-    appLogger.info("process-poller:auto-select-start-skipped", {
-      reason: "process-watcher-disabled",
-    });
-    return;
-  }
   try {
     processPoller.setEnabled(true);
+    processPoller.setEventWatcherEnabled(
+      isProcessNameWatcherEnabled(cachedPreferences),
+    );
   } catch {}
   autoSelectProcessPollerStarted = true;
   ensureAutoSelectIndexReady().catch(() => {});
@@ -20982,16 +20971,6 @@ function startAutoSelectProcessPoller() {
 }
 
 function scheduleAutoSelectProcessPollerAfterBoot() {
-  if (!isProcessNameWatcherEnabled(cachedPreferences)) {
-    stopAutoSelectProcessPoller();
-    try {
-      processPoller.setEnabled(false);
-    } catch {}
-    appLogger.info("process-poller:auto-select-disabled", {
-      reason: "process-watcher-disabled",
-    });
-    return;
-  }
   if (autoSelectProcessPollerStarted) return;
   if (autoSelectProcessPollerWaitTimer || autoSelectProcessPollerStartTimer)
     return;
@@ -21087,11 +21066,18 @@ function getConfigProcessArgTokens(configData) {
 
 async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
   const now = Date.now();
+  const detectionMode = String(
+    processPoller.getStatus()?.processDetectionMode || "",
+  );
+  const requireCommandLineForArguments = detectionMode === "hybrid";
   const livePids = new Set();
   for (const procs of procsByExe.values()) {
     for (const proc of Array.isArray(procs) ? procs : []) {
       const pid = Math.floor(Number(proc?.pid));
       if (Number.isFinite(pid) && pid > 0) livePids.add(pid);
+      if (proc && typeof proc === "object") {
+        proc.__processDetectionMode = detectionMode;
+      }
     }
   }
   for (const [pid, cached] of processCommandLineCache) {
@@ -21113,7 +21099,8 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
     for (const proc of Array.isArray(procs) ? procs : []) {
       const pid = Math.floor(Number(proc?.pid));
       if (!Number.isFinite(pid) || pid <= 0) continue;
-      proc.__requireCommandLineForArgs = true;
+      proc.__requireCommandLineForArgs = requireCommandLineForArguments;
+      if (!requireCommandLineForArguments) continue;
       if (normalizeProcessCmdLine(proc)) continue;
 
       const processName = String(proc?.name || "").trim().toLowerCase();
@@ -21179,7 +21166,18 @@ function processMatchesConfig(proc, configData, configName) {
   const argTokens = getConfigProcessArgTokens(configData);
   if (!argTokens.length) return true;
   const cmdLine = normalizeProcessCmdLine(proc);
-  if (!cmdLine) return proc.__requireCommandLineForArgs !== true;
+  if (!cmdLine) {
+    const detectionMode = String(
+      proc.__processDetectionMode ||
+        processPoller.getStatus()?.processDetectionMode ||
+        "",
+    );
+    return (
+      detectionMode === "fallback-preference" ||
+      detectionMode === "fallback-degraded" ||
+      detectionMode === "poll"
+    );
+  }
   return argTokens.every((token) => cmdLine.includes(token));
 }
 
@@ -21187,7 +21185,6 @@ async function autoSelectRunningGameConfigOnce(processes) {
   try {
     const list = Array.isArray(processes) ? processes : [];
     if (!list.length) return;
-    if (!isProcessNameWatcherEnabled(cachedPreferences)) return;
     if (process.env.ACH_LOG_PROCESSES === "1") {
       const logPath = path.join(app.getPath("userData"), "process-log.txt");
       fs.writeFileSync(logPath, list.map((p) => p.name).join("\n"), "utf8");
@@ -21368,41 +21365,100 @@ async function autoSelectRunningGameConfigOnce(processes) {
       const candidates = autoSelectIndex.exeToConfigs.get(exe);
       if (!candidates || !candidates.size) continue;
 
-      const orderedCandidates = Array.from(candidates).sort((a, b) => {
-        const aEntry = getEntry(a);
-        const bEntry = getEntry(b);
-        return (
-          getConfigProcessArgTokens(bEntry?.data).length -
-          getConfigProcessArgTokens(aEntry?.data).length
-        );
-      });
-      for (const configName of orderedCandidates) {
+      const activeCandidateStillRunning = Array.from(candidates).some(
+        (configName) => {
+          if (!activePlaytimeConfigs.has(configName)) return false;
+          const activeEntry = getEntry(configName);
+          return (
+            !!activeEntry &&
+            (Array.isArray(procs) ? procs : []).some((processInfo) =>
+              processMatchesConfig(
+                processInfo,
+                activeEntry.data,
+                activeEntry.name,
+              ),
+            )
+          );
+        },
+      );
+      if (activeCandidateStillRunning) continue;
+
+      const matchingCandidates = [];
+      for (const configName of Array.from(candidates)) {
         if (activePlaytimeConfigs.has(configName)) continue;
 
         const entry = getEntry(configName);
         if (!entry) continue;
         if (isBlacklisted(entry)) continue;
 
-        const running = (Array.isArray(procs) ? procs : []).some((p) =>
-          processMatchesConfig(p, entry.data, entry.name),
+        const argTokens = getConfigProcessArgTokens(entry.data);
+        const matchingProcesses = (Array.isArray(procs) ? procs : []).filter(
+          (processInfo) =>
+            processMatchesConfig(processInfo, entry.data, entry.name),
         );
-        if (!running) continue;
-
-        detectedConfigName = entry.name;
-        activePlaytimeConfigs.add(entry.name);
-        notifyInfo(
-          tUi("main.notify.config.started", {
-            name: entry?.data?.name || entry?.name || entry.name,
-          }),
-        );
-        entry.data.__playtimeKey = sanitizeConfigName(entry.name);
-
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("auto-select-config", entry.name);
-          startPlaytimeLogWatcher(entry.data);
-        }
-        return;
+        if (!matchingProcesses.length) continue;
+        const exactArgumentMatch =
+          argTokens.length > 0 &&
+          matchingProcesses.some((processInfo) => {
+            const commandLine = normalizeProcessCmdLine(processInfo);
+            return (
+              !!commandLine &&
+              argTokens.every((token) => commandLine.includes(token))
+            );
+          });
+        matchingCandidates.push({
+          configName,
+          entry,
+          exactArgumentMatch,
+          generic: argTokens.length === 0,
+        });
       }
+
+      if (!matchingCandidates.length) continue;
+      matchingCandidates.sort((a, b) => {
+        if (a.exactArgumentMatch !== b.exactArgumentMatch) {
+          return a.exactArgumentMatch ? -1 : 1;
+        }
+        if (a.generic !== b.generic) return a.generic ? -1 : 1;
+        return String(a.configName).localeCompare(String(b.configName));
+      });
+
+      const selectedCandidate = matchingCandidates[0];
+      const detectionMode = String(
+        processPoller.getStatus()?.processDetectionMode || "",
+      );
+      if (
+        matchingCandidates.length > 1 &&
+        (detectionMode === "fallback-preference" ||
+          detectionMode === "fallback-degraded") &&
+        Date.now() - processMatchAmbiguityWarnLastAt >= 30000
+      ) {
+        processMatchAmbiguityWarnLastAt = Date.now();
+        appLogger.warn("process-poller:ambiguous-executable-match", {
+          executable: exe,
+          detectionMode,
+          candidates: matchingCandidates.map((candidate) =>
+            sanitizeConfigName(candidate.configName),
+          ),
+          selected: sanitizeConfigName(selectedCandidate.configName),
+        });
+      }
+
+      const entry = selectedCandidate.entry;
+      detectedConfigName = entry.name;
+      activePlaytimeConfigs.add(entry.name);
+      notifyInfo(
+        tUi("main.notify.config.started", {
+          name: entry?.data?.name || entry?.name || entry.name,
+        }),
+      );
+      entry.data.__playtimeKey = sanitizeConfigName(entry.name);
+
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("auto-select-config", entry.name);
+        startPlaytimeLogWatcher(entry.data);
+      }
+      return;
     }
   } catch (err) {
     notifyError(

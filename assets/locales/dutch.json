@@ -103,7 +103,7 @@
   "label.configList": "Selecteer Configuratie:",
   "label.configName": "Configuratienaam:",
   "label.configPath": "Configuratiepad: ! Laat leeg om te genereren !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Procesnaamcontrole uitschakelen",
+  "label.settings-disableProcessNameWatcherCheckbox": "Native procesbewaking uitschakelen (fallback gebruiken)",
   "label.settings-disableHardwareAccelerationCheckbox": "Hardwareversnelling uitschakelen",
   "settings-disableHardwareAccelerationHint": "(herstart vereist)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "globalShortcut forceren voor de overlay",

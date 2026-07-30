@@ -103,7 +103,7 @@
   "label.configList": "Selecteaza config:",
   "label.configName": "Nume config:",
   "label.configPath": "Calea config-ului: ! Lasa gol pentru generare !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Dezactiveaza monitorizarea numelui procesului",
+  "label.settings-disableProcessNameWatcherCheckbox": "Dezactivează monitorizarea nativă a proceselor (folosește fallback)",
   "label.settings-disableHardwareAccelerationCheckbox": "Dezactiveaza accelerarea hardware",
   "settings-disableHardwareAccelerationHint": "(restart necesar)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Forteaza globalShortcut pentru overlay",

@@ -103,7 +103,7 @@
   "label.configList": "Chọn Cấu hình:",
   "label.configName": "Tên cấu hình:",
   "label.configPath": "Đường dẫn cấu hình: ! Để trống để tạo !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Tắt theo dõi tên tiến trình",
+  "label.settings-disableProcessNameWatcherCheckbox": "Tắt trình theo dõi tiến trình gốc (dùng chế độ dự phòng)",
   "label.settings-disableHardwareAccelerationCheckbox": "Tắt tăng tốc phần cứng",
   "settings-disableHardwareAccelerationHint": "(cần khởi động lại)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Buộc dùng globalShortcut cho lớp phủ",

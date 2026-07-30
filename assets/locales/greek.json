@@ -103,7 +103,7 @@
   "label.configList": "Επιλέξτε Διαμόρφωση:",
   "label.configName": "Όνομα διαμόρφωσης:",
   "label.configPath": "Διαδρομή διαμόρφωσης: ! Αφήστε κενό για δημιουργία !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Απενεργοποίηση παρακολούθησης ονόματος διεργασίας",
+  "label.settings-disableProcessNameWatcherCheckbox": "Απενεργοποίηση εγγενούς παρακολούθησης διεργασιών (χρήση εφεδρικής λειτουργίας)",
   "label.settings-disableHardwareAccelerationCheckbox": "Απενεργοποίηση επιτάχυνσης υλικού",
   "settings-disableHardwareAccelerationHint": "(απαιτείται επανεκκίνηση)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Επιβολή globalShortcut για το overlay",

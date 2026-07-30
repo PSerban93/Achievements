@@ -103,7 +103,7 @@
   "label.configList": "Vyberte konfiguraci:",
   "label.configName": "Název konfigurace:",
   "label.configPath": "Cesta ke konfiguraci: ! Nechte prázdné pro generování !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Zakázat sledování názvu procesu",
+  "label.settings-disableProcessNameWatcherCheckbox": "Zakázat nativní sledování procesů (použít záložní režim)",
   "label.settings-disableHardwareAccelerationCheckbox": "Zakázat hardwarovou akceleraci",
   "settings-disableHardwareAccelerationHint": "(vyžaduje restart)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Vynutit globalShortcut pro overlay",

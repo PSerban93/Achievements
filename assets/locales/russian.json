@@ -103,7 +103,7 @@
   "label.configList": "Выберите конфигурацию:",
   "label.configName": "Имя конфигурации:",
   "label.configPath": "Путь к конфигурации: ! Оставьте пустым для генерации !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Отключить отслеживание имени процесса",
+  "label.settings-disableProcessNameWatcherCheckbox": "Отключить нативный монитор процессов (использовать резервный режим)",
   "label.settings-disableHardwareAccelerationCheckbox": "Отключить аппаратное ускорение",
   "settings-disableHardwareAccelerationHint": "(требуется перезапуск)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Принудительно использовать globalShortcut для оверлея",

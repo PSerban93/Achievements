@@ -103,7 +103,7 @@
   "label.configList": "Виберіть «Конфігурація»:",
   "label.configName": "Назва конфігурації:",
   "label.configPath": "Шлях до конфігурації: ! Залиште порожнім для генерації !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Вимкнути відстеження назви процесу",
+  "label.settings-disableProcessNameWatcherCheckbox": "Вимкнути нативний монітор процесів (використовувати резервний режим)",
   "label.settings-disableHardwareAccelerationCheckbox": "Вимкнути апаратне прискорення",
   "settings-disableHardwareAccelerationHint": "(потрібен перезапуск)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Примусово використовувати globalShortcut для оверлею",

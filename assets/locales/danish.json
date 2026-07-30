@@ -103,7 +103,7 @@
   "label.configList": "Vælg Konfiguration:",
   "label.configName": "Konfigurationsnavn:",
   "label.configPath": "Konfigurationssti: ! Lad feltet være tomt for at generere !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Deaktivér overvågning af procesnavn",
+  "label.settings-disableProcessNameWatcherCheckbox": "Deaktivér integreret procesovervågning (brug reservefunktion)",
   "label.settings-disableHardwareAccelerationCheckbox": "Deaktiver hardwareacceleration",
   "settings-disableHardwareAccelerationHint": "(genstart påkrævet)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Tving globalShortcut til overlayet",

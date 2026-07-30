@@ -103,7 +103,7 @@
   "label.configList": "Yapılandırma seç:",
   "label.configName": "Yapılandırma adı:",
   "label.configPath": "Yapılandırma yolu: ! Oluşturmak için boş bırakın !",
-  "label.settings-disableProcessNameWatcherCheckbox": "Uygulama izlemeyi devre dışı bırak",
+  "label.settings-disableProcessNameWatcherCheckbox": "Yerel işlem izleyiciyi devre dışı bırak (yedek modu kullan)",
   "label.settings-disableHardwareAccelerationCheckbox": "Donanım hızlandırmayı devre dışı bırak",
   "settings-disableHardwareAccelerationHint": "(Yeniden başlatma gerekli)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "Arayüz için kısayol tuşlarını zorla",

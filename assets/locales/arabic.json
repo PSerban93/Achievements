@@ -103,7 +103,7 @@
   "label.configList": "حدد التكوين:",
   "label.configName": "اسم التكوين:",
   "label.configPath": "مسار التكوين: ! اتركه فارغًا لإنشائه !",
-  "label.settings-disableProcessNameWatcherCheckbox": "تعطيل مراقبة اسم العملية",
+  "label.settings-disableProcessNameWatcherCheckbox": "تعطيل مراقب العمليات الأصلي (استخدام الوضع الاحتياطي)",
   "label.settings-disableHardwareAccelerationCheckbox": "تعطيل تسريع الأجهزة",
   "settings-disableHardwareAccelerationHint": "(يتطلب إعادة التشغيل)",
   "label.settings-forceGlobalOverlayShortcutsCheckbox": "فرض globalShortcut للواجهة المتراكبة",
