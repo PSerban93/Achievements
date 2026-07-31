@@ -63,6 +63,14 @@ const {
   resolveEaOfficialLogsRoots,
   resolveEaOfficialVerboseLogForConfig,
 } = require("./ea-desktop-local");
+const {
+  createConfigDeletionGuard,
+} = require("./config-deletion-guard");
+const {
+  findMostSpecificContainingRoot,
+  normalizeAbsolutePath,
+  validateAppIdDirectoryTarget,
+} = require("./config-deletion-paths");
 const GAMEPLAY_DB_WAL_NAME = `${GAMEPLAY_DB_NAME}-wal`;
 const GAMEPLAY_DB_SHM_NAME = `${GAMEPLAY_DB_NAME}-shm`;
 
@@ -410,6 +418,8 @@ module.exports = function makeWatchedFolders({
   const configPlatformPresence = new Map(); // appid -> Set(platform)
   const configSavePathIndex = new Map(); // appid -> Set(path)
   const pendingSavePathIndex = new Map(); // appid -> Set(path)
+  const configDeletionGuard = createConfigDeletionGuard();
+  const pausedDeletionRootWatchers = new Map(); // deletion token id -> roots
   const pendingObservedGenerations = new Set(); // appid+platform+normalizedSavePath keys
   const recentObservedGenerationTs = new Map(); // appid+platform+normalizedSavePath -> ts
   const recentObservedGenerationVariantTs = new Map(); // appid+platform -> ts
@@ -797,6 +807,13 @@ module.exports = function makeWatchedFolders({
     if (!name) return;
     const appidKey =
       normalizeAppIdValue(meta?.appid) || String(meta?.appid || "");
+    if (appidKey && configDeletionGuard.isSuppressed(appidKey)) {
+      watcherLogger.info("auto-select:skip-config-deleting", {
+        config: name,
+        appid: appidKey,
+      });
+      return;
+    }
     if (appidKey && suppressAutoSelect.has(appidKey)) {
       watcherLogger.info("auto-select:skip-suppressed-app", {
         config: name,
@@ -866,6 +883,13 @@ module.exports = function makeWatchedFolders({
     }
     const appidKey =
       normalizeAppIdValue(meta.appid) || String(meta.appid || "");
+    if (appidKey && configDeletionGuard.isSuppressed(appidKey)) {
+      watcherLogger.info("auto-select:enqueue-skip-config-deleting", {
+        config: name,
+        appid: appidKey,
+      });
+      return;
+    }
     if (appidKey && suppressAutoSelect.has(appidKey)) {
       watcherLogger.info("auto-select:enqueue-skip-suppressed-app", {
         config: name,
@@ -6639,6 +6663,297 @@ module.exports = function makeWatchedFolders({
     }
   }
 
+  async function closeSaveWatchersForConfigDeletion(appid, configName) {
+    const appidKey = normalizeAppIdValue(appid) || String(appid || "").trim();
+    const safeConfigName = String(configName || "").trim();
+    const closeTasks = [];
+
+    for (const [bucketAppId, bucket] of appidSaveWatchers.entries()) {
+      if (!(bucket instanceof Map)) continue;
+      if (
+        appidKey &&
+        String(bucketAppId).toLowerCase() !== appidKey.toLowerCase()
+      ) {
+        continue;
+      }
+      for (const [watchedConfigName, watcher] of bucket.entries()) {
+        if (
+          !appidKey &&
+          safeConfigName &&
+          watchedConfigName !== safeConfigName
+        ) {
+          continue;
+        }
+        watcherLogger.info("config-delete:unwatch-save", {
+          appid: String(bucketAppId),
+          config: watchedConfigName,
+        });
+        bucket.delete(watchedConfigName);
+        try {
+          closeTasks.push(Promise.resolve(watcher?.close?.()));
+        } catch {}
+      }
+      if (bucket.size === 0) appidSaveWatchers.delete(bucketAppId);
+    }
+
+    if (closeTasks.length > 0) {
+      await Promise.allSettled(closeTasks);
+    }
+    return closeTasks.length;
+  }
+
+  function pathsEqualForDeletion(left, right) {
+    const normalizedLeft = normalizeAbsolutePath(left);
+    const normalizedRight = normalizeAbsolutePath(right);
+    if (!normalizedLeft || !normalizedRight) return false;
+    return normalizedLeft.toLowerCase() === normalizedRight.toLowerCase();
+  }
+
+  function buildConfigDeletionRootPlan(appid, rawTargets) {
+    const activeWatcherRoots = Array.from(folderWatchers.keys());
+    const configuredFolderPaths = getWatchedFolders();
+    const configuredRoots = [
+      ...configuredFolderPaths,
+      ...configuredFolderPaths.map(normalizeRoot),
+    ];
+    const deleteTargets = [];
+    const rootsToPause = new Set();
+
+    for (const rawTarget of Array.isArray(rawTargets) ? rawTargets : []) {
+      const target = validateAppIdDirectoryTarget(rawTarget, appid);
+      if (!target) {
+        watcherLogger.warn("config-delete:target-rejected", {
+          appid,
+          deleteTarget: rawTarget || null,
+          reason: "not-absolute-appid-directory",
+        });
+        continue;
+      }
+      const equalsConfiguredRoot = configuredRoots.some((root) =>
+        pathsEqualForDeletion(root, target),
+      );
+      const equalsActiveRoot = activeWatcherRoots.some((root) =>
+        pathsEqualForDeletion(root, target),
+      );
+      if (equalsConfiguredRoot || equalsActiveRoot) {
+        watcherLogger.warn("config-delete:target-rejected", {
+          appid,
+          deleteTarget: target,
+          reason: "target-is-watched-root",
+        });
+        continue;
+      }
+
+      deleteTargets.push(target);
+      let targetIsDirectory = false;
+      try {
+        targetIsDirectory =
+          fs.existsSync(target) && fs.statSync(target).isDirectory();
+      } catch {
+        targetIsDirectory = false;
+      }
+      if (!targetIsDirectory) continue;
+      const match = findMostSpecificContainingRoot(target, activeWatcherRoots);
+      if (!match) {
+        watcherLogger.info("config-delete:target-no-active-root", {
+          appid,
+          deleteTarget: target,
+        });
+        continue;
+      }
+      rootsToPause.add(match.root);
+      watcherLogger.info("config-delete:target-validated", {
+        appid,
+        watchedRoot: match.root,
+        deleteTarget: match.target,
+      });
+    }
+
+    return {
+      deleteTargets: Array.from(new Set(deleteTargets)),
+      rootsToPause: Array.from(rootsToPause),
+    };
+  }
+
+  async function pauseFolderWatcherForConfigDeletion(rootPath) {
+    let matchedKey = null;
+    let entry = null;
+    for (const [key, value] of folderWatchers.entries()) {
+      if (!pathsEqualForDeletion(key, rootPath)) continue;
+      matchedKey = key;
+      entry = value;
+      break;
+    }
+    if (!entry || !matchedKey) return false;
+
+    folderWatchers.delete(matchedKey);
+    clearTimeout(entry.debounce);
+    try {
+      entry.resolveReady?.(false);
+    } catch {}
+    entry.resolveReady = null;
+    await entry.watcher.close();
+    watcherLogger.info("config-delete:root-watcher-paused", {
+      watchedRoot: matchedKey,
+    });
+    return true;
+  }
+
+  async function resumeConfigDeletionRootWatchers(token, timeoutMs) {
+    const pausedRoots = pausedDeletionRootWatchers.get(token?.id) || [];
+    pausedDeletionRootWatchers.delete(token?.id);
+    if (pausedRoots.length === 0) return [];
+
+    const allowedRoots = getWatchedFolders().map(normalizeRoot);
+    const failures = [];
+    for (const root of pausedRoots) {
+      try {
+        const stillAllowed = allowedRoots.some((allowedRoot) =>
+          pathsEqualForDeletion(allowedRoot, root),
+        );
+        if (!stillAllowed) {
+          watcherLogger.info("config-delete:root-watcher-restart-skip", {
+            appid: String(token?.appid || ""),
+            watchedRoot: root,
+            reason: "root-no-longer-configured",
+          });
+          continue;
+        }
+
+        const readyPromise = startFolderWatcher(root, { initialScan: false });
+        let ready = false;
+        let readyTimeout = null;
+        try {
+          ready = await Promise.race([
+            Promise.resolve(readyPromise),
+            new Promise((resolve) => {
+              readyTimeout = setTimeout(
+                () => resolve(false),
+                Math.min(Math.max(1000, timeoutMs || 10000), 10000),
+              );
+            }),
+          ]);
+        } finally {
+          if (readyTimeout) clearTimeout(readyTimeout);
+        }
+        watcherLogger.info("config-delete:root-watcher-restarted", {
+          appid: String(token?.appid || ""),
+          watchedRoot: root,
+          initialScan: false,
+          ready: ready === true,
+        });
+      } catch (error) {
+        failures.push({
+          root,
+          error: error?.message || String(error),
+        });
+        watcherLogger.warn("config-delete:root-watcher-restart-failed", {
+          appid: String(token?.appid || ""),
+          watchedRoot: root,
+          error: error?.message || String(error),
+        });
+      }
+    }
+    return failures;
+  }
+
+  async function beginConfigDeletion(options = {}) {
+    const appid =
+      normalizeAppIdValue(options?.appid) ||
+      String(options?.appid || "").trim();
+    const configName = String(options?.configName || "").trim();
+    const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 60000);
+    const guardToken = await configDeletionGuard.begin(appid, { timeoutMs });
+    const deletionPlan = buildConfigDeletionRootPlan(
+      appid,
+      options?.deleteTargets,
+    );
+    const token = Object.freeze({
+      ...guardToken,
+      deleteTargets: Object.freeze([...deletionPlan.deleteTargets]),
+    });
+    let closedWatchers = 0;
+    const pausedRoots = [];
+    pausedDeletionRootWatchers.set(token.id, pausedRoots);
+    try {
+      closedWatchers = await closeSaveWatchersForConfigDeletion(
+        appid,
+        configName,
+      );
+      pendingSavePathIndex.delete(appid);
+      pendingSavePathIndex.delete(token.appid);
+      for (const root of deletionPlan.rootsToPause) {
+        try {
+          if (await pauseFolderWatcherForConfigDeletion(root)) {
+            pausedRoots.push(root);
+          }
+        } catch (error) {
+          pausedRoots.push(root);
+          throw error;
+        }
+      }
+    } catch (error) {
+      try {
+        await resumeConfigDeletionRootWatchers(token, timeoutMs);
+      } catch (resumeError) {
+        watcherLogger.warn("config-delete:root-watcher-rollback-failed", {
+          appid,
+          error: resumeError?.message || String(resumeError),
+        });
+      } finally {
+        await configDeletionGuard.end(guardToken, {
+          settleMs: 0,
+          timeoutMs,
+        });
+      }
+      throw error;
+    }
+    watcherLogger.info("config-delete:guard-started", {
+      appid,
+      config: configName || null,
+      closedWatchers,
+      pausedRootWatchers: pausedRoots.length,
+      deleteTargets: token.deleteTargets.length,
+      timeoutMs,
+    });
+    watcherLogger.info("config-delete:generation-idle", {
+      appid,
+      config: configName || null,
+    });
+    return token;
+  }
+
+  async function endConfigDeletion(token, options = {}) {
+    const settleMs = Math.max(0, Number(options?.settleMs) || 800);
+    const timeoutMs = Math.max(1000, Number(options?.timeoutMs) || 60000);
+    let restartError = null;
+    let restartFailures = [];
+    try {
+      restartFailures = await resumeConfigDeletionRootWatchers(
+        token,
+        timeoutMs,
+      );
+    } catch (error) {
+      restartError = error;
+      watcherLogger.warn("config-delete:root-watcher-restart-failed", {
+        appid: String(token?.appid || ""),
+        error: error?.message || String(error),
+      });
+    }
+    const released = await configDeletionGuard.end(token, {
+      settleMs,
+      timeoutMs,
+    });
+    watcherLogger.info("config-delete:guard-ended", {
+      appid: String(token?.appid || ""),
+      settleMs,
+      released,
+      rootWatcherRestartError: restartError?.message || null,
+      rootWatcherRestartFailures: restartFailures.length,
+    });
+    return released;
+  }
+
   async function discoverAppIdsUnder(root, maxDepth = 3, yieldIfNeeded) {
     const out = new Map(); // appid -> abs path
     async function walk(dir, depth = 0) {
@@ -6988,6 +7303,14 @@ module.exports = function makeWatchedFolders({
   async function generateOneAppId(appid, appDir, opts = {}) {
     appid = String(appid);
     const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
+    if (configDeletionGuard.isSuppressed(appid)) {
+      watcherLogger.info("watcher:generate-skip-config-deleting", {
+        appid,
+        platform: desiredPlatform || null,
+        path: appDir || null,
+      });
+      return { created: false, reason: "config-deleting" };
+    }
     const invalidAutoAppIdReason = getInvalidAutoAppIdReason(appid);
     if (invalidAutoAppIdReason) {
       watcherLogger.info("watcher:generate-skipped-invalid-appid", {
@@ -7037,6 +7360,16 @@ module.exports = function makeWatchedFolders({
       wasObservedGenerationRecent(appid, desiredPlatform, normalizedSavePath)
     ) {
       return { created: false, reason: "recent-save-path" };
+    }
+    const finishGenerationActivity =
+      configDeletionGuard.tryStartGeneration(appid);
+    if (!finishGenerationActivity) {
+      watcherLogger.info("watcher:generate-skip-config-deleting", {
+        appid,
+        platform: desiredPlatform || null,
+        path: appDir || null,
+      });
+      return { created: false, reason: "config-deleting" };
     }
     markObservedGenerationPending(appid, desiredPlatform, normalizedSavePath);
     inflightAppIds.add(inflightKey);
@@ -7294,6 +7627,7 @@ module.exports = function makeWatchedFolders({
       return { created: false, reason: "missing-generator" };
     } finally {
       inflightAppIds.delete(inflightKey);
+      finishGenerationActivity();
       clearObservedGenerationPending(
         appid,
         desiredPlatform,
@@ -9343,6 +9677,19 @@ module.exports = function makeWatchedFolders({
       }
 
       if (typeof generateConfigForAppId === "function") {
+        for (let index = generationTasks.length - 1; index >= 0; index -= 1) {
+          const task = generationTasks[index];
+          if (!configDeletionGuard.isSuppressed(task?.appid)) continue;
+          watcherLogger.info("watcher:scan-skip-config-deleting", {
+            appid: String(task?.appid || ""),
+            platform: task?.forcePlatform || null,
+            root: rootPath,
+          });
+          if (task?.normalizedPath) {
+            clearPendingSavePath(task.appid, task.normalizedPath);
+          }
+          generationTasks.splice(index, 1);
+        }
         let generatedIds = new Set();
         const createdGenerationTasks = [];
         const batchProgress =
@@ -9371,19 +9718,31 @@ module.exports = function makeWatchedFolders({
               : generationTasks;
           if (batchableTasks.length > 0) {
             try {
-              const batchResult = await generateConfigsForAppIds(
-                batchableTasks,
-                configsDir,
-                {
-                  onSeedCache,
-                  onTaskProgress: (task, taskIndex, progress) => {
-                    batchProgress?.updateTask(task, taskIndex, progress);
+              const finishBatchGenerationActivities = batchableTasks
+                .map((task) =>
+                  configDeletionGuard.tryStartGeneration(task.appid),
+                )
+                .filter(Boolean);
+              let batchResult;
+              try {
+                batchResult = await generateConfigsForAppIds(
+                  batchableTasks,
+                  configsDir,
+                  {
+                    onSeedCache,
+                    onTaskProgress: (task, taskIndex, progress) => {
+                      batchProgress?.updateTask(task, taskIndex, progress);
+                    },
+                    onTaskSettled: (task, taskIndex, result) => {
+                      batchProgress?.settleTask(task, taskIndex, result);
+                    },
                   },
-                  onTaskSettled: (task, taskIndex, result) => {
-                    batchProgress?.settleTask(task, taskIndex, result);
-                  },
-                },
-              );
+                );
+              } finally {
+                for (const finishActivity of finishBatchGenerationActivities) {
+                  finishActivity();
+                }
+              }
               for (const id of batchResult?.generated || []) {
                 generatedIds.add(String(id));
               }
@@ -9608,10 +9967,12 @@ module.exports = function makeWatchedFolders({
     const { initialScan = true } = opts;
     const root = normalizeRoot(coercePath(inputRoot));
     const strictRootProfile = getStrictRootProfile(root);
-    if (folderWatchers.has(root)) return;
+    if (folderWatchers.has(root)) {
+      return folderWatchers.get(root)?.readyPromise || Promise.resolve(true);
+    }
     if (!fs.existsSync(root)) {
       markMissingRoot(root);
-      return;
+      return Promise.resolve(false);
     }
 
     const watcher = chokidar.watch(root, {
@@ -9621,7 +9982,11 @@ module.exports = function makeWatchedFolders({
       depth: strictRootProfile ? STRICT_ROOT_WATCH_DEPTH : 6,
       ignorePermissionErrors: true,
     });
-    const state = { watcher, debounce: null };
+    let resolveReady = null;
+    const readyPromise = new Promise((resolve) => {
+      resolveReady = resolve;
+    });
+    const state = { watcher, debounce: null, readyPromise, resolveReady };
     folderWatchers.set(root, state);
     watcherLogger.info("watch-folder", { root, initialScan });
 
@@ -9845,6 +10210,10 @@ module.exports = function makeWatchedFolders({
 
     watcher
       .on("ready", () => {
+        try {
+          state.resolveReady?.(true);
+        } catch {}
+        state.resolveReady = null;
         if (
           !rescanInProgress.value &&
           initialScan &&
@@ -10542,6 +10911,7 @@ module.exports = function makeWatchedFolders({
                 "pending-save-path",
                 "recent-save-path",
                 "recent-app-platform",
+                "config-deleting",
               ].includes(generationResult?.reason || "")
             ) {
               watcherLogger.info("watcher:addDir-skip-fallback", {
@@ -10565,12 +10935,17 @@ module.exports = function makeWatchedFolders({
         if (!rescanInProgress.value) schedule();
       })
       .on("error", (err) => {
+        try {
+          state.resolveReady?.(false);
+        } catch {}
+        state.resolveReady = null;
         watcherLogger.error("watch-folder-error", {
           root,
           error: err?.message || String(err),
         });
         notifyWarn(`Watcher error "${root}": ${err.message}`);
       });
+    return readyPromise;
   }
 
   function stopFolderWatcher(inputRoot) {
@@ -10578,6 +10953,10 @@ module.exports = function makeWatchedFolders({
     const entry = folderWatchers.get(root) || folderWatchers.get(inputRoot);
     if (!entry) return;
     clearTimeout(entry.debounce);
+    try {
+      entry.resolveReady?.(false);
+    } catch {}
+    entry.resolveReady = null;
     entry.watcher.close().catch(() => {});
     watcherLogger.info("unwatch-folder", { root });
     folderWatchers.delete(root);
@@ -11318,16 +11697,19 @@ module.exports = function makeWatchedFolders({
     }
   });
 
-  async function refreshConfigState() {
+  async function refreshConfigState(options = {}) {
+    const suppressInitialNotify = options?.suppressInitialNotify === true;
     watcherLogger.info("refresh-config-state:start", {
       saveWatcherBuckets: appidSaveWatchers.size,
       folderWatchers: folderWatchers.size,
+      suppressInitialNotify,
     });
     await indexExistingConfigsSync();
-    await rebuildSaveWatchers();
+    await rebuildSaveWatchers({ suppressInitialNotify });
     watcherLogger.info("refresh-config-state:complete", {
       saveWatcherBuckets: appidSaveWatchers.size,
       folderWatchers: folderWatchers.size,
+      suppressInitialNotify,
     });
   }
 
@@ -11398,6 +11780,8 @@ module.exports = function makeWatchedFolders({
   }
 
   return {
+    beginConfigDeletion,
+    endConfigDeletion,
     rebuildKnownAppIds,
     refreshConfigState,
     isBootOnboardingPending,

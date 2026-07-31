@@ -49,6 +49,9 @@ const AdmZip = require("adm-zip");
 const { copyFolderOnce, copyFolderOverwrite } = require("./utils/fileCopy");
 const { computeFolderContentVersion } = require("./utils/content-version");
 const {
+  validateAppIdDirectoryTarget,
+} = require("./utils/config-deletion-paths");
+const {
   defaultSoundsFolder,
   defaultPresetsFolder,
   userSoundsFolder,
@@ -10435,6 +10438,51 @@ ipcMain.handle(
   },
 );
 
+function collectConfigSaveDeletionDirectories({
+  appid,
+  platform,
+  savePath,
+  configData,
+}) {
+  const appidStr = String(appid || "").trim();
+  if (!appidStr) return [];
+  const targets = new Set();
+  const addTarget = (candidate) => {
+    const validated = validateAppIdDirectoryTarget(candidate, appidStr);
+    if (validated) targets.add(validated);
+  };
+  const saveBase = typeof savePath === "string" ? savePath.trim() : "";
+
+  if (saveBase && path.isAbsolute(saveBase)) {
+    const baseLower = saveBase.toLowerCase();
+    const appLower = appidStr.toLowerCase();
+    addTarget(path.join(saveBase, appidStr));
+    if (!baseLower.endsWith(`${path.sep}steam_settings`)) {
+      addTarget(path.join(saveBase, "steam_settings", appidStr));
+    }
+    if (!baseLower.endsWith(`${path.sep}remote`)) {
+      addTarget(path.join(saveBase, "remote", appidStr));
+    }
+    addTarget(path.join(saveBase, normalizePlatform(platform), appidStr));
+    if (path.basename(baseLower) === appLower) addTarget(saveBase);
+  }
+
+  if (platform === "rpcs3") {
+    const trophyDir = resolveRpcs3TrophyDirForConfig(configData || {});
+    addTarget(trophyDir);
+  } else if (platform === "shadps4") {
+    const trophyDir =
+      typeof configData?.trophy_path === "string" && configData.trophy_path
+        ? configData.trophy_path
+        : saveBase;
+    if (trophyDir && path.isAbsolute(trophyDir)) {
+      addTarget(path.dirname(path.dirname(trophyDir)));
+    }
+  }
+
+  return Array.from(targets);
+}
+
 // Handler for config deletion
 ipcMain.handle("delete-config", async (_event, payload) => {
   const configName =
@@ -10460,6 +10508,36 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       ...(meta && typeof meta === "object" ? meta : {}),
     });
     logDeleteWarn(message, meta);
+  };
+  let deletionGuardToken = null;
+  let saveDeletionTargets = [];
+  let configFileDeleted = false;
+  let configStateRefreshAttempted = false;
+  const refreshDeletedConfigState = async () => {
+    if (
+      !configFileDeleted ||
+      configStateRefreshAttempted ||
+      !watchedFoldersApi?.refreshConfigState
+    ) {
+      return;
+    }
+    configStateRefreshAttempted = true;
+    logDeleteInfo("delete-config:refresh-config-state:start", {
+      configName,
+    });
+    try {
+      await watchedFoldersApi.refreshConfigState({
+        suppressInitialNotify: true,
+      });
+      logDeleteInfo("delete-config:refresh-config-state:complete", {
+        configName,
+      });
+    } catch (error) {
+      pushDeleteWarning("delete-config:refresh-config-state-failed", {
+        configName,
+        error: error?.message || String(error),
+      });
+    }
   };
   const isRetryableDeleteError = (err) => {
     const code = String(err?.code || "").toUpperCase();
@@ -10497,35 +10575,69 @@ ipcMain.handle("delete-config", async (_event, payload) => {
     const configPath = path.join(configsDir, `${safeName}.json`);
     //const configPath = path.join(process.env.APPDATA, 'Achievements', 'configs', `${safe}.json`);
     if (fs.existsSync(configPath)) {
-      const needsConfigData = deleteExtras || deleteSaveFiles;
       let configData = null;
-      if (needsConfigData) {
-        try {
-          configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
-        } catch (err) {
-          pushDeleteWarning("delete-config:parse-failed", {
-            configName,
-            error: err?.message || String(err),
-          });
-        }
+      try {
+        configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      } catch (err) {
+        pushDeleteWarning("delete-config:parse-failed", {
+          configName,
+          error: err?.message || String(err),
+        });
       }
-      const appid = needsConfigData
-        ? sanitizeAppId(configData?.appid) ||
-          sanitizeAppId(configData?.appId) ||
-          sanitizeAppId(configData?.steamAppId) ||
-          ""
-        : "";
-      const inferredConfigPlatform = needsConfigData
-        ? inferOfficialPlatformFromMarkers(configData) ||
-          normalizePlatform(configData?.platform)
-        : "";
-      const platform = needsConfigData
-        ? inferredConfigPlatform || getPlatformForAppId(appid) || "steam"
-        : "steam";
+      const appid =
+        sanitizeAppId(configData?.appid) ||
+        sanitizeAppId(configData?.appId) ||
+        sanitizeAppId(configData?.steamAppId) ||
+        "";
+      const inferredConfigPlatform =
+        inferOfficialPlatformFromMarkers(configData) ||
+        normalizePlatform(configData?.platform);
+      const platform =
+        inferredConfigPlatform || getPlatformForAppId(appid) || "steam";
       const savePath =
-        needsConfigData && typeof configData?.save_path === "string"
+        typeof configData?.save_path === "string"
           ? configData.save_path
           : "";
+      const skipSaveDirectoryDeletion = [
+        "steam-official",
+        "epic-official",
+        "gog-official",
+        "ubisoft-official",
+        "ea-official",
+        "xbox-pc",
+      ].includes(platform);
+      if (deleteSaveFiles && !skipSaveDirectoryDeletion) {
+        saveDeletionTargets = collectConfigSaveDeletionDirectories({
+          appid,
+          platform,
+          savePath,
+          configData,
+        });
+      }
+
+      if (appid && watchedFoldersApi?.beginConfigDeletion) {
+        logDeleteInfo("delete-config:generation-guard:start", {
+          configName,
+          appid,
+          platform,
+        });
+        deletionGuardToken = await watchedFoldersApi.beginConfigDeletion({
+          appid,
+          configName: safeName,
+          platform,
+          savePath,
+          deleteTargets: saveDeletionTargets,
+          timeoutMs: 60000,
+        });
+        if (Array.isArray(deletionGuardToken?.deleteTargets)) {
+          saveDeletionTargets = deletionGuardToken.deleteTargets;
+        }
+        logDeleteInfo("delete-config:generation-guard:ready", {
+          configName,
+          appid,
+          platform,
+        });
+      }
 
       const deletingActiveConfig =
         sanitizeConfigName(selectedConfig || "") === safeName;
@@ -10546,17 +10658,8 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       await runDeleteWithRetries("config-file", configPath, () =>
         fs.unlinkSync(configPath),
       );
+      configFileDeleted = true;
       clearPendingMissingAchievementFile(configName);
-
-      if (watchedFoldersApi?.refreshConfigState) {
-        logDeleteInfo("delete-config:refresh-config-state:start", {
-          configName,
-        });
-        await watchedFoldersApi.refreshConfigState();
-        logDeleteInfo("delete-config:refresh-config-state:complete", {
-          configName,
-        });
-      }
 
       if (deleteExtras) {
         try {
@@ -10630,14 +10733,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         }
       }
       if (deleteSaveFiles) {
-        if (
-          platform === "steam-official" ||
-          platform === "epic-official" ||
-          platform === "gog-official" ||
-          platform === "ubisoft-official" ||
-          platform === "ea-official" ||
-          platform === "xbox-pc"
-        ) {
+        if (skipSaveDirectoryDeletion) {
           logDeleteInfo("delete-config:save-delete-skip", {
             configName,
             platform,
@@ -10705,45 +10801,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
 
           const appidStr = String(appid || "").trim();
           const saveBase = savePath || "";
-          const appidDirs = new Set();
-          const addDir = (dir) => {
-            if (dir && typeof dir === "string") appidDirs.add(dir);
-          };
-
-          if (appidStr && saveBase) {
-            const baseLower = saveBase.toLowerCase();
-            const appLower = appidStr.toLowerCase();
-            addDir(path.join(saveBase, appidStr));
-            if (!baseLower.endsWith(`${path.sep}steam_settings`)) {
-              addDir(path.join(saveBase, "steam_settings", appidStr));
-            }
-            if (!baseLower.endsWith(`${path.sep}remote`)) {
-              addDir(path.join(saveBase, "remote", appidStr));
-            }
-            addDir(path.join(saveBase, normalizePlatform(platform), appidStr));
-            if (path.basename(baseLower) === appLower) addDir(saveBase);
-          }
-
-          if (platform === "rpcs3") {
-            const trophyDir = resolveRpcs3TrophyDirForConfig(configData || {});
-            if (trophyDir) {
-              const base = path.basename(trophyDir).toLowerCase();
-              if (appidStr && base === appidStr.toLowerCase()) {
-                addDir(trophyDir);
-              }
-            }
-          } else if (platform === "shadps4") {
-            const trophyDir =
-              typeof configData?.trophy_path === "string" &&
-              configData.trophy_path
-                ? configData.trophy_path
-                : saveBase;
-            if (trophyDir) {
-              const appDir = path.dirname(path.dirname(trophyDir));
-              const base = path.basename(appDir || "").toLowerCase();
-              if (appidStr && base === appidStr.toLowerCase()) addDir(appDir);
-            }
-          }
+          const appidDirs = new Set(saveDeletionTargets);
 
           let deletedDir = false;
           for (const dir of appidDirs) {
@@ -10782,6 +10840,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
           }
         }
       }
+      await refreshDeletedConfigState();
       logDeleteInfo("delete-config:success", {
         configName,
         configPath,
@@ -10800,6 +10859,26 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       error: error.message,
     });
     return { success: false, error: error.message };
+  } finally {
+    await refreshDeletedConfigState();
+    if (deletionGuardToken && watchedFoldersApi?.endConfigDeletion) {
+      try {
+        await watchedFoldersApi.endConfigDeletion(deletionGuardToken, {
+          settleMs: 800,
+          timeoutMs: 60000,
+        });
+        logDeleteInfo("delete-config:generation-guard:released", {
+          configName,
+          appid: deletionGuardToken.appid || null,
+        });
+      } catch (error) {
+        logDeleteWarn("delete-config:generation-guard-release-failed", {
+          configName,
+          appid: deletionGuardToken.appid || null,
+          error: error?.message || String(error),
+        });
+      }
+    }
   }
 });
 
