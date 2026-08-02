@@ -165,7 +165,11 @@ function notifyReady() {
     state.consecutiveFailures = 0;
     state.restartTimestamps = [];
     state.circuitOpenUntil = 0;
-    notifyLifecycle({ state: "stable", reason: "stable-window-complete" });
+    notifyLifecycle({
+      state: "stable",
+      pid: Number(state.child?.pid) || Number(state.child?.__achPid) || 0,
+      reason: "stable-window-complete",
+    });
   }, STABLE_RESET_MS);
   notifyLifecycle({ state: "ready", pid: Number(state.child?.pid) || 0 });
   for (const subscription of Array.from(state.subscriptions)) {

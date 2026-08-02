@@ -214,6 +214,109 @@ function parseAchievementIniSection(sec) {
   return parseType1Section(sec);
 }
 
+function parseOnlineFixStatsIni(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return {};
+  const parsed = parseIniWithEncoding(filePath);
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const statsKey = Object.keys(parsed).find(
+    (key) => String(key || "").trim().toLowerCase() === "stats"
+  );
+  if (!statsKey || !parsed[statsKey] || typeof parsed[statsKey] !== "object") {
+    return null;
+  }
+
+  const values = {};
+  for (const [rawName, rawValue] of Object.entries(parsed[statsKey])) {
+    const name = String(rawName || "").trim();
+    const value = Number(rawValue);
+    if (!name || !Number.isFinite(value)) continue;
+    values[name] = value;
+  }
+  return values;
+}
+
+function roundProgressNumber(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round(numeric * 100) / 100;
+}
+
+function buildOnlineFixSnapshot(
+  schemaEntries,
+  unlockedAchievements,
+  statValues,
+  fallback = {}
+) {
+  const schema = Array.isArray(schemaEntries) ? schemaEntries : [];
+  const unlocked =
+    unlockedAchievements && typeof unlockedAchievements === "object"
+      ? unlockedAchievements
+      : {};
+  const previous = fallback && typeof fallback === "object" ? fallback : {};
+  const stats = statValues && typeof statValues === "object" ? statValues : {};
+  const statsByLowerName = new Map(
+    Object.entries(stats).map(([name, value]) => [
+      String(name || "").trim().toLowerCase(),
+      value,
+    ])
+  );
+  const snapshot = {};
+
+  for (const achievement of schema) {
+    const name = String(achievement?.name || achievement?.api || "").trim();
+    if (!name) continue;
+
+    const unlockedEntry = unlocked[name];
+    const isEarned = unlockedEntry?.earned === true || unlockedEntry?.earned === 1;
+    const entry = {
+      earned: isEarned,
+      earned_time: isEarned ? Number(unlockedEntry?.earned_time) || 0 : 0,
+    };
+
+    const progress = achievement?.progress;
+    const operation = String(progress?.value?.operation || "")
+      .trim()
+      .toLowerCase();
+    const operand = String(progress?.value?.operand1 || "").trim();
+    const maxProgress = Number(progress?.max_val);
+    const minProgress = Number(progress?.min_val);
+    if (operation === "statvalue" && operand && Number.isFinite(maxProgress) && maxProgress > 0) {
+      const rawStat = statsByLowerName.get(operand.toLowerCase());
+      const previousProgress = Number(previous?.[name]?.progress);
+      const defaultProgress = Number.isFinite(minProgress) ? minProgress : 0;
+      const rawProgress = Number.isFinite(Number(rawStat))
+        ? Number(rawStat)
+        : Number.isFinite(previousProgress)
+          ? previousProgress
+          : defaultProgress;
+      const isFloatProgress =
+        !Number.isInteger(rawProgress) || !Number.isInteger(maxProgress);
+      const clampedProgress = Math.max(0, Math.min(rawProgress, maxProgress));
+      entry.progress = isFloatProgress
+        ? roundProgressNumber(clampedProgress)
+        : clampedProgress;
+      entry.max_progress = isFloatProgress
+        ? roundProgressNumber(maxProgress)
+        : maxProgress;
+      if (isFloatProgress) entry.progress_is_float = true;
+    }
+
+    snapshot[name] = entry;
+  }
+
+  for (const [name, unlockedEntry] of Object.entries(unlocked)) {
+    if (!name || snapshot[name]) continue;
+    const isEarned = unlockedEntry?.earned === true || unlockedEntry?.earned === 1;
+    snapshot[name] = {
+      earned: isEarned,
+      earned_time: isEarned ? Number(unlockedEntry?.earned_time) || 0 : 0,
+    };
+  }
+
+  return snapshot;
+}
+
 function flattenIniSections(obj) {
   const out = {};
   const isLeaf = (o) =>
@@ -383,6 +486,27 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
   return null;
 }
 
+function readAchievementSchemaArray(
+  configMeta,
+  configPathOverride = null,
+  fullSchemaPath = null
+) {
+  const candidates = [
+    fullSchemaPath,
+    resolveConfigSchemaPath(configMeta, configPathOverride),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate)) continue;
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      /* try the next schema candidate */
+    }
+  }
+  return [];
+}
+
 function buildCrcNameMap(achievements) {
   const map = {};
   for (const ach of achievements || []) {
@@ -434,7 +558,118 @@ function canonNameFromEntry(rawName, nameIndex) {
   return nameIndex?.byName.get(key) || nameIndex?.byDisp.get(key) || rawName;
 }
 
-function parseTenokeAchievementsIni(filePath, nameIndex) {
+function buildTenokeSnapshot(
+  schemaEntries,
+  achievementsMap,
+  statsMap,
+  nameIndex,
+  fallback = {}
+) {
+  const schema = Array.isArray(schemaEntries) ? schemaEntries : [];
+  const previous = fallback && typeof fallback === "object" ? fallback : {};
+  const achievements =
+    achievementsMap instanceof Map ? achievementsMap : new Map();
+  const stats = statsMap instanceof Map ? statsMap : new Map();
+  const statsByLowerName = new Map(
+    Array.from(stats.entries(), ([name, value]) => [
+      String(name || "").trim().toLowerCase(),
+      value,
+    ])
+  );
+  const achievementsByLowerName = new Map();
+
+  for (const [rawName, data] of achievements.entries()) {
+    const rawKey = String(rawName || "").trim().toLowerCase();
+    if (rawKey) achievementsByLowerName.set(rawKey, data);
+
+    const canonical = canonNameFromEntry(rawName, nameIndex);
+    const canonicalKey = String(canonical || "").trim().toLowerCase();
+    if (canonicalKey) achievementsByLowerName.set(canonicalKey, data);
+  }
+
+  const snapshot = {};
+  for (const achievement of schema) {
+    const name = String(achievement?.name || achievement?.api || "").trim();
+    if (!name) continue;
+
+    const achData = achievementsByLowerName.get(name.toLowerCase()) || {};
+    const isEarned = achData.unlocked === true;
+    const entry = {
+      earned: isEarned,
+      earned_time: isEarned ? normalizeEpoch(achData.time || 0) : 0,
+    };
+
+    const progress = achievement?.progress;
+    const operation = String(progress?.value?.operation || "")
+      .trim()
+      .toLowerCase();
+    const operand = String(progress?.value?.operand1 || "").trim();
+    const maxProgress = Number(progress?.max_val);
+    const minProgress = Number(progress?.min_val);
+    const mappedStat =
+      operation === "statvalue" && operand
+        ? statsByLowerName.get(operand.toLowerCase())
+        : undefined;
+    const previousProgress = Number(previous?.[name]?.progress);
+    const explicitProgress = Number(achData.progress);
+
+    if (
+      operation === "statvalue" &&
+      operand &&
+      Number.isFinite(maxProgress) &&
+      maxProgress > 0
+    ) {
+      const defaultProgress = Number.isFinite(minProgress) ? minProgress : 0;
+      const rawProgress = Number.isFinite(Number(mappedStat))
+        ? Number(mappedStat)
+        : Number.isFinite(explicitProgress)
+          ? explicitProgress
+          : Number.isFinite(previousProgress)
+            ? previousProgress
+            : defaultProgress;
+      const isFloatProgress =
+        !Number.isInteger(rawProgress) || !Number.isInteger(maxProgress);
+      const clampedProgress = Math.max(0, Math.min(rawProgress, maxProgress));
+      entry.progress = isFloatProgress
+        ? roundProgressNumber(clampedProgress)
+        : clampedProgress;
+      entry.max_progress = isFloatProgress
+        ? roundProgressNumber(maxProgress)
+        : maxProgress;
+      if (isFloatProgress) entry.progress_is_float = true;
+    } else if (Number.isFinite(explicitProgress)) {
+      // Older Tenoke formats can store progress directly on the achievement.
+      entry.progress = explicitProgress;
+    }
+
+    snapshot[name] = entry;
+  }
+
+  // Preserve achievements unknown to the schema, but never expose orphan stats
+  // as achievement entries when a schema is available.
+  for (const [rawName, achData] of achievements.entries()) {
+    const canonical = canonNameFromEntry(rawName, nameIndex);
+    if (!canonical || snapshot[canonical]) continue;
+    const isEarned = achData?.unlocked === true;
+    const entry = {
+      earned: isEarned,
+      earned_time: isEarned ? normalizeEpoch(achData?.time || 0) : 0,
+    };
+    if (Number.isFinite(Number(achData?.progress))) {
+      entry.progress = Number(achData.progress);
+    }
+    snapshot[canonical] = entry;
+  }
+
+  return snapshot;
+}
+
+function parseTenokeAchievementsIni(
+  filePath,
+  nameIndex,
+  schemaEntries = [],
+  fallback = {}
+) {
   try {
     const raw = fs.readFileSync(filePath, "utf8");
     const lines = raw.split(/\r?\n/);
@@ -497,6 +732,16 @@ function parseTenokeAchievementsIni(filePath, nameIndex) {
 
         achievementsMap.set(entryName, { unlocked, time, progress });
       }
+    }
+
+    if (Array.isArray(schemaEntries) && schemaEntries.length) {
+      return buildTenokeSnapshot(
+        schemaEntries,
+        achievementsMap,
+        statsMap,
+        nameIndex,
+        fallback
+      );
     }
 
     const allNames = new Set([...statsMap.keys(), ...achievementsMap.keys()]);
@@ -675,6 +920,10 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
     findCaseInsensitive(statsDir, "achievements.ini", { maxDepth: 2 }) ||
     path.join(statsDir, "achievements.ini");
   const onlineFixIniPath = isStatsDir ? iniPath : statsIni;
+  const onlineFixStatsDir = isStatsDir ? saveDir : statsDir;
+  const onlineFixStatsPath =
+    findCaseInsensitive(onlineFixStatsDir, "stats.ini") ||
+    path.join(onlineFixStatsDir, "stats.ini");
   const binPath = path.join(saveDir, "stats.bin");
   const fromIniSection = (sec) => parseAchievementIniSection(sec);
 
@@ -820,21 +1069,56 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
   }
 
   if (fs.existsSync(tenokeIniPath)) {
-    const tenokeData = parseTenokeAchievementsIni(tenokeIniPath, nameIndex);
+    const schemaEntries = readAchievementSchemaArray(
+      configMeta,
+      configPathOverride,
+      fullSchemaPath
+    );
+    const tenokeData = parseTenokeAchievementsIni(
+      tenokeIniPath,
+      nameIndex,
+      schemaEntries,
+      fallback
+    );
     if (tenokeData) return tenokeData;
   }
 
-  if (fs.existsSync(onlineFixIniPath)) {
+  if (
+    fs.existsSync(onlineFixIniPath) ||
+    fs.existsSync(onlineFixStatsPath)
+  ) {
     try {
-      const parsed = parseIniWithEncoding(onlineFixIniPath);
-      const flat = flattenIniSections(parsed);
       const converted = {};
-      for (const [secTitle, secObj] of Object.entries(flat)) {
-        const key = canonNameFromIniSection(secTitle, nameIndex);
-        if (!key) continue;
-        converted[key] = fromIniSection(secObj || {});
+      if (fs.existsSync(onlineFixIniPath)) {
+        const parsed = parseIniWithEncoding(onlineFixIniPath);
+        if (!parsed || typeof parsed !== "object") return fallback || {};
+        const flat = flattenIniSections(parsed);
+        for (const [secTitle, secObj] of Object.entries(flat)) {
+          const key = canonNameFromIniSection(secTitle, nameIndex);
+          if (!key) continue;
+          converted[key] = fromIniSection(secObj || {});
+        }
       }
-      return converted;
+
+      const stats = fs.existsSync(onlineFixStatsPath)
+        ? parseOnlineFixStatsIni(onlineFixStatsPath)
+        : {};
+      if (stats === null) return fallback || {};
+
+      const schemaEntries = readAchievementSchemaArray(
+        configMeta,
+        configPathOverride,
+        fullSchemaPath
+      );
+      if (!schemaEntries.length) {
+        return Object.keys(converted).length ? converted : fallback || {};
+      }
+      return buildOnlineFixSnapshot(
+        schemaEntries,
+        converted,
+        stats,
+        fallback
+      );
     } catch {
       return fallback || {};
     }
@@ -892,6 +1176,10 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
 module.exports = {
   loadAchievementsFromSaveFile,
   parseAchievementIniSection,
+  parseOnlineFixStatsIni,
+  buildOnlineFixSnapshot,
+  parseTenokeAchievementsIni,
+  buildTenokeSnapshot,
   flattenIniSections,
   canonNameFromIniSection,
   getNameIndexFromConfigPath,

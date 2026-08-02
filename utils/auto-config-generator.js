@@ -8,6 +8,7 @@ const { fork, execFileSync } = require("child_process");
 const ini = require("ini");
 const CRC32 = require("crc-32");
 const { loadAchievementsFromSaveFile } = require("./achievement-data");
+const { sanitizeConfigName } = require("./config-name");
 const { createLogger } = require("./logger");
 const {
   buildGogOfficialSnapshot,
@@ -459,9 +460,11 @@ async function maybeSeedAchCache({
     path.join(save_path, id, "achievements.json"),
     path.join(save_path, "steam_settings", id, "achievements.json"),
     path.join(save_path, "achievements.ini"),
+    path.join(save_path, "stats.ini"),
     path.join(save_path, "SteamData", "user_stats.ini"),
     path.join(save_path, id, "SteamData", "user_stats.ini"),
     path.join(save_path, "Stats", "achievements.ini"),
+    path.join(save_path, "Stats", "stats.ini"),
     path.join(save_path, id, "achievements.ini"),
     path.join(save_path, "stats.bin"),
     path.join(save_path, id, "stats.bin"),
@@ -505,7 +508,7 @@ async function maybeSeedAchCache({
   }
 }
 function sanitizeFilename(name) {
-  return name.replace(/[\/\\:*?"<>|]/g, "");
+  return sanitizeConfigName(name);
 }
 
 function applyLaunchMetadataToConfig(configData, metadata) {

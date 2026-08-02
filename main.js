@@ -62,6 +62,10 @@ const {
 } = require("./utils/paths");
 const { normalizeAppTheme } = require("./utils/app-theme");
 const {
+  resolveConfigJsonPath,
+  sanitizeConfigName,
+} = require("./utils/config-name");
+const {
   ensureUserThemes,
   getThemeRegistryPayload,
 } = require("./utils/theme-manager");
@@ -1749,7 +1753,7 @@ function normalizeAchievementCacheOptions(options) {
 function readConfigForAchievementCache(configName) {
   const safeName = sanitizeConfigName(configName || "");
   if (!safeName) return null;
-  const cfgPath = path.join(configsDir, `${safeName}.json`);
+  const cfgPath = resolveConfigJsonPath(configsDir, configName);
   if (!fs.existsSync(cfgPath)) return null;
   try {
     return JSON.parse(fs.readFileSync(cfgPath, "utf8"));
@@ -2621,7 +2625,13 @@ function resolveSaveSidecarPaths(saveBase, appid) {
     const tenokeIni = fs.existsSync(tenokeIniDirect)
       ? tenokeIniDirect
       : tenokeIniNested;
-    const ofx = path.join(d, "Stats", "achievements.ini");
+    const isOnlineFixStatsDir = path.basename(d).toLowerCase() === "stats";
+    const ofx = isOnlineFixStatsDir
+      ? path.join(d, "achievements.ini")
+      : path.join(d, "Stats", "achievements.ini");
+    const ofxStats = isOnlineFixStatsDir
+      ? path.join(d, "stats.ini")
+      : path.join(d, "Stats", "stats.ini");
     const bin = path.join(d, "stats.bin");
     if (fs.existsSync(tenokeIni))
       return {
@@ -2629,6 +2639,7 @@ function resolveSaveSidecarPaths(saveBase, appid) {
         ini: null,
         tenokeIni,
         ofx: null,
+        ofxStats: null,
         bin: fs.existsSync(bin) ? bin : null,
       };
     if (fs.existsSync(ofx))
@@ -2637,6 +2648,17 @@ function resolveSaveSidecarPaths(saveBase, appid) {
         ini: null,
         tenokeIni: null,
         ofx,
+        ofxStats: fs.existsSync(ofxStats) ? ofxStats : null,
+        bin: fs.existsSync(bin) ? bin : null,
+      };
+
+    if (fs.existsSync(ofxStats))
+      return {
+        dir: d,
+        ini: null,
+        tenokeIni: null,
+        ofx: null,
+        ofxStats,
         bin: fs.existsSync(bin) ? bin : null,
       };
 
@@ -2646,6 +2668,7 @@ function resolveSaveSidecarPaths(saveBase, appid) {
         ini: universeIniPath,
         tenokeIni: null,
         ofx: null,
+        ofxStats: null,
         bin: fs.existsSync(bin) ? bin : null,
       };
 
@@ -2655,6 +2678,7 @@ function resolveSaveSidecarPaths(saveBase, appid) {
         ini: iniPath,
         tenokeIni: null,
         ofx: null,
+        ofxStats: null,
         bin: fs.existsSync(bin) ? bin : null,
       };
 
@@ -2664,6 +2688,7 @@ function resolveSaveSidecarPaths(saveBase, appid) {
         ini: null,
         tenokeIni: null,
         ofx: null,
+        ofxStats: null,
         bin,
       };
   }
@@ -2672,6 +2697,7 @@ function resolveSaveSidecarPaths(saveBase, appid) {
     ini: null,
     tenokeIni: null,
     ofx: null,
+    ofxStats: null,
     bin: null,
   };
 }
@@ -4255,19 +4281,6 @@ function resolveIconAbsolutePath(configPath, rel) {
     }
   } catch {}
   return ICON_PNG_PATH;
-}
-
-//Config Name Sanitize
-function sanitizeConfigName(raw) {
-  const s = String(raw || "")
-    .replace(/[\/\\:*?"<>|]/g, "") // Windows-illegal
-    .replace(/\s+/g, " ") // multiple spaces
-    .trim()
-    .replace(/[. ]+$/, ""); // without dot/space at end
-  const base = s || "config";
-  return /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(base)
-    ? `_${base}`
-    : base;
 }
 
 function waitForFileExists(fp, tries = 50, delay = 80) {
@@ -8336,7 +8349,7 @@ function listConfigs() {
 function isRpcs3ConfigName(configName) {
   const safeName = sanitizeConfigName(configName);
   if (!safeName) return false;
-  const cfgPath = path.join(configsDir, `${safeName}.json`);
+  const cfgPath = resolveConfigJsonPath(configsDir, configName);
   if (!fs.existsSync(cfgPath)) return false;
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
@@ -8349,7 +8362,7 @@ function isRpcs3ConfigName(configName) {
 function isLumaPlayConfigName(configName) {
   const safeName = sanitizeConfigName(configName);
   if (!safeName) return false;
-  const cfgPath = path.join(configsDir, `${safeName}.json`);
+  const cfgPath = resolveConfigJsonPath(configsDir, configName);
   if (!fs.existsSync(cfgPath)) return false;
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
@@ -9327,8 +9340,7 @@ ipcMain.handle("load-achievements", async (event, configName, options = {}) => {
   ipcLogger.info("load-achievements:request", { configName, includeRarity });
   try {
     //const configPath = path.join(process.env.APPDATA, 'Achievements', 'configs', `${configName}.json`);
-    const safeName = sanitizeConfigName(configName);
-    const configPath = path.join(configsDir, `${safeName}.json`);
+    const configPath = resolveConfigJsonPath(configsDir, configName);
     const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
 
     const cfgDir = isNonEmptyString(config?.config_path)
@@ -9480,7 +9492,7 @@ ipcMain.handle(
         });
       }
       const safeName = sanitizeConfigName(configName);
-      const configPath = path.join(configsDir, `${safeName}.json`);
+      const configPath = resolveConfigJsonPath(configsDir, configName);
       if (!fs.existsSync(configPath)) {
         const ready = await waitForFileExists(configPath, 50, 100);
         if (!ready || !fs.existsSync(configPath)) {
@@ -10381,6 +10393,7 @@ ipcMain.handle(
         tenokeIni: tenokeIniPath,
         ini: achievementsIniPath,
         ofx: achievementsIniOnlineFixPath,
+        ofxStats: statsIniOnlineFixPath,
         bin: achievementsBinPath,
       } = resolveSaveSidecarPaths(saveBase, appid);
 
@@ -10396,6 +10409,8 @@ ipcMain.handle(
         effectiveSavePath = path.dirname(achievementsIniPath);
       else if (safeExists(achievementsIniOnlineFixPath))
         effectiveSavePath = path.dirname(achievementsIniOnlineFixPath);
+      else if (safeExists(statsIniOnlineFixPath))
+        effectiveSavePath = path.dirname(statsIniOnlineFixPath);
       else if (safeExists(achievementsBinPath))
         effectiveSavePath = path.dirname(achievementsBinPath);
 
@@ -10572,7 +10587,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
   }
   try {
     const safeName = sanitizeConfigName(configName);
-    const configPath = path.join(configsDir, `${safeName}.json`);
+    const configPath = resolveConfigJsonPath(configsDir, configName);
     //const configPath = path.join(process.env.APPDATA, 'Achievements', 'configs', `${safe}.json`);
     if (fs.existsSync(configPath)) {
       let configData = null;
@@ -10829,12 +10844,14 @@ ipcMain.handle("delete-config", async (_event, payload) => {
                 tenokeIni: tenokeIniPath,
                 ini: achievementsIniPath,
                 ofx: achievementsIniOnlineFixPath,
+                ofxStats: statsIniOnlineFixPath,
                 bin: achievementsBinPath,
               } = resolveSaveSidecarPaths(saveBase, appid);
               await deleteFile(saveJsonPath);
               await deleteFile(tenokeIniPath);
               await deleteFile(achievementsIniPath);
               await deleteFile(achievementsIniOnlineFixPath);
+              await deleteFile(statsIniOnlineFixPath);
               await deleteFile(achievementsBinPath);
             }
           }
@@ -10890,7 +10907,7 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
     ? normalizeBlacklistPlatformValue(payload.platform)
     : null;
   const configPath = safeName
-    ? path.join(configsDir, `${safeName}.json`)
+    ? resolveConfigJsonPath(configsDir, rawName)
     : null;
   const removeFlag = payload?.remove === true || payload?.action === "remove";
 
@@ -11046,7 +11063,7 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
         message: tUi("main.message.configNameRequired"),
       };
     }
-    const cfgFile = path.join(configsDir, `${safeName}.json`);
+    const cfgFile = resolveConfigJsonPath(configsDir, rawName);
     if (!fs.existsSync(cfgFile)) {
       return {
         success: false,
@@ -12610,7 +12627,7 @@ ipcMain.on("show-test-platinum-notification", (_event, options = {}) => {
 function markConfigPlatinumFlag(configName) {
   const safe = configName ? sanitizeConfigName(configName) : "";
   if (!safe) return false;
-  const cfgPath = path.join(configsDir, `${safe}.json`);
+  const cfgPath = resolveConfigJsonPath(configsDir, configName);
   if (!fs.existsSync(cfgPath)) return false;
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
@@ -14124,11 +14141,13 @@ function resolveBootSeedCandidatePath(config) {
       tenokeIni: tenokeIniPath,
       ini: iniPath,
       ofx: onlineFixIniPath,
+      ofxStats: onlineFixStatsPath,
       bin: binPath,
     } = resolveSaveSidecarPaths(saveRoot, appid);
     if (fs.existsSync(saveJsonPath)) candidatePath = saveJsonPath;
     else if (tenokeIniPath) candidatePath = tenokeIniPath;
     else if (onlineFixIniPath) candidatePath = onlineFixIniPath;
+    else if (onlineFixStatsPath) candidatePath = onlineFixStatsPath;
     else if (iniPath) candidatePath = iniPath;
     else if (binPath) candidatePath = binPath;
     else if (appid) {
@@ -14289,7 +14308,7 @@ function markCacheSeedKeyFromConfig(config) {
 function markCacheSeedKeyFromName(configName) {
   const safeName = sanitizeConfigName(configName);
   if (!safeName) return "";
-  const cfgPath = path.join(configsDir, `${safeName}.json`);
+  const cfgPath = resolveConfigJsonPath(configsDir, configName);
   if (fs.existsSync(cfgPath)) {
     try {
       const data = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
@@ -14427,7 +14446,7 @@ async function loadPreviousAchievements(
   try {
     const safeName = sanitizeConfigName(configName || "");
     const configPath = safeName
-      ? path.join(configsDir, `${safeName}.json`)
+      ? resolveConfigJsonPath(configsDir, configName)
       : "";
     if (configPath && fs.existsSync(configPath)) {
       const cfg = JSON.parse(fs.readFileSync(configPath, "utf8"));
@@ -14651,6 +14670,7 @@ function findAchievementFileDeep(baseDir, maxDepth = 2) {
   const targets = [
     "achievements.json",
     "achievements.ini",
+    "stats.ini",
     "stats.bin",
     "user_stats.ini",
   ];
@@ -14661,7 +14681,13 @@ function findAchievementFileDeep(baseDir, maxDepth = 2) {
     try {
       const entries = fs.readdirSync(dir, { withFileTypes: true });
       for (const ent of entries) {
-        if (ent.isFile() && targetLc.includes(ent.name.toLowerCase())) {
+        const entryName = ent.name.toLowerCase();
+        if (
+          ent.isFile() &&
+          targetLc.includes(entryName) &&
+          (entryName !== "stats.ini" ||
+            path.basename(dir).toLowerCase() === "stats")
+        ) {
           return path.join(dir, ent.name);
         }
       }
@@ -14762,7 +14788,7 @@ async function monitorAchievementsFile(filePath) {
     ? sanitizeConfigName(selectedConfig)
     : null;
   const configFile = safeConfigName
-    ? path.join(configsDir, `${safeConfigName}.json`)
+    ? resolveConfigJsonPath(configsDir, selectedConfig)
     : null;
   const configName = selectedConfig;
   const configPath = path.join(configsDir, `${configName}.json`);
@@ -15591,6 +15617,24 @@ async function monitorAchievementsFile(filePath) {
         fs.unwatchFile(filePath);
       } catch {}
       fs.watchFile(filePath, { interval: 1000 }, achievementsWatcher);
+
+      const activeBaseName = path.basename(filePath).toLowerCase();
+      const activeParent = path.dirname(filePath);
+      if (
+        path.basename(activeParent).toLowerCase() === "stats" &&
+        ["achievements.ini", "stats.ini"].includes(activeBaseName)
+      ) {
+        const sidecarName =
+          activeBaseName === "stats.ini" ? "achievements.ini" : "stats.ini";
+        const sidecarPath = path.join(activeParent, sidecarName);
+        try {
+          fs.unwatchFile(sidecarPath);
+        } catch {}
+        extraAchievementFiles.add(sidecarPath);
+        fs.watchFile(sidecarPath, { interval: 1000 }, () =>
+          processSnapshot(false),
+        );
+      }
       achievementMonitorTimer = null;
     } else {
       const baseDir = path.dirname(filePath);
@@ -15647,6 +15691,7 @@ async function monitorAchievementsFile(filePath) {
         "Achievements.ini",
       );
       const onlineFixIniPath = path.join(baseDir, "Stats", "achievements.ini");
+      const onlineFixStatsPath = path.join(baseDir, "Stats", "stats.ini");
       const binPath = path.join(baseDir, "stats.bin");
 
       if (fs.existsSync(tenokePath)) {
@@ -15666,6 +15711,11 @@ async function monitorAchievementsFile(filePath) {
 
       if (fs.existsSync(onlineFixIniPath)) {
         monitorAchievementsFile(onlineFixIniPath);
+        return;
+      }
+
+      if (fs.existsSync(onlineFixStatsPath)) {
+        monitorAchievementsFile(onlineFixStatsPath);
         return;
       }
 
@@ -15715,7 +15765,7 @@ async function refreshSelectedSteamOfficialMonitoring() {
 
   const safeName = sanitizeConfigName(selectedConfig);
   if (!safeName) return;
-  const cfgFile = path.join(configsDir, `${safeName}.json`);
+  const cfgFile = resolveConfigJsonPath(configsDir, selectedConfig);
   let config = null;
   try {
     config = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
@@ -15869,7 +15919,7 @@ ipcMain.on(
       return;
     }
 
-    const cfgFile = path.join(configsDir, `${safeName}.json`);
+    const cfgFile = resolveConfigJsonPath(configsDir, configName);
     let config;
     try {
       config = JSON.parse(fs.readFileSync(cfgFile, "utf-8"));
@@ -16424,12 +16474,14 @@ ipcMain.on(
       tenokeIni: tenokeIniPath,
       ini: iniPath,
       ofx: onlineFixIniPath,
+      ofxStats: onlineFixStatsPath,
       bin: binPath,
     } = resolveSaveSidecarPaths(saveBase, appid);
 
     if (fs.existsSync(saveJsonPath)) achievementsFilePath = saveJsonPath;
     else if (tenokeIniPath) achievementsFilePath = tenokeIniPath;
     else if (onlineFixIniPath) achievementsFilePath = onlineFixIniPath;
+    else if (onlineFixStatsPath) achievementsFilePath = onlineFixStatsPath;
     else if (iniPath) achievementsFilePath = iniPath;
     else if (binPath) achievementsFilePath = binPath;
     else achievementsFilePath = saveJsonPath; // fallback
@@ -16499,7 +16551,7 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
   if (getConfigInflight.has(safe)) return getConfigInflight.get(safe);
 
   const job = (async () => {
-    let configPath = path.join(configsDir, `${safe}.json`);
+    let configPath = resolveConfigJsonPath(configsDir, name);
     if (!fs.existsSync(configPath)) {
       await waitForPathExists(configPath, 60, 70);
     }
@@ -16697,7 +16749,7 @@ ipcMain.handle("config:set-custom-cover-path", async (_event, payload = {}) => {
   if (!safeName) {
     return { success: false, error: "Invalid config name." };
   }
-  const configPath = path.join(configsDir, `${safeName}.json`);
+  const configPath = resolveConfigJsonPath(configsDir, payload?.configName);
   if (!fs.existsSync(configPath)) {
     return { success: false, error: "Config not found." };
   }
@@ -16794,7 +16846,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     const safeOld = sanitizeConfigName(oldName);
     const safeNew = sanitizeConfigName(newConfig.name);
 
-    const oldConfigPath = path.join(configsDir, `${safeOld}.json`);
+    const oldConfigPath = resolveConfigJsonPath(configsDir, oldName);
     const newConfigPath = path.join(configsDir, `${safeNew}.json`);
     let prevConfig = null;
     if (fs.existsSync(oldConfigPath)) {
