@@ -216,8 +216,14 @@ function parseAchievementIniSection(sec) {
 
 function parseOnlineFixStatsIni(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return {};
+  try {
+    if (fs.statSync(filePath).size === 0) return {};
+  } catch {
+    return null;
+  }
   const parsed = parseIniWithEncoding(filePath);
   if (!parsed || typeof parsed !== "object") return null;
+  if (!Object.keys(parsed).length) return {};
 
   const statsKey = Object.keys(parsed).find(
     (key) => String(key || "").trim().toLowerCase() === "stats"
@@ -246,7 +252,8 @@ function buildOnlineFixSnapshot(
   schemaEntries,
   unlockedAchievements,
   statValues,
-  fallback = {}
+  fallback = {},
+  options = {},
 ) {
   const schema = Array.isArray(schemaEntries) ? schemaEntries : [];
   const unlocked =
@@ -255,6 +262,7 @@ function buildOnlineFixSnapshot(
       : {};
   const previous = fallback && typeof fallback === "object" ? fallback : {};
   const stats = statValues && typeof statValues === "object" ? statValues : {};
+  const statsAreAuthoritative = options?.statsAreAuthoritative === true;
   const statsByLowerName = new Map(
     Object.entries(stats).map(([name, value]) => [
       String(name || "").trim().toLowerCase(),
@@ -287,7 +295,7 @@ function buildOnlineFixSnapshot(
       const defaultProgress = Number.isFinite(minProgress) ? minProgress : 0;
       const rawProgress = Number.isFinite(Number(rawStat))
         ? Number(rawStat)
-        : Number.isFinite(previousProgress)
+        : !statsAreAuthoritative && Number.isFinite(previousProgress)
           ? previousProgress
           : defaultProgress;
       const isFloatProgress =
@@ -1100,7 +1108,8 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
         }
       }
 
-      const stats = fs.existsSync(onlineFixStatsPath)
+      const hasOnlineFixStats = fs.existsSync(onlineFixStatsPath);
+      const stats = hasOnlineFixStats
         ? parseOnlineFixStatsIni(onlineFixStatsPath)
         : {};
       if (stats === null) return fallback || {};
@@ -1117,7 +1126,8 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
         schemaEntries,
         converted,
         stats,
-        fallback
+        fallback,
+        { statsAreAuthoritative: hasOnlineFixStats },
       );
     } catch {
       return fallback || {};

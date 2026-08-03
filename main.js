@@ -23389,9 +23389,11 @@ ipcMain.handle(
             : ""
           : config?.epic_product_id != null
             ? String(config.epic_product_id).trim()
-            : config?.appid != null
-              ? String(config.appid).trim()
-              : "";
+            : config?.epic_namespace != null
+              ? String(config.epic_namespace).trim()
+              : config?.appid != null
+                ? String(config.appid).trim()
+                : "";
       if (!rarityTargetId) {
         return {
           success: false,

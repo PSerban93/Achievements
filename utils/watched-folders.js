@@ -4559,7 +4559,14 @@ module.exports = function makeWatchedFolders({
     const snapKey = makeSnapshotKey(meta, appid, { filePath });
     const normPath = normalizePrefPath(filePath);
     if (!snapKey || !normPath) return "";
-    return `${snapKey}::${normPath}`;
+    const baseName = path.basename(filePath).toLowerCase();
+    const parentName = path.basename(path.dirname(filePath)).toLowerCase();
+    const parserRevision =
+      parentName === "stats" &&
+      (baseName === "achievements.ini" || baseName === "stats.ini")
+        ? "::online-fix-parser:2"
+        : "";
+    return `${snapKey}::${normPath}${parserRevision}`;
   }
 
   function readFileStatSyncSafe(fp) {
@@ -8368,6 +8375,7 @@ module.exports = function makeWatchedFolders({
       let discoveredMap = null;
       let discovered = [];
       let tenokeFound = null;
+      let nemirtingasEpicDiscovery = false;
 
       if (!strictRootProfile) {
         const gpdFiles = await discoverGpdFilesUnder(
@@ -9533,6 +9541,8 @@ module.exports = function makeWatchedFolders({
               !gogInfoFound && (await discoverNemirtingasEpicAppIds(rootPath));
             const shouldFallbackEpic =
               epicDiscoveredMap instanceof Map && epicDiscoveredMap.size === 0;
+            nemirtingasEpicDiscovery =
+              epicDiscoveredMap instanceof Map && epicDiscoveredMap.size > 0;
             discoveredMap =
               epicDiscoveredMap !== null && !shouldFallbackEpic
                 ? epicDiscoveredMap
@@ -9575,19 +9585,26 @@ module.exports = function makeWatchedFolders({
               (pendingSet && pendingSet.has(normalizedDir)));
 
           if (!existingConfigIds.has(id)) {
-            const autoInflightKey = `${String(id)}:auto`;
+            const discoveredPlatform = nemirtingasEpicDiscovery
+              ? "epic"
+              : null;
+            const autoInflightKey = `${String(id)}:${discoveredPlatform || "auto"}`;
             if (
               inflightAppIds.has(autoInflightKey) ||
-              wasObservedGenerationVariantRecent(id, null)
+              wasObservedGenerationVariantRecent(id, discoveredPlatform)
             ) {
               continue;
             }
-            if (isAppIdBlacklisted(id, null, blacklistState)) continue;
+            if (
+              isAppIdBlacklisted(id, discoveredPlatform, blacklistState)
+            ) {
+              continue;
+            }
             if (alreadyTracked) continue;
             brandNewIds.push(id);
             generationTasks.push({
               appid: id,
-              forcePlatform: null,
+              forcePlatform: discoveredPlatform,
               appDir,
               normalizedPath: normalizedDir,
             });
@@ -9595,7 +9612,9 @@ module.exports = function makeWatchedFolders({
             continue;
           }
 
-          const targetPlatform = determineAlternatePlatform(id);
+          const targetPlatform = nemirtingasEpicDiscovery
+            ? "epic"
+            : determineAlternatePlatform(id);
           if (!normalizedDir || alreadyTracked || !targetPlatform) continue;
           if (isAppIdBlacklisted(id, targetPlatform, blacklistState)) continue;
           const targetInflightKey = `${String(id)}:${targetPlatform || "auto"}`;

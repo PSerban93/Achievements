@@ -45,6 +45,8 @@ const {
 } = require("./local-game-name-cache");
 const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
 const { resolveSchemaParseRuntimeDir } = require("./steam-schema-parse");
+const { resolveEpicArtifactIdentity } = require("./epic-identity");
+const { fetchEpicCatalogItem } = require("./epic-api");
 const {
   hasProcessNameValue,
   normalizeProcessNameValue,
@@ -1453,6 +1455,7 @@ async function getGameNameFromGogDb(appid) {
 // Epic name resolution helpers
 let epicProductMap = null;
 const epicEgdataTitleCache = new Map();
+const loggedEpicArtifactIdentities = new Set();
 async function loadEpicProductMap() {
   if (epicProductMap) return epicProductMap;
   try {
@@ -1553,12 +1556,84 @@ async function getEpicTitle(appid) {
   return null;
 }
 
+async function getEpicArtifactIdentity(appid) {
+  const id = String(appid || "").trim();
+  if (!id) return null;
+  try {
+    const identity = await resolveEpicArtifactIdentity(id);
+    if (
+      identity &&
+      !identity.displayName &&
+      identity.namespace &&
+      identity.catalogItemId
+    ) {
+      try {
+        const result = await fetchEpicCatalogItem(
+          identity.namespace,
+          identity.catalogItemId,
+          { locale: "en-US", country: "US", timeoutMs: 15000 },
+        );
+        const catalogItem = result?.item || null;
+        const displayName = String(
+          catalogItem?.title ||
+            catalogItem?.displayName ||
+            catalogItem?.name ||
+            "",
+        ).trim();
+        if (displayName) {
+          identity.displayName = displayName;
+        }
+      } catch {}
+    }
+    const logKey = id.toLowerCase();
+    if (identity && !loggedEpicArtifactIdentities.has(logKey)) {
+      if (loggedEpicArtifactIdentities.size >= 512) {
+        loggedEpicArtifactIdentities.clear();
+      }
+      loggedEpicArtifactIdentities.add(logKey);
+      autoConfigLogger.info("epic:artifact-identity-resolved", {
+        appid: id,
+        artifactId: identity.artifactId || null,
+        catalogItemId: identity.catalogItemId || null,
+        namespace: identity.namespace || null,
+        displayName: identity.displayName || null,
+      });
+    }
+    return identity;
+  } catch (err) {
+    autoConfigLogger.warn("epic:artifact-identity-failed", {
+      appid: id,
+      error: err?.message || String(err),
+    });
+    return null;
+  }
+}
+
+function applyEpicIdentityToConfig(config, identity) {
+  if (!config || typeof config !== "object" || !identity) return false;
+  const fields = {
+    epic_app_name: identity.artifactId || "",
+    epic_catalog_item_id: identity.catalogItemId || "",
+    epic_namespace: identity.namespace || "",
+  };
+  let changed = false;
+  for (const [key, rawValue] of Object.entries(fields)) {
+    const value = String(rawValue || "").trim();
+    if (!value || config[key] === value) continue;
+    config[key] = value;
+    changed = true;
+  }
+  return changed;
+}
+
 function cleanEpicPageTitle(rawTitle) {
-  return decodeHtml(String(rawTitle || ""))
+  const title = decodeHtml(String(rawTitle || ""))
     .replace(/\s*-\s*Achievements\s*\|\s*Sandbox\s*$/i, "")
     .replace(/\s*\|\s*EGDATA(?:\.APP)?\s*$/i, "")
     .replace(/\s*-\s*EGDATA(?:\.APP)?\s*$/i, "")
     .trim();
+  if (/^(?:sandbox|page|record)\s+not\s+found$/i.test(title)) return "";
+  return title;
 }
 
 function extractMetaContentByKey(html, key) {
@@ -1657,9 +1732,11 @@ async function getGameName(appid, opts = {}, retries = 2) {
     return preferredName;
   }
   const hasHex = /[a-f]/i.test(String(appid || ""));
-  if (hasHex) {
+  if (hasHex || platformHint === "epic") {
     const epicName = await getEpicTitle(appid);
     if (epicName) return epicName;
+    const artifactIdentity = await getEpicArtifactIdentity(appid);
+    if (artifactIdentity?.displayName) return artifactIdentity.displayName;
     const egdataTitle = await getEpicTitleFromEgdata(appid);
     if (egdataTitle) return egdataTitle;
     // For Epic IDs, do not fall back to Steam/GOG
@@ -2615,6 +2692,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
     const uplayId = String(appid);
     let mapping = uplayToSteam.get(uplayId);
     const isHexId = /[a-f]/i.test(uplayId);
+    let epicIdentity = null;
     let mappingForRun =
       !itemForcedPlatform || itemForcedPlatform === "uplay" ? mapping : null;
     const nameSourceId = isHexId
@@ -2756,6 +2834,9 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       steamAppId: platformMeta.steamAppId || null,
       forced: !!itemForcedPlatform,
     });
+    if (platformMeta.platform === "epic") {
+      epicIdentity = await getEpicArtifactIdentity(uplayId);
+    }
     const targetInfo = resolveConfigTarget({
       outputDir,
       baseName: safeName,
@@ -3007,6 +3088,12 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
           changed = true;
         }
         if (
+          platformMeta.platform === "epic" &&
+          applyEpicIdentityToConfig(curr, epicIdentity)
+        ) {
+          changed = true;
+        }
+        if (
           platformMeta.platform === "steam" ||
           (platformMeta.platform === "uplay" && nextSteamId)
         ) {
@@ -3111,6 +3198,9 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
     }
     if (itemEmu) {
       gameData.emu = itemEmu;
+    }
+    if (platformMeta.platform === "epic") {
+      applyEpicIdentityToConfig(gameData, epicIdentity);
     }
     if (
       platformMeta.platform === "steam" ||

@@ -39,6 +39,11 @@ const {
   buildRarityEntriesForSchema,
   writeAchievementPercentagesSidecar: writeRaritySidecar,
 } = require("./achievement-rarity");
+const {
+  fetchEpicAchievementSchemaBySandbox,
+  fetchEpicPublicProductAchievements,
+} = require("./epic-api");
+const { resolveEpicArtifactIdentity } = require("./epic-identity");
 const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
 const {
   generateSteamSchemaWithSchemaParse,
@@ -925,11 +930,34 @@ const EPIC_LOCALE_MAP = {
   tchinese: "zh-TW",
 };
 
+const EPIC_GRAPHQL_LOCALE_MAP = {
+  english: "en-US",
+  french: "fr-FR",
+  german: "de-DE",
+  italian: "it-IT",
+  japanese: "ja-JP",
+  koreana: "ko-KR",
+  polish: "pl-PL",
+  brazilian: "pt-BR",
+  russian: "ru-RU",
+  spanish: "es-ES",
+  latam: "es-MX",
+  schinese: "zh-CN",
+  tchinese: "zh-TW",
+};
+
 function epicLocaleForLang(lang) {
   const key = String(lang || "")
     .trim()
     .toLowerCase();
   return EPIC_LOCALE_MAP[key] || EPIC_LOCALE_MAP.english;
+}
+
+function epicGraphqlLocaleForLang(lang) {
+  const key = String(lang || "")
+    .trim()
+    .toLowerCase();
+  return EPIC_GRAPHQL_LOCALE_MAP[key] || EPIC_GRAPHQL_LOCALE_MAP.english;
 }
 
 function resolveEpicLangsToFetch() {
@@ -2430,13 +2458,7 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
           const locale = epicLocaleForLang(lang);
           try {
             const items = await fetchEpicAchievements(appid, locale);
-            const map = new Map();
-            for (const item of items) {
-              const parsed = parseEpicAchievement(item);
-              if (!parsed || !parsed.apiName) continue;
-              map.set(parsed.apiName, parsed);
-            }
-            perLangByApi[lang] = map;
+            perLangByApi[lang] = buildEpicAchievementMap(items);
           } catch (e) {
             emit("warn", `[${appid}] Epic API failed for ${lang}`, {
               appid,
@@ -2447,6 +2469,36 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
           }
         }),
       );
+
+      if (!hasEpicAchievementRows(perLangByApi)) {
+        try {
+          const fallback = await fetchEpicArtifactAchievementsFallback(
+            appid,
+            langsToFetch,
+          );
+          if (fallback?.identity) {
+            emit("info", "epic:artifact-identity-resolved", {
+              appid,
+              artifactId: fallback.identity.artifactId || null,
+              catalogItemId: fallback.identity.catalogItemId || null,
+              namespace: fallback.identity.namespace || null,
+              productId: fallback.productId || null,
+              source: fallback.source || null,
+            });
+          }
+          if (hasEpicAchievementRows(fallback?.perLangByApi)) {
+            for (const lang of langsToFetch) {
+              perLangByApi[lang] =
+                fallback.perLangByApi[lang] || new Map();
+            }
+          }
+        } catch (e) {
+          emit("warn", "epic:artifact-fallback-failed", {
+            appid,
+            error: String(e?.message || e),
+          });
+        }
+      }
 
       let enMap = perLangByApi["english"];
       if (!enMap || enMap.size === 0) {
@@ -2886,6 +2938,114 @@ function buildSchemaParseBatchItem(appMeta, outBaseDir) {
     appid,
     resultKey: folderId,
     outDir: path.join(base, targetPlatform, folderId),
+  };
+}
+
+/* ---------- Epic artifact/App ID fallback ---------- */
+function buildEpicAchievementMap(items) {
+  const map = new Map();
+  for (const item of Array.isArray(items) ? items : []) {
+    const parsed = parseEpicAchievement(item);
+    if (!parsed?.apiName) continue;
+    map.set(parsed.apiName, parsed);
+  }
+  return map;
+}
+
+function hasEpicAchievementRows(perLangByApi) {
+  return Object.values(perLangByApi || {}).some(
+    (map) => map instanceof Map && map.size > 0,
+  );
+}
+
+async function fetchEpicArtifactAchievementsFallback(appid, langsToFetch) {
+  const identity = await resolveEpicArtifactIdentity(appid);
+  const sandboxId = String(identity?.namespace || "").trim();
+  if (!identity || !sandboxId) return null;
+
+  const langs = Array.isArray(langsToFetch) && langsToFetch.length
+    ? langsToFetch
+    : ["english"];
+  const seedLang = langs.includes("english") ? "english" : langs[0];
+  let seedItems = [];
+  let seedSource = "";
+  let productId = "";
+
+  try {
+    const publicResult = await fetchEpicPublicProductAchievements(sandboxId, {
+      locale: epicLocaleForLang(seedLang),
+      timeoutMs: 15000,
+    });
+    seedItems = publicResult.achievements || [];
+    productId = String(publicResult.productId || "").trim();
+    if (seedItems.length) seedSource = "public-sandbox";
+  } catch {}
+
+  if (!seedItems.length) {
+    try {
+      const sandboxResult = await fetchEpicAchievementSchemaBySandbox(
+        sandboxId,
+        {
+          locale: epicGraphqlLocaleForLang(seedLang),
+          timeoutMs: 15000,
+        },
+      );
+      seedItems = sandboxResult.achievements || [];
+      productId = String(sandboxResult.productId || productId || "").trim();
+      if (seedItems.length) seedSource = "sandbox";
+    } catch {}
+  }
+
+  if (!seedItems.length) {
+    return { identity, productId, source: "", perLangByApi: {} };
+  }
+
+  const perLangByApi = {
+    [seedLang]: buildEpicAchievementMap(seedItems),
+  };
+  await Promise.all(
+    langs
+      .filter((lang) => lang !== seedLang)
+      .map(async (lang) => {
+        let items = [];
+        const publicLookupId = productId || sandboxId;
+        try {
+          const publicResult = await fetchEpicPublicProductAchievements(
+            publicLookupId,
+            {
+              locale: epicLocaleForLang(lang),
+              timeoutMs: 15000,
+            },
+          );
+          items = publicResult.achievements || [];
+          if (!productId) {
+            productId = String(publicResult.productId || "").trim();
+          }
+        } catch {}
+        if (!items.length) {
+          try {
+            const sandboxResult = await fetchEpicAchievementSchemaBySandbox(
+              sandboxId,
+              {
+                locale: epicGraphqlLocaleForLang(lang),
+                timeoutMs: 15000,
+              },
+            );
+            items = sandboxResult.achievements || [];
+            if (!productId) {
+              productId = String(sandboxResult.productId || "").trim();
+            }
+          } catch {}
+        }
+        perLangByApi[lang] = buildEpicAchievementMap(items);
+      }),
+  );
+
+  return {
+    identity,
+    productId,
+    source: seedSource,
+    perLangByApi,
   };
 }
 
