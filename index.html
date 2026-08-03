@@ -3319,7 +3319,7 @@
                     </li>
                     <li id="platformGuideSteamItem2">
                       Manual config: set a valid <code>AppID</code> and correct
-                      <code>Save path</code>.
+                      <code>Achievements Save Path</code>.
                     </li>
                     <li id="platformGuideSteamItem3">
                       Uplay note: if Steam mapping is needed, use the mapped
@@ -4038,7 +4038,7 @@
                           </button>
                         </div>
 
-                        <label for="savePath">Save path:</label>
+                        <label for="savePath">Achievements Save Path:</label>
                         <div class="input-with-button">
                           <input
                             type="text"
@@ -11213,7 +11213,7 @@
           ),
           checkboxLabel2: tUi(
             "confirm.deleteConfig.deleteSave",
-            "Do you want to delete save data from the save path?",
+            "Do you want to delete save data from the Achievements Save Path?",
           ),
         });
         if (!confirmDelete?.confirmed) return;
@@ -11360,7 +11360,7 @@
           ),
           checkboxLabel2: tUi(
             "confirm.deleteConfig.deleteSave",
-            "Do you want to delete save data from the save path?",
+            "Do you want to delete save data from the Achievements Save Path?",
           ),
         });
         if (!confirmDelete?.confirmed) return false;
@@ -14413,7 +14413,7 @@
             alert(
               tUi(
                 "alert.savePathRequired",
-                "Canceled: You must select a save path folder to continue!",
+                "Canceled: You must select an Achievements Save Path folder to continue!",
               ),
             );
             return;
