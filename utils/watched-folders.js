@@ -5,6 +5,11 @@ const path = require("path");
 const chokidar = require("chokidar");
 const { createLogger } = require("./logger");
 const { normalizePlatform } = require("./config-platform-migrator");
+const {
+  buildBlacklistConfigKey,
+  normalizeAppIdValue,
+  normalizeBlacklistConfigKey,
+} = require("./blacklist-identity");
 const { parseGpdFile, buildSnapshotFromGpd } = require("./xenia-gpd");
 const {
   generateConfigFromGpd,
@@ -179,7 +184,11 @@ function isPathInsideRoot(rootPath, targetPath) {
     return false;
   }
   if (!rel || rel === ".") return true;
-  return !rel.startsWith("..") && !path.isAbsolute(rel);
+  return (
+    rel !== ".." &&
+    !rel.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(rel)
+  );
 }
 function shouldIgnoreDiscoveredId(id) {
   const value = String(id || "").trim();
@@ -192,8 +201,13 @@ function shouldIgnoreDiscoveredId(id) {
   if (value.length < 6 && /[a-f]/i.test(value)) return true;
   return false;
 }
-async function discoverImmediateAppIdsUnder(root, yieldIfNeeded) {
+async function discoverImmediateAppIdsUnder(
+  root,
+  yieldIfNeeded,
+  shouldSkipPath = null,
+) {
   const out = new Map();
+  if (typeof shouldSkipPath === "function" && shouldSkipPath(root)) return out;
   let entries = [];
   try {
     entries = await fsp.readdir(root, { withFileTypes: true });
@@ -202,9 +216,16 @@ async function discoverImmediateAppIdsUnder(root, yieldIfNeeded) {
   }
   for (const ent of entries) {
     if (!ent.isDirectory()) continue;
+    const candidatePath = path.join(root, ent.name);
+    if (
+      typeof shouldSkipPath === "function" &&
+      shouldSkipPath(candidatePath)
+    ) {
+      continue;
+    }
     if (!isAppIdName(ent.name)) continue;
     if (shouldIgnoreDiscoveredId(ent.name)) continue;
-    out.set(ent.name, path.join(root, ent.name));
+    out.set(ent.name, candidatePath);
     if (yieldIfNeeded) await yieldIfNeeded();
   }
   return out;
@@ -428,6 +449,7 @@ module.exports = function makeWatchedFolders({
   const missingRoots = new Set(); // watched folders missing on disk
   const pendingSteamOfficial = new Map(); // appid -> { statsDir, firstSeen }
   let missingRootTimer = null;
+  let blockedFoldersCache = null;
   const persistPreferences =
     typeof updatePreferences === "function" ? updatePreferences : null;
   const justUnblocked = new Set(); // appids recently removed from blacklist
@@ -2433,6 +2455,8 @@ module.exports = function makeWatchedFolders({
 
   async function scanFolderSignalsForOnboarding(rootPath) {
     const seenSignals = new Map();
+    const blockedFolders = getBlockedFoldersSet();
+    if (isPathBlocked(rootPath, blockedFolders)) return seenSignals;
     const queue = [{ dir: rootPath, depth: 0 }];
     let scannedDirs = 0;
     while (queue.length) {
@@ -2464,8 +2488,10 @@ module.exports = function makeWatchedFolders({
         if (current.depth >= AUTOCONFIG_ONBOARDING_DISCOVERY_MAX_DEPTH)
           continue;
         if (shouldSkipOnboardingScanDir(ent.name)) continue;
+        const candidatePath = path.join(current.dir, ent.name);
+        if (isPathBlocked(candidatePath, blockedFolders)) continue;
         queue.push({
-          dir: path.join(current.dir, ent.name),
+          dir: candidatePath,
           depth: current.depth + 1,
         });
       }
@@ -2534,7 +2560,7 @@ module.exports = function makeWatchedFolders({
         })();
         seen.set(real, {
           path: real,
-          blocked: blocked.has(real),
+          blocked: isPathBlocked(real, blocked),
           exists,
           isDefault: DEFAULT_WATCH_SET.has(real),
         });
@@ -2628,40 +2654,6 @@ module.exports = function makeWatchedFolders({
   const BLACKLIST_PREF_KEY = "blacklistedAppIds";
   const BLACKLIST_CONFIG_PREF_KEY = "blacklistedConfigKeys";
 
-  function normalizeAppIdValue(value) {
-    const trimmed = String(value || "").trim();
-    if (
-      /^[0-9a-fA-F]+$/.test(trimmed) ||
-      /^CUSA\d+$/i.test(trimmed) ||
-      /^NP[A-Z0-9_]+$/i.test(trimmed) ||
-      /^0x[0-9a-f]+$/i.test(trimmed)
-    ) {
-      return trimmed;
-    }
-    return "";
-  }
-
-  function normalizeBlacklistPlatformValue(value) {
-    return normalizePlatform(value) || "steam";
-  }
-
-  function buildBlacklistConfigKey(appid, platform) {
-    const normalizedAppId = normalizeAppIdValue(appid);
-    if (!normalizedAppId) return "";
-    return `${normalizedAppId}::${normalizeBlacklistPlatformValue(platform)}`;
-  }
-
-  function normalizeBlacklistConfigKey(value) {
-    const raw = String(value || "").trim();
-    if (!raw) return "";
-    const sepIndex = raw.indexOf("::");
-    if (sepIndex <= 0) return "";
-    const appid = normalizeAppIdValue(raw.slice(0, sepIndex));
-    if (!appid) return "";
-    const platform = normalizeBlacklistPlatformValue(raw.slice(sepIndex + 2));
-    return `${appid}::${platform}`;
-  }
-
   function getBlacklistedAppIdsSet() {
     try {
       const prefs = readPrefsSafe();
@@ -2731,7 +2723,7 @@ module.exports = function makeWatchedFolders({
     const normalized = normalizePrefPath(root);
     if (!normalized) return;
     const blocked = getBlockedFoldersSet();
-    if (blocked.has(normalized)) return;
+    if (isPathBlocked(normalized, blocked)) return;
     missingRoots.add(normalized);
     startMissingRootPoller();
   }
@@ -3610,6 +3602,14 @@ module.exports = function makeWatchedFolders({
     if (!info?.appid) return null;
     const appid = String(info.appid);
     const statsDir = info.statsDir || "";
+    if (isAppIdBlacklisted(appid, "steam-official")) {
+      pendingSteamOfficial.delete(appid);
+      watcherLogger.info("steam-official:skip-blacklisted", {
+        appid,
+        source: "file-event",
+      });
+      return { skipped: true, appid, reason: "blacklisted" };
+    }
     const preferredAccountId = getPreferredSteamOfficialAccountId();
     if (
       preferredAccountId &&
@@ -3673,6 +3673,8 @@ module.exports = function makeWatchedFolders({
         {
           preferredAccountId,
           onGenerationProgress,
+          shouldSkipAppId: (candidateAppId) =>
+            isAppIdBlacklisted(candidateAppId, "steam-official"),
         },
       );
     } catch (err) {
@@ -3683,6 +3685,17 @@ module.exports = function makeWatchedFolders({
       throw err;
     }
     if (!result) return null;
+    if (result.skipped) {
+      progressReporter?.updateTask(progressTask, 0, {
+        appid,
+        itemName: appid,
+        phase: "skipped",
+        detail: result.reason || "blacklisted",
+      });
+      progressReporter?.finish("success", "");
+      pendingSteamOfficial.delete(appid);
+      return result;
+    }
     if (
       progressReporter &&
       (result.created || result.schemaUpdated || result.configUpdated)
@@ -3699,10 +3712,16 @@ module.exports = function makeWatchedFolders({
     return result;
   }
 
-  async function discoverGpdFilesUnder(root, maxDepth = 4, yieldIfNeeded) {
+  async function discoverGpdFilesUnder(
+    root,
+    maxDepth = 4,
+    yieldIfNeeded,
+    shouldSkipPath = null,
+  ) {
     const results = [];
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) return;
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -3727,10 +3746,12 @@ module.exports = function makeWatchedFolders({
     root,
     maxDepth = 4,
     yieldIfNeeded,
+    shouldSkipPath = null,
   ) {
     const results = [];
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) return;
       const baseName = path.basename(dir || "").toLowerCase();
       if (isRpcs3TempFolderName(baseName)) return;
       let entries;
@@ -3763,10 +3784,16 @@ module.exports = function makeWatchedFolders({
     return results;
   }
 
-  async function discoverPs4TrophyDirsUnder(root, maxDepth = 4, yieldIfNeeded) {
+  async function discoverPs4TrophyDirsUnder(
+    root,
+    maxDepth = 4,
+    yieldIfNeeded,
+    shouldSkipPath = null,
+  ) {
     const results = [];
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) return;
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -3778,6 +3805,13 @@ module.exports = function makeWatchedFolders({
       let hasXml = false;
       for (const ent of entries) {
         const name = ent.name.toLowerCase();
+        const entryPath = path.join(dir, ent.name);
+        if (
+          typeof shouldSkipPath === "function" &&
+          shouldSkipPath(entryPath)
+        ) {
+          continue;
+        }
         if (ent.isDirectory() && name === "trophyfiles") {
           const t0 = path.join(dir, ent.name, "trophy00");
           const xml = path.join(t0, "Xml", "TROP.XML");
@@ -4039,6 +4073,9 @@ module.exports = function makeWatchedFolders({
   }
 
   function getBlockedFoldersSet() {
+    if (blockedFoldersCache instanceof Set) {
+      return new Set(blockedFoldersCache);
+    }
     const prefs = readPrefsSafe();
     const blockedArr = Array.isArray(prefs.blockedWatchedFolders)
       ? prefs.blockedWatchedFolders
@@ -4054,7 +4091,31 @@ module.exports = function makeWatchedFolders({
       })
       .filter(Boolean)
       .forEach((dir) => blocked.add(dir));
-    return blocked;
+    blockedFoldersCache = new Set(blocked);
+    return new Set(blockedFoldersCache);
+  }
+
+  function isNormalizedPathBlocked(candidate, blockedFolders = null) {
+    if (!candidate) return false;
+    const blocked =
+      blockedFolders instanceof Set ? blockedFolders : getBlockedFoldersSet();
+    for (const blockedRoot of blocked) {
+      if (DEFAULT_BLOCKED_SET.has(blockedRoot)) {
+        try {
+          if (!path.relative(blockedRoot, candidate)) return true;
+        } catch {}
+        continue;
+      }
+      if (isPathInsideRoot(blockedRoot, candidate)) return true;
+    }
+    return false;
+  }
+
+  function isPathBlocked(candidatePath, blockedFolders = null) {
+    return isNormalizedPathBlocked(
+      normalizePrefPath(candidatePath),
+      blockedFolders,
+    );
   }
 
   function saveBlockedFolders(list) {
@@ -4063,18 +4124,17 @@ module.exports = function makeWatchedFolders({
     );
     try {
       if (persistPreferences) {
-        const prefs = persistPreferences({ blockedWatchedFolders: uniq });
-        const stored = Array.isArray(prefs?.blockedWatchedFolders)
-          ? prefs.blockedWatchedFolders
-          : uniq;
-        return new Set(stored);
+        persistPreferences({ blockedWatchedFolders: uniq });
+        blockedFoldersCache = null;
+        return getBlockedFoldersSet();
       }
       const prefs = readPrefsSafe();
       fs.writeFileSync(
         preferencesPath,
         JSON.stringify({ ...prefs, blockedWatchedFolders: uniq }, null, 2),
       );
-      return new Set(uniq);
+      blockedFoldersCache = null;
+      return getBlockedFoldersSet();
     } catch (err) {
       watcherLogger.error("folders:block-save-failed", {
         error: err?.message || String(err),
@@ -6589,6 +6649,7 @@ module.exports = function makeWatchedFolders({
         : 0;
     const roots = getWatchedFolders().map(normalize);
     const blacklistState = getBlacklistState();
+    const blockedFolders = getBlockedFoldersSet();
     const allowed = new Map(); // appid -> Set(configName)
 
     for (const [appid, metas] of configIndex.entries()) {
@@ -6605,6 +6666,7 @@ module.exports = function makeWatchedFolders({
         }
         const savePath = meta?.save_path ? normalize(meta.save_path) : null;
         if (!savePath) continue;
+        if (isPathBlocked(savePath, blockedFolders)) continue;
         const inside = roots.some((root) => {
           const rel = path.relative(root, savePath);
           if (!rel) return true; // same directory
@@ -6987,10 +7049,16 @@ module.exports = function makeWatchedFolders({
     return released;
   }
 
-  async function discoverAppIdsUnder(root, maxDepth = 3, yieldIfNeeded) {
+  async function discoverAppIdsUnder(
+    root,
+    maxDepth = 3,
+    yieldIfNeeded,
+    shouldSkipPath = null,
+  ) {
     const out = new Map(); // appid -> abs path
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) return;
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -7000,6 +7068,9 @@ module.exports = function makeWatchedFolders({
       for (const ent of entries) {
         if (!ent.isDirectory()) continue;
         const next = path.join(dir, ent.name);
+        if (typeof shouldSkipPath === "function" && shouldSkipPath(next)) {
+          continue;
+        }
         if (/^[0-9a-fA-F]+$/.test(ent.name)) out.set(ent.name, next);
         await walk(next, depth + 1);
         if (yieldIfNeeded) await yieldIfNeeded();
@@ -7022,13 +7093,16 @@ module.exports = function makeWatchedFolders({
     return { base, sub };
   }
 
-  async function discoverNemirtingasEpicAppIds(root) {
+  async function discoverNemirtingasEpicAppIds(root, shouldSkipPath = null) {
     const info = resolveNemirtingasBaseInfo(root);
     if (!info) return null;
     const { base, sub } = info;
     const out = new Map();
 
     const scanUserDir = async (userDir) => {
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(userDir)) {
+        return;
+      }
       let entries;
       try {
         entries = await fsp.readdir(userDir, { withFileTypes: true });
@@ -7038,7 +7112,14 @@ module.exports = function makeWatchedFolders({
       for (const ent of entries) {
         if (!ent.isDirectory()) continue;
         if (!isAppIdName(ent.name)) continue;
-        out.set(ent.name, path.join(userDir, ent.name));
+        const candidatePath = path.join(userDir, ent.name);
+        if (
+          typeof shouldSkipPath === "function" &&
+          shouldSkipPath(candidatePath)
+        ) {
+          continue;
+        }
+        out.set(ent.name, candidatePath);
       }
     };
 
@@ -7063,7 +7144,12 @@ module.exports = function makeWatchedFolders({
     return out;
   }
 
-  async function findGogInfoAppId(root, maxDepth = 3, yieldIfNeeded) {
+  async function findGogInfoAppId(
+    root,
+    maxDepth = 3,
+    yieldIfNeeded,
+    shouldSkipPath = null,
+  ) {
     const pattern = /^goggame-(\d+)\.info$/i;
     const found = [];
     const normalizeGogTaskPath = (value) =>
@@ -7099,6 +7185,7 @@ module.exports = function makeWatchedFolders({
     };
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) return;
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -7183,11 +7270,17 @@ module.exports = function makeWatchedFolders({
     };
   }
 
-  async function findUniverseLanAppId(root, maxDepth = 3, yieldIfNeeded) {
+  async function findUniverseLanAppId(
+    root,
+    maxDepth = 3,
+    yieldIfNeeded,
+    shouldSkipPath = null,
+  ) {
     const iniName = "UniverseLAN.ini";
     const found = [];
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) return;
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -7260,6 +7353,7 @@ module.exports = function makeWatchedFolders({
       forceAsyncIndex ? { forceAsync: true } : undefined,
     );
     const blacklistState = getBlacklistState();
+    const blockedFolders = getBlockedFoldersSet();
     try {
       const roots = getWatchedFolders().map(normalizeRoot);
       for (const r of roots) {
@@ -7267,9 +7361,11 @@ module.exports = function makeWatchedFolders({
           try {
             const entries = await fsp.readdir(r, { withFileTypes: true });
             for (const ent of entries) {
+              const candidatePath = path.join(r, ent.name);
               if (
                 ent.isDirectory() &&
                 /^\d+$/.test(ent.name) &&
+                !isPathBlocked(candidatePath, blockedFolders) &&
                 !isAppIdBlacklisted(ent.name, null, blacklistState)
               ) {
                 knownAppIds.add(ent.name);
@@ -7283,9 +7379,11 @@ module.exports = function makeWatchedFolders({
         try {
           const entries = fs.readdirSync(r, { withFileTypes: true });
           for (const ent of entries) {
+            const candidatePath = path.join(r, ent.name);
             if (
               ent.isDirectory() &&
               /^\d+$/.test(ent.name) &&
+              !isPathBlocked(candidatePath, blockedFolders) &&
               !isAppIdBlacklisted(ent.name, null, blacklistState)
             ) {
               knownAppIds.add(ent.name);
@@ -7301,9 +7399,17 @@ module.exports = function makeWatchedFolders({
   }
 
   // --- Tenoke helpers ---
-  async function findTenokeAppId(root, maxDepth = 6, yieldIfNeeded) {
+  async function findTenokeAppId(
+    root,
+    maxDepth = 6,
+    yieldIfNeeded,
+    shouldSkipPath = null,
+  ) {
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return null;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) {
+        return null;
+      }
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -8357,6 +8463,36 @@ module.exports = function makeWatchedFolders({
     let rootBatchProgress = null;
     try {
       if (!rootPath || !fs.existsSync(rootPath)) return;
+      const blockedFolders = getBlockedFoldersSet();
+      if (isPathBlocked(rootPath, blockedFolders)) return;
+      const scanScopeRoot = opts.scanScopeRoot
+        ? normalizePrefPath(opts.scanScopeRoot)
+        : null;
+      const excludedScanRoots = new Set(
+        (Array.isArray(opts.excludedScanRoots) ? opts.excludedScanRoots : [])
+          .map(normalizePrefPath)
+          .filter(
+            (candidate) =>
+              candidate &&
+              (!scanScopeRoot || !isPathInsideRoot(candidate, scanScopeRoot)),
+          ),
+      );
+      const shouldSkipPath = (candidatePath) => {
+        const candidate = normalizePrefPath(candidatePath);
+        if (!candidate) return true;
+        if (isNormalizedPathBlocked(candidate, blockedFolders)) return true;
+        if (
+          scanScopeRoot &&
+          !isPathInsideRoot(scanScopeRoot, candidate) &&
+          !isPathInsideRoot(candidate, scanScopeRoot)
+        ) {
+          return true;
+        }
+        for (const excludedRoot of excludedScanRoots) {
+          if (isPathInsideRoot(excludedRoot, candidate)) return true;
+        }
+        return false;
+      };
       const base = path.basename(rootPath);
       const scanBase = isAppIdName(base) ? path.dirname(rootPath) : rootPath;
 
@@ -8382,6 +8518,7 @@ module.exports = function makeWatchedFolders({
           scanBase,
           6,
           yieldIfNeeded,
+          shouldSkipPath,
         );
         if (gpdFiles.length) {
           const schemaRoot = path.join(configsDir, "schema");
@@ -8533,6 +8670,7 @@ module.exports = function makeWatchedFolders({
           scanBase,
           6,
           yieldIfNeeded,
+          shouldSkipPath,
         );
         if (trophyDirs.length) {
           const schemaRoot = path.join(configsDir, "schema");
@@ -8891,6 +9029,7 @@ module.exports = function makeWatchedFolders({
           scanBase,
           6,
           yieldIfNeeded,
+          shouldSkipPath,
         );
         if (ps4Dirs.length) {
           const schemaRoot = path.join(configsDir, "schema");
@@ -9095,8 +9234,10 @@ module.exports = function makeWatchedFolders({
 
           const steamScanBase = steamStatsRoot || scanBase;
           const entries = await fsp.readdir(steamScanBase);
-          const schemaBins = entries.filter((f) =>
-            /^UserGameStatsSchema_\d+\.bin$/i.test(f),
+          const schemaBins = entries.filter(
+            (f) =>
+              /^UserGameStatsSchema_\d+\.bin$/i.test(f) &&
+              !shouldSkipPath(path.join(steamScanBase, f)),
           );
           if (schemaBins.length) {
             const steamIds = new Set();
@@ -9130,19 +9271,31 @@ module.exports = function makeWatchedFolders({
                 ? String(schemaInfo.appid)
                 : "";
               if (
+                appidFromBin &&
+                isAppIdBlacklisted(
+                  appidFromBin,
+                  "steam-official",
+                  blacklistState,
+                )
+              ) {
+                pendingSteamOfficial.delete(appidFromBin);
+                watcherLogger.info("steam-official:skip-blacklisted", {
+                  appid: appidFromBin,
+                  source: "root-scan",
+                });
+                steamBatchProgress.updateTask(task, task.index, {
+                  appid: appidFromBin,
+                  itemName: appidFromBin,
+                  phase: "skipped",
+                  detail: "blacklisted",
+                });
+                return;
+              }
+              if (
                 bootMode &&
                 appidFromBin &&
                 shouldSkipSteamOfficialGeneration(appidFromBin)
               ) {
-                if (
-                  isAppIdBlacklisted(
-                    appidFromBin,
-                    "steam-official",
-                    blacklistState,
-                  )
-                ) {
-                  return;
-                }
                 steamIds.add(appidFromBin);
                 knownAppIds.add(appidFromBin);
                 return;
@@ -9155,6 +9308,11 @@ module.exports = function makeWatchedFolders({
                   configsDir,
                   {
                     preferredAccountId: getPreferredSteamOfficialAccountId(),
+                    shouldSkipAppId: (candidateAppId) =>
+                      isAppIdBlacklisted(
+                        candidateAppId,
+                        "steam-official",
+                      ),
                     onGenerationProgress: (progress = {}) => {
                       steamBatchProgress.updateTask(
                         task,
@@ -9172,7 +9330,16 @@ module.exports = function makeWatchedFolders({
                 );
                 throw err;
               }
-              if (!result || result.skipped) return;
+              if (!result) return;
+              if (result.skipped) {
+                steamBatchProgress.updateTask(task, task.index, {
+                  appid: appidFromBin || result.appid || "",
+                  itemName: appidFromBin || result.appid || task.bin,
+                  phase: "skipped",
+                  detail: result.reason || "blacklisted",
+                });
+                return;
+              }
               const resultAppId = String(result.appid);
               if (
                 isAppIdBlacklisted(
@@ -9515,11 +9682,16 @@ module.exports = function makeWatchedFolders({
               scanBase,
               6,
               yieldIfNeeded,
+              shouldSkipPath,
             ).catch(() => null);
             if (gogInfoFound) {
               const gogId = String(gogInfoFound.appid || "").trim();
               if (gogId && !isAppIdBlacklisted(gogId, "gog", blacklistState)) {
-                const shippingDir = await findShippingExeDir(scanBase, 6);
+                const shippingDir = await findShippingExeDir(
+                  scanBase,
+                  6,
+                  shouldSkipPath,
+                );
                 const saveRoot =
                   shippingDir || gogInfoFound.baseDir || scanBase;
                 const normalizedPath = normalizeObservedPath(saveRoot, gogId);
@@ -9538,7 +9710,8 @@ module.exports = function makeWatchedFolders({
 
             // If no GOG .info, fall back to numeric discovery (with Epic container handling)
             const epicDiscoveredMap =
-              !gogInfoFound && (await discoverNemirtingasEpicAppIds(rootPath));
+              !gogInfoFound &&
+              (await discoverNemirtingasEpicAppIds(rootPath, shouldSkipPath));
             const shouldFallbackEpic =
               epicDiscoveredMap instanceof Map && epicDiscoveredMap.size === 0;
             nemirtingasEpicDiscovery =
@@ -9547,7 +9720,12 @@ module.exports = function makeWatchedFolders({
               epicDiscoveredMap !== null && !shouldFallbackEpic
                 ? epicDiscoveredMap
                 : !gogInfoFound
-                  ? await discoverAppIdsUnder(scanBase, 6, yieldIfNeeded)
+                  ? await discoverAppIdsUnder(
+                      scanBase,
+                      6,
+                      yieldIfNeeded,
+                      shouldSkipPath,
+                    )
                   : null;
             discovered = discoveredMap
               ? Array.from(discoveredMap.keys()).map((id) => String(id))
@@ -9558,6 +9736,7 @@ module.exports = function makeWatchedFolders({
         discoveredMap = await discoverImmediateAppIdsUnder(
           scanBase,
           yieldIfNeeded,
+          shouldSkipPath,
         );
         discovered = Array.from(discoveredMap.keys()).map((id) => String(id));
         watcherLogger.info("scan-root:strict-mode", {
@@ -9576,6 +9755,7 @@ module.exports = function makeWatchedFolders({
         try {
           if (shouldIgnoreDiscoveredId(id)) continue;
           const appDir = discoveredMap.get(id) || null;
+          if (appDir && shouldSkipPath(appDir)) continue;
           const normalizedDir = normalizeObservedPath(appDir, id);
           const pendingSet = pendingSavePathIndex.get(id);
           const knownPaths = configSavePathIndex.get(id);
@@ -9644,18 +9824,23 @@ module.exports = function makeWatchedFolders({
       // Tenoke/GOG info/UniverseLAN fallback: if nothing to generate, try to discover deeper
       tenokeFound = null;
       if (!strictRootProfile && generationTasks.length === 0) {
-        tenokeFound = await findTenokeAppId(scanBase, 6, yieldIfNeeded).catch(
-          () => null,
-        );
+        tenokeFound = await findTenokeAppId(
+          scanBase,
+          6,
+          yieldIfNeeded,
+          shouldSkipPath,
+        ).catch(() => null);
         const gogInfoFound = await findGogInfoAppId(
           scanBase,
           6,
           yieldIfNeeded,
+          shouldSkipPath,
         ).catch(() => null);
         const universeFound = await findUniverseLanAppId(
           scanBase,
           6,
           yieldIfNeeded,
+          shouldSkipPath,
         ).catch(() => null);
         if (!tenokeFound && !gogInfoFound && !universeFound) {
           for (const id of discovered) {
@@ -9669,7 +9854,11 @@ module.exports = function makeWatchedFolders({
         if (tenokeFound) {
           const tenokeId = String(tenokeFound.appid || "").trim();
           if (tenokeId && !isAppIdBlacklisted(tenokeId, null, blacklistState)) {
-            const shippingDir = await findShippingExeDir(scanBase, 6);
+            const shippingDir = await findShippingExeDir(
+              scanBase,
+              6,
+              shouldSkipPath,
+            );
             const saveRoot = shippingDir || tenokeFound.baseDir || scanBase;
             tenokeIds.add(tenokeId);
             const normalizedRoot = normalizeObservedPath(saveRoot, tenokeId);
@@ -9691,7 +9880,11 @@ module.exports = function makeWatchedFolders({
         if (gogInfoFound) {
           const gogId = String(gogInfoFound.appid || "").trim();
           if (gogId && !isAppIdBlacklisted(gogId, "gog", blacklistState)) {
-            const shippingDir = await findShippingExeDir(scanBase, 6);
+            const shippingDir = await findShippingExeDir(
+              scanBase,
+              6,
+              shouldSkipPath,
+            );
             const saveRoot = shippingDir || gogInfoFound.baseDir || scanBase;
             generationTasks.push({
               appid: gogId,
@@ -9707,7 +9900,11 @@ module.exports = function makeWatchedFolders({
         } else if (universeFound) {
           const uniId = String(universeFound.appid || "").trim();
           if (uniId && !isAppIdBlacklisted(uniId, "gog", blacklistState)) {
-            const shippingDir = await findShippingExeDir(scanBase, 6);
+            const shippingDir = await findShippingExeDir(
+              scanBase,
+              6,
+              shouldSkipPath,
+            );
             const saveRoot = shippingDir || universeFound.baseDir || scanBase;
             generationTasks.push({
               appid: uniId,
@@ -9719,6 +9916,25 @@ module.exports = function makeWatchedFolders({
             markPendingSavePath(uniId, normalizeObservedPath(saveRoot, uniId));
           }
         }
+      }
+
+      for (let index = generationTasks.length - 1; index >= 0; index -= 1) {
+        const task = generationTasks[index];
+        const taskPath =
+          task?.normalizedPath ||
+          task?.__savePathOverride ||
+          task?.appDir ||
+          null;
+        if (!taskPath || !shouldSkipPath(taskPath)) continue;
+        watcherLogger.info("watcher:scan-skip-blocked-path", {
+          appid: String(task?.appid || ""),
+          platform: task?.forcePlatform || null,
+          path: taskPath,
+        });
+        if (task?.normalizedPath) {
+          clearPendingSavePath(task.appid, task.normalizedPath);
+        }
+        generationTasks.splice(index, 1);
       }
 
       if (typeof generateConfigForAppId === "function") {
@@ -10019,10 +10235,16 @@ module.exports = function makeWatchedFolders({
       markMissingRoot(root);
       return Promise.resolve(false);
     }
+    if (isPathBlocked(root)) {
+      watcherLogger.info("watch-folder:skip-blocked", { root });
+      return Promise.resolve(false);
+    }
 
     const watcher = chokidar.watch(root, {
       persistent: true,
       ignoreInitial: true,
+      ignored: (candidatePath) =>
+        candidatePath !== root && isPathBlocked(candidatePath),
       awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 },
       depth: strictRootProfile ? STRICT_ROOT_WATCH_DEPTH : 6,
       ignorePermissionErrors: true,
@@ -10270,6 +10492,7 @@ module.exports = function makeWatchedFolders({
 
       .on("add", async (filePath) => {
         if (rescanInProgress.value) return;
+        if (isPathBlocked(filePath)) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:add");
           return;
@@ -10523,6 +10746,7 @@ module.exports = function makeWatchedFolders({
 
       .on("change", async (filePath) => {
         if (rescanInProgress.value) return;
+        if (isPathBlocked(filePath)) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:change");
           return;
@@ -10780,6 +11004,7 @@ module.exports = function makeWatchedFolders({
 
       .on("addDir", async (dir) => {
         if (rescanInProgress.value) return;
+        if (isPathBlocked(dir)) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:addDir");
           return;
@@ -11126,96 +11351,125 @@ module.exports = function makeWatchedFolders({
     }
   });
 
-  async function restartWatchersAndRescan() {
+  async function restartWatchersAndRescan(selectedPaths = null) {
     rescanInProgress.value = true;
-    activeRoots.clear();
-
-    const entries = Array.from(folderWatchers.values());
-    folderWatchers.clear();
-    await Promise.allSettled(
-      entries.map((e) => {
-        try {
-          clearTimeout(e.debounce);
-        } catch {}
-        try {
-          return e.watcher.close();
-        } catch {
-          return Promise.resolve();
-        }
-      }),
-    );
-
-    await rebuildKnownAppIds({
-      forceAsyncIndex: true,
-      forceAsyncRootScan: true,
-    });
-
-    const folders = getWatchedFolders();
-    await startFolderWatchersBatched(folders, {
-      initialScan: false,
-      batchDelayMs: BOOT_ATTACH_DELAY_MS,
-      onError: (err, dir) => {
-        notifyWarn(`Failed to start watcher for "${dir}": ${err.message}`);
-      },
-    });
-    if (ROOT_WATCH_SETTLE_DELAY_MS > 0 && folders.length > 0) {
-      await sleep(ROOT_WATCH_SETTLE_DELAY_MS);
-    }
-
-    const before = existingConfigIds.size;
-    for (const f of folders) {
-      try {
-        await scanRootOnce(f, { suppressInitialNotify: true });
-      } catch (e) {
-        notifyWarn(`Rescan failed for "${f}": ${e.message}`);
-      }
-    }
-    if (RESCAN_PHASE_SETTLE_DELAY_MS > 0) {
-      await sleep(RESCAN_PHASE_SETTLE_DELAY_MS);
-    }
     try {
-      await scanLumaPlayRegistryOnce({
-        suppressInitialNotify: true,
-        autoRebuild: false,
-      });
-    } catch (e) {
-      watcherLogger.warn("lumaplay:rescan-failed", {
-        error: e?.message || String(e),
-      });
-    }
-    if (RESCAN_PHASE_SETTLE_DELAY_MS > 0) {
-      await sleep(RESCAN_PHASE_SETTLE_DELAY_MS);
-    }
-    const generatedSomething = existingConfigIds.size > before;
+      activeRoots.clear();
 
-    // rebuild watchers
-    await rebuildSaveWatchers({
-      suppressInitialNotify: true,
-      deferInitialSeed: true,
-      deferLumaPlayPolling: true,
-    });
-    if (RESCAN_PHASE_SETTLE_DELAY_MS > 0) {
-      await sleep(RESCAN_PHASE_SETTLE_DELAY_MS);
-    }
-    broadcastAll("refresh-achievements-table");
+      const entries = Array.from(folderWatchers.values());
+      folderWatchers.clear();
+      await Promise.allSettled(
+        entries.map((e) => {
+          try {
+            clearTimeout(e.debounce);
+          } catch {}
+          try {
+            return e.watcher.close();
+          } catch {
+            return Promise.resolve();
+          }
+        }),
+      );
 
-    rescanInProgress.value = false;
-    if (getActiveLumaPlayWatcherEntries().length > 0) {
-      startLumaPlayDiscoveryPolling();
-    }
-    if (lumaPlayDiscoveryPending) {
+      await rebuildKnownAppIds({
+        forceAsyncIndex: true,
+        forceAsyncRootScan: true,
+      });
+
+      const folders = getWatchedFolders();
+      const availableByPath = new Map(
+        folders.map((folder) => [normalizePrefPath(folder), folder]),
+      );
+      const scanFolders = Array.isArray(selectedPaths)
+        ? Array.from(
+            new Set(
+              selectedPaths
+                .map((folder) => normalizePrefPath(folder))
+                .filter((folder) => availableByPath.has(folder)),
+            ),
+          ).map((folder) => availableByPath.get(folder))
+        : folders;
+      const selectedScanSet = new Set(
+        scanFolders.map((folder) => normalizePrefPath(folder)).filter(Boolean),
+      );
+      const excludedScanRoots = Array.isArray(selectedPaths)
+        ? folders.filter(
+            (folder) => !selectedScanSet.has(normalizePrefPath(folder)),
+          )
+        : [];
+
+      await startFolderWatchersBatched(folders, {
+        initialScan: false,
+        batchDelayMs: BOOT_ATTACH_DELAY_MS,
+        onError: (err, dir) => {
+          notifyWarn(`Failed to start watcher for "${dir}": ${err.message}`);
+        },
+      });
+      if (ROOT_WATCH_SETTLE_DELAY_MS > 0 && folders.length > 0) {
+        await sleep(ROOT_WATCH_SETTLE_DELAY_MS);
+      }
+
+      const before = existingConfigIds.size;
+      for (const f of scanFolders) {
+        try {
+          await scanRootOnce(f, {
+            suppressInitialNotify: true,
+            scanScopeRoot: Array.isArray(selectedPaths) ? f : null,
+            excludedScanRoots,
+          });
+        } catch (e) {
+          notifyWarn(`Rescan failed for "${f}": ${e.message}`);
+        }
+      }
       if (RESCAN_PHASE_SETTLE_DELAY_MS > 0) {
         await sleep(RESCAN_PHASE_SETTLE_DELAY_MS);
       }
       try {
-        await runLumaPlayDiscoveryTick({ autoRebuild: true });
-      } catch {}
+        await scanLumaPlayRegistryOnce({
+          suppressInitialNotify: true,
+          autoRebuild: false,
+        });
+      } catch (e) {
+        watcherLogger.warn("lumaplay:rescan-failed", {
+          error: e?.message || String(e),
+        });
+      }
+      if (RESCAN_PHASE_SETTLE_DELAY_MS > 0) {
+        await sleep(RESCAN_PHASE_SETTLE_DELAY_MS);
+      }
+      const generatedSomething = existingConfigIds.size > before;
+
+      await rebuildSaveWatchers({
+        suppressInitialNotify: true,
+        deferInitialSeed: true,
+        deferLumaPlayPolling: true,
+      });
+      if (RESCAN_PHASE_SETTLE_DELAY_MS > 0) {
+        await sleep(RESCAN_PHASE_SETTLE_DELAY_MS);
+      }
+      broadcastAll("refresh-achievements-table");
+
+      if (getActiveLumaPlayWatcherEntries().length > 0) {
+        startLumaPlayDiscoveryPolling();
+      }
+      if (lumaPlayDiscoveryPending) {
+        if (RESCAN_PHASE_SETTLE_DELAY_MS > 0) {
+          await sleep(RESCAN_PHASE_SETTLE_DELAY_MS);
+        }
+        try {
+          await runLumaPlayDiscoveryTick({ autoRebuild: true });
+        } catch {}
+      }
+      return {
+        ok: true,
+        restarted: folders.length,
+        scanned: scanFolders.length,
+        available: folders.length,
+        generated: generatedSomething,
+      };
+    } finally {
+      rescanInProgress.value = false;
     }
-    return {
-      ok: true,
-      restarted: folders.length,
-      generated: generatedSomething,
-    };
   }
 
   // add
@@ -11229,7 +11483,7 @@ module.exports = function makeWatchedFolders({
         return { ok: false, errorCode: "folderNotFound" };
       }
       const blocked = getBlockedFoldersSet();
-      if (blocked.has(p)) {
+      if (isPathBlocked(p, blocked)) {
         return {
           ok: false,
           errorCode: "folderBlocked",
@@ -11306,10 +11560,14 @@ module.exports = function makeWatchedFolders({
   ipcMain.handle("folders:block", async (_e, dirPath) => {
     try {
       const target = normalizePrefPath(coercePath(dirPath));
+      if (!target) {
+        return { ok: false, errorCode: "folderPathInvalid" };
+      }
       const blocked = getBlockedFoldersSet();
       blocked.add(target);
       saveBlockedFolders([...blocked]);
       stopFolderWatcher(target);
+      await syncFolderWatchersWithCurrentPrefs();
       await rebuildSaveWatchers({ suppressInitialNotify: true });
       return {
         ok: true,
@@ -11362,7 +11620,7 @@ module.exports = function makeWatchedFolders({
   });
 
   // rescan
-  ipcMain.handle("folders:rescan", async () => {
+  ipcMain.handle("folders:rescan", async (_e, payload = null) => {
     try {
       if (!bootOnboardingGateOpen) {
         return {
@@ -11374,7 +11632,10 @@ module.exports = function makeWatchedFolders({
       }
       if (rescanInProgress.value)
         return { ok: false, errorCode: "rescanBusy", busy: true };
-      const result = await restartWatchersAndRescan();
+      const selectedPaths = Array.isArray(payload?.selectedPaths)
+        ? payload.selectedPaths
+        : null;
+      const result = await restartWatchersAndRescan(selectedPaths);
       watcherLogger.info("folders:rescan", result);
       return {
         ...result,
@@ -11766,10 +12027,17 @@ module.exports = function makeWatchedFolders({
     });
   }
 
-  async function findShippingExeDir(root, maxDepth = 6) {
+  async function findShippingExeDir(
+    root,
+    maxDepth = 6,
+    shouldSkipPath = null,
+  ) {
     const matches = (name) => /shipping\.exe$/i.test(name || "");
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return null;
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) {
+        return null;
+      }
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });

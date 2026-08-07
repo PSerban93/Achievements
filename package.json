@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.2.7",
+  "version": "1.2.8-beta.1",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -121,11 +121,11 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2",
     "screenshot-desktop": "^1.15.3",
     "uiohook-napi": "1.5.5",
-    "ws": "8.21.2"
+    "ws": "8.21.3"
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "^43.2.0",
+    "electron": "43.3.0",
     "electron-builder": "^26.8.1",
     "eslint": "^10.8.0",
     "rcedit": "^5.0.2"

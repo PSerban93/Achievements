@@ -236,6 +236,20 @@
         border-right: 2px solid var(--dracula-cyan) !important;
       }
 
+      #achievementsTableBody tr.achievement-row-navigation-target td {
+        background: rgba(139, 233, 253, 0.12) !important;
+        border-top: 2px solid var(--dracula-cyan) !important;
+        border-bottom: 2px solid var(--dracula-cyan) !important;
+      }
+
+      #achievementsTableBody tr.achievement-row-navigation-target td:first-child {
+        border-left: 2px solid var(--dracula-cyan) !important;
+      }
+
+      #achievementsTableBody tr.achievement-row-navigation-target td:last-child {
+        border-right: 2px solid var(--dracula-cyan) !important;
+      }
+
       #achievementManualContextMenu {
         min-width: 215px;
         padding: 6px;
@@ -1742,9 +1756,62 @@
                     style="margin-top: 8px"
                   ></div>
                   <div class="settings-control" style="gap: 8px">
+                    <button type="button" id="settings-addBlacklistedAppIdsBtn">
+                      Add Blacklisted AppIDs
+                    </button>
                     <button type="button" id="settings-resetBlacklistBtn">
                       Reset Blacklist
                     </button>
+                  </div>
+                </div>
+                <hr style="margin: 18px 0 14px" />
+                <div class="settings-section">
+                  <h4 data-i18n="settings.notificationClickNavigation.title">
+                    Notification Click Action
+                  </h4>
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
+                      id="settings-notificationClickRedirectCheckbox"
+                    />
+                    <label
+                      for="settings-notificationClickRedirectCheckbox"
+                      data-i18n="label.settings-notificationClickRedirectCheckbox"
+                    >
+                      Open the achievement when clicking a notification
+                    </label>
+                  </div>
+                  <div class="settings-control">
+                    <label
+                      for="settings-notificationClickRedirectTargetSelect"
+                      data-i18n="label.settings-notificationClickRedirectTargetSelect"
+                    >
+                      Open notification in
+                    </label>
+                    <select
+                      id="settings-notificationClickRedirectTargetSelect"
+                      disabled
+                    >
+                      <option
+                        value="overlay"
+                        data-i18n="option.notificationClickRedirectTargetOverlay"
+                      >
+                        In-game Overlay
+                      </option>
+                      <option
+                        value="application"
+                        data-i18n="option.notificationClickRedirectTargetApplication"
+                      >
+                        Main application
+                      </option>
+                    </select>
+                  </div>
+                  <div
+                    class="hint"
+                    data-i18n="settings.notificationClickNavigation.hint"
+                  >
+                    The Overlay stays non-focusable and click-through. Opening
+                    the main application moves focus away from the game.
                   </div>
                 </div>
                 <hr style="margin: 18px 0 14px" />
@@ -4783,6 +4850,15 @@
         <h3 id="appConfirmTitle">Confirm</h3>
         <p id="appConfirmMessage"></p>
         <p id="appConfirmDetail" class="confirm-detail hidden"></p>
+        <label id="appConfirmInputRow" class="confirm-input-row hidden">
+          <span id="appConfirmInputLabel"></span>
+          <textarea
+            id="appConfirmInput"
+            rows="5"
+            spellcheck="false"
+            autocomplete="off"
+          ></textarea>
+        </label>
         <div id="appConfirmNotes" class="confirm-notes hidden">
           <div
             id="appConfirmNotesTitle"
@@ -4817,6 +4893,14 @@
           Was found folders with achievement data. Select which folders should
           be scanned automatically.
         </p>
+        <div id="foldersRescanSelectionActions" class="folder-selection-actions hidden">
+          <button id="foldersRescanSelectAllBtn" type="button">
+            Select All
+          </button>
+          <button id="foldersRescanDeselectAllBtn" type="button">
+            Deselect All
+          </button>
+        </div>
         <div
           id="bootOnboardingList"
           class="boot-onboarding-list"
@@ -5213,10 +5297,13 @@
           if (!Object.keys(pending).length) return current;
           const result = await originalSavePreferences(pending);
           try {
-            const merged = {
-              ...current,
-              ...pending,
-            };
+            const merged =
+              result && typeof result === "object"
+                ? { ...result }
+                : {
+                    ...current,
+                    ...pending,
+                  };
             delete merged.steamApiKeyMasked;
             window.__preferencesCache = merged;
             if (Object.prototype.hasOwnProperty.call(pending, "appTheme")) {
@@ -5278,7 +5365,7 @@
       patchApiWithCacheRefresh(window.api, "resetBlacklist");
       patchApiWithCacheRefresh(window.api, "getBlacklist");
       if (window.folders) {
-        ["add", "remove", "block", "unblock"].forEach((method) =>
+        ["add", "remove", "block", "unblock", "rescan"].forEach((method) =>
           patchApiWithCacheRefresh(window.folders, method),
         );
       }
@@ -7412,7 +7499,11 @@
             achievementTableViewState.status === "all" ||
             (achievementTableViewState.status === "locked" && !isUnlocked) ||
             (achievementTableViewState.status === "unlocked" && isUnlocked);
-          row.style.display = searchMatches && statusMatches ? "" : "none";
+          const isNavigationTarget = row.classList.contains(
+            "achievement-row-navigation-target",
+          );
+          row.style.display =
+            isNavigationTarget || (searchMatches && statusMatches) ? "" : "none";
         });
       }
 
@@ -7791,11 +7882,25 @@
         tableBody.addEventListener("click", (event) => {
           const row = event.target.closest("tr[data-achievement-name]");
           if (!row) return;
+          const wasNavigationTarget = row.classList.contains(
+            "achievement-row-navigation-target",
+          );
+          clearAppNavigationAchievementTarget();
+          if (
+            wasNavigationTarget &&
+            !event.shiftKey &&
+            !event.ctrlKey &&
+            !event.metaKey
+          ) {
+            clearAchievementSelection();
+            return;
+          }
           handleAchievementRowSelection(row, event);
         });
         tableBody.addEventListener("contextmenu", (event) => {
           const row = event.target.closest("tr[data-achievement-name]");
           if (!row) return;
+          clearAppNavigationAchievementTarget();
           if (!achievementSelection.has(row.dataset.achievementName)) {
             clearAchievementSelection();
             setAchievementRowSelected(row, true);
@@ -10229,6 +10334,9 @@
       const resetBlacklistBtn = document.getElementById(
         "settings-resetBlacklistBtn",
       );
+      const addManualBlacklistBtn = document.getElementById(
+        "settings-addBlacklistedAppIdsBtn",
+      );
 
       const configMetaIndex = new Map();
       const blacklistState = {
@@ -10618,6 +10726,11 @@
       const confirmTitleEl = document.getElementById("appConfirmTitle");
       const confirmMessageEl = document.getElementById("appConfirmMessage");
       const confirmDetailEl = document.getElementById("appConfirmDetail");
+      const confirmInputRow = document.getElementById("appConfirmInputRow");
+      const confirmInputLabel = document.getElementById(
+        "appConfirmInputLabel",
+      );
+      const confirmInput = document.getElementById("appConfirmInput");
       const confirmNotesEl = document.getElementById("appConfirmNotes");
       const confirmNotesTitleEl = document.getElementById(
         "appConfirmNotesTitle",
@@ -10643,6 +10756,8 @@
       let confirmLastFocus = null;
       let confirmCheckboxValue = false;
       let confirmCheckboxValue2 = false;
+      let confirmInputValue = "";
+      let confirmInputRequired = false;
       const tUi = (key, fallback) =>
         window.i18nUi && typeof window.i18nUi.getString === "function"
           ? window.i18nUi.getString(key, fallback)
@@ -10656,6 +10771,19 @@
         confirmModal.setAttribute("aria-hidden", "true");
         confirmModal.inert = false;
         document.body.classList.remove("modal-open");
+        if (confirmInputRow && confirmInput) {
+          confirmInputValue = !confirmInputRow.classList.contains("hidden")
+            ? confirmInput.value.trim()
+            : "";
+          confirmInputRow.classList.add("hidden");
+          confirmInput.value = "";
+          confirmInput.removeAttribute("placeholder");
+          if (confirmInputLabel) confirmInputLabel.textContent = "";
+        } else {
+          confirmInputValue = "";
+        }
+        confirmInputRequired = false;
+        if (confirmOkBtn) confirmOkBtn.disabled = false;
         if (confirmCheckboxRow && confirmCheckbox) {
           confirmCheckboxValue = !confirmCheckboxRow.classList.contains(
             "hidden",
@@ -10752,6 +10880,25 @@
           confirmNotesTitleEl.classList.add("hidden");
           confirmNotesEl.classList.add("hidden");
         }
+        if (confirmInputRow && confirmInput && confirmInputLabel) {
+          if (opts.inputLabel) {
+            confirmInputLabel.textContent = opts.inputLabel;
+            confirmInput.value = String(opts.inputValue || "");
+            confirmInputRequired = opts.inputRequired === true;
+            if (opts.inputPlaceholder) {
+              confirmInput.setAttribute("placeholder", opts.inputPlaceholder);
+            } else {
+              confirmInput.removeAttribute("placeholder");
+            }
+            confirmInputRow.classList.remove("hidden");
+          } else {
+            confirmInputRow.classList.add("hidden");
+            confirmInput.value = "";
+            confirmInput.removeAttribute("placeholder");
+            confirmInputLabel.textContent = "";
+            confirmInputRequired = false;
+          }
+        }
         confirmOkBtn.textContent = opts.okText || tUi("appConfirmOkBtn", "OK");
         confirmCancelBtn.textContent =
           opts.cancelText || tUi("appConfirmCancelBtn", "Cancel");
@@ -10781,7 +10928,9 @@
         confirmModal.classList.remove("hidden");
         confirmModal.setAttribute("aria-hidden", "false");
         document.body.classList.add("modal-open");
-        confirmOkBtn.focus();
+        confirmOkBtn.disabled =
+          confirmInputRequired && !String(confirmInput?.value || "").trim();
+        (opts.inputLabel && confirmInput ? confirmInput : confirmOkBtn).focus();
 
         return new Promise((resolve) => {
           confirmResolve = resolve;
@@ -10796,6 +10945,12 @@
           closeAppConfirm(false),
         );
       }
+      if (confirmInput) {
+        confirmInput.addEventListener("input", () => {
+          if (!confirmOkBtn || !confirmInputRequired) return;
+          confirmOkBtn.disabled = !confirmInput.value.trim();
+        });
+      }
       if (confirmModal) {
         confirmModal.addEventListener("click", (event) => {
           if (event.target === confirmModal) {
@@ -10807,13 +10962,45 @@
         if (!confirmResolve) return;
         if (event.key === "Escape") {
           event.preventDefault();
+          event.stopImmediatePropagation();
           closeAppConfirm(false);
+          return;
         }
         if (event.key === "Enter") {
+          if (
+            confirmInputRow &&
+            !confirmInputRow.classList.contains("hidden") &&
+            event.target === confirmInput &&
+            !event.ctrlKey &&
+            !event.metaKey
+          ) {
+            event.stopImmediatePropagation();
+            return;
+          }
+          if (confirmOkBtn?.disabled) return;
           event.preventDefault();
+          event.stopImmediatePropagation();
           closeAppConfirm(true);
         }
       });
+
+      async function showAppTextPrompt(opts = {}) {
+        if (!confirmInputRow || !confirmInput || !confirmInputLabel) {
+          const fallbackValue = window.prompt(
+            opts.message || "",
+            opts.inputValue || "",
+          );
+          return {
+            confirmed: fallbackValue !== null,
+            value: String(fallbackValue || "").trim(),
+          };
+        }
+        const confirmed = await showAppConfirm({
+          ...opts,
+          inputLabel: opts.inputLabel || "AppIDs",
+        });
+        return { confirmed, value: confirmInputValue };
+      }
 
       function logUiEvent(level, message, meta) {
         try {
@@ -11565,6 +11752,7 @@
         }
 
         configList.addEventListener("change", async () => {
+          clearAppNavigationAchievementTarget();
           const selectedConfig = configList.value;
           const requestSeq = ++configChangeRequestSeq;
           const isStaleSelection = () =>
@@ -11696,6 +11884,11 @@
           const achStatsEl = document.getElementById("achStats");
           if (achStatsEl) achStatsEl.style.display = "block";
           updateMuteProgressUI().catch(() => {});
+          window.dispatchEvent(
+            new CustomEvent("app-navigation:table-ready", {
+              detail: { configName: selectedConfig },
+            }),
+          );
         });
       });
 
@@ -12154,6 +12347,119 @@
               ),
             );
             e.target.checked = !next;
+          }
+        });
+      }
+
+      if (addManualBlacklistBtn) {
+        addManualBlacklistBtn.addEventListener("click", async () => {
+          try {
+            const promptResult = await showAppTextPrompt({
+              title: tUi(
+                "blacklist.manual.title",
+                "Add blacklisted AppIDs",
+              ),
+              message: tUi(
+                "blacklist.manual.message",
+                "Enter one or more AppIDs to ignore globally. Separate multiple values with commas, spaces, or new lines.",
+              ),
+              inputLabel: tUi(
+                "blacklist.manual.inputLabel",
+                "AppIDs or incorrectly detected UserIDs",
+              ),
+              inputPlaceholder: tUi(
+                "blacklist.manual.placeholder",
+                "Example: 123456 or 76561198000000000",
+              ),
+              inputRequired: true,
+              okText: tUi("blacklist.manual.add", "Add to blacklist"),
+              cancelText: tUi("appConfirmCancelBtn", "Cancel"),
+            });
+            if (!promptResult?.confirmed) return;
+
+            const appids = String(promptResult.value || "")
+              .split(/[\s,;]+/)
+              .map((value) => value.trim())
+              .filter(Boolean);
+            if (!appids.length) {
+              showNotification(
+                tUi(
+                  "blacklist.manual.empty",
+                  "Enter at least one AppID.",
+                ),
+                "#ff9800",
+              );
+              return;
+            }
+
+            addManualBlacklistBtn.disabled = true;
+            logUiEvent("info", "ui:blacklist-add-manual:ipc-start", {
+              count: appids.length,
+            });
+            const response = window.api?.addManualBlacklistedAppIds
+              ? await window.api.addManualBlacklistedAppIds(appids)
+              : await window.api?.invoke?.("blacklist:add-manual", { appids });
+            if (!response?.success) {
+              throw new Error(
+                response?.error ||
+                  tUi(
+                    "alert.blacklistManualAddFailed",
+                    "Failed to add AppIDs to the blacklist.",
+                  ),
+              );
+            }
+
+            const added = Array.isArray(response.added)
+              ? response.added.length
+              : 0;
+            const duplicates = Array.isArray(response.duplicates)
+              ? response.duplicates.length
+              : 0;
+            const invalid = Array.isArray(response.invalid)
+              ? response.invalid.length
+              : 0;
+            if (response.blacklistPayload) {
+              applyBlacklistPayload(response.blacklistPayload);
+            } else {
+              await syncBlacklistList();
+            }
+            renderBlacklistList();
+
+            if (added > 0) {
+              await reloadConfigsDropdown(true);
+              if (typeof buildDashboard === "function") {
+                await buildDashboard();
+              }
+            }
+
+            showNotification(
+              tUiFmt(
+                "blacklist.manual.result",
+                {
+                  added: String(added),
+                  duplicates: String(duplicates),
+                  invalid: String(invalid),
+                },
+                `Added: ${added}. Already blacklisted: ${duplicates}. Invalid: ${invalid}.`,
+              ),
+              invalid > 0 ? "#ff9800" : "#4CAF50",
+            );
+            logUiEvent("info", "ui:blacklist-add-manual:complete", {
+              added,
+              duplicates,
+              invalid,
+            });
+          } catch (err) {
+            logUiError("ui:blacklist-add-manual-failed", err);
+            alert(
+              err?.message ||
+                tUi(
+                  "alert.blacklistManualAddFailed",
+                  "Failed to add AppIDs to the blacklist.",
+                ),
+            );
+          } finally {
+            addManualBlacklistBtn.disabled = false;
           }
         });
       }
@@ -13103,6 +13409,32 @@
         }
       }
 
+      function applyNotificationClickRedirectPreferences(prefs = {}) {
+        const checkbox = document.getElementById(
+          "settings-notificationClickRedirectCheckbox",
+        );
+        const targetSelect = document.getElementById(
+          "settings-notificationClickRedirectTargetSelect",
+        );
+        const enabled = prefs?.notificationClickRedirectEnabled === true;
+        const target =
+          String(prefs?.notificationClickRedirectTarget || "overlay")
+            .trim()
+            .toLowerCase() === "application"
+            ? "application"
+            : "overlay";
+
+        if (checkbox) {
+          checkbox.checked = enabled;
+          checkbox.dataset.preferencesHydrated = "1";
+        }
+        if (targetSelect) {
+          targetSelect.value = target;
+          targetSelect.disabled = !enabled;
+          targetSelect.dataset.preferencesHydrated = "1";
+        }
+      }
+
       async function loadPreferences() {
         const prefs = await loadPreferencesFromDisk();
         await loadAppThemeRegistry();
@@ -13264,6 +13596,7 @@
           );
           if (cb) cb.checked = prefs?.hideZeroCompletionGames === true;
         }
+        applyNotificationClickRedirectPreferences(prefs);
         {
           const cb = document.getElementById(
             "settings-overlayControllerSupportCheckbox",
@@ -13416,6 +13749,7 @@
             }
             applyRareNotificationPreferences(prefs);
             applyNotificationTogglePreferences(prefs);
+            applyNotificationClickRedirectPreferences(prefs);
             const hiddenPlatPos = document.getElementById(
               "platinumPositionValue",
             );
@@ -14021,6 +14355,39 @@
           });
         }
 
+        const notificationClickRedirectEl = document.getElementById(
+          "settings-notificationClickRedirectCheckbox",
+        );
+        const notificationClickRedirectTargetEl = document.getElementById(
+          "settings-notificationClickRedirectTargetSelect",
+        );
+        applyNotificationClickRedirectPreferences(prefs);
+        if (notificationClickRedirectEl) {
+          notificationClickRedirectEl.addEventListener("change", async (e) => {
+            const enabled = e.target.checked === true;
+            if (notificationClickRedirectTargetEl) {
+              notificationClickRedirectTargetEl.disabled = !enabled;
+            }
+            await window.api.savePreferences({
+              notificationClickRedirectEnabled: enabled,
+            });
+            await loadPreferencesCached().catch(() => {});
+          });
+        }
+        if (notificationClickRedirectTargetEl) {
+          notificationClickRedirectTargetEl.addEventListener(
+            "change",
+            async (e) => {
+              const target =
+                e.target.value === "application" ? "application" : "overlay";
+              await window.api.savePreferences({
+                notificationClickRedirectTarget: target,
+              });
+              await loadPreferencesCached().catch(() => {});
+            },
+          );
+        }
+
         const startWindowsEl = document.getElementById(
           "settings-startWindowsCheckbox",
         );
@@ -14328,6 +14695,253 @@
         configList.dispatchEvent(new Event("change", { bubbles: true }));
       });
 
+      const APP_NAVIGATION_ACHIEVEMENT_TARGET_TIMEOUT_MS = 10000;
+      let appNavigationUiSequence = 0;
+      let appNavigationAchievementTargetTimer = null;
+
+      function clearAppNavigationAchievementTarget() {
+        if (appNavigationAchievementTargetTimer) {
+          clearTimeout(appNavigationAchievementTargetTimer);
+          appNavigationAchievementTargetTimer = null;
+        }
+        let removed = false;
+        document
+          .querySelectorAll(
+            "#achievementsTableBody tr.achievement-row-navigation-target",
+          )
+          .forEach((row) => {
+            removed = true;
+            row.classList.remove("achievement-row-navigation-target");
+            row.removeAttribute("aria-current");
+          });
+        if (removed) applyAchievementsSearchFilter();
+      }
+
+      function scrollAppNavigationAchievementIntoView(row) {
+        const scrollContainer = document.getElementById("mainScroll");
+        if (!row || !scrollContainer || !scrollContainer.contains(row)) {
+          return false;
+        }
+
+        const containerRect = scrollContainer.getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const centeredTop =
+          scrollContainer.scrollTop +
+          (rowRect.top - containerRect.top) -
+          (scrollContainer.clientHeight - rowRect.height) / 2;
+        const maxScrollTop = Math.max(
+          0,
+          scrollContainer.scrollHeight - scrollContainer.clientHeight,
+        );
+        const targetTop = Math.min(
+          maxScrollTop,
+          Math.max(0, Math.round(centeredTop)),
+        );
+
+        scrollContainer.scrollTo({
+          top: targetTop,
+          behavior: "smooth",
+        });
+        return true;
+      }
+
+      function focusAppNavigationAchievement(achievementId) {
+        const targetId = String(achievementId || "").trim();
+        if (!targetId) return false;
+        clearAppNavigationAchievementTarget();
+        const row = getAchievementRows().find(
+          (candidate) =>
+            String(candidate?.dataset?.achievementName || "") === targetId,
+        );
+        if (!row) return false;
+        row.classList.add("achievement-row-navigation-target");
+        row.setAttribute("aria-current", "true");
+        appNavigationAchievementTargetTimer = setTimeout(() => {
+          clearAppNavigationAchievementTarget();
+        }, APP_NAVIGATION_ACHIEVEMENT_TARGET_TIMEOUT_MS);
+        applyAchievementsSearchFilter();
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              scrollAppNavigationAchievementIntoView(row);
+            } catch {}
+          });
+        });
+        return true;
+      }
+
+      document.addEventListener(
+        "pointerdown",
+        (event) => {
+          const target = document.querySelector(
+            "#achievementsTableBody tr.achievement-row-navigation-target",
+          );
+          if (!target || target.contains(event.target)) return;
+          clearAppNavigationAchievementTarget();
+        },
+        true,
+      );
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") clearAppNavigationAchievementTarget();
+      });
+
+      function waitForAppNavigationTable(configName, timeoutMs = 15000) {
+        return new Promise((resolve) => {
+          let settled = false;
+          const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            window.removeEventListener(
+              "app-navigation:table-ready",
+              onTableReady,
+            );
+            resolve(value);
+          };
+          const onTableReady = (event) => {
+            if (String(event?.detail?.configName || "") !== configName) return;
+            finish(true);
+          };
+          const timer = setTimeout(() => finish(false), timeoutMs);
+          window.addEventListener("app-navigation:table-ready", onTableReady);
+        });
+      }
+
+      async function ensureAppNavigationConfigOption(payload, configList) {
+        const configName = String(payload?.configName || "").trim();
+        const findOption = () =>
+          Array.from(configList?.options || []).find(
+            (option) => option.value === configName,
+          ) || null;
+        let option = findOption();
+        if (option) return option;
+        await reloadConfigsDropdown(true).catch(() => {});
+        option = findOption();
+        if (option) return option;
+
+        const config = await window.api.getConfigByName(configName);
+        if (!config || config.__failed || config.__notFound) return null;
+        const meta = {
+          ...config,
+          name: configName,
+          displayName: config.displayName || config.name || configName,
+          appid: config.appid || config.appId || payload?.appid || null,
+          platform: config.platform || payload?.platform || null,
+        };
+        configMetaIndex.set(configName, meta);
+        option = document.createElement("option");
+        option.value = configName;
+        option.textContent = meta.displayName;
+        if (payload?.blacklisted === true) option.textContent += " (Ignored)";
+        configList.appendChild(option);
+        return option;
+      }
+
+      async function openAppNavigationRoute(payload = {}) {
+        const sequence = ++appNavigationUiSequence;
+        const requestId = String(payload?.requestId || "");
+        const configName = String(payload?.configName || "").trim();
+        const achievementId = String(payload?.achievementId || "").trim();
+        const sendResult = (success, reason = "") => {
+          window.api?.appNavigationResult?.({
+            requestId,
+            success,
+            reason,
+            configName,
+            achievementId,
+          });
+        };
+
+        if (!configName) {
+          sendResult(false, "config-name-missing");
+          return;
+        }
+
+        try {
+          if (typeof isSettingsOpen === "function" && isSettingsOpen()) {
+            closeSettingsModal();
+          }
+          if (window.__dashboardOpen && typeof window.closeDashboard === "function") {
+            window.closeDashboard();
+          }
+
+          const configList = document.getElementById("configList");
+          if (!configList) {
+            sendResult(false, "config-list-missing");
+            return;
+          }
+          const option = await ensureAppNavigationConfigOption(
+            payload,
+            configList,
+          );
+          if (sequence !== appNavigationUiSequence) return;
+          if (!option) {
+            showNotification(
+              tUi("alert.configNotFound", "Config not found!"),
+              "#f44336",
+            );
+            sendResult(false, "config-not-found");
+            return;
+          }
+
+          const alreadySelected = configList.value === configName;
+          if (!achievementId) {
+            if (!alreadySelected) {
+              clearAppNavigationAchievementTarget();
+              configList.value = configName;
+              configList.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            sendResult(true);
+            return;
+          }
+
+          if (alreadySelected && focusAppNavigationAchievement(achievementId)) {
+            sendResult(true);
+            return;
+          }
+
+          let tableReady = true;
+          if (alreadySelected) {
+            const lang =
+              document.getElementById("languageSelect")?.value || "english";
+            await buildMainAchievementsTable(configName, lang, {
+              skipPlatinumCheck: true,
+            });
+          } else {
+            const tableReadyPromise = waitForAppNavigationTable(configName);
+            clearAppNavigationAchievementTarget();
+            configList.value = configName;
+            configList.dispatchEvent(new Event("change", { bubbles: true }));
+            tableReady = await tableReadyPromise;
+          }
+          if (sequence !== appNavigationUiSequence) return;
+
+          const focused = focusAppNavigationAchievement(achievementId);
+          if (!focused) {
+            sendResult(
+              false,
+              tableReady ? "achievement-not-found" : "table-ready-timeout",
+            );
+            return;
+          }
+          sendResult(true);
+        } catch (error) {
+          console.error("App navigation failed:", error);
+          sendResult(false, "renderer-error");
+        }
+      }
+
+      window.api?.onAppNavigationOpen?.((payload) => {
+        void openAppNavigationRoute(payload);
+      });
+      window.api?.onAppNavigationError?.(() => {
+        showNotification(
+          tUi("alert.configNotFound", "Config not found!"),
+          "#f44336",
+        );
+      });
+
       async function reloadConfigsDropdown(forceRefreshBlacklist = false) {
         if (forceRefreshBlacklist) {
           await syncBlacklistList();
@@ -14487,24 +15101,41 @@
       });
 
       // Settings Menu Functionality
+      function setElementModalInert(el, on) {
+        if (!(el instanceof HTMLElement)) return;
+
+        if (on) {
+          const activeElement = document.activeElement;
+          if (
+            activeElement instanceof HTMLElement &&
+            el.contains(activeElement)
+          ) {
+            activeElement.blur();
+          }
+          el.inert = true;
+          el.setAttribute("aria-hidden", "true");
+          return;
+        }
+
+        el.removeAttribute("aria-hidden");
+        el.inert = false;
+      }
+
       function setInertExcept(keepIds = []) {
         const keep = new Set(["titlebar", ...keepIds]);
         Array.from(document.body.children).forEach((el) => {
           if (!(el instanceof HTMLElement)) return;
           if (keep.has(el.id)) {
-            el.removeAttribute("aria-hidden");
-            el.inert = false;
+            setElementModalInert(el, false);
           } else {
-            el.setAttribute("aria-hidden", "true");
-            el.inert = true;
+            setElementModalInert(el, true);
           }
         });
       }
       function clearInertAll() {
         Array.from(document.body.children).forEach((el) => {
           if (!(el instanceof HTMLElement)) return;
-          el.removeAttribute("aria-hidden");
-          el.inert = false;
+          setElementModalInert(el, false);
         });
       }
 
@@ -14712,6 +15343,19 @@
         const menu = document.getElementById("settingsMenu");
         const open = menu && !menu.classList.contains("hidden");
         if (!open) return;
+        const onboardingModal = document.getElementById(
+          "bootOnboardingModal",
+        );
+        if (
+          onboardingModal &&
+          !onboardingModal.classList.contains("hidden")
+        ) {
+          return;
+        }
+        const confirmModal = document.getElementById("appConfirmModal");
+        if (confirmModal && !confirmModal.classList.contains("hidden")) {
+          return;
+        }
 
         e.stopImmediatePropagation();
         e.preventDefault();
@@ -14749,7 +15393,17 @@
         const stopOutside = (e) => {
           if (!settingsMenu || settingsMenu.classList.contains("hidden"))
             return;
-          if (!content.contains(e.target)) {
+          const isInsideOnboardingModal = e.target?.closest?.(
+            "#bootOnboardingModal:not(.hidden)",
+          );
+          const isInsideConfirmModal = e.target?.closest?.(
+            "#appConfirmModal:not(.hidden)",
+          );
+          if (
+            !content.contains(e.target) &&
+            !isInsideOnboardingModal &&
+            !isInsideConfirmModal
+          ) {
             e.preventDefault();
             e.stopPropagation();
           }
@@ -15490,6 +16144,7 @@
         if (options.skipSanPresetLoad !== true) {
           void populateSanPresetControls(prefs);
         }
+        applyNotificationClickRedirectPreferences(prefs);
 
         // Sync position dropdown
         const mainPositionDropdown =
@@ -15756,6 +16411,19 @@
           hideZeroCompletionGames: checkbox(
             "settings-hideZeroCompletionGamesCheckbox",
           ),
+          notificationClickRedirectEnabled:
+            byId("settings-notificationClickRedirectCheckbox")?.dataset
+              ?.preferencesHydrated === "1"
+              ? checkbox("settings-notificationClickRedirectCheckbox")
+              : base.notificationClickRedirectEnabled === true,
+          notificationClickRedirectTarget:
+            byId("settings-notificationClickRedirectTargetSelect")?.dataset
+              ?.preferencesHydrated === "1"
+              ? pick(
+                  getVal("settings-notificationClickRedirectTargetSelect"),
+                  base.notificationClickRedirectTarget || "overlay",
+                )
+              : base.notificationClickRedirectTarget || "overlay",
           overlayControllerSupportEnabled: checkbox(
             "settings-overlayControllerSupportCheckbox",
           ),
@@ -16931,6 +17599,21 @@
         if (!listEl || !addBtn || !rescanBtn) return;
 
         async function invoke(channel, ...args) {
+          const folderMethodByChannel = {
+            "folders:list": "list",
+            "folders:add": "add",
+            "folders:remove": "remove",
+            "folders:block": "block",
+            "folders:unblock": "unblock",
+            "folders:rescan": "rescan",
+          };
+          const folderMethod = folderMethodByChannel[channel];
+          if (
+            folderMethod &&
+            typeof window.folders?.[folderMethod] === "function"
+          ) {
+            return window.folders[folderMethod](...args);
+          }
           if (window.api?.invoke) return window.api.invoke(channel, ...args);
           if (window.electron?.ipcRenderer?.invoke)
             return window.electron.ipcRenderer.invoke(channel, ...args);
@@ -17121,6 +17804,10 @@
 
         rescanBtn.addEventListener("click", async () => {
           try {
+            if (typeof window.openFoldersRescanModal === "function") {
+              await window.openFoldersRescanModal();
+              return;
+            }
             const res = await invoke("folders:rescan");
             if (res?.ok) {
               renderFoldersList(res.folders || []);
@@ -17176,18 +17863,11 @@
           if (!(el instanceof HTMLElement)) return;
 
           if (keep.has(el.id)) {
-            el.removeAttribute("aria-hidden");
-            el.inert = false;
+            setElementModalInert(el, false);
             return;
           }
 
-          if (on) {
-            el.setAttribute("aria-hidden", "true");
-            el.inert = true;
-          } else {
-            el.removeAttribute("aria-hidden");
-            el.inert = false;
-          }
+          setElementModalInert(el, on);
         });
       }
       function focusDashboardSearch(selectAll = true) {
@@ -21696,6 +22376,15 @@
         );
         const bootOnboardingList =
           document.getElementById("bootOnboardingList");
+        const foldersRescanSelectionActions = document.getElementById(
+          "foldersRescanSelectionActions",
+        );
+        const foldersRescanSelectAllBtn = document.getElementById(
+          "foldersRescanSelectAllBtn",
+        );
+        const foldersRescanDeselectAllBtn = document.getElementById(
+          "foldersRescanDeselectAllBtn",
+        );
         const bootOnboardingHint =
           document.getElementById("bootOnboardingHint");
         const bootOnboardingActions = document.getElementById(
@@ -21720,6 +22409,7 @@
         let bootOnboardingBusy = false;
         let bootOnboardingCandidates = [];
         let bootOnboardingLastFocus = null;
+        let folderSelectionModalMode = "boot";
         const BOOT_ONBOARDING_SEARCH_STAGE_MIN_MS = 900;
         const BOOT_ONBOARDING_POST_RESULT_DELAY_MS = 280;
         const BOOT_ONBOARDING_EMPTY_STAGE_DELAY_MS = 750;
@@ -21732,6 +22422,7 @@
           if (!bootOnboardingModal) return;
           if (visible) {
             bootOnboardingLastFocus = document.activeElement;
+            bootOnboardingModal.inert = false;
             bootOnboardingModal.classList.remove("hidden");
             bootOnboardingModal.setAttribute("aria-hidden", "false");
             document.body.classList.add("modal-open");
@@ -21739,6 +22430,7 @@
           }
           bootOnboardingModal.classList.add("hidden");
           bootOnboardingModal.setAttribute("aria-hidden", "true");
+          bootOnboardingModal.inert = true;
           document.body.classList.remove("modal-open");
           if (
             bootOnboardingLastFocus &&
@@ -21755,6 +22447,14 @@
           bootOnboardingBusy = busy === true;
           if (bootOnboardingStartBtn) bootOnboardingStartBtn.disabled = busy;
           if (bootOnboardingSkipBtn) bootOnboardingSkipBtn.disabled = busy;
+          if (foldersRescanSelectAllBtn) {
+            foldersRescanSelectAllBtn.disabled =
+              busy || bootOnboardingCandidates.length === 0;
+          }
+          if (foldersRescanDeselectAllBtn) {
+            foldersRescanDeselectAllBtn.disabled =
+              busy || bootOnboardingCandidates.length === 0;
+          }
         };
 
         const renderBootOnboardingSearchingState = () => {
@@ -21762,10 +22462,8 @@
           bootOnboardingList.innerHTML = "";
           const searching = document.createElement("div");
           searching.className = "boot-onboarding-hint";
-          searching.textContent = tUi(
-            "boot.onboarding.searching",
-            "Searching folders…",
-          );
+          searching.textContent =
+            tUi("boot.onboarding.searching", "Searching folders…");
           bootOnboardingList.appendChild(searching);
         };
 
@@ -21794,10 +22492,13 @@
           if (!list.length) {
             const empty = document.createElement("div");
             empty.className = "boot-onboarding-hint";
-            empty.textContent = tUi(
-              "boot.onboarding.empty",
-              "No folders with known achievement files were discovered.",
-            );
+            empty.textContent =
+              folderSelectionModalMode === "rescan"
+                ? tUi("folders.empty", "No watched folders yet.")
+                : tUi(
+                    "boot.onboarding.empty",
+                    "No folders with known achievement files were discovered.",
+                  );
             bootOnboardingList.appendChild(empty);
             return;
           }
@@ -21861,6 +22562,237 @@
           return checked
             .map((input) => String(input?.value || "").trim())
             .filter(Boolean);
+        };
+
+        const updateFoldersRescanSelectionState = () => {
+          if (folderSelectionModalMode !== "rescan") return;
+          const hasCandidates = bootOnboardingCandidates.length > 0;
+          const selectedCount = getBootOnboardingSelectedPaths().length;
+          if (bootOnboardingStartBtn) {
+            bootOnboardingStartBtn.disabled =
+              bootOnboardingBusy || selectedCount === 0;
+          }
+          if (foldersRescanSelectAllBtn) {
+            foldersRescanSelectAllBtn.disabled =
+              bootOnboardingBusy || !hasCandidates;
+          }
+          if (foldersRescanDeselectAllBtn) {
+            foldersRescanDeselectAllBtn.disabled =
+              bootOnboardingBusy || !hasCandidates;
+          }
+        };
+
+        const setFoldersRescanSelection = (checked) => {
+          if (!bootOnboardingList || folderSelectionModalMode !== "rescan") {
+            return;
+          }
+          bootOnboardingList
+            .querySelectorAll('input[type="checkbox"]')
+            .forEach((input) => {
+              if (!input.disabled) input.checked = checked === true;
+            });
+          updateFoldersRescanSelectionState();
+        };
+
+        const closeFoldersRescanModal = () => {
+          if (folderSelectionModalMode !== "rescan" || bootOnboardingBusy) return;
+          setBootOnboardingModalVisible(false);
+          folderSelectionModalMode = "boot";
+          window.__foldersRescanModalActive = false;
+          bootOnboardingCandidates = [];
+          foldersRescanSelectionActions?.classList.add("hidden");
+        };
+
+        const runFoldersRescanSelection = async () => {
+          if (folderSelectionModalMode !== "rescan" || bootOnboardingBusy) {
+            return;
+          }
+          const selectedPaths = getBootOnboardingSelectedPaths();
+          if (!selectedPaths.length) {
+            if (bootOnboardingHint) {
+              bootOnboardingHint.textContent = tUi(
+                "folders.rescan.message",
+                "Select the active folders that should be rescanned. Ignored folders and their contents will remain excluded.",
+              );
+            }
+            return;
+          }
+
+          setBootOnboardingBusy(true);
+          if (bootOnboardingHint) {
+            bootOnboardingHint.textContent = tUi(
+              "boot.onboarding.searching",
+              "Searching folders…",
+            );
+          }
+          let result = null;
+          try {
+            result = window.folders?.rescan
+              ? await window.folders.rescan(selectedPaths)
+              : await window.api?.invoke?.("folders:rescan", { selectedPaths });
+          } catch (err) {
+            result = { ok: false, error: err?.message || String(err) };
+          }
+
+          if (!result?.ok) {
+            if (bootOnboardingHint) {
+              bootOnboardingHint.textContent =
+                result?.error ||
+                tUi(
+                  "alert.watcherRestartFailed",
+                  "Failed to restart watchers",
+                );
+            }
+            setBootOnboardingBusy(false);
+            return;
+          }
+
+          const scanned = Math.max(
+            0,
+            Number(result?.scanned ?? selectedPaths.length) || 0,
+          );
+          showNotification(
+            `${tUi("foldersRescanBtn", "Rescan")}: ${scanned}`,
+            "#4CAF50",
+          );
+          try {
+            window.refreshFoldersList?.();
+          } catch {}
+          setBootOnboardingBusy(false);
+          closeFoldersRescanModal();
+        };
+
+        window.openFoldersRescanModal = async () => {
+          if (
+            bootOnboardingBusy ||
+            (bootOnboardingModal &&
+              !bootOnboardingModal.classList.contains("hidden"))
+          ) {
+            return;
+          }
+
+          folderSelectionModalMode = "rescan";
+          window.__foldersRescanModalActive = true;
+          bootOnboardingCandidates = [];
+          if (bootOnboardingTitle) {
+            bootOnboardingTitle.textContent = tUi(
+              "foldersRescanBtn",
+              "Rescan",
+            );
+          }
+          if (bootOnboardingMessage) {
+            bootOnboardingMessage.textContent = tUi(
+              "folders.rescan.message",
+              "Select the active folders that should be rescanned. Ignored folders and their contents will remain excluded.",
+            );
+          }
+          if (bootOnboardingActions) {
+            bootOnboardingActions.classList.remove("hidden");
+          }
+          if (foldersRescanSelectionActions) {
+            foldersRescanSelectionActions.classList.remove("hidden");
+          }
+          if (foldersRescanSelectAllBtn) {
+            foldersRescanSelectAllBtn.textContent = tUi(
+              "settings-schemaLanguagesSelectAllBtn",
+              "Select All",
+            );
+          }
+          if (foldersRescanDeselectAllBtn) {
+            foldersRescanDeselectAllBtn.textContent = tUi(
+              "settings-schemaLanguagesDeselectAllBtn",
+              "Deselect All",
+            );
+          }
+          if (bootOnboardingDone) bootOnboardingDone.classList.add("hidden");
+          if (bootOnboardingStartBtn) {
+            bootOnboardingStartBtn.textContent = tUi(
+              "foldersRescanBtn",
+              "Rescan",
+            );
+          }
+          if (bootOnboardingSkipBtn) {
+            bootOnboardingSkipBtn.textContent = tUi(
+              "appConfirmCancelBtn",
+              "Cancel",
+            );
+          }
+          if (bootOnboardingHint) bootOnboardingHint.textContent = "";
+          if (bootOnboardingList) {
+            bootOnboardingList.setAttribute(
+              "aria-label",
+              tUi(
+                "aria.bootOnboardingList",
+                "Auto-config folder selection",
+              ),
+            );
+          }
+
+          setBootOnboardingModalVisible(true);
+          setBootOnboardingBusy(true);
+          renderBootOnboardingSearchingState();
+
+          let response = null;
+          try {
+            response = window.folders?.list
+              ? await window.folders.list()
+              : await window.api?.invoke?.("folders:list");
+          } catch (err) {
+            response = { ok: false, folders: [], error: err?.message };
+          }
+          if (folderSelectionModalMode !== "rescan") return;
+
+          bootOnboardingCandidates = (Array.isArray(response?.folders)
+            ? response.folders
+            : []
+          )
+            .filter(
+              (entry) =>
+                entry?.path && entry?.exists !== false && entry?.blocked !== true,
+            )
+            .map((entry) => ({
+              path: entry.path,
+              blocked: false,
+              recommended: false,
+              signals: [],
+            }));
+          renderBootOnboardingCandidates(bootOnboardingCandidates);
+
+          if (bootOnboardingHint) {
+            if (!response?.ok) {
+              bootOnboardingHint.textContent =
+                response?.error ||
+                tUi(
+                  "alert.watcherRestartFailed",
+                  "Failed to restart watchers",
+                );
+            } else if (!bootOnboardingCandidates.length) {
+              bootOnboardingHint.textContent = tUi(
+                "folders.empty",
+                "No watched folders yet.",
+              );
+            } else {
+              bootOnboardingHint.textContent = tUiFmt(
+                "boot.onboarding.foundCount",
+                { count: String(bootOnboardingCandidates.length) },
+                `${bootOnboardingCandidates.length} active folder(s) available.`,
+              );
+            }
+          }
+          setBootOnboardingBusy(false);
+          if (bootOnboardingStartBtn) {
+            bootOnboardingStartBtn.disabled =
+              bootOnboardingCandidates.length === 0;
+          }
+          updateFoldersRescanSelectionState();
+          setTimeout(
+            () =>
+              (bootOnboardingCandidates.length
+                ? bootOnboardingStartBtn
+                : bootOnboardingSkipBtn
+              )?.focus(),
+            0,
+          );
         };
 
         const showBootOnboardingCompletion = (messageText) => {
@@ -21941,6 +22873,17 @@
             bootOnboardingPromptDone = true;
             bootOnboardingPromptActive = false;
             return;
+          }
+          folderSelectionModalMode = "boot";
+          window.__foldersRescanModalActive = false;
+          if (bootOnboardingList) {
+            bootOnboardingList.setAttribute(
+              "aria-label",
+              tUi(
+                "aria.bootOnboardingList",
+                "Auto-config folder selection",
+              ),
+            );
           }
           if (bootOnboardingTitle) {
             bootOnboardingTitle.textContent = tUi(
@@ -22070,6 +23013,9 @@
           if (window.__bootDone !== true) return;
           window.__prepareDashboardForStartup?.();
           window.__uiDataReady = true;
+          try {
+            window.api?.appNavigationReady?.();
+          } catch {}
           maybeHideBootLoading();
         };
         window.api
@@ -22177,6 +23123,10 @@
         });
         if (bootOnboardingStartBtn) {
           bootOnboardingStartBtn.addEventListener("click", async () => {
+            if (folderSelectionModalMode === "rescan") {
+              await runFoldersRescanSelection();
+              return;
+            }
             if (bootOnboardingBusy) return;
             setBootOnboardingBusy(true);
             const selectedPaths = getBootOnboardingSelectedPaths();
@@ -22220,6 +23170,10 @@
         }
         if (bootOnboardingSkipBtn) {
           bootOnboardingSkipBtn.addEventListener("click", async () => {
+            if (folderSelectionModalMode === "rescan") {
+              closeFoldersRescanModal();
+              return;
+            }
             if (bootOnboardingBusy) return;
             await finalizeBootOnboardingSkipAll({
               showCompletion: true,
@@ -22233,6 +23187,9 @@
           });
         }
         if (bootOnboardingList) {
+          bootOnboardingList.addEventListener("change", () => {
+            updateFoldersRescanSelectionState();
+          });
           bootOnboardingList.addEventListener("keydown", (event) => {
             if (
               !bootOnboardingModal ||
@@ -22275,6 +23232,12 @@
             }
           });
         }
+        foldersRescanSelectAllBtn?.addEventListener("click", () => {
+          setFoldersRescanSelection(true);
+        });
+        foldersRescanDeselectAllBtn?.addEventListener("click", () => {
+          setFoldersRescanSelection(false);
+        });
         document.addEventListener("keydown", (event) => {
           if (
             !bootOnboardingModal ||
@@ -22284,7 +23247,10 @@
           }
           if (event.key === "Escape") {
             event.preventDefault();
-            event.stopPropagation();
+            event.stopImmediatePropagation();
+            if (folderSelectionModalMode === "rescan") {
+              closeFoldersRescanModal();
+            }
           }
         });
         window.api?.on?.("boot:manual-seed-complete", () => {
@@ -23538,7 +24504,10 @@
             .getElementById("settingsMenu")
             ?.classList.contains("hidden");
           if (!open) return;
-          if (!e.target.closest(".settings-content")) {
+          const isInsideAllowedOverlay = e.target?.closest?.(
+            ".settings-content, #bootOnboardingModal:not(.hidden), #appConfirmModal:not(.hidden)",
+          );
+          if (!isInsideAllowedOverlay) {
             e.preventDefault();
             e.stopPropagation();
           }
@@ -24034,6 +25003,9 @@
               "bootOnboardingModal",
             );
             if (action === A.BACK) {
+              if (window.__foldersRescanModalActive === true) {
+                document.getElementById("bootOnboardingSkipBtn")?.click();
+              }
               return;
             }
             if (action === A.CONFIRM) {

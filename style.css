@@ -417,6 +417,7 @@ body {
   color: var(--dracula-foreground);
   margin: 0;
   padding: 48px 20px 20px 20px;
+  box-sizing: border-box;
   height: 100vh;
   min-height: 100vh;
   overflow: hidden;
@@ -625,6 +626,39 @@ h1 {
   background: var(--app-input-bg);
 }
 
+.confirm-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+  color: var(--app-text);
+  font-size: 0.95em;
+}
+
+.confirm-input-row.hidden {
+  display: none;
+}
+
+.confirm-input-row textarea {
+  width: 100%;
+  min-height: 112px;
+  padding: 10px 12px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--app-radius-md);
+  background: var(--app-input-bg);
+  color: var(--app-text);
+  font: inherit;
+  line-height: 1.4;
+  outline: none;
+}
+
+.confirm-input-row textarea:focus {
+  border-color: var(--app-accent-2);
+  box-shadow: 0 0 0 2px rgba(139, 233, 253, 0.18);
+}
+
 .confirm-notes-title {
   margin-bottom: 8px;
   font-weight: 700;
@@ -675,6 +709,17 @@ h1 {
 .boot-onboarding-modal {
   width: min(760px, 92vw);
   max-height: 76vh;
+}
+
+.folder-selection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.folder-selection-actions.hidden {
+  display: none;
 }
 
 .boot-onboarding-list {

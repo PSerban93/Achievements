@@ -62,6 +62,20 @@ const {
 } = require("./utils/paths");
 const { normalizeAppTheme } = require("./utils/app-theme");
 const {
+  configMatchesNavigationRoute,
+  normalizeNavigationAppId,
+  normalizeNavigationPlatform,
+  normalizeNotificationNavigationTarget,
+  parseAppNavigationArgs,
+  stripAppNavigationArgs,
+} = require("./utils/app-navigation");
+const {
+  buildBlacklistConfigKey,
+  normalizeAppIdValue,
+  normalizeBlacklistConfigKey,
+  normalizeBlacklistPlatformValue,
+} = require("./utils/blacklist-identity");
+const {
   resolveConfigJsonPath,
   sanitizeConfigName,
 } = require("./utils/config-name");
@@ -156,6 +170,12 @@ const {
   normalizeProcessNameValue,
   processNameValuesEqual,
 } = require("./utils/process-name-utils");
+const {
+  PROCESS_CONFIG_MATCH,
+  classifyProcessConfigMatch,
+  getProcessConfigMatchRank,
+  selectBestProcessConfigCandidate,
+} = require("./utils/process-config-match");
 
 const appLogger = createLogger("app");
 const notificationLogger = createLogger("notifications");
@@ -1939,6 +1959,8 @@ const DEFAULT_PREFERENCES = {
   progressMutedConfigs: [],
   windowZoomFactor: 1,
   disableAchievementScreenshot: false,
+  notificationClickRedirectEnabled: false,
+  notificationClickRedirectTarget: "overlay",
   showDashboardOnStart: false,
   startMaximized: false,
   disableHardwareAcceleration: true,
@@ -2060,6 +2082,21 @@ function mergeWithDefaultPreferences(prefs = {}) {
   return { ...DEFAULT_PREFERENCES, ...(prefs || {}) };
 }
 
+function isNotificationClickRedirectEnabled(
+  preferences = cachedPreferences,
+) {
+  return preferences?.notificationClickRedirectEnabled === true;
+}
+
+function getNotificationClickRedirectTarget(
+  preferences = cachedPreferences,
+) {
+  return normalizeNotificationNavigationTarget(
+    preferences?.notificationClickRedirectTarget,
+    DEFAULT_PREFERENCES.notificationClickRedirectTarget,
+  );
+}
+
 const shouldDisableHardwareAcceleration = (() => {
   try {
     const prefs = readPrefsSafe();
@@ -2136,6 +2173,12 @@ let selectedNotificationScale = 1;
 let bootSeeding = true;
 let bootOnboardingRecoveryTimer = null;
 let bootOnboardingRecoveryLastAt = 0;
+let appNavigationRendererReady = false;
+let pendingAppNavigationRoute = null;
+let appNavigationRequestSequence = 0;
+const recentAppNavigationKeys = new Map();
+let pendingOverlayNotificationNavigation = null;
+let overlayNavigationRendererReadyWebContentsId = null;
 global.bootDone = false;
 global.bootUiReady = false;
 global.bootOverlayHidden = false;
@@ -2148,50 +2191,11 @@ if (!gotTheLock) {
   app.exit(0);
   process.exit(0);
 } else {
-  app.on("second-instance", () => {
-    // Ignore subsequent launches; keep the first instance state (tray/hidden).
-    return;
+  app.on("second-instance", (_event, argv) => {
+    handleAppNavigationArgv(argv, "second-instance", { showWindow: true });
   });
 }
-
-function normalizeAppIdValue(value) {
-  const trimmed = String(value || "").trim();
-  if (
-    /^[0-9a-fA-F]+$/.test(trimmed) ||
-    /^CUSA\d+$/i.test(trimmed) ||
-    /^NP[A-Z0-9_]+$/i.test(trimmed) ||
-    /^0x[0-9a-f]+$/i.test(trimmed) ||
-    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(trimmed)
-  ) {
-    return trimmed;
-  }
-  return "";
-}
-
-function normalizeBlacklistPlatformValue(value) {
-  const trimmed = String(value || "")
-    .trim()
-    .toLowerCase();
-  return trimmed || "steam";
-}
-
-function buildBlacklistConfigKey(appid, platform) {
-  const normalizedAppId = normalizeAppIdValue(appid);
-  if (!normalizedAppId) return "";
-  const normalizedPlatform = normalizeBlacklistPlatformValue(platform);
-  return `${normalizedAppId}::${normalizedPlatform}`;
-}
-
-function normalizeBlacklistConfigKey(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  const sepIndex = raw.indexOf("::");
-  if (sepIndex <= 0) return "";
-  const appid = normalizeAppIdValue(raw.slice(0, sepIndex));
-  if (!appid) return "";
-  const platform = normalizeBlacklistPlatformValue(raw.slice(sepIndex + 2));
-  return `${appid}::${platform}`;
-}
+handleAppNavigationArgv(process.argv, "initial-launch", { showWindow: false });
 
 function setBlacklistedAppIds(list) {
   blacklistedAppIdsSet.clear();
@@ -2257,7 +2261,9 @@ function readBlacklistFromPrefs() {
   const arr = Array.isArray(prefs[BLACKLIST_PREF_KEY])
     ? prefs[BLACKLIST_PREF_KEY]
     : [];
-  return arr.map(normalizeAppIdValue).filter(Boolean);
+  return Array.from(
+    new Set(arr.map(normalizeAppIdValue).filter(Boolean)),
+  );
 }
 
 function readBlacklistedConfigKeysFromPrefs() {
@@ -2265,7 +2271,9 @@ function readBlacklistedConfigKeysFromPrefs() {
   const arr = Array.isArray(prefs[BLACKLIST_CONFIG_PREF_KEY])
     ? prefs[BLACKLIST_CONFIG_PREF_KEY]
     : [];
-  return arr.map(normalizeBlacklistConfigKey).filter(Boolean);
+  return Array.from(
+    new Set(arr.map(normalizeBlacklistConfigKey).filter(Boolean)),
+  );
 }
 
 function buildBlacklistPayload({
@@ -2297,12 +2305,14 @@ function buildBlacklistPayload({
 }
 
 function persistBlacklist({ appIds = [], configKeys = [] } = {}) {
-  const nextAppIds = Array.from(new Set(appIds))
-    .map(normalizeAppIdValue)
-    .filter(Boolean);
-  const nextConfigKeys = Array.from(new Set(configKeys))
-    .map(normalizeBlacklistConfigKey)
-    .filter(Boolean);
+  const nextAppIds = Array.from(
+    new Set((appIds || []).map(normalizeAppIdValue).filter(Boolean)),
+  );
+  const nextConfigKeys = Array.from(
+    new Set(
+      (configKeys || []).map(normalizeBlacklistConfigKey).filter(Boolean),
+    ),
+  );
   try {
     const prefs = updatePreferences({
       [BLACKLIST_PREF_KEY]: nextAppIds,
@@ -6174,6 +6184,16 @@ function applyPreferenceSideEffects(
       themesFolder: themeRegistry.folder,
     });
   }
+  if (
+    Object.prototype.hasOwnProperty.call(
+      patch,
+      "notificationClickRedirectEnabled",
+    ) &&
+    prefsSnapshot.notificationClickRedirectEnabled !== true
+  ) {
+    disableActiveAnimatedNotificationNavigation("preferences-disabled");
+    clearNativeWindowsNotificationRoutes("preferences-disabled");
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "lumaPlayWatcherEnabled")) {
     try {
       watchedFoldersApi?.refreshConfigState?.();
@@ -6261,6 +6281,28 @@ function updatePreferences(patch = {}) {
 
   if (Object.prototype.hasOwnProperty.call(incoming, "appTheme")) {
     incoming.appTheme = normalizeAppTheme(incoming.appTheme);
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      incoming,
+      "notificationClickRedirectEnabled",
+    )
+  ) {
+    incoming.notificationClickRedirectEnabled =
+      incoming.notificationClickRedirectEnabled === true;
+  }
+  if (
+    Object.prototype.hasOwnProperty.call(
+      incoming,
+      "notificationClickRedirectTarget",
+    )
+  ) {
+    incoming.notificationClickRedirectTarget =
+      normalizeNotificationNavigationTarget(
+        incoming.notificationClickRedirectTarget,
+        DEFAULT_PREFERENCES.notificationClickRedirectTarget,
+      );
   }
 
   if (Object.prototype.hasOwnProperty.call(incoming, "steamApiKey")) {
@@ -8322,6 +8364,104 @@ ipcMain.handle("dashboard:set-open", (_e, state) => {
 ipcMain.handle("dashboard:is-open", () => {
   return dashboardOpen;
 });
+
+ipcMain.on("app-navigation:ready", (event) => {
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    event.sender?.id !== mainWindow.webContents?.id
+  ) {
+    return;
+  }
+  appNavigationRendererReady = true;
+  appLogger.info("app-navigation:renderer-ready");
+  flushPendingAppNavigationRoute();
+});
+
+ipcMain.on("app-navigation:result", (event, payload = {}) => {
+  if (
+    !mainWindow ||
+    mainWindow.isDestroyed() ||
+    event.sender?.id !== mainWindow.webContents?.id
+  ) {
+    return;
+  }
+  const success = payload?.success === true;
+  const resultConfigName = String(payload?.configName || "").trim();
+  const meta = {
+    requestId: String(payload?.requestId || ""),
+    success,
+    configName: resultConfigName
+      ? sanitizeConfigName(resultConfigName)
+      : null,
+    achievementId: String(payload?.achievementId || "").slice(0, 256) || null,
+    reason: String(payload?.reason || "").slice(0, 128) || null,
+  };
+  if (success) appLogger.info("app-navigation:completed", meta);
+  else appLogger.warn("app-navigation:renderer-failed", meta);
+});
+
+ipcMain.on("overlay:navigation-ready", (event) => {
+  if (
+    !overlayWindow ||
+    overlayWindow.isDestroyed() ||
+    event.sender?.id !== overlayWindow.webContents?.id
+  ) {
+    return;
+  }
+  overlayNavigationRendererReadyWebContentsId = event.sender.id;
+  notificationLogger.info("notification-navigation:overlay-renderer-ready", {
+    webContentsId: event.sender.id,
+  });
+  flushPendingOverlayNotificationNavigation();
+});
+
+ipcMain.on("overlay:navigation-result", (event, payload = {}) => {
+  if (
+    !overlayWindow ||
+    overlayWindow.isDestroyed() ||
+    event.sender?.id !== overlayWindow.webContents?.id
+  ) {
+    return;
+  }
+  const pending = pendingOverlayNotificationNavigation;
+  const requestId = String(payload?.requestId || "");
+  if (!pending || !requestId || requestId !== pending.requestId) {
+    notificationLogger.info("notification-navigation:overlay-result-stale", {
+      requestId: requestId || null,
+      pendingRequestId: pending?.requestId || null,
+    });
+    return;
+  }
+
+  const success = payload?.success === true;
+  const meta = {
+    requestId,
+    success,
+    configName: sanitizeConfigName(
+      String(payload?.configName || pending.configName || ""),
+    ),
+    achievementId:
+      String(payload?.achievementId || pending.achievementId || "").slice(
+        0,
+        256,
+      ) || null,
+    reason: String(payload?.reason || "").slice(0, 128) || null,
+  };
+  pendingOverlayNotificationNavigation = null;
+  if (success) {
+    notificationLogger.info(
+      "notification-navigation:overlay-renderer-complete",
+      meta,
+    );
+  } else {
+    notificationLogger.warn(
+      "notification-navigation:overlay-renderer-failed",
+      meta,
+    );
+  }
+});
+
 ipcMain.handle("boot:status", () => ({
   bootDone: global.bootDone === true,
   uiReady: global.bootUiReady === true,
@@ -11019,6 +11159,138 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle("blacklist:add-manual", async (_event, payload = {}) => {
+  const source = Array.isArray(payload?.appids)
+    ? payload.appids
+    : typeof payload?.appids === "string"
+      ? payload.appids.split(/[\s,;]+/)
+      : [];
+  const rawValues = source
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean);
+  const MAX_MANUAL_BLACKLIST_APPIDS = 500;
+
+  ipcLogger.info("blacklist:add-manual:request", {
+    count: rawValues.length,
+  });
+
+  if (rawValues.length > MAX_MANUAL_BLACKLIST_APPIDS) {
+    ipcLogger.warn("blacklist:add-manual:too-many", {
+      count: rawValues.length,
+      limit: MAX_MANUAL_BLACKLIST_APPIDS,
+    });
+    return {
+      success: false,
+      errorCode: "tooManyAppIds",
+      error: `A maximum of ${MAX_MANUAL_BLACKLIST_APPIDS} AppIDs can be added at once.`,
+      limit: MAX_MANUAL_BLACKLIST_APPIDS,
+    };
+  }
+
+  try {
+    const appIds = new Set(readBlacklistFromPrefs());
+    const added = [];
+    const duplicates = [];
+    const invalid = [];
+
+    for (const rawValue of rawValues) {
+      const normalized = normalizeAppIdValue(rawValue);
+      if (!normalized) {
+        invalid.push(rawValue);
+        continue;
+      }
+      if (appIds.has(normalized)) {
+        duplicates.push(normalized);
+        continue;
+      }
+      appIds.add(normalized);
+      added.push(normalized);
+    }
+
+    const blacklistPayload = added.length
+      ? persistBlacklist({
+          appIds: Array.from(appIds),
+          configKeys: readBlacklistedConfigKeysFromPrefs(),
+        })
+      : buildBlacklistPayload();
+
+    if (added.length) {
+      const persisted = new Set(blacklistPayload?.appids || []);
+      if (added.some((appid) => !persisted.has(appid))) {
+        throw new Error("Manual blacklist entries could not be saved.");
+      }
+
+      const activeEpicPollName = epicOfficialActivePollState?.configName || "";
+      if (
+        activeEpicPollName &&
+        isEpicOfficialConfigBlacklisted(activeEpicPollName)
+      ) {
+        stopEpicOfficialActivePoll("blacklisted", {
+          configName: activeEpicPollName,
+          appid: null,
+        });
+      }
+      const activeXboxPollName = xboxPcActivePollState?.configName || "";
+      if (
+        activeXboxPollName &&
+        isXboxPcConfigBlacklisted(activeXboxPollName)
+      ) {
+        stopXboxPcActivePoll("blacklisted", {
+          configName: activeXboxPollName,
+          appid: null,
+        });
+      }
+      if (selectedConfig) {
+        const activeConfigName = sanitizeConfigName(selectedConfig);
+        const activeConfig = activeConfigName
+          ? readConfigForAchievementCache(activeConfigName)
+          : null;
+        const activeAppId = String(
+          activeConfig?.xbox_title_id || activeConfig?.appid || "",
+        ).trim();
+        const activePlatform =
+          normalizePlatform(activeConfig?.platform) || null;
+        if (
+          activeAppId &&
+          isAppIdBlacklisted(activeAppId, activePlatform)
+        ) {
+          await clearActiveConfigSelection({
+            reason: "manual-appid-blacklisted",
+            configName: activeConfigName,
+          });
+        }
+      }
+
+      refreshBlacklistEffects();
+      try {
+        broadcastToAll("blacklist:updated", blacklistPayload);
+      } catch {}
+    }
+
+    ipcLogger.info("blacklist:add-manual:success", {
+      requested: rawValues.length,
+      added: added.length,
+      duplicates: duplicates.length,
+      invalid: invalid.length,
+    });
+    return {
+      success: true,
+      added,
+      duplicates,
+      invalid,
+      blacklistPayload,
+    };
+  } catch (err) {
+    ipcLogger.error("blacklist:add-manual:error", {
+      error: err?.message || String(err),
+    });
+    return {
+      success: false,
+      error: err?.message || "Failed to add manual blacklist entries.",
+    };
+  }
+});
+
 ipcMain.handle("blacklist:list", async () => {
   return buildBlacklistPayload();
 });
@@ -11557,6 +11829,338 @@ function showMainWindowRespectingPrefs() {
   mainWindow.show();
 }
 
+function createAppNavigationRoute(route = {}, source = "unknown") {
+  const appid = normalizeNavigationAppId(route?.appid);
+  const platform = normalizeNavigationPlatform(route?.platform);
+  const rawConfigName = String(route?.configName || "").trim();
+  const configName = rawConfigName ? sanitizeConfigName(rawConfigName) : "";
+  const rawAchievementId = String(route?.achievementId || "").trim();
+  const achievementId =
+    rawAchievementId &&
+    rawAchievementId.length <= 256 &&
+    !/[\u0000-\u001f\u007f]/.test(rawAchievementId)
+      ? rawAchievementId
+      : "";
+  if ((!appid || !platform) && !configName) return null;
+  appNavigationRequestSequence += 1;
+  return {
+    appid: appid || "",
+    platform: platform || "",
+    configName: configName || "",
+    achievementId,
+    source: String(source || "unknown").slice(0, 64),
+    requestId: `${Date.now()}-${appNavigationRequestSequence}`,
+  };
+}
+
+function handleAppNavigationArgv(argv, source, options = {}) {
+  const parsed = parseAppNavigationArgs(argv);
+  if (!parsed.hasNavigationArgs) return false;
+  if (!parsed.route) {
+    appLogger.warn("app-navigation:arguments-invalid", {
+      source,
+      reason: parsed.error || "invalid",
+    });
+    return false;
+  }
+  return requestAppNavigation(parsed.route, {
+    source,
+    showWindow: options?.showWindow === true,
+  });
+}
+
+function pruneRecentAppNavigationKeys(now = Date.now()) {
+  for (const [key, timestamp] of recentAppNavigationKeys) {
+    if (now - timestamp > 5000) recentAppNavigationKeys.delete(key);
+  }
+}
+
+function showMainWindowForNavigation() {
+  if (!app.isReady()) return;
+  hideTrayMenu?.();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (global.bootDone === true) {
+      createMainWindow({ forceShow: true });
+    }
+    return;
+  }
+  try {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+  } catch {}
+  try {
+    mainWindow.show();
+    mainWindow.focus();
+  } catch {}
+}
+
+function requestAppNavigation(route, options = {}) {
+  const source = options?.source || route?.source || "unknown";
+  const normalized = createAppNavigationRoute(route, source);
+  if (!normalized) {
+    appLogger.warn("app-navigation:request-invalid", { source });
+    return false;
+  }
+
+  const dedupeKey = String(options?.dedupeKey || "").trim();
+  if (dedupeKey) {
+    const now = Date.now();
+    pruneRecentAppNavigationKeys(now);
+    const previous = recentAppNavigationKeys.get(dedupeKey) || 0;
+    if (now - previous <= 5000) {
+      appLogger.info("app-navigation:deduped", { source, dedupeKey });
+      return false;
+    }
+    recentAppNavigationKeys.set(dedupeKey, now);
+  }
+
+  pendingAppNavigationRoute = normalized;
+  appLogger.info("app-navigation:request", {
+    source,
+    requestId: normalized.requestId,
+    appid: normalized.appid || null,
+    platform: normalized.platform || null,
+    configName: normalized.configName || null,
+    achievementId: normalized.achievementId || null,
+  });
+
+  if (options?.showWindow !== false) showMainWindowForNavigation();
+  flushPendingAppNavigationRoute();
+  return true;
+}
+
+function readAppNavigationConfigFile(fileName) {
+  const fullPath = path.join(configsDir, fileName);
+  try {
+    const config = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+    return {
+      config,
+      configName: path.basename(fileName, ".json"),
+    };
+  } catch (err) {
+    appLogger.warn("app-navigation:config-read-failed", {
+      file: fileName,
+      error: err?.message || String(err),
+    });
+    return null;
+  }
+}
+
+function resolveAppNavigationConfig(route) {
+  let fileNames = [];
+  try {
+    fileNames = fs
+      .readdirSync(configsDir)
+      .filter((file) => file.toLowerCase().endsWith(".json"));
+  } catch (err) {
+    return { ok: false, reason: "config-directory-unavailable", matches: [] };
+  }
+
+  const matches = [];
+  const rawRequestedName = String(route?.configName || "").trim();
+  const requestedName = rawRequestedName
+    ? sanitizeConfigName(rawRequestedName)
+    : "";
+  for (const fileName of fileNames) {
+    const configName = path.basename(fileName, ".json");
+    if (
+      requestedName &&
+      sanitizeConfigName(configName).toLowerCase() !== requestedName.toLowerCase()
+    ) {
+      continue;
+    }
+    const entry = readAppNavigationConfigFile(fileName);
+    if (!entry) continue;
+    if (
+      route?.appid &&
+      route?.platform &&
+      !configMatchesNavigationRoute(entry.config, route)
+    ) {
+      continue;
+    }
+    matches.push(entry);
+  }
+
+  if (matches.length !== 1) {
+    return {
+      ok: false,
+      reason: matches.length ? "ambiguous-config" : "config-not-found",
+      matches: matches.map((entry) => entry.configName),
+    };
+  }
+
+  const match = matches[0];
+  const appid = normalizeNavigationAppId(
+    match.config?.appid ?? match.config?.appId ?? route?.appid,
+  );
+  const platform = normalizeNavigationPlatform(
+    match.config?.platform ?? route?.platform,
+  );
+  return {
+    ok: true,
+    configName: match.configName,
+    appid,
+    platform,
+    blacklisted: !!appid && isAppIdBlacklisted(appid, platform || null),
+  };
+}
+
+function flushPendingOverlayNotificationNavigation() {
+  const pending = pendingOverlayNotificationNavigation;
+  if (!pending || !overlayWindow || overlayWindow.isDestroyed()) return false;
+  const webContentsId = Number(overlayWindow.webContents?.id);
+  if (
+    !overlayWindow.webContents ||
+    overlayWindow.webContents.isDestroyed() ||
+    !Number.isFinite(webContentsId) ||
+    overlayNavigationRendererReadyWebContentsId !== webContentsId
+  ) {
+    return false;
+  }
+  if (pending.dispatchedWebContentsId === webContentsId) return true;
+  try {
+    const payload = {
+      requestId: pending.requestId,
+      source: pending.source,
+      configName: pending.configName,
+      achievementId: pending.achievementId,
+    };
+    overlayWindow.webContents.send("overlay:navigate-achievement", payload);
+    pending.dispatchedWebContentsId = webContentsId;
+    pending.dispatchedAt = Date.now();
+    notificationLogger.info(
+      "notification-navigation:overlay-dispatched",
+      payload,
+    );
+    return true;
+  } catch (error) {
+    notificationLogger.warn("notification-navigation:overlay-dispatch-failed", {
+      requestId: pending.requestId,
+      error: error?.message || String(error),
+    });
+    return false;
+  }
+}
+
+function requestOverlayNotificationNavigation(route, options = {}) {
+  const source = String(options?.source || route?.source || "notification");
+  const normalized = createAppNavigationRoute(route, source);
+  if (!normalized?.achievementId) {
+    notificationLogger.warn("notification-navigation:overlay-failed", {
+      source,
+      reason: "achievement-id-missing",
+    });
+    return false;
+  }
+  const resolved = resolveAppNavigationConfig(normalized);
+  if (!resolved.ok) {
+    notificationLogger.warn("notification-navigation:overlay-failed", {
+      source,
+      reason: resolved.reason,
+      matches: resolved.matches,
+    });
+    return false;
+  }
+  const activeConfigName = sanitizeConfigName(selectedConfig || "");
+  const resolvedConfigName = sanitizeConfigName(resolved.configName || "");
+  const activeConfigMatches =
+    !!activeConfigName &&
+    activeConfigName.toLowerCase() === resolvedConfigName.toLowerCase();
+  if (!activeConfigMatches) {
+    notificationLogger.info("notification-navigation:overlay-route-config", {
+      source,
+      activeConfig: selectedConfig || null,
+      notificationConfig: resolved.configName || null,
+    });
+  }
+
+  pendingOverlayNotificationNavigation = {
+    requestId: normalized.requestId,
+    source,
+    configName: resolved.configName,
+    achievementId: normalized.achievementId,
+  };
+
+  try {
+    if (!overlayWindow || overlayWindow.isDestroyed()) {
+      createOverlayWindow(resolved.configName);
+    } else {
+      if (!activeConfigMatches && !overlayWindow.webContents.isLoading()) {
+        overlayWindow.webContents.send(
+          "load-overlay-data",
+          resolved.configName,
+        );
+      }
+      if (!isOverlayEffectivelyPresented()) {
+        setOverlayPresented(true);
+      }
+    }
+    flushPendingOverlayNotificationNavigation();
+    return true;
+  } catch (error) {
+    pendingOverlayNotificationNavigation = null;
+    notificationLogger.warn("notification-navigation:overlay-failed", {
+      source,
+      reason: "overlay-present-failed",
+      error: error?.message || String(error),
+    });
+    return false;
+  }
+}
+
+function sendAppNavigationError(route, reason, matches = []) {
+  appLogger.warn("app-navigation:resolve-failed", {
+    requestId: route?.requestId || null,
+    source: route?.source || null,
+    appid: route?.appid || null,
+    platform: route?.platform || null,
+    reason,
+    matches,
+  });
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send("app-navigation:error", {
+      requestId: route?.requestId || "",
+      reason: String(reason || "navigation-failed"),
+    });
+  } catch {}
+}
+
+function flushPendingAppNavigationRoute() {
+  if (!pendingAppNavigationRoute || !appNavigationRendererReady) return false;
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (mainWindow.webContents.isLoading()) return false;
+
+  const route = pendingAppNavigationRoute;
+  const resolved = resolveAppNavigationConfig(route);
+  pendingAppNavigationRoute = null;
+  if (!resolved.ok) {
+    sendAppNavigationError(route, resolved.reason, resolved.matches);
+    return false;
+  }
+
+  const payload = {
+    requestId: route.requestId,
+    source: route.source,
+    appid: resolved.appid || route.appid,
+    platform: resolved.platform || route.platform,
+    configName: resolved.configName,
+    achievementId: route.achievementId || "",
+    blacklisted: resolved.blacklisted === true,
+  };
+  try {
+    mainWindow.webContents.send("app-navigation:open", payload);
+    appLogger.info("app-navigation:dispatched", payload);
+    return true;
+  } catch (err) {
+    pendingAppNavigationRoute = route;
+    appLogger.warn("app-navigation:dispatch-failed", {
+      requestId: route.requestId,
+      error: err?.message || String(err),
+    });
+    return false;
+  }
+}
+
 // Zoom model:
 // - userZoom: preference from UI dropdown (1.0, 1.25, 1.5, etc).
 // - effectiveZoom: value applied to webContents (userZoom / display scale).
@@ -11830,6 +12434,7 @@ let previousAchievements = {};
 const pendingMissingAchievementFiles = new Map();
 
 function createMainWindow(options = {}) {
+  appNavigationRendererReady = false;
   windowLogger.info("create-main-window:start", {
     existing: Boolean(mainWindow && !mainWindow.isDestroyed?.()),
   });
@@ -11872,6 +12477,10 @@ function createMainWindow(options = {}) {
   const ICON_URL = pathToFileURL(ICON_PNG_PATH).toString();
   mainWindow.loadFile("index.html", { query: { icon: ICON_URL } });
   windowLogger.info("create-main-window:load-file", { icon: ICON_URL });
+
+  mainWindow.webContents.on("did-start-loading", () => {
+    appNavigationRendererReady = false;
+  });
 
   mainWindow.webContents.on("did-finish-load", () => {
     windowLogger.info("create-main-window:did-finish-load");
@@ -13293,6 +13902,375 @@ const activeNativeAchievementNotifications = new Set();
 const NATIVE_WINDOWS_REFERENCE_TIMEOUT_MS = 30000;
 const NATIVE_WINDOWS_QUEUE_INTERVAL_MS = 1250;
 const NATIVE_WINDOWS_SHOW_WATCHDOG_MS = 3000;
+const NATIVE_WINDOWS_ROUTE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const NATIVE_WINDOWS_ROUTE_MAX_ENTRIES = 200;
+const nativeWindowsNotificationRoutes = new Map();
+const animatedNotificationNavigationRoutes = new Map();
+const nativeWindowsNotificationRoutesPath = path.join(
+  path.dirname(preferencesPath),
+  "native-notification-routes.json",
+);
+let nativeWindowsNotificationRoutesLoaded = false;
+let nativeWindowsActivationHandlerRegistered = false;
+
+function pruneNativeWindowsNotificationRoutes(now = Date.now()) {
+  for (const [token, route] of nativeWindowsNotificationRoutes) {
+    const createdAt = Number(route?.createdAt || 0);
+    if (!createdAt || now - createdAt > NATIVE_WINDOWS_ROUTE_TTL_MS) {
+      nativeWindowsNotificationRoutes.delete(token);
+    }
+  }
+  if (nativeWindowsNotificationRoutes.size <= NATIVE_WINDOWS_ROUTE_MAX_ENTRIES)
+    return;
+  const ordered = Array.from(nativeWindowsNotificationRoutes.entries()).sort(
+    (left, right) =>
+      Number(left[1]?.createdAt || 0) - Number(right[1]?.createdAt || 0),
+  );
+  const removeCount = ordered.length - NATIVE_WINDOWS_ROUTE_MAX_ENTRIES;
+  ordered.slice(0, removeCount).forEach(([token]) => {
+    nativeWindowsNotificationRoutes.delete(token);
+  });
+}
+
+function loadNativeWindowsNotificationRoutes() {
+  if (nativeWindowsNotificationRoutesLoaded) return;
+  nativeWindowsNotificationRoutesLoaded = true;
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(nativeWindowsNotificationRoutesPath, "utf8"),
+    );
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+    for (const entry of entries) {
+      const token = String(entry?.token || "").trim();
+      const route = createAppNavigationRoute(entry, "native-notification");
+      if (!token || !route) continue;
+      nativeWindowsNotificationRoutes.set(token, {
+        appid: route.appid,
+        platform: route.platform,
+        configName: route.configName,
+        achievementId: route.achievementId,
+        createdAt: Number(entry?.createdAt || 0),
+      });
+    }
+    pruneNativeWindowsNotificationRoutes();
+  } catch (err) {
+    if (err?.code !== "ENOENT") {
+      notificationLogger.warn("native-windows-route-store:load-failed", {
+        error: err?.message || String(err),
+      });
+    }
+  }
+}
+
+function persistNativeWindowsNotificationRoutes() {
+  pruneNativeWindowsNotificationRoutes();
+  const payload = {
+    version: 1,
+    entries: Array.from(nativeWindowsNotificationRoutes.entries()).map(
+      ([token, route]) => ({ token, ...route }),
+    ),
+  };
+  const tempPath = `${nativeWindowsNotificationRoutesPath}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(nativeWindowsNotificationRoutesPath), {
+      recursive: true,
+    });
+    fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), "utf8");
+    fs.renameSync(tempPath, nativeWindowsNotificationRoutesPath);
+  } catch (err) {
+    try {
+      fs.writeFileSync(
+        nativeWindowsNotificationRoutesPath,
+        JSON.stringify(payload, null, 2),
+        "utf8",
+      );
+    } catch {}
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch {}
+    notificationLogger.warn("native-windows-route-store:save-failed", {
+      error: err?.message || String(err),
+    });
+  }
+}
+
+function clearNativeWindowsNotificationRoutes(reason = "unknown") {
+  loadNativeWindowsNotificationRoutes();
+  if (!nativeWindowsNotificationRoutes.size) return;
+  const removed = nativeWindowsNotificationRoutes.size;
+  nativeWindowsNotificationRoutes.clear();
+  persistNativeWindowsNotificationRoutes();
+  notificationLogger.info("notification-navigation:native-routes-cleared", {
+    reason,
+    removed,
+  });
+}
+
+function createNotificationNavigationRoute(
+  notificationData = {},
+  source = "notification",
+) {
+  if (notificationData?.isTest === true) return null;
+  const route = createAppNavigationRoute(
+    {
+      appid: notificationData?.appid,
+      platform: notificationData?.platform,
+      configName:
+        notificationData?.configName || notificationData?.config_name,
+      achievementId: notificationData?.name,
+    },
+    source,
+  );
+  return route?.achievementId ? route : null;
+}
+
+function registerNativeWindowsNotificationRoute(token, notificationData = {}) {
+  if (!token || !isNotificationClickRedirectEnabled()) return false;
+  const route = createNotificationNavigationRoute(
+    notificationData,
+    "native-notification",
+  );
+  if (!route) return false;
+  loadNativeWindowsNotificationRoutes();
+  nativeWindowsNotificationRoutes.set(token, {
+    appid: route.appid,
+    platform: route.platform,
+    configName: route.configName,
+    achievementId: route.achievementId,
+    createdAt: Date.now(),
+  });
+  persistNativeWindowsNotificationRoutes();
+  return true;
+}
+
+function removeNativeWindowsNotificationRoute(token) {
+  if (!token || !nativeWindowsNotificationRoutes.delete(token)) return;
+  persistNativeWindowsNotificationRoutes();
+}
+
+function findNativeWindowsNotificationRoute(rawArguments) {
+  loadNativeWindowsNotificationRoutes();
+  const raw = String(rawArguments || "").trim();
+  if (!raw) return null;
+  const candidates = new Set([raw]);
+  try {
+    candidates.add(decodeURIComponent(raw));
+  } catch {}
+  try {
+    const parsed = JSON.parse(raw);
+    [parsed?.token, parsed?.id, parsed?.notificationId, parsed?.arguments]
+      .filter(Boolean)
+      .forEach((value) => candidates.add(String(value)));
+  } catch {}
+  for (const [token, route] of nativeWindowsNotificationRoutes) {
+    if (
+      Array.from(candidates).some(
+        (candidate) => candidate === token || candidate.includes(token),
+      )
+    ) {
+      return { token, route };
+    }
+  }
+  return null;
+}
+
+function dispatchNotificationNavigation(route, options = {}) {
+  const source = String(options?.source || route?.source || "notification");
+  const token = String(options?.token || "").trim();
+  if (!route || !isNotificationClickRedirectEnabled()) {
+    notificationLogger.info("notification-navigation:ignored", {
+      source,
+      reason: route ? "disabled" : "invalid-route",
+    });
+    return false;
+  }
+  if (token) {
+    const dedupeKey = `notification:${token}`;
+    const now = Date.now();
+    pruneRecentAppNavigationKeys(now);
+    const previous = recentAppNavigationKeys.get(dedupeKey) || 0;
+    if (now - previous <= 5000) {
+      notificationLogger.info("notification-navigation:deduped", {
+        source,
+        token,
+      });
+      return false;
+    }
+    recentAppNavigationKeys.set(dedupeKey, now);
+  }
+  const target = getNotificationClickRedirectTarget();
+  notificationLogger.info("notification-navigation:click", {
+    source,
+    target,
+    configName: route?.configName || null,
+    appid: route?.appid || null,
+    platform: route?.platform || null,
+    achievementId: route?.achievementId || null,
+  });
+  if (target === "overlay") {
+    return requestOverlayNotificationNavigation(route, { source, token });
+  }
+  return requestAppNavigation(route, {
+    source,
+    showWindow: true,
+  });
+}
+
+function initializeNativeWindowsActivationHandler() {
+  if (
+    nativeWindowsActivationHandlerRegistered ||
+    process.platform !== "win32" ||
+    typeof Notification.handleActivation !== "function"
+  ) {
+    return;
+  }
+  nativeWindowsActivationHandlerRegistered = true;
+  loadNativeWindowsNotificationRoutes();
+  if (!isNotificationClickRedirectEnabled()) {
+    clearNativeWindowsNotificationRoutes("startup-disabled");
+  }
+  Notification.handleActivation((details = {}) => {
+    if (String(details?.type || "").toLowerCase() !== "click") return;
+    if (!isNotificationClickRedirectEnabled()) {
+      notificationLogger.info(
+        "native-windows-notification:activation-ignored",
+        { reason: "redirect-disabled" },
+      );
+      return;
+    }
+    const match = findNativeWindowsNotificationRoute(details?.arguments);
+    if (!match) {
+      notificationLogger.warn("native-windows-notification:activation-unmatched", {
+        hasArguments: !!String(details?.arguments || "").trim(),
+      });
+      return;
+    }
+    notificationLogger.info("native-windows-notification:activated", {
+      token: match.token,
+      configName: match.route?.configName || null,
+      achievementId: match.route?.achievementId || null,
+      coldStart: !mainWindow || mainWindow.isDestroyed(),
+    });
+    dispatchNotificationNavigation(match.route, {
+      token: match.token,
+      source: "native-notification-activation",
+    });
+  });
+}
+
+function removeAnimatedNotificationNavigationRoute(webContentsId) {
+  const id = Number(webContentsId);
+  if (!Number.isFinite(id)) return;
+  animatedNotificationNavigationRoutes.delete(id);
+}
+
+function disableActiveAnimatedNotificationNavigation(reason = "unknown") {
+  if (!animatedNotificationNavigationRoutes.size) return;
+  const entries = Array.from(animatedNotificationNavigationRoutes.entries());
+  animatedNotificationNavigationRoutes.clear();
+  for (const [, entry] of entries) {
+    const notificationWindow = entry?.window;
+    if (!notificationWindow || notificationWindow.isDestroyed()) continue;
+    try {
+      notificationWindow.setIgnoreMouseEvents(true, { forward: true });
+    } catch {}
+    try {
+      if (!notificationWindow.webContents.isDestroyed()) {
+        notificationWindow.webContents.send("notification-navigation:disable");
+      }
+    } catch {}
+  }
+  notificationLogger.info("notification-navigation:animated-disabled", {
+    reason,
+    windows: entries.length,
+  });
+}
+
+function registerAnimatedNotificationNavigation(
+  notificationWindow,
+  notificationData = {},
+) {
+  if (
+    !notificationWindow ||
+    notificationWindow.isDestroyed() ||
+    !isNotificationClickRedirectEnabled()
+  ) {
+    return false;
+  }
+  const route = createNotificationNavigationRoute(
+    notificationData,
+    "animated-notification",
+  );
+  if (!route) return false;
+  const webContentsId = notificationWindow.webContents.id;
+  animatedNotificationNavigationRoutes.set(webContentsId, {
+    route,
+    window: notificationWindow,
+    createdAt: Date.now(),
+  });
+
+  const enableClick = () => {
+    const entry = animatedNotificationNavigationRoutes.get(webContentsId);
+    if (
+      !entry ||
+      !isNotificationClickRedirectEnabled() ||
+      notificationWindow.isDestroyed() ||
+      notificationWindow.webContents.isDestroyed()
+    ) {
+      removeAnimatedNotificationNavigationRoute(webContentsId);
+      return;
+    }
+    try {
+      notificationWindow.webContents.send("notification-navigation:enable");
+      notificationWindow.setIgnoreMouseEvents(false);
+      notificationLogger.info("notification-navigation:animated-enabled", {
+        webContentsId,
+        configName: route.configName || null,
+        achievementId: route.achievementId || null,
+      });
+    } catch (error) {
+      removeAnimatedNotificationNavigationRoute(webContentsId);
+      notificationLogger.warn("notification-navigation:animated-enable-failed", {
+        webContentsId,
+        error: error?.message || String(error),
+      });
+    }
+  };
+
+  if (notificationWindow.webContents.isLoading()) {
+    notificationWindow.webContents.once("did-finish-load", enableClick);
+  } else {
+    enableClick();
+  }
+  notificationWindow.once("closed", () => {
+    removeAnimatedNotificationNavigationRoute(webContentsId);
+  });
+  return true;
+}
+
+ipcMain.on("notification-navigation:click", (event) => {
+  const webContentsId = Number(event?.sender?.id);
+  const entry = animatedNotificationNavigationRoutes.get(webContentsId);
+  if (!entry) return;
+  animatedNotificationNavigationRoutes.delete(webContentsId);
+  const notificationWindow = entry.window;
+  try {
+    if (notificationWindow && !notificationWindow.isDestroyed()) {
+      notificationWindow.setIgnoreMouseEvents(true, { forward: true });
+    }
+  } catch {}
+
+  dispatchNotificationNavigation(entry.route, {
+    token: `animated-${webContentsId}-${entry.createdAt}`,
+    source: "animated-notification-click",
+  });
+
+  try {
+    if (notificationWindow && !notificationWindow.isDestroyed()) {
+      notificationWindow.close();
+    }
+  } catch {}
+});
 
 function buildNativeWindowsNotificationGroupId(notificationData = {}) {
   const source =
@@ -13362,6 +14340,21 @@ function showNativeWindowsAchievementNotification(
     .filter(Boolean)
     .join("\n");
   const groupId = buildNativeWindowsNotificationGroupId(notificationData);
+  const notificationId = `ach-${crypto
+    .createHash("sha1")
+    .update(
+      [
+        notificationData.config_path || "",
+        notificationData.name || "",
+        notificationData.displayName || "",
+        Date.now(),
+      ].join("::"),
+    )
+    .digest("hex")}`;
+  const hasNavigationRoute = registerNativeWindowsNotificationRoute(
+    notificationId,
+    notificationData,
+  );
 
   let nativeNotification = null;
   let referenceTimer = null;
@@ -13380,17 +14373,7 @@ function showNativeWindowsAchievementNotification(
 
   try {
     nativeNotification = new Notification({
-      id: crypto
-        .createHash("sha1")
-        .update(
-          [
-            notificationData.config_path || "",
-            notificationData.name || "",
-            notificationData.displayName || "",
-            Date.now(),
-          ].join("::"),
-        )
-        .digest("hex"),
+      id: notificationId,
       groupId,
       groupTitle: notificationData.configName || "Achievements",
       title,
@@ -13416,8 +14399,24 @@ function showNativeWindowsAchievementNotification(
       });
       invokeNativeWindowsNotificationCallback(callbacks.onShow);
     });
+    nativeNotification.once("click", () => {
+      if (!hasNavigationRoute) return;
+      const route = nativeWindowsNotificationRoutes.get(notificationId);
+      notificationLogger.info("native-windows-notification:click", {
+        token: notificationId,
+        configName: route?.configName || null,
+        achievementId: route?.achievementId || null,
+      });
+      dispatchNotificationNavigation(route, {
+        token: notificationId,
+        source: "native-notification-click",
+      });
+    });
     nativeNotification.once("failed", (_event, error) => {
       releaseReference();
+      if (hasNavigationRoute) {
+        removeNativeWindowsNotificationRoute(notificationId);
+      }
       notificationLogger.warn("native-windows-notification:failed", {
         displayName: notificationData.displayName,
         error: error || null,
@@ -13427,6 +14426,9 @@ function showNativeWindowsAchievementNotification(
     nativeNotification.once("close", (details) => {
       releaseReference();
       const reason = details?.reason || null;
+      if (hasNavigationRoute && reason === "userCanceled") {
+        removeNativeWindowsNotificationRoute(notificationId);
+      }
       notificationLogger.info("native-windows-notification:closed", {
         displayName: notificationData.displayName,
         reason,
@@ -13437,6 +14439,9 @@ function showNativeWindowsAchievementNotification(
     return nativeNotification;
   } catch (error) {
     releaseReference();
+    if (hasNavigationRoute) {
+      removeNativeWindowsNotificationRoute(notificationId);
+    }
     notificationLogger.warn("native-windows-notification:show-failed", {
       displayName: notificationData.displayName,
       error: error?.message || String(error),
@@ -13467,6 +14472,10 @@ function showCustomAchievementNotification({
   let notificationWindow = null;
   try {
     notificationWindow = createNotificationWindow(notificationData);
+    registerAnimatedNotificationNavigation(
+      notificationWindow,
+      notificationData,
+    );
   } catch (error) {
     notificationLogger.warn("show-notification:custom-create-failed", {
       displayName: notificationData.displayName,
@@ -18421,6 +19430,14 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   setOverlayWindowOpacitySafely(0, "createOverlayWindow:initial");
   //setOverlayInteractive(false);
   const iconUrl = pathToFileURL(ICON_PNG_PATH).toString();
+  overlayNavigationRendererReadyWebContentsId = null;
+  overlayWindow.webContents.on("did-start-loading", () => {
+    overlayNavigationRendererReadyWebContentsId = null;
+    if (pendingOverlayNotificationNavigation) {
+      delete pendingOverlayNotificationNavigation.dispatchedWebContentsId;
+      delete pendingOverlayNotificationNavigation.dispatchedAt;
+    }
+  });
   overlayWindow
     .loadFile("overlay.html", { query: { icon: iconUrl } })
     .catch((err) => {
@@ -18477,6 +19494,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       language: selectedLanguage,
       uiLanguage: selectedUiLanguage,
     });
+    flushPendingOverlayNotificationNavigation();
     const dispatched = sendOverlayVisibility(
       overlayPresented,
       "createOverlayWindow:did-finish-load",
@@ -18509,6 +19527,8 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
     clearOverlayTopmostBoostTimer();
     stopOverlayGlobalDrag();
     overlayWindow = null;
+    pendingOverlayNotificationNavigation = null;
+    overlayNavigationRendererReadyWebContentsId = null;
     overlayInteractive = false;
     overlayPresented = false;
     overlayReadyToShow = false;
@@ -20040,6 +21060,7 @@ app.whenReady().then(async () => {
     platform: process.platform,
     arch: process.arch,
   });
+  initializeNativeWindowsActivationHandler();
   try {
     await ensureSchemaParseRuntimeReady({
       userDataDir: app.getPath("userData"),
@@ -20126,7 +21147,11 @@ app.whenReady().then(async () => {
   copyProgressTemplateToUserPresetsOnce();
   void pruneAppUpdatePendingCache({ trigger: "startup" });
 
-  createMainWindow();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createMainWindow({ forceShow: !!pendingAppNavigationRoute });
+  } else if (pendingAppNavigationRoute) {
+    showMainWindowForNavigation();
+  }
   syncOverlayControllerSupportState("app-ready", cachedPreferences);
   scheduleAutoSelectProcessPollerAfterBoot();
   mainWindow.hide();
@@ -21206,9 +22231,6 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
     for (const proc of Array.isArray(procs) ? procs : []) {
       const pid = Math.floor(Number(proc?.pid));
       if (Number.isFinite(pid) && pid > 0) livePids.add(pid);
-      if (proc && typeof proc === "object") {
-        proc.__processDetectionMode = detectionMode;
-      }
     }
   }
   for (const [pid, cached] of processCommandLineCache) {
@@ -21230,7 +22252,6 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
     for (const proc of Array.isArray(procs) ? procs : []) {
       const pid = Math.floor(Number(proc?.pid));
       if (!Number.isFinite(pid) || pid <= 0) continue;
-      proc.__requireCommandLineForArgs = requireCommandLineForArguments;
       if (!requireCommandLineForArguments) continue;
       if (normalizeProcessCmdLine(proc)) continue;
 
@@ -21285,31 +22306,29 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
   }
 }
 
-function processMatchesConfig(proc, configData, configName) {
+function getProcessConfigMatchKind(proc, configData, configName) {
   if (!proc || !proc.name || !hasProcessNameValue(configData?.process_name)) {
-    return false;
+    return PROCESS_CONFIG_MATCH.NONE;
   }
   const exeNames = getProcessExecutableNames(configData.process_name);
-  if (!exeNames.length) return false;
-  if (!exeNames.includes(String(proc.name || "").toLowerCase())) return false;
+  if (!exeNames.length) return PROCESS_CONFIG_MATCH.NONE;
   const mapped = manualLaunchPidMap.get(proc.pid);
-  if (mapped) return mapped === configName;
   const argTokens = getConfigProcessArgTokens(configData);
-  if (!argTokens.length) return true;
-  const cmdLine = normalizeProcessCmdLine(proc);
-  if (!cmdLine) {
-    const detectionMode = String(
-      proc.__processDetectionMode ||
-        processPoller.getStatus()?.processDetectionMode ||
-        "",
-    );
-    return (
-      detectionMode === "fallback-preference" ||
-      detectionMode === "fallback-degraded" ||
-      detectionMode === "poll"
-    );
-  }
-  return argTokens.every((token) => cmdLine.includes(token));
+  return classifyProcessConfigMatch({
+    processName: proc.name,
+    executableNames: exeNames,
+    argumentTokens: argTokens,
+    commandLine: normalizeProcessCmdLine(proc),
+    mappedConfigName: mapped || null,
+    configName,
+  });
+}
+
+function processMatchesConfig(proc, configData, configName) {
+  return (
+    getProcessConfigMatchKind(proc, configData, configName) !==
+    PROCESS_CONFIG_MATCH.NONE
+  );
 }
 
 async function autoSelectRunningGameConfigOnce(processes) {
@@ -21522,56 +22541,70 @@ async function autoSelectRunningGameConfigOnce(processes) {
         if (!entry) continue;
         if (isBlacklisted(entry)) continue;
 
-        const argTokens = getConfigProcessArgTokens(entry.data);
-        const matchingProcesses = (Array.isArray(procs) ? procs : []).filter(
-          (processInfo) =>
-            processMatchesConfig(processInfo, entry.data, entry.name),
+        const processMatches = (Array.isArray(procs) ? procs : [])
+          .map((processInfo) => ({
+            processInfo,
+            matchKind: getProcessConfigMatchKind(
+              processInfo,
+              entry.data,
+              entry.name,
+            ),
+          }))
+          .filter(
+            ({ matchKind }) => matchKind !== PROCESS_CONFIG_MATCH.NONE,
+          );
+        if (!processMatches.length) continue;
+        processMatches.sort(
+          (a, b) =>
+            getProcessConfigMatchRank(b.matchKind) -
+            getProcessConfigMatchRank(a.matchKind),
         );
-        if (!matchingProcesses.length) continue;
-        const exactArgumentMatch =
-          argTokens.length > 0 &&
-          matchingProcesses.some((processInfo) => {
-            const commandLine = normalizeProcessCmdLine(processInfo);
-            return (
-              !!commandLine &&
-              argTokens.every((token) => commandLine.includes(token))
-            );
-          });
+        const bestProcessMatch = processMatches[0];
         matchingCandidates.push({
           configName,
           entry,
-          exactArgumentMatch,
-          generic: argTokens.length === 0,
+          matchKind: bestProcessMatch.matchKind,
+          processInfo: bestProcessMatch.processInfo,
         });
       }
 
       if (!matchingCandidates.length) continue;
-      matchingCandidates.sort((a, b) => {
-        if (a.exactArgumentMatch !== b.exactArgumentMatch) {
-          return a.exactArgumentMatch ? -1 : 1;
-        }
-        if (a.generic !== b.generic) return a.generic ? -1 : 1;
-        return String(a.configName).localeCompare(String(b.configName));
-      });
-
-      const selectedCandidate = matchingCandidates[0];
+      const candidateSelection = selectBestProcessConfigCandidate(
+        matchingCandidates,
+      );
       const detectionMode = String(
         processPoller.getStatus()?.processDetectionMode || "",
       );
+      if (candidateSelection.ambiguous) {
+        if (Date.now() - processMatchAmbiguityWarnLastAt >= 30000) {
+          processMatchAmbiguityWarnLastAt = Date.now();
+          appLogger.warn("process-poller:ambiguous-executable-match", {
+            executable: exe,
+            detectionMode,
+            matchRank: candidateSelection.matchRank,
+            candidates: candidateSelection.bestCandidates.map((candidate) => ({
+              config: sanitizeConfigName(candidate.configName),
+              matchKind: candidate.matchKind,
+            })),
+          });
+        }
+        continue;
+      }
+
+      const selectedCandidate = candidateSelection.selected;
+      if (!selectedCandidate) continue;
       if (
-        matchingCandidates.length > 1 &&
-        (detectionMode === "fallback-preference" ||
-          detectionMode === "fallback-degraded") &&
-        Date.now() - processMatchAmbiguityWarnLastAt >= 30000
+        selectedCandidate.matchKind ===
+          PROCESS_CONFIG_MATCH.EXECUTABLE_ARGUMENTS_MISMATCH ||
+        selectedCandidate.matchKind ===
+          PROCESS_CONFIG_MATCH.EXECUTABLE_COMMAND_LINE_UNAVAILABLE
       ) {
-        processMatchAmbiguityWarnLastAt = Date.now();
-        appLogger.warn("process-poller:ambiguous-executable-match", {
+        appLogger.info("process-poller:executable-fallback-match", {
           executable: exe,
           detectionMode,
-          candidates: matchingCandidates.map((candidate) =>
-            sanitizeConfigName(candidate.configName),
-          ),
-          selected: sanitizeConfigName(selectedCandidate.configName),
+          config: sanitizeConfigName(selectedCandidate.configName),
+          reason: selectedCandidate.matchKind,
+          candidateCount: candidateSelection.candidates.length,
         });
       }
 
@@ -22966,7 +23999,7 @@ function quoteForCmd(arg) {
 
 function buildStartupCommandLine() {
   const exe = quoteForCmd(process.execPath);
-  const argList = process.argv.slice(1).map(quoteForCmd);
+  const argList = stripAppNavigationArgs(process.argv.slice(1)).map(quoteForCmd);
   return [exe].concat(argList).join(" ").trim();
 }
 

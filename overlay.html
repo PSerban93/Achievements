@@ -429,6 +429,15 @@
         background-color: var(--app-overlay-hover);
       }
 
+      .achievement-item.notification-navigation-target {
+        background-color: color-mix(
+          in srgb,
+          var(--dracula-purple) 28%,
+          transparent
+        );
+        box-shadow: inset 3px 0 0 var(--dracula-cyan);
+      }
+
       .achievement-icon {
         width: 48px;
         height: 48px;
@@ -746,6 +755,9 @@
       let currentDataHash = null;
       let isLoading = false;
       let pendingConfigName = null;
+      let pendingNotificationNavigation = null;
+      const NOTIFICATION_NAVIGATION_TARGET_TIMEOUT_MS = 10000;
+      let notificationNavigationTargetTimer = null;
       let pendingVisibilityAckPayload = null;
 
       function dispatchOverlayVisibilityAck(payload, reason = "immediate") {
@@ -1146,6 +1158,111 @@
         });
       }
 
+      function clearNotificationNavigationTarget() {
+        if (notificationNavigationTargetTimer) {
+          clearTimeout(notificationNavigationTargetTimer);
+          notificationNavigationTargetTimer = null;
+        }
+        document
+          .querySelectorAll(
+            "#achievements-list .notification-navigation-target",
+          )
+          .forEach((item) =>
+            item.classList.remove("notification-navigation-target"),
+          );
+      }
+
+      function reportNotificationNavigationResult(
+        pending,
+        success,
+        reason = "",
+      ) {
+        if (!pending) return;
+        try {
+          window.api?.overlayNavigationResult?.({
+            requestId: String(pending.requestId || ""),
+            success: success === true,
+            reason: String(reason || ""),
+            configName: String(pending.configName || currentConfigName || ""),
+            achievementId: String(pending.achievementId || ""),
+          });
+        } catch {}
+      }
+
+      function flushPendingNotificationNavigation() {
+        const pending = pendingNotificationNavigation;
+        if (!pending || isLoading) return false;
+        if (
+          String(pending.configName || "") !== String(currentConfigName || "")
+        ) {
+          // On the first presentation the navigation IPC can arrive as soon as
+          // this renderer declares itself ready, just before main sends the
+          // initial config. Keep the route pending; loadAchievements() flushes
+          // it after that config and its rows are ready.
+          window.api?.logOverlayEvent?.(
+            "debug",
+            "notification-navigation:overlay-renderer-waiting",
+            {
+              reason: "config-not-ready",
+              currentConfig: currentConfigName || null,
+              notificationConfig: pending.configName || null,
+            },
+          );
+          return false;
+        }
+        const achievementId = String(pending.achievementId || "").trim();
+        const item = Array.from(
+          document.querySelectorAll("#achievements-list li.achievement-item"),
+        ).find(
+          (candidate) =>
+            String(candidate?.dataset?.achievementName || "") === achievementId,
+        );
+        pendingNotificationNavigation = null;
+        if (!item || item.style.display === "none") {
+          reportNotificationNavigationResult(
+            pending,
+            false,
+            item ? "achievement-filtered" : "achievement-not-found",
+          );
+          window.api?.logOverlayEvent?.(
+            "info",
+            "notification-navigation:overlay-renderer-failed",
+            {
+              reason: item ? "achievement-filtered" : "achievement-not-found",
+              configName: currentConfigName || null,
+              achievementId,
+            },
+          );
+          return false;
+        }
+        clearNotificationNavigationTarget();
+        item.classList.add("notification-navigation-target");
+        notificationNavigationTargetTimer = setTimeout(() => {
+          clearNotificationNavigationTarget();
+        }, NOTIFICATION_NAVIGATION_TARGET_TIMEOUT_MS);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              item.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+                inline: "nearest",
+              });
+            } catch {}
+          });
+        });
+        window.api?.logOverlayEvent?.(
+          "info",
+          "notification-navigation:overlay-renderer-complete",
+          {
+            configName: currentConfigName || null,
+            achievementId,
+          },
+        );
+        reportNotificationNavigationResult(pending, true);
+        return true;
+      }
+
       function applyOverlayAchievementTableViewState(payload) {
         const normalized = normalizeOverlayAchievementTableState(payload);
         if (!normalized) return;
@@ -1239,7 +1356,10 @@
 
           const isSameConfig = currentConfigName === configName;
           const isSameHash = currentDataHash === newHash;
-          if (isSameConfig && isSameHash) return;
+          if (isSameConfig && isSameHash) {
+            flushPendingNotificationNavigation();
+            return;
+          }
 
           emptyState.style.display = "none";
           achievementsList.style.display = "block";
@@ -1333,6 +1453,7 @@
 
             const listItem = document.createElement("li");
             listItem.className = "achievement-item";
+            listItem.dataset.achievementName = String(achievement.name);
             const rarityGlowTierClass = resolveRarityGlowTierClass(achievement);
             listItem.dataset.defaultIndex = String(defaultItemIndex++);
             listItem.dataset.sortName = String(
@@ -1377,6 +1498,7 @@
 
           currentConfigName = configName;
           currentDataHash = newHash;
+          flushPendingNotificationNavigation();
         } finally {
           isLoading = false;
           const next = pendingConfigName;
@@ -1384,6 +1506,7 @@
           if (next) {
             loadAchievements(next);
           } else {
+            flushPendingNotificationNavigation();
             flushOverlayVisibilityAck("loadAchievements:finally");
           }
         }
@@ -1431,6 +1554,8 @@
         const emptyState = document.getElementById("empty-state");
 
         if (!configName) {
+          clearNotificationNavigationTarget();
+          pendingNotificationNavigation = null;
           achievementsList.innerHTML = "";
           emptyState.style.display = "flex";
           achievementsList.style.display = "none";
@@ -1444,6 +1569,7 @@
         }
 
         if (configName !== currentConfigName) {
+          clearNotificationNavigationTarget();
           currentDataHash = null;
         }
         currentConfigName = configName;
@@ -1461,6 +1587,17 @@
       window.api.on("ach-table:view-state", (payload) => {
         applyOverlayAchievementTableViewState(payload);
       });
+
+      window.api.on("overlay:navigate-achievement", (payload) => {
+        if (!payload || typeof payload !== "object") return;
+        pendingNotificationNavigation = {
+          requestId: String(payload.requestId || ""),
+          configName: String(payload.configName || ""),
+          achievementId: String(payload.achievementId || ""),
+        };
+        flushPendingNotificationNavigation();
+      });
+      window.api.overlayNavigationReady?.();
 
       window.api.on("overlay-preferences-updated", (payload) => {
         if (!payload || typeof payload !== "object") return;

@@ -796,6 +796,12 @@ async function generateConfigFromAppcacheBin(
   const appidMatch = path.basename(schemaBinPath).match(/UserGameStatsSchema_(\d+)\.bin/i);
   if (!appidMatch) return null;
   const appid = appidMatch[1];
+  if (
+    typeof options?.shouldSkipAppId === "function" &&
+    options.shouldSkipAppId(appid) === true
+  ) {
+    return { appid, skipped: true, reason: "blacklisted" };
+  }
   const onGenerationProgress =
     typeof options?.onGenerationProgress === "function"
       ? options.onGenerationProgress
