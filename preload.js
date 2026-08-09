@@ -491,6 +491,8 @@ contextBridge.exposeInMainWorld("api", {
   },
   clearActiveConfig: (payload = {}) =>
     ipcRenderer.invoke("config:clear-active", payload),
+  getActiveConfigSelection: () =>
+    ipcRenderer.invoke("config:get-active-selection"),
   blacklistConfig: (payload) => ipcRenderer.invoke("config:blacklist", payload),
   addManualBlacklistedAppIds: (appids) =>
     ipcRenderer.invoke("blacklist:add-manual", { appids }),

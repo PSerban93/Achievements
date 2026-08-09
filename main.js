@@ -70,6 +70,12 @@ const {
   stripAppNavigationArgs,
 } = require("./utils/app-navigation");
 const {
+  buildNativeWindowsAchievementToastXml,
+  decodeNativeWindowsNotificationLaunchArguments,
+  encodeNativeWindowsNotificationLaunchArguments,
+  NativeWindowsNotificationReferenceStore,
+} = require("./utils/native-windows-notification-navigation");
+const {
   buildBlacklistConfigKey,
   normalizeAppIdValue,
   normalizeBlacklistConfigKey,
@@ -6192,6 +6198,7 @@ function applyPreferenceSideEffects(
     prefsSnapshot.notificationClickRedirectEnabled !== true
   ) {
     disableActiveAnimatedNotificationNavigation("preferences-disabled");
+    activeNativeAchievementNotifications.releaseAll("preferences-disabled");
     clearNativeWindowsNotificationRoutes("preferences-disabled");
   }
   if (Object.prototype.hasOwnProperty.call(patch, "lumaPlayWatcherEnabled")) {
@@ -10667,6 +10674,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
   let deletionGuardToken = null;
   let saveDeletionTargets = [];
   let configFileDeleted = false;
+  let deletedConfigIdentity = null;
   let configStateRefreshAttempted = false;
   const refreshDeletedConfigState = async () => {
     if (
@@ -10814,6 +10822,10 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         fs.unlinkSync(configPath),
       );
       configFileDeleted = true;
+      deletedConfigIdentity = {
+        configName: safeName,
+        appid,
+      };
       clearPendingMissingAchievementFile(configName);
 
       if (deleteExtras) {
@@ -11018,6 +11030,29 @@ ipcMain.handle("delete-config", async (_event, payload) => {
     return { success: false, error: error.message };
   } finally {
     await refreshDeletedConfigState();
+    if (configFileDeleted && deletedConfigIdentity) {
+      const resetResult = resetMainPlatinumNotificationState(
+        deletedConfigIdentity,
+      );
+      let watcherResetResult = null;
+      try {
+        watcherResetResult =
+          watchedFoldersApi?.resetPlatinumState?.(deletedConfigIdentity) ||
+          null;
+      } catch (error) {
+        logDeleteWarn("delete-config:platinum-state-reset-failed", {
+          configName: deletedConfigIdentity.configName,
+          appid: deletedConfigIdentity.appid || null,
+          error: error?.message || String(error),
+        });
+      }
+      logDeleteInfo("delete-config:platinum-state-reset", {
+        configName: deletedConfigIdentity.configName,
+        appid: deletedConfigIdentity.appid || null,
+        main: resetResult,
+        watcher: watcherResetResult,
+      });
+    }
     if (deletionGuardToken && watchedFoldersApi?.endConfigDeletion) {
       try {
         await watchedFoldersApi.endConfigDeletion(deletionGuardToken, {
@@ -13412,6 +13447,86 @@ const RECENT_ACHIEVEMENT_NOTIFICATION_DEDUPE_MS = 1500;
 const recentAchievementNotificationKeys = new Map();
 const NATIVE_WINDOWS_PRESET_NAME = "Native Windows";
 
+function matchesPlatinumNotificationIdentity(notificationData, identity = {}) {
+  if (
+    !notificationData ||
+    (notificationData.isPlatinum !== true &&
+      notificationData.__isPlatinum !== true)
+  ) {
+    return false;
+  }
+  const rawTargetName = String(identity?.configName || "").trim();
+  const targetName = rawTargetName ? sanitizeConfigName(rawTargetName) : "";
+  const rawPayloadName = String(
+    notificationData?.configName || notificationData?.config_name || "",
+  ).trim();
+  const payloadName = rawPayloadName
+    ? sanitizeConfigName(rawPayloadName)
+    : "";
+  if (targetName && payloadName) return targetName === payloadName;
+  const targetAppId = String(identity?.appid || "").trim();
+  const payloadAppId = String(
+    notificationData?.appid || notificationData?.appId || "",
+  ).trim();
+  return !!targetAppId && !!payloadAppId && targetAppId === payloadAppId;
+}
+
+function resetMainPlatinumNotificationState(identity = {}) {
+  const rawConfigName = String(identity?.configName || "").trim();
+  const configName = rawConfigName ? sanitizeConfigName(rawConfigName) : "";
+  const appid = String(identity?.appid || "").trim();
+  const removedDedupByConfig = configName
+    ? platinumDedup.delete(configName)
+    : false;
+  const removedDedupByApp = appid ? platinumDedup.delete(appid) : false;
+
+  let removedPendingByConfig = 0;
+  for (const [key, payload] of pendingPlatinumByConfig) {
+    const safeKey = String(key || "").trim();
+    if (
+      (configName && sanitizeConfigName(safeKey) === configName) ||
+      matchesPlatinumNotificationIdentity(payload, { configName, appid })
+    ) {
+      pendingPlatinumByConfig.delete(key);
+      removedPendingByConfig += 1;
+    }
+  }
+
+  const removedPendingNotification = matchesPlatinumNotificationIdentity(
+    pendingPlatinumNotification,
+    { configName, appid },
+  );
+  if (removedPendingNotification) {
+    pendingPlatinumNotification = null;
+    platinumAwaitingNormal = false;
+    if (platinumFallbackTimer) {
+      clearTimeout(platinumFallbackTimer);
+      platinumFallbackTimer = null;
+    }
+  }
+
+  let removedQueued = 0;
+  for (let index = earnedNotificationQueue.length - 1; index >= 0; index -= 1) {
+    if (
+      matchesPlatinumNotificationIdentity(earnedNotificationQueue[index], {
+        configName,
+        appid,
+      })
+    ) {
+      earnedNotificationQueue.splice(index, 1);
+      removedQueued += 1;
+    }
+  }
+
+  return {
+    removedDedupByConfig,
+    removedDedupByApp,
+    removedPendingByConfig,
+    removedPendingNotification,
+    removedQueued,
+  };
+}
+
 function isNativeWindowsNotificationPreset(preset) {
   return (
     String(preset || "")
@@ -13898,8 +14013,8 @@ async function captureAchievementUnlockScreenshot(notificationData = {}) {
   }
 }
 
-const activeNativeAchievementNotifications = new Set();
-const NATIVE_WINDOWS_REFERENCE_TIMEOUT_MS = 30000;
+const NATIVE_WINDOWS_REFERENCE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const NATIVE_WINDOWS_REFERENCE_MAX_ENTRIES = 64;
 const NATIVE_WINDOWS_QUEUE_INTERVAL_MS = 1250;
 const NATIVE_WINDOWS_SHOW_WATCHDOG_MS = 3000;
 const NATIVE_WINDOWS_ROUTE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -13912,6 +14027,17 @@ const nativeWindowsNotificationRoutesPath = path.join(
 );
 let nativeWindowsNotificationRoutesLoaded = false;
 let nativeWindowsActivationHandlerRegistered = false;
+const activeNativeAchievementNotifications =
+  new NativeWindowsNotificationReferenceStore({
+    maxEntries: NATIVE_WINDOWS_REFERENCE_MAX_ENTRIES,
+    ttlMs: NATIVE_WINDOWS_REFERENCE_TTL_MS,
+    onRelease: ({ token, reason, retainedMs, remaining }) => {
+      notificationLogger.debug(
+        "native-windows-notification:reference-released",
+        { token, reason, retainedMs, remaining },
+      );
+    },
+  });
 
 function pruneNativeWindowsNotificationRoutes(now = Date.now()) {
   for (const [token, route] of nativeWindowsNotificationRoutes) {
@@ -14049,9 +14175,21 @@ function removeNativeWindowsNotificationRoute(token) {
 }
 
 function findNativeWindowsNotificationRoute(rawArguments) {
-  loadNativeWindowsNotificationRoutes();
   const raw = String(rawArguments || "").trim();
   if (!raw) return null;
+
+  const embedded = decodeNativeWindowsNotificationLaunchArguments(raw);
+  if (embedded) {
+    const route = createAppNavigationRoute(
+      embedded.route,
+      "native-notification-activation",
+    );
+    if (route?.achievementId) {
+      return { token: embedded.token, route };
+    }
+  }
+
+  loadNativeWindowsNotificationRoutes();
   const candidates = new Set([raw]);
   try {
     candidates.add(decodeURIComponent(raw));
@@ -14130,7 +14268,18 @@ function initializeNativeWindowsActivationHandler() {
     clearNativeWindowsNotificationRoutes("startup-disabled");
   }
   Notification.handleActivation((details = {}) => {
-    if (String(details?.type || "").toLowerCase() !== "click") return;
+    const activationType = String(details?.type || "").toLowerCase();
+    notificationLogger.info("native-windows-notification:activation-received", {
+      type: activationType || null,
+      hasArguments: !!String(details?.arguments || "").trim(),
+    });
+    if (activationType !== "click") {
+      notificationLogger.info("native-windows-notification:activation-ignored", {
+        reason: "unsupported-type",
+        type: activationType || null,
+      });
+      return;
+    }
     if (!isNotificationClickRedirectEnabled()) {
       notificationLogger.info(
         "native-windows-notification:activation-ignored",
@@ -14155,6 +14304,15 @@ function initializeNativeWindowsActivationHandler() {
       token: match.token,
       source: "native-notification-activation",
     });
+    setImmediate(() => {
+      activeNativeAchievementNotifications.release(
+        match.token,
+        "global-activation",
+      );
+    });
+  });
+  notificationLogger.info("native-windows-notification:activation-handler-ready", {
+    toastActivatorCLSID: app.toastActivatorCLSID || null,
   });
 }
 
@@ -14355,53 +14513,82 @@ function showNativeWindowsAchievementNotification(
     notificationId,
     notificationData,
   );
+  const registeredNavigationRoute = hasNavigationRoute
+    ? nativeWindowsNotificationRoutes.get(notificationId) || null
+    : null;
 
   let nativeNotification = null;
-  let referenceTimer = null;
-  let referenceReleased = false;
-  const releaseReference = () => {
-    if (referenceReleased) return;
-    referenceReleased = true;
-    if (referenceTimer) {
-      clearTimeout(referenceTimer);
-      referenceTimer = null;
-    }
-    if (nativeNotification) {
-      activeNativeAchievementNotifications.delete(nativeNotification);
-    }
-  };
+  const releaseReference = (reason) =>
+    activeNativeAchievementNotifications.release(
+      notificationId,
+      reason,
+      nativeNotification,
+    );
 
   try {
-    nativeNotification = new Notification({
+    const notificationOptions = {
       id: notificationId,
       groupId,
       groupTitle: notificationData.configName || "Achievements",
-      title,
-      body,
-      icon: iconPath,
-      silent: true,
-      timeoutType: "default",
-      urgency: "normal",
-    });
+    };
+    if (hasNavigationRoute && registeredNavigationRoute) {
+      const launchArguments =
+        encodeNativeWindowsNotificationLaunchArguments({
+          token: notificationId,
+          ...registeredNavigationRoute,
+        });
+      notificationOptions.toastXml = buildNativeWindowsAchievementToastXml({
+        launchArguments,
+        groupId,
+        groupTitle: notificationData.configName || "Achievements",
+        title,
+        body,
+        iconUrl: pathToFileURL(iconPath).toString(),
+      });
+    } else {
+      Object.assign(notificationOptions, {
+        title,
+        body,
+        icon: iconPath,
+        silent: true,
+        timeoutType: "default",
+        urgency: "normal",
+      });
+    }
 
-    activeNativeAchievementNotifications.add(nativeNotification);
-    referenceTimer = setTimeout(() => {
-      releaseReference();
-    }, NATIVE_WINDOWS_REFERENCE_TIMEOUT_MS);
-    referenceTimer.unref?.();
+    nativeNotification = new Notification(notificationOptions);
+
+    if (hasNavigationRoute) {
+      activeNativeAchievementNotifications.retain(
+        notificationId,
+        nativeNotification,
+      );
+      notificationLogger.debug(
+        "native-windows-notification:reference-retained",
+        {
+          token: notificationId,
+          retained: activeNativeAchievementNotifications.size,
+          maxEntries: NATIVE_WINDOWS_REFERENCE_MAX_ENTRIES,
+          ttlMs: NATIVE_WINDOWS_REFERENCE_TTL_MS,
+        },
+      );
+    }
 
     nativeNotification.once("show", () => {
-      releaseReference();
       notificationLogger.info("native-windows-notification:show", {
         displayName: notificationData.displayName,
         config: notificationData.config_path || null,
         groupId,
+        navigationEnabled: hasNavigationRoute,
       });
       invokeNativeWindowsNotificationCallback(callbacks.onShow);
     });
     nativeNotification.once("click", () => {
+      releaseReference("instance-click");
       if (!hasNavigationRoute) return;
-      const route = nativeWindowsNotificationRoutes.get(notificationId);
+      const route =
+        registeredNavigationRoute ||
+        nativeWindowsNotificationRoutes.get(notificationId);
       notificationLogger.info("native-windows-notification:click", {
         token: notificationId,
         configName: route?.configName || null,
@@ -14413,7 +14600,7 @@ function showNativeWindowsAchievementNotification(
       });
     });
     nativeNotification.once("failed", (_event, error) => {
-      releaseReference();
+      releaseReference("failed");
       if (hasNavigationRoute) {
         removeNativeWindowsNotificationRoute(notificationId);
       }
@@ -14424,21 +14611,26 @@ function showNativeWindowsAchievementNotification(
       invokeNativeWindowsNotificationCallback(callbacks.onFailed, error);
     });
     nativeNotification.once("close", (details) => {
-      releaseReference();
       const reason = details?.reason || null;
+      const retainedForActionCenter =
+        hasNavigationRoute && reason === "timedOut";
+      if (!retainedForActionCenter) {
+        releaseReference(`closed:${reason || "unknown"}`);
+      }
       if (hasNavigationRoute && reason === "userCanceled") {
         removeNativeWindowsNotificationRoute(notificationId);
       }
       notificationLogger.info("native-windows-notification:closed", {
         displayName: notificationData.displayName,
         reason,
+        retainedForActionCenter,
       });
       invokeNativeWindowsNotificationCallback(callbacks.onClose, reason);
     });
     nativeNotification.show();
     return nativeNotification;
   } catch (error) {
-    releaseReference();
+    releaseReference("show-failed");
     if (hasNavigationRoute) {
       removeNativeWindowsNotificationRoute(notificationId);
     }
@@ -16913,6 +17105,12 @@ ipcMain.handle("config:clear-active", async (_event, payload = {}) => {
   }
 });
 
+ipcMain.handle("config:get-active-selection", () => ({
+  configName: isNonEmptyString(selectedConfig) ? selectedConfig : null,
+  platform: normalizePlatform(selectedPlatform) || null,
+  appid: currentAppId != null ? String(currentAppId) : null,
+}));
+
 ipcMain.on(
   "update-config",
   async (
@@ -16946,6 +17144,11 @@ ipcMain.on(
       normalizePlatform(platform) ||
       normalizePlatform(config?.platform) ||
       null;
+    ipcLogger.info("update-config:selected", {
+      configName,
+      platform: selectedPlatform,
+      appid: config?.appid != null ? String(config.appid) : null,
+    });
     selectedConfigPath = isNonEmptyString(config.config_path)
       ? config.config_path
       : null;
@@ -21165,6 +21368,7 @@ app.whenReady().then(async () => {
 });
 
 app.on("will-quit", () => {
+  activeNativeAchievementNotifications.releaseAll("app-will-quit");
   overlayControllerService?.shutdown?.("app:will-quit");
   clearOverlayShortcutRegistration();
   clearOverlayInteractShortcut();

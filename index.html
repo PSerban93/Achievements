@@ -5239,16 +5239,17 @@
         );
         if (hasManualEarned) return { triggered: false };
 
-        window.__platinumManualSent = window.__platinumManualSent || new Set();
+        window.__platinumManualPending =
+          window.__platinumManualPending || new Set();
         const key =
           configMeta.name ||
           configMeta.configName ||
           configMeta.appid ||
           configMeta.appId ||
           "";
-        if (!key || window.__platinumManualSent.has(key))
+        if (!key || window.__platinumManualPending.has(key))
           return { triggered: false };
-        window.__platinumManualSent.add(key);
+        window.__platinumManualPending.add(key);
 
         const payload = {
           configName: configMeta.name || configMeta.configName || "",
@@ -5280,6 +5281,8 @@
             err,
           );
           return { triggered: false };
+        } finally {
+          window.__platinumManualPending.delete(key);
         }
       }
 
@@ -10347,6 +10350,75 @@
       };
       let lastSelectedConfigMeta = null;
       let configChangeRequestSeq = 0;
+      const CONFIG_UI_SELECTION_IN_FLIGHT_TTL_MS = 15000;
+      const CONFIG_UI_SELECTION_DISPATCH_GRACE_MS = 1200;
+      let configUiAppliedName = "";
+      let configUiSelectionInFlight = {
+        name: "",
+        requestSeq: 0,
+        startedAt: 0,
+      };
+
+      function markConfigUiSelectionStarted(configName, requestSeq) {
+        const safeName = sanitizeConfigName(configName || "");
+        configUiSelectionInFlight = {
+          name: safeName,
+          requestSeq: Number(requestSeq) || 0,
+          startedAt: Date.now(),
+        };
+        if (configUiAppliedName !== safeName) configUiAppliedName = "";
+      }
+
+      function markConfigUiSelectionApplied(configName, requestSeq) {
+        const safeName = sanitizeConfigName(configName || "");
+        if (
+          configUiSelectionInFlight.requestSeq !== (Number(requestSeq) || 0) ||
+          configUiSelectionInFlight.name !== safeName
+        ) {
+          return false;
+        }
+        configUiAppliedName = safeName;
+        configUiSelectionInFlight = {
+          name: "",
+          requestSeq: 0,
+          startedAt: 0,
+        };
+        return true;
+      }
+
+      function clearConfigUiSelectionState(configName = "") {
+        const safeName = sanitizeConfigName(configName || "");
+        if (!safeName || configUiAppliedName === safeName) {
+          configUiAppliedName = "";
+        }
+        if (!safeName || configUiSelectionInFlight.name === safeName) {
+          configUiSelectionInFlight = {
+            name: "",
+            requestSeq: 0,
+            startedAt: 0,
+          };
+        }
+      }
+
+      function isConfigUiSelectionInFlight(
+        configName,
+        maxAgeMs = CONFIG_UI_SELECTION_IN_FLIGHT_TTL_MS,
+      ) {
+        const safeName = sanitizeConfigName(configName || "");
+        if (!safeName || configUiSelectionInFlight.name !== safeName) {
+          return false;
+        }
+        const ageMs = Date.now() - configUiSelectionInFlight.startedAt;
+        if (ageMs < 0 || ageMs > CONFIG_UI_SELECTION_IN_FLIGHT_TTL_MS) {
+          configUiSelectionInFlight = {
+            name: "",
+            requestSeq: 0,
+            startedAt: 0,
+          };
+          return false;
+        }
+        return ageMs <= maxAgeMs;
+      }
 
       function normalizeConfigEntry(entry) {
         if (!entry) return null;
@@ -11473,6 +11545,8 @@
           configName,
         });
         configChangeRequestSeq += 1;
+        clearConfigUiSelectionState(configName);
+        clearWatcherAutoSelect(configName);
         lastSelectedConfigMeta = null;
         configList.value = "";
         document.getElementById("backButton").style.display = "none";
@@ -11755,10 +11829,12 @@
           clearAppNavigationAchievementTarget();
           const selectedConfig = configList.value;
           const requestSeq = ++configChangeRequestSeq;
+          markConfigUiSelectionStarted(selectedConfig, requestSeq);
           const isStaleSelection = () =>
             requestSeq !== configChangeRequestSeq ||
             configList.value !== selectedConfig;
           if (!selectedConfig) {
+            clearConfigUiSelectionState();
             window.__cancelEmbeddedCoverLoads?.();
             lastSelectedConfigMeta = null;
             updateBlacklistButtonState(null);
@@ -11846,6 +11922,7 @@
           if (tableBody) {
             tableBody.innerHTML = "";
           } else {
+            clearConfigUiSelectionState(selectedConfig);
             console.error(
               tUi("log.tableBodyMissing", "Table body could not be found."),
             );
@@ -11854,6 +11931,7 @@
 
           if (achievementsDataObj.error) {
             setAchievementsHeaderVisible(false);
+            markConfigUiSelectionApplied(selectedConfig, requestSeq);
             alert(achievementsDataObj.error);
             return;
           }
@@ -11862,8 +11940,12 @@
             setAchievementsHeaderVisible(false);
             if (achievementsDataObj.achievements == null) {
               await showEmptyAchievementStats(selectedConfig);
+              if (!isStaleSelection()) {
+                markConfigUiSelectionApplied(selectedConfig, requestSeq);
+              }
               return;
             }
+            markConfigUiSelectionApplied(selectedConfig, requestSeq);
             console.warn(
               "Achievements payload is not an array; skipping table render.",
             );
@@ -11884,6 +11966,7 @@
           const achStatsEl = document.getElementById("achStats");
           if (achStatsEl) achStatsEl.style.display = "block";
           updateMuteProgressUI().catch(() => {});
+          markConfigUiSelectionApplied(selectedConfig, requestSeq);
           window.dispatchEvent(
             new CustomEvent("app-navigation:table-ready", {
               detail: { configName: selectedConfig },
@@ -14654,45 +14737,218 @@
         }
       }
 
+      const WATCHER_AUTO_SELECT_MARKER_TTL_MS = 5000;
+      const AUTO_SELECT_MAIN_CONFIRM_TIMEOUT_MS = 1000;
+      const AUTO_SELECT_MAIN_CONFIRM_POLL_MS = 50;
       let __watcherAutoSelect = null;
-      window.api.on("auto-select-config", async (configName) => {
-        const configList = document.getElementById("configList");
-        __watcherAutoSelect = sanitizeConfigName(configName);
-        if (!configList) return;
+      let watcherAutoSelectClearTimer = null;
+      let autoSelectUiSequence = 0;
+      let autoSelectPendingName = "";
 
-        const currentSafe = sanitizeConfigName(configList.value || "");
-        if (currentSafe === __watcherAutoSelect) {
-          return; // already selected, avoid duplicate reloads
-        }
-
-        const cached = configMetaIndex.get(configName);
+      function clearWatcherAutoSelect(expectedName = "") {
+        const expectedSafe = sanitizeConfigName(expectedName || "");
         if (
-          !blacklistState.showBlacklisted &&
-          cached?.appid &&
-          isAppIdInBlacklist(cached.appid, cached?.platform || null)
+          expectedSafe &&
+          sanitizeConfigName(__watcherAutoSelect || "") !== expectedSafe
         ) {
+          return false;
+        }
+        if (watcherAutoSelectClearTimer) {
+          clearTimeout(watcherAutoSelectClearTimer);
+          watcherAutoSelectClearTimer = null;
+        }
+        __watcherAutoSelect = null;
+        return true;
+      }
+
+      function setWatcherAutoSelect(configName) {
+        clearWatcherAutoSelect();
+        __watcherAutoSelect = sanitizeConfigName(configName || "");
+        if (!__watcherAutoSelect) return;
+        const expectedName = __watcherAutoSelect;
+        watcherAutoSelectClearTimer = setTimeout(() => {
+          clearWatcherAutoSelect(expectedName);
+        }, WATCHER_AUTO_SELECT_MARKER_TTL_MS);
+      }
+
+      async function readMainActiveConfigSelection() {
+        if (typeof window.api?.getActiveConfigSelection !== "function") {
+          return { available: false, configName: "" };
+        }
+        try {
+          const result = await window.api.getActiveConfigSelection();
+          return {
+            available: true,
+            configName: sanitizeConfigName(result?.configName || ""),
+          };
+        } catch (error) {
+          logUiEvent("warn", "ui:auto-select:active-query-failed", {
+            error: error?.message || String(error),
+          });
+          return { available: false, configName: "" };
+        }
+      }
+
+      async function waitForMainAutoSelectConfirmation(configName, sequence) {
+        const targetSafe = sanitizeConfigName(configName || "");
+        const deadline = Date.now() + AUTO_SELECT_MAIN_CONFIRM_TIMEOUT_MS;
+        while (Date.now() <= deadline) {
+          if (sequence !== autoSelectUiSequence) {
+            return { confirmed: false, superseded: true };
+          }
+          const active = await readMainActiveConfigSelection();
+          if (active.available && active.configName === targetSafe) {
+            return { confirmed: true, superseded: false };
+          }
+          await new Promise((resolve) =>
+            setTimeout(resolve, AUTO_SELECT_MAIN_CONFIRM_POLL_MS),
+          );
+        }
+        return { confirmed: false, superseded: false };
+      }
+
+      async function handleAutoSelectConfig(configName) {
+        const targetName = String(configName || "").trim();
+        const targetSafe = sanitizeConfigName(targetName);
+        if (!targetName || !targetSafe) return;
+
+        setWatcherAutoSelect(targetSafe);
+        if (autoSelectPendingName === targetSafe) {
+          logUiEvent("info", "ui:auto-select:skip-request-in-flight", {
+            configName: targetName,
+          });
           return;
         }
 
-        const ensureOption = async () => {
-          const hasOption = !!configList.querySelector(
-            `option[value="${configName.replace(/"/g, '\\"')}"]`,
+        const sequence = ++autoSelectUiSequence;
+        autoSelectPendingName = targetSafe;
+        try {
+          const configList = document.getElementById("configList");
+          if (!configList) {
+            logUiEvent("warn", "ui:auto-select:config-list-missing", {
+              configName: targetName,
+            });
+            return;
+          }
+
+          const currentSafe = sanitizeConfigName(configList.value || "");
+          const domAlreadySelected = currentSafe === targetSafe;
+          const uiApplied = configUiAppliedName === targetSafe;
+          const uiSelectionInFlight = isConfigUiSelectionInFlight(targetSafe);
+          const uiSelectionRecentlyDispatched = isConfigUiSelectionInFlight(
+            targetSafe,
+            CONFIG_UI_SELECTION_DISPATCH_GRACE_MS,
           );
-          if (!hasOption) {
+          const activeBefore = await readMainActiveConfigSelection();
+          if (sequence !== autoSelectUiSequence) return;
+
+          logUiEvent("info", "ui:auto-select:received", {
+            configName: targetName,
+            currentConfig: configList.value || null,
+            mainConfig: activeBefore.configName || null,
+            domAlreadySelected,
+            uiApplied,
+            uiSelectionInFlight,
+            uiSelectionRecentlyDispatched,
+          });
+
+          if (domAlreadySelected && uiSelectionRecentlyDispatched) {
+            logUiEvent("info", "ui:auto-select:skip-ui-in-flight", {
+              configName: targetName,
+            });
+            return;
+          }
+          if (
+            activeBefore.available &&
+            activeBefore.configName === targetSafe &&
+            domAlreadySelected &&
+            (uiApplied || uiSelectionInFlight)
+          ) {
+            logUiEvent("info", "ui:auto-select:skip-confirmed-active", {
+              configName: targetName,
+            });
+            return;
+          }
+
+          const cached = configMetaIndex.get(targetName);
+          if (
+            !blacklistState.showBlacklisted &&
+            cached?.appid &&
+            isAppIdInBlacklist(cached.appid, cached?.platform || null)
+          ) {
+            logUiEvent("info", "ui:auto-select:skip-blacklisted", {
+              configName: targetName,
+              appid: String(cached.appid),
+            });
+            return;
+          }
+
+          const findOption = () =>
+            Array.from(configList.options || []).find(
+              (option) => option.value === targetName,
+            ) || null;
+          if (!findOption()) {
             await reloadConfigsDropdown();
           }
-        };
+          if (sequence !== autoSelectUiSequence) return;
+          if (!findOption()) {
+            logUiEvent("warn", "ui:auto-select:option-missing", {
+              configName: targetName,
+            });
+            return;
+          }
 
-        await ensureOption();
+          const activeAfterReload = await readMainActiveConfigSelection();
+          if (sequence !== autoSelectUiSequence) return;
+          const domAfterReload =
+            sanitizeConfigName(configList.value || "") === targetSafe;
+          const uiAppliedAfterReload = configUiAppliedName === targetSafe;
+          const uiInFlightAfterReload =
+            isConfigUiSelectionInFlight(targetSafe);
+          if (
+            activeAfterReload.available &&
+            activeAfterReload.configName === targetSafe &&
+            domAfterReload &&
+            (uiAppliedAfterReload || uiInFlightAfterReload)
+          ) {
+            logUiEvent("info", "ui:auto-select:skip-confirmed-after-reload", {
+              configName: targetName,
+            });
+            return;
+          }
 
-        // if still missing, abort gracefully
-        const optionExists = !!configList.querySelector(
-          `option[value="${configName.replace(/"/g, '\\"')}"]`,
-        );
-        if (!optionExists) return;
+          configList.value = targetName;
+          configList.dispatchEvent(new Event("change", { bubbles: true }));
+          logUiEvent("info", "ui:auto-select:change-dispatched", {
+            configName: targetName,
+            previousMainConfig: activeAfterReload.configName || null,
+            recoveredSilentDropdownSelection: domAfterReload,
+          });
 
-        configList.value = configName;
-        configList.dispatchEvent(new Event("change", { bubbles: true }));
+          const confirmation = await waitForMainAutoSelectConfirmation(
+            targetSafe,
+            sequence,
+          );
+          if (confirmation.superseded) return;
+          if (confirmation.confirmed) {
+            logUiEvent("info", "ui:auto-select:confirmed", {
+              configName: targetName,
+            });
+          } else {
+            logUiEvent("warn", "ui:auto-select:confirmation-timeout", {
+              configName: targetName,
+              timeoutMs: AUTO_SELECT_MAIN_CONFIRM_TIMEOUT_MS,
+            });
+          }
+        } finally {
+          if (sequence === autoSelectUiSequence) {
+            autoSelectPendingName = "";
+          }
+        }
+      }
+
+      window.api.on("auto-select-config", (configName) => {
+        void handleAutoSelectConfig(configName);
       });
 
       const APP_NAVIGATION_ACHIEVEMENT_TARGET_TIMEOUT_MS = 10000;
@@ -23818,7 +24074,7 @@
             __watcherAutoSelect &&
             cfgSanitized &&
             __watcherAutoSelect === cfgSanitized;
-          __watcherAutoSelect = null;
+          clearWatcherAutoSelect(cfgSanitized);
           if (!cfg) return;
 
           const [achData, saved] = await Promise.all([

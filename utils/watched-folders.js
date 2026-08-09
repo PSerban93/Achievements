@@ -481,6 +481,23 @@ module.exports = function makeWatchedFolders({
   let deferredSeedOverlayWaitStartedAt = 0;
   let deferredSeedOverlayWaitWarned = false;
 
+  function resetPlatinumState(options = {}) {
+    const rawConfigName = String(options?.configName || "").trim();
+    const configName = rawConfigName ? sanitizeConfigName(rawConfigName) : "";
+    const appid = String(options?.appid || "").trim();
+    const removedConfig = configName
+      ? platinumNotified.delete(configName)
+      : false;
+    const removedApp = appid ? platinumNotifiedByApp.delete(appid) : false;
+    watcherLogger.info("platinum-state:reset", {
+      config: configName || null,
+      appid: appid || null,
+      removedConfig,
+      removedApp,
+    });
+    return { removedConfig, removedApp };
+  }
+
   const cacheMetaPath = (() => {
     try {
       if (app && typeof app.getPath === "function") {
@@ -12103,6 +12120,7 @@ module.exports = function makeWatchedFolders({
   return {
     beginConfigDeletion,
     endConfigDeletion,
+    resetPlatinumState,
     rebuildKnownAppIds,
     refreshConfigState,
     isBootOnboardingPending,
