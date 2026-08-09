@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "게임 내 오버레이",
   "option.notificationClickRedirectTargetApplication": "기본 애플리케이션",
   "settings.notificationClickNavigation.hint": "오버레이는 포커스를 받지 않고 클릭을 통과시킵니다. 기본 애플리케이션을 열면 게임에서 포커스가 이동합니다.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Achievements를 관리자로 실행하면 Native Windows 알림에 제한이 있습니다.",
   "settings-renderingTitle": "표현",
   "customCoverPathLabel": "맞춤 로컬 이미지",
   "customCoverChooseBtn": "로컬 이미지 선택",

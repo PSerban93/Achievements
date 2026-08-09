@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Overlay în joc",
   "option.notificationClickRedirectTargetApplication": "Aplicația principală",
   "settings.notificationClickNavigation.hint": "Overlay-ul rămâne fără focus și permite trecerea clicurilor. Deschiderea aplicației principale mută focusul de la joc.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Notificările Native Windows au limitări atunci când Achievements rulează ca administrator.",
   "settings-renderingTitle": "Randare",
   "customCoverPathLabel": "Imagine locala custom",
   "customCoverChooseBtn": "Alege imagine locala",

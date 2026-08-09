@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Herní překryv",
   "option.notificationClickRedirectTargetApplication": "Hlavní aplikace",
   "settings.notificationClickNavigation.hint": "Překryv zůstává bez fokusu a propouští kliknutí. Otevření hlavní aplikace přesune fokus ze hry.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Oznámení Native Windows mají omezení, když je aplikace Achievements spuštěna jako správce.",
   "settings-renderingTitle": "Vykreslování",
   "customCoverPathLabel": "Vlastní místní obrázek",
   "customCoverChooseBtn": "Vyberte Místní obrázek",

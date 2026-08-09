@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Játékon belüli overlay",
   "option.notificationClickRedirectTargetApplication": "Főalkalmazás",
   "settings.notificationClickNavigation.hint": "Az Overlay nem kap fókuszt, és átengedi a kattintásokat. A főalkalmazás megnyitása elveszi a fókuszt a játéktól.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "A Native Windows értesítések korlátozottan működnek, ha az Achievements rendszergazdaként fut.",
   "settings-renderingTitle": "Rendering",
   "customCoverPathLabel": "Egyedi helyi kép",
   "customCoverChooseBtn": "Válassza a Helyi kép lehetőséget",

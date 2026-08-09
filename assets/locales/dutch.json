@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "In-game overlay",
   "option.notificationClickRedirectTargetApplication": "Hoofdapplicatie",
   "settings.notificationClickNavigation.hint": "De overlay blijft niet-focusbaar en laat klikken door. Het openen van de hoofdapplicatie verplaatst de focus van het spel.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Native Windows-meldingen hebben beperkingen wanneer Achievements als administrator wordt uitgevoerd.",
   "settings-renderingTitle": "Weergave",
   "customCoverPathLabel": "Aangepaste lokale afbeelding",
   "customCoverChooseBtn": "Kies Lokale afbeelding",

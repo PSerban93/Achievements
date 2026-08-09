@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "In-game Overlay",
   "option.notificationClickRedirectTargetApplication": "Main application",
   "settings.notificationClickNavigation.hint": "The Overlay stays non-focusable and click-through. Opening the main application moves focus away from the game.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Native Windows notifications have limitations when Achievements runs as administrator.",
   "settings-renderingTitle": "Rendering",
   "customCoverPathLabel": "Custom local image",
   "customCoverChooseBtn": "Choose Local Image",

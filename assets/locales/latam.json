@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Overlay en el juego",
   "option.notificationClickRedirectTargetApplication": "Aplicación principal",
   "settings.notificationClickNavigation.hint": "El Overlay permanece sin recibir el foco y permite que los clics lo atraviesen. Abrir la aplicación principal quita el foco del juego.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Las notificaciones Native Windows tienen limitaciones cuando Achievements se ejecuta como administrador.",
   "settings-renderingTitle": "Representación",
   "customCoverPathLabel": "Imagen local personalizada",
   "customCoverChooseBtn": "Elija imagen local",

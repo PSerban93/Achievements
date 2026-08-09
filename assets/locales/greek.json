@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Overlay εντός παιχνιδιού",
   "option.notificationClickRedirectTargetApplication": "Κύρια εφαρμογή",
   "settings.notificationClickNavigation.hint": "Το Overlay παραμένει χωρίς εστίαση και επιτρέπει τη διέλευση των κλικ. Το άνοιγμα της κύριας εφαρμογής μεταφέρει την εστίαση από το παιχνίδι.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Οι ειδοποιήσεις Native Windows έχουν περιορισμούς όταν το Achievements εκτελείται ως διαχειριστής.",
   "settings-renderingTitle": "Απόδοση",
   "customCoverPathLabel": "Προσαρμοσμένη τοπική εικόνα",
   "customCoverChooseBtn": "Επιλέξτε Τοπική εικόνα",

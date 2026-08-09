@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "遊戲內覆蓋層",
   "option.notificationClickRedirectTargetApplication": "主應用程式",
   "settings.notificationClickNavigation.hint": "覆蓋層保持不可聚焦並允許點擊穿透。開啟主應用程式會將焦點從遊戲移開。",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "以系統管理員身分執行 Achievements 時，Native Windows 通知會受到限制。",
   "settings-renderingTitle": "算繪",
   "customCoverPathLabel": "自訂本機圖片",
   "customCoverChooseBtn": "選擇本機圖片",

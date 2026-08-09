@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "التراكب داخل اللعبة",
   "option.notificationClickRedirectTargetApplication": "التطبيق الرئيسي",
   "settings.notificationClickNavigation.hint": "يبقى التراكب غير قابل للتركيز ويمرر النقرات. يؤدي فتح التطبيق الرئيسي إلى نقل التركيز بعيدًا عن اللعبة.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "إشعارات Native Windows لها قيود عند تشغيل Achievements كمسؤول.",
   "settings-renderingTitle": "التقديم",
   "customCoverPathLabel": "صورة محلية مخصصة",
   "customCoverChooseBtn": "اختر الصورة المحلية",

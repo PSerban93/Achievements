@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Overlay i spillet",
   "option.notificationClickRedirectTargetApplication": "Hovedprogram",
   "settings.notificationClickNavigation.hint": "Overlayet forbliver uden fokus og lader klik passere. Åbning af hovedprogrammet flytter fokus væk fra spillet.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Native Windows-notifikationer har begrænsninger, når Achievements køres som administrator.",
   "settings-renderingTitle": "Gengivelse",
   "customCoverPathLabel": "Tilpasset lokalt billede",
   "customCoverChooseBtn": "Vælg Lokalt billede",

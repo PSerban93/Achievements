@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "ゲーム内オーバーレイ",
   "option.notificationClickRedirectTargetApplication": "メインアプリケーション",
   "settings.notificationClickNavigation.hint": "オーバーレイはフォーカスを受け取らず、クリックを透過します。メインアプリケーションを開くと、ゲームからフォーカスが移動します。",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Achievements を管理者として実行すると、Native Windows 通知には制限があります。",
   "settings-renderingTitle": "レンダリング",
   "customCoverPathLabel": "カスタムローカルイメージ",
   "customCoverChooseBtn": "ローカルイメージの選択",

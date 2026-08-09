@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "โอเวอร์เลย์ในเกม",
   "option.notificationClickRedirectTargetApplication": "แอปพลิเคชันหลัก",
   "settings.notificationClickNavigation.hint": "โอเวอร์เลย์จะไม่รับโฟกัสและปล่อยให้คลิกผ่านได้ การเปิดแอปพลิเคชันหลักจะย้ายโฟกัสออกจากเกม",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "การแจ้งเตือน Native Windows มีข้อจำกัดเมื่อเรียกใช้ Achievements ในฐานะผู้ดูแลระบบ",
   "settings-renderingTitle": "การเรนเดอร์",
   "customCoverPathLabel": "รูปภาพท้องถิ่นแบบกำหนดเอง",
   "customCoverChooseBtn": "เลือกรูปภาพท้องถิ่น",

@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Внутрішньоігровий оверлей",
   "option.notificationClickRedirectTargetApplication": "Основна програма",
   "settings.notificationClickNavigation.hint": "Оверлей не отримує фокус і пропускає натискання. Відкриття основної програми переводить фокус із гри.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Сповіщення Native Windows мають обмеження, коли Achievements запущено від імені адміністратора.",
   "settings-renderingTitle": "Рендеринг",
   "customCoverPathLabel": "Власне локальне зображення",
   "customCoverChooseBtn": "Вибрати локальне зображення",

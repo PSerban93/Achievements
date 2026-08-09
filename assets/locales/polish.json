@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Nakładka w grze",
   "option.notificationClickRedirectTargetApplication": "Główna aplikacja",
   "settings.notificationClickNavigation.hint": "Nakładka nie przejmuje fokusu i przepuszcza kliknięcia. Otwarcie głównej aplikacji odbiera fokus grze.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Powiadomienia Native Windows mają ograniczenia, gdy Achievements jest uruchamiane jako administrator.",
   "settings-renderingTitle": "Wykonanie",
   "customCoverPathLabel": "Niestandardowy obraz lokalny",
   "customCoverChooseBtn": "Wybierz obraz lokalny",

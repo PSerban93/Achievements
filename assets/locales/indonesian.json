@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Overlay dalam game",
   "option.notificationClickRedirectTargetApplication": "Aplikasi utama",
   "settings.notificationClickNavigation.hint": "Overlay tetap tidak dapat menerima fokus dan meneruskan klik. Membuka aplikasi utama memindahkan fokus dari game.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Notifikasi Native Windows memiliki keterbatasan saat Achievements dijalankan sebagai administrator.",
   "settings-renderingTitle": "Render",
   "customCoverPathLabel": "Gambar lokal khusus",
   "customCoverChooseBtn": "Pilih Gambar Lokal",

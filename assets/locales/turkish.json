@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Oyun içi Overlay",
   "option.notificationClickRedirectTargetApplication": "Ana uygulama",
   "settings.notificationClickNavigation.hint": "Overlay odaklanamaz durumda kalır ve tıklamaları geçirir. Ana uygulamanın açılması odağı oyundan uzaklaştırır.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Achievements yönetici olarak çalıştırıldığında Native Windows bildirimlerinde sınırlamalar olur.",
   "settings-renderingTitle": "Render",
   "customCoverPathLabel": "Özel yerel görsel",
   "customCoverChooseBtn": "Yerel görsel seç",

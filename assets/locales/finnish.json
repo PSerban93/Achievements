@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Pelin sisäinen peittokuva",
   "option.notificationClickRedirectTargetApplication": "Pääsovellus",
   "settings.notificationClickNavigation.hint": "Peittokuva ei vastaanota kohdistusta ja päästää napsautukset läpi. Pääsovelluksen avaaminen siirtää kohdistuksen pois pelistä.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Native Windows -ilmoituksissa on rajoituksia, kun Achievements suoritetaan järjestelmänvalvojana.",
   "settings-renderingTitle": "Renderöinti",
   "customCoverPathLabel": "Muokattu paikallinen kuva",
   "customCoverChooseBtn": "Valitse Paikallinen kuva",

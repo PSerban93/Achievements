@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Lớp phủ trong trò chơi",
   "option.notificationClickRedirectTargetApplication": "Ứng dụng chính",
   "settings.notificationClickNavigation.hint": "Lớp phủ không nhận tiêu điểm và cho phép nhấp xuyên qua. Mở ứng dụng chính sẽ chuyển tiêu điểm khỏi trò chơi.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Thông báo Native Windows có một số hạn chế khi Achievements chạy với quyền quản trị viên.",
   "settings-renderingTitle": "Kết xuất",
   "customCoverPathLabel": "Ảnh cục bộ tùy chỉnh",
   "customCoverChooseBtn": "Chọn ảnh cục bộ",

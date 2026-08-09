@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Наслагване в играта",
   "option.notificationClickRedirectTargetApplication": "Основното приложение",
   "settings.notificationClickNavigation.hint": "Наслагването остава без фокус и пропуска щракванията. Отварянето на основното приложение премества фокуса от играта.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Известията Native Windows имат ограничения, когато Achievements се изпълнява като администратор.",
   "settings-renderingTitle": "Изобразяване",
   "customCoverPathLabel": "Персонализирано локално изображение",
   "customCoverChooseBtn": "Изберете Локално изображение",

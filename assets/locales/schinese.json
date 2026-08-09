@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "游戏内叠加层",
   "option.notificationClickRedirectTargetApplication": "主应用程序",
   "settings.notificationClickNavigation.hint": "叠加层保持不可聚焦并允许点击穿透。打开主应用程序会将焦点从游戏移开。",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "以管理员身份运行 Achievements 时，Native Windows 通知会受到限制。",
   "settings-renderingTitle": "渲染",
   "customCoverPathLabel": "自定义本地图片",
   "customCoverChooseBtn": "选择本地图片",

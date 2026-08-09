@@ -898,6 +898,7 @@
   "option.notificationClickRedirectTargetOverlay": "Overlegg i spillet",
   "option.notificationClickRedirectTargetApplication": "Hovedprogram",
   "settings.notificationClickNavigation.hint": "Overlegget forblir uten fokus og slipper klikk gjennom. Åpning av hovedprogrammet flytter fokus bort fra spillet.",
+  "settings.notificationClickNavigation.nativeWindowsAdminHint": "Native Windows-varsler har begrensninger når Achievements kjøres som administrator.",
   "settings-renderingTitle": "Gjengivelse",
   "customCoverPathLabel": "Egendefinert lokalt bilde",
   "customCoverChooseBtn": "Velg Lokalt bilde",
