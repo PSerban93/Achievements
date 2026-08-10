@@ -44,7 +44,12 @@ const {
   lookupUplayMappingEntry,
 } = require("./local-game-name-cache");
 const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
-const { resolveSchemaParseRuntimeDir } = require("./steam-schema-parse");
+const {
+  hasSchemaParseOutputArtifacts,
+  readSchemaParseGeneratedDisplayName,
+  resolveSchemaParseAppOutputDir,
+  resolveSchemaParseRuntimeDir,
+} = require("./steam-schema-parse");
 const { resolveEpicArtifactIdentity } = require("./epic-identity");
 const { fetchEpicCatalogItem } = require("./epic-api");
 const {
@@ -1789,7 +1794,7 @@ async function getGameName(appid, opts = {}, retries = 2) {
   if (shName) return shName;
   autoConfigLogger.warn("fallback:steam-hunters-failed", { appid });
   const schemaParseOutputName = resolveSchemaParseOutputDisplayName(
-    path.join(resolveSchemaParseRuntimeDir(userDataDir), "_OUTPUT"),
+    resolveSchemaParseRuntimeDir(userDataDir),
     appid,
   );
   if (schemaParseOutputName) {
@@ -1846,41 +1851,13 @@ function emitGenerationProgress(callback, payload = {}) {
   } catch {}
 }
 
-function resolveSchemaParseOutputDisplayName(outputRoot, appid) {
+function resolveSchemaParseOutputDisplayName(runtimeDir, appid) {
   const normalizedAppId = String(appid || "").trim();
-  if (!normalizedAppId || !outputRoot) return "";
-  const outputDir = path.join(outputRoot, normalizedAppId);
-  const productInfoPath = path.join(
-    outputDir,
-    "steam_misc",
-    "app_info",
-    "app_product_info.json",
+  if (!normalizedAppId || !runtimeDir) return "";
+  return readSchemaParseGeneratedDisplayName(
+    resolveSchemaParseAppOutputDir(runtimeDir, normalizedAppId),
+    normalizedAppId,
   );
-  const detailsPath = path.join(
-    outputDir,
-    "steam_misc",
-    "app_info",
-    "app_details.json",
-  );
-  try {
-    if (fs.existsSync(productInfoPath)) {
-      const raw = JSON.parse(fs.readFileSync(productInfoPath, "utf8"));
-      const productName = String(raw?.common?.name || "").trim();
-      if (productName) return productName;
-    }
-  } catch {}
-  try {
-    if (fs.existsSync(detailsPath)) {
-      const raw = JSON.parse(fs.readFileSync(detailsPath, "utf8"));
-      const detailsRoot =
-        raw && typeof raw === "object"
-          ? raw[String(normalizedAppId)]?.data || raw?.data || null
-          : null;
-      const detailsName = String(detailsRoot?.name || "").trim();
-      if (detailsName) return detailsName;
-    }
-  } catch {}
-  return "";
 }
 
 function formatGenerationCounter(current, total, label = "") {
@@ -2273,25 +2250,19 @@ function runAchievementsGeneratorBatch(
       }
     };
     if (isSchemaParseSteamBatch) {
-      const runtimeOutputRoot = path.join(
-        resolveSchemaParseRuntimeDir(userDataDir),
-        "_OUTPUT",
-      );
+      const runtimeDir = resolveSchemaParseRuntimeDir(userDataDir);
       schemaParseProgressTimer = setInterval(() => {
         let completed = 0;
         for (const appid of schemaParseOrderedIds) {
-          const outputDir = path.join(runtimeOutputRoot, appid);
+          const outputDir = resolveSchemaParseAppOutputDir(runtimeDir, appid);
           const resolvedName = resolveSchemaParseOutputDisplayName(
-            runtimeOutputRoot,
+            runtimeDir,
             appid,
           );
           if (resolvedName) {
             schemaParseNameCache.set(appid, resolvedName);
           }
-          const hasOutput =
-            fs.existsSync(path.join(outputDir, "steam_settings", "achievements.json")) ||
-            fs.existsSync(path.join(outputDir, "steam_misc", "app_info", "config_launch.json")) ||
-            fs.existsSync(outputDir);
+          const hasOutput = hasSchemaParseOutputArtifacts(outputDir);
           if (!hasOutput) continue;
           completed += 1;
         }

@@ -20,10 +20,12 @@ const SCHEMA_PARSE_DEFAULT_PASSWORD = "BabaYaga0003";
 const SCHEMA_PARSE_BATCH_CHUNK_SIZE = 20;
 const SCHEMA_PARSE_AUTH_RETRY_DELAY_MS = 30000;
 const SCHEMA_PARSE_CHUNK_DELAY_MS = 7000;
+const SCHEMA_PARSE_OUTPUT_DIR_NAMES = ["output", "_OUTPUT"];
 const SCHEMA_PARSE_MUTABLE_NAMES = [
   "my_login.txt",
   "refresh_tokens.json",
   "top_owners_ids.txt",
+  "output",
   "_OUTPUT",
 ];
 
@@ -244,20 +246,59 @@ function normalizeGeneratedAchievementsSchema(entries = []) {
   }));
 }
 
+function getSchemaParseOutputRoots(runtimeDir = "") {
+  const normalizedRuntimeDir = path.resolve(String(runtimeDir || "").trim());
+  return SCHEMA_PARSE_OUTPUT_DIR_NAMES.map((name) =>
+    path.join(normalizedRuntimeDir, name),
+  );
+}
+
+function getSchemaParseAppOutputCandidates(runtimeDir = "", appid = "") {
+  const normalizedAppId = String(appid || "").trim();
+  return getSchemaParseOutputRoots(runtimeDir).map((outputRoot) =>
+    path.join(outputRoot, normalizedAppId),
+  );
+}
+
+function hasSchemaParseOutputArtifacts(appOutputDir = "") {
+  const targetDir = path.resolve(String(appOutputDir || "").trim());
+  if (!targetDir || !fs.existsSync(targetDir)) return false;
+  return [
+    path.join(targetDir, "steam_settings", "achievements.json"),
+    path.join(targetDir, "info", "launch_config.json"),
+    path.join(targetDir, "info", "product_info.json"),
+    path.join(targetDir, "steam_misc", "app_info", "config_launch.json"),
+    path.join(targetDir, "steam_misc", "app_info", "app_product_info.json"),
+  ].some((candidate) => fs.existsSync(candidate));
+}
+
+function resolveSchemaParseAppOutputDir(runtimeDir = "", appid = "") {
+  const candidates = getSchemaParseAppOutputCandidates(runtimeDir, appid);
+  return (
+    candidates.find((candidate) => hasSchemaParseOutputArtifacts(candidate)) ||
+    candidates.find((candidate) => fs.existsSync(candidate)) ||
+    candidates[0]
+  );
+}
+
+function resolveFirstExistingPath(rootDir = "", relativeCandidates = []) {
+  for (const relativePath of relativeCandidates) {
+    const candidate = path.join(rootDir, ...relativePath);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return "";
+}
+
 function readSchemaParseGeneratedDisplayName(appOutputDir = "", appid = "") {
   const normalizedAppId = String(appid || "").trim();
-  const productInfoPath = path.join(
-    appOutputDir,
-    "steam_misc",
-    "app_info",
-    "app_product_info.json",
-  );
-  const detailsPath = path.join(
-    appOutputDir,
-    "steam_misc",
-    "app_info",
-    "app_details.json",
-  );
+  const productInfoPath = resolveFirstExistingPath(appOutputDir, [
+    ["info", "product_info.json"],
+    ["steam_misc", "app_info", "app_product_info.json"],
+  ]);
+  const detailsPath = resolveFirstExistingPath(appOutputDir, [
+    ["info", "app_details.json"],
+    ["steam_misc", "app_info", "app_details.json"],
+  ]);
   try {
     if (fs.existsSync(productInfoPath)) {
       const raw = JSON.parse(fs.readFileSync(productInfoPath, "utf8"));
@@ -378,11 +419,7 @@ async function ensureSchemaParseRuntimeReady(options = {}) {
 
 async function runGenerateEmuConfig(runtimeDir, appid) {
   const exePath = path.join(runtimeDir, "generate_emu_config.exe");
-  const outputRoot = path.join(runtimeDir, "_OUTPUT");
-  const appOutputDir = path.join(outputRoot, String(appid));
-  try {
-    fs.rmSync(appOutputDir, { recursive: true, force: true });
-  } catch {}
+  cleanupGeneratedAppArtifacts(runtimeDir, appid, { log: false });
   logger.info("schema-parse:run:start", { appid, runtimeDir });
   let result;
   try {
@@ -416,7 +453,7 @@ async function runGenerateEmuConfig(runtimeDir, appid) {
     hasStderr: !!String(result.stderr || "").trim(),
   });
   return {
-    appOutputDir,
+    appOutputDir: resolveSchemaParseAppOutputDir(runtimeDir, appid),
     stdout: String(result.stdout || ""),
     stderr: String(result.stderr || ""),
   };
@@ -434,7 +471,7 @@ async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
     } catch (err) {
       runError = err;
       runResult = {
-        appOutputDir: path.join(runtimeDir, "_OUTPUT", appid),
+        appOutputDir: resolveSchemaParseAppOutputDir(runtimeDir, appid),
         stdout: String(err?.stdout || ""),
         stderr: String(err?.stderr || ""),
       };
@@ -470,7 +507,7 @@ async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
     }
     return result;
   } finally {
-    cleanupGeneratedAppOutput(runResult.appOutputDir, appid);
+    cleanupGeneratedAppArtifacts(runtimeDir, appid);
   }
 }
 
@@ -483,11 +520,8 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
         .filter((appid) => /^\d+$/.test(appid)),
     ),
   );
-  const outputRoot = path.join(runtimeDir, "_OUTPUT");
   for (const appid of normalizedAppIds) {
-    try {
-      fs.rmSync(path.join(outputRoot, appid), { recursive: true, force: true });
-    } catch {}
+    cleanupGeneratedAppArtifacts(runtimeDir, appid, { log: false });
   }
   logger.info("schema-parse:batch:start", {
     count: normalizedAppIds.length,
@@ -512,8 +546,10 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
     const emitBatchProgress = (appid, current, detail, percent) => {
       try {
         if (typeof options.onProgress !== "function") return;
-        const itemName =
-          resolveSchemaParseOutputDisplayName(outputRoot, appid) || "";
+        const itemName = readSchemaParseGeneratedDisplayName(
+          resolveSchemaParseAppOutputDir(runtimeDir, appid),
+          appid,
+        ) || "";
         options.onProgress({
           appid,
           itemName,
@@ -535,11 +571,8 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
       if (sawStartedStdout) return;
       let completed = 0;
       for (const appid of normalizedAppIds) {
-        const outputDir = path.join(outputRoot, appid);
-        const hasOutput =
-          fs.existsSync(path.join(outputDir, "steam_settings", "achievements.json")) ||
-          fs.existsSync(path.join(outputDir, "steam_misc", "app_info", "config_launch.json")) ||
-          fs.existsSync(outputDir);
+        const outputDir = resolveSchemaParseAppOutputDir(runtimeDir, appid);
+        const hasOutput = hasSchemaParseOutputArtifacts(outputDir);
         if (!hasOutput) continue;
         completed += 1;
       }
@@ -571,9 +604,13 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
       stdoutLineBuffer = parts.pop() || "";
       for (const rawLine of parts) {
         const line = String(rawLine || "").trim();
-        const startedMatch = line.match(
-          /^\*{3}\s+STARTED config for app id\s+(\d+)\s+\*{3}$/i,
-        );
+        const startedMatch =
+          line.match(
+            /^\*{3}\s+STARTED config for app id\s+(\d+)\s+\*{3}$/i,
+          ) ||
+          line.match(
+            /^\*+\s*generating info for app id\s+(\d+)\s*\*+$/i,
+          );
         if (!startedMatch) continue;
         sawStartedStdout = true;
         const appid = String(startedMatch[1] || "").trim();
@@ -624,7 +661,7 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
     hasStderr: !!String(result.stderr || "").trim(),
   });
   return {
-    outputRoot,
+    outputRoot: getSchemaParseOutputRoots(runtimeDir)[0],
     stdout: String(result.stdout || ""),
     stderr: String(result.stderr || ""),
     appids: normalizedAppIds,
@@ -641,13 +678,11 @@ function copyImageDirectory(sourceDir, destDir) {
 }
 
 function copySchemaParseProductInfo(appOutputDir, outDir) {
-  const sourcePath = path.join(
-    appOutputDir,
-    "steam_misc",
-    "app_info",
-    "app_product_info.json",
-  );
-  if (!fs.existsSync(sourcePath)) return false;
+  const sourcePath = resolveFirstExistingPath(appOutputDir, [
+    ["info", "product_info.json"],
+    ["steam_misc", "app_info", "app_product_info.json"],
+  ]);
+  if (!sourcePath) return false;
   const destPath = path.join(
     outDir,
     "steam_misc",
@@ -663,41 +698,60 @@ function copySchemaParseProductInfo(appOutputDir, outDir) {
   }
 }
 
-function cleanupGeneratedAppOutput(appOutputDir = "", appid = "") {
-  const targetDir = path.resolve(String(appOutputDir || "").trim());
-  if (!targetDir || !fs.existsSync(targetDir)) return;
-  try {
-    fs.rmSync(targetDir, { recursive: true, force: true });
+function cleanupGeneratedAppArtifacts(runtimeDir = "", appid = "", options = {}) {
+  const normalizedAppId = String(appid || "").trim();
+  if (!/^\d+$/.test(normalizedAppId)) return;
+  const normalizedRuntimeDir = path.resolve(String(runtimeDir || "").trim());
+  const roots = [
+    ...getSchemaParseOutputRoots(normalizedRuntimeDir),
+    path.join(normalizedRuntimeDir, "backup"),
+  ];
+  const removedPaths = [];
+  const failures = [];
+  for (const rootDir of roots) {
+    const normalizedRootDir = path.resolve(rootDir);
+    const targetDir = path.resolve(normalizedRootDir, normalizedAppId);
+    if (path.dirname(targetDir) !== normalizedRootDir || !fs.existsSync(targetDir)) {
+      continue;
+    }
+    try {
+      fs.rmSync(targetDir, { recursive: true, force: true });
+      removedPaths.push(targetDir);
+    } catch (err) {
+      failures.push({ targetDir, error: err?.message || String(err) });
+    }
+  }
+  if (options.log === false) return;
+  if (removedPaths.length > 0) {
     logger.info("schema-parse:cleanup:success", {
-      appid: String(appid || "").trim() || null,
-      appOutputDir: targetDir,
+      appid: normalizedAppId,
+      removedPaths,
     });
-  } catch (err) {
+  }
+  for (const failure of failures) {
     logger.warn("schema-parse:cleanup:failed", {
-      appid: String(appid || "").trim() || null,
-      appOutputDir: targetDir,
-      error: err?.message || String(err),
+      appid: normalizedAppId,
+      appOutputDir: failure.targetDir,
+      error: failure.error,
     });
   }
 }
 
-function hasSchemaParseGeneratedAchievements(outputRoot = "", appid = "") {
+function hasSchemaParseGeneratedAchievements(runtimeDir = "", appid = "") {
   const normalizedAppId = String(appid || "").trim();
   if (!normalizedAppId) return false;
-  return fs.existsSync(
-    path.join(
-      path.resolve(String(outputRoot || "").trim()),
-      normalizedAppId,
-      "steam_settings",
-      "achievements.json",
-    ),
+  return getSchemaParseAppOutputCandidates(runtimeDir, normalizedAppId).some(
+    (appOutputDir) =>
+      fs.existsSync(
+        path.join(appOutputDir, "steam_settings", "achievements.json"),
+      ),
   );
 }
 
-function findFirstMissingSchemaParseOutputIndex(outputRoot = "", appids = []) {
+function findFirstMissingSchemaParseOutputIndex(runtimeDir = "", appids = []) {
   const normalizedAppIds = Array.isArray(appids) ? appids : [];
   for (let index = 0; index < normalizedAppIds.length; index += 1) {
-    if (!hasSchemaParseGeneratedAchievements(outputRoot, normalizedAppIds[index])) {
+    if (!hasSchemaParseGeneratedAchievements(runtimeDir, normalizedAppIds[index])) {
       return index;
     }
   }
@@ -706,10 +760,13 @@ function findFirstMissingSchemaParseOutputIndex(outputRoot = "", appids = []) {
 
 function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
   const schemaJsonPath = path.join(appOutputDir, "steam_settings", "achievements.json");
-  const launchMetadata = readSchemaParseLaunchMetadata(
-    path.join(appOutputDir, "steam_misc", "app_info", "config_launch.json"),
-    appid,
-  );
+  const launchConfigPath = resolveFirstExistingPath(appOutputDir, [
+    ["info", "launch_config.json"],
+    ["steam_misc", "app_info", "config_launch.json"],
+  ]);
+  const launchMetadata = launchConfigPath
+    ? readSchemaParseLaunchMetadata(launchConfigPath, appid)
+    : null;
   const displayName = readSchemaParseGeneratedDisplayName(appOutputDir, appid);
   if (!fs.existsSync(schemaJsonPath)) {
     logger.info("schema-parse:run:no-achievements", { appid });
@@ -842,7 +899,7 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
       batchErrors.push(err);
       if (isSchemaParseAuthError(err)) {
         const retryStartIndex = findFirstMissingSchemaParseOutputIndex(
-          path.join(runtime.runtimeDir, "_OUTPUT"),
+          runtime.runtimeDir,
           chunkAppIds,
         );
         const retryAppIds = chunkAppIds.slice(retryStartIndex);
@@ -878,10 +935,13 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
   }
 
   for (const item of normalizedItems) {
-    const appOutputDir = path.join(runtime.runtimeDir, "_OUTPUT", item.appid);
+    const appOutputDir = resolveSchemaParseAppOutputDir(
+      runtime.runtimeDir,
+      item.appid,
+    );
     const shouldRetrySingle =
       batchErrors.length > 0 &&
-      !hasSchemaParseGeneratedAchievements(path.join(runtime.runtimeDir, "_OUTPUT"), item.appid);
+      !hasSchemaParseGeneratedAchievements(runtime.runtimeDir, item.appid);
     try {
       if (shouldRetrySingle) {
         logger.info("schema-parse:batch:retry-single", {
@@ -920,7 +980,7 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
         readSchemaParseGeneratedResult(item.appid, appOutputDir, item.outDir),
       );
     } finally {
-      cleanupGeneratedAppOutput(appOutputDir, item.appid);
+      cleanupGeneratedAppArtifacts(runtime.runtimeDir, item.appid);
     }
   }
   logger.info("schema-parse:batch:results", {
@@ -943,7 +1003,10 @@ module.exports = {
   ensureSchemaParseRuntimeReady,
   generateSteamSchemaWithSchemaParse,
   generateSteamSchemasWithSchemaParseBatch,
+  hasSchemaParseOutputArtifacts,
   normalizeGeneratedAchievementsSchema,
+  readSchemaParseGeneratedDisplayName,
+  resolveSchemaParseAppOutputDir,
   resolveSchemaParseRuntimeDir,
   resolveSchemaParseSeedArchive,
 };
