@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.2.8",
+  "version": "1.2.8-beta.2",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -8,10 +8,11 @@
     "start": "electron .",
     "test:xbox-pc": "node tests/xbox-pc.test.js",
     "verify:process-tree": "node build/run-electron-script.js build/verify-windows-process-tree.js",
+    "verify:san-runtime": "node build/verify-san-runtime.js",
     "prepare:process-tree": "npm run verify:process-tree",
-    "pack": "npm run prepare:process-tree && electron-builder --dir",
+    "pack": "npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --dir",
     "dl-browsers": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 node ./node_modules/playwright-core/cli.js install chromium chromium-headless-shell",
-    "dist": "npm run dl-browsers && npm run prepare:process-tree && electron-builder --win --x64"
+    "dist": "npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64"
   },
   "build": {
     "appId": "com.achievements.app",

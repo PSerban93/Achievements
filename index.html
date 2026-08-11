@@ -10531,7 +10531,8 @@
 
       function buildBlacklistConfigKey(appid, platform) {
         const id = appid ? String(appid).trim() : "";
-        if (!id) return "";
+        const rawPlatform = String(platform || "").trim();
+        if (!id || !rawPlatform) return "";
         return `${id}::${normalizeBlacklistPlatformValue(platform)}`;
       }
 
@@ -10544,11 +10545,31 @@
       }
 
       function isAppIdInBlacklist(appid, platform = null) {
-        if (!appid) return false;
-        const normalizedId = String(appid);
-        if (blacklistState.appids.has(normalizedId)) return true;
+        return getBlacklistMatchState(appid, platform).effective;
+      }
+
+      function getBlacklistMatchState(appid, platform = null) {
+        const normalizedId = String(appid || "").trim();
         const configKey = buildBlacklistConfigKey(normalizedId, platform);
-        return configKey ? blacklistState.configKeys.has(configKey) : false;
+        const globalMatch =
+          !!normalizedId && blacklistState.appids.has(normalizedId);
+        const scopedMatch =
+          !!configKey && blacklistState.configKeys.has(configKey);
+        return {
+          global: globalMatch,
+          scoped: scopedMatch,
+          effective: globalMatch || scopedMatch,
+          configKey: configKey || null,
+        };
+      }
+
+      function getBlacklistMutationScopes(appid, platform, remove) {
+        if (!remove) return platform ? ["platform"] : ["global"];
+        const match = getBlacklistMatchState(appid, platform);
+        return [
+          ...(match.global ? ["global"] : []),
+          ...(match.scoped ? ["platform"] : []),
+        ];
       }
 
       async function syncBlacklistList() {
@@ -10634,6 +10655,8 @@
         for (const entry of entries) {
           const appid = String(entry?.appid || "").trim();
           const platform = entry?.platform || null;
+          const entryScope =
+            entry?.scope || (platform && !entry?.legacy ? "platform" : "global");
           const rowKey = entry?.key || buildBlacklistConfigKey(appid, platform);
           const displayKey =
             platform && !entry?.legacy ? `${appid} [${platform}]` : appid;
@@ -10666,12 +10689,22 @@
           btnRemove.innerHTML = faWithFallback("fa-regular fa-trash-can", "🗑");
           btnRemove.addEventListener("click", async () => {
             try {
-              await window.api.blacklistConfig({
+              const response = await window.api.blacklistConfig({
                 appid,
                 platform,
+                scope: entryScope,
                 remove: true,
               });
-              await syncBlacklistList();
+              if (!response?.success) {
+                throw new Error(
+                  response?.error || "blacklist-entry-remove-failed",
+                );
+              }
+              if (response?.blacklistPayload) {
+                applyBlacklistPayload(response.blacklistPayload);
+              } else {
+                await syncBlacklistList();
+              }
               renderBlacklistList();
               await reloadConfigsDropdown(true);
               if (typeof buildDashboard === "function") {
@@ -10788,7 +10821,7 @@
         }
         blacklistConfigBtn.disabled = false;
         const isBlacklisted = isAppIdInBlacklist(appid, resolvedPlatform);
-        if (blacklistState.showBlacklisted && isBlacklisted) {
+        if (isBlacklisted) {
           blacklistConfigBtn.textContent = tUi(
             "dashboardMenuRemoveBlacklist",
             "Remove from Blacklist",
@@ -12282,14 +12315,19 @@
               targetAppId,
               targetPlatform,
             );
-            const removeMode =
-              blacklistState.showBlacklisted && currentlyBlacklisted;
+            const removeMode = currentlyBlacklisted;
+            const mutationScopes = getBlacklistMutationScopes(
+              targetAppId,
+              targetPlatform,
+              removeMode,
+            );
 
             logUiEvent("info", "ui:blacklist-config:click", {
               configName: selectedConfig,
               appid: targetAppId,
               platform: targetPlatform,
               remove: removeMode,
+              scopes: mutationScopes,
             });
 
             const confirmed = await safeConfirm({
@@ -12313,6 +12351,7 @@
               appid: targetAppId,
               platform: targetPlatform,
               remove: removeMode,
+              scopes: mutationScopes,
               confirmed,
             });
             if (!confirmed) return;
@@ -12323,12 +12362,14 @@
               configName: selectedConfig,
               appid: targetAppId,
               platform: targetPlatform,
+              scopes: mutationScopes,
               remove: removeMode,
             });
             const response = await window.api.blacklistConfig({
               configName: selectedConfig,
               appid: targetAppId,
               platform: targetPlatform,
+              scopes: mutationScopes,
               remove: removeMode,
             });
             logUiEvent(
@@ -12362,7 +12403,8 @@
             renderBlacklistList();
 
             await reloadConfigsDropdown(true);
-            if (!blacklistState.showBlacklisted) {
+            const isNowBlacklisted = response.blacklisted === true;
+            if (isNowBlacklisted && !blacklistState.showBlacklisted) {
               configList.value = "";
               [
                 "deleteConfigBtn",
@@ -12390,6 +12432,10 @@
               } catch {}
               window.__showFallbackLogo?.();
             } else {
+              const restoredOption = Array.from(configList.options || []).find(
+                (option) => option.value === selectedConfig,
+              );
+              if (restoredOption) configList.value = selectedConfig;
               configList.dispatchEvent(new Event("change", { bubbles: true }));
             }
 
@@ -14879,7 +14925,6 @@
 
           const cached = configMetaIndex.get(targetName);
           if (
-            !blacklistState.showBlacklisted &&
             cached?.appid &&
             isAppIdInBlacklist(cached.appid, cached?.platform || null)
           ) {
@@ -15122,6 +15167,8 @@
         }
 
         try {
+          await syncBlacklistList();
+          if (sequence !== appNavigationUiSequence) return;
           if (typeof isSettingsOpen === "function" && isSettingsOpen()) {
             closeSettingsModal();
           }
@@ -15149,8 +15196,35 @@
           }
 
           const alreadySelected = configList.value === configName;
+          const navigationMeta =
+            configMetaIndex.get(configName) ||
+            (await window.api.getConfigByName(configName));
+          if (sequence !== appNavigationUiSequence) return;
+          const navigationBlacklisted =
+            !!navigationMeta?.appid &&
+            isAppIdInBlacklist(
+              String(navigationMeta.appid),
+              navigationMeta?.platform || payload?.platform || null,
+            );
+          const expectedSelectionMode = navigationBlacklisted
+            ? "view-only"
+            : "active";
+          let activeSelection = null;
+          try {
+            activeSelection = await window.api.getActiveConfigSelection();
+          } catch {}
+          if (sequence !== appNavigationUiSequence) return;
+          const mainHasExpectedSelection =
+            sanitizeConfigName(activeSelection?.configName || "") ===
+              sanitizeConfigName(configName) &&
+            activeSelection?.mode === expectedSelectionMode;
+          const selectionNeedsRefresh =
+            !alreadySelected || !mainHasExpectedSelection;
+
+          updateBlacklistButtonState(navigationMeta || null);
+          updateMainPlayButtonState(navigationMeta || null);
           if (!achievementId) {
-            if (!alreadySelected) {
+            if (selectionNeedsRefresh) {
               clearAppNavigationAchievementTarget();
               configList.value = configName;
               configList.dispatchEvent(new Event("change", { bubbles: true }));
@@ -15159,13 +15233,17 @@
             return;
           }
 
-          if (alreadySelected && focusAppNavigationAchievement(achievementId)) {
+          if (
+            alreadySelected &&
+            !selectionNeedsRefresh &&
+            focusAppNavigationAchievement(achievementId)
+          ) {
             sendResult(true);
             return;
           }
 
           let tableReady = true;
-          if (alreadySelected) {
+          if (alreadySelected && !selectionNeedsRefresh) {
             const lang =
               document.getElementById("languageSelect")?.value || "english";
             await buildMainAchievementsTable(configName, lang, {
@@ -18870,11 +18948,17 @@
             );
             return;
           }
+          const mutationScopes = getBlacklistMutationScopes(
+            appid,
+            platform,
+            removeMode,
+          );
           logUiEvent("info", "ui:blacklist-dashboard:click", {
             configName,
             appid,
             platform: platform || null,
             remove: removeMode,
+            scopes: mutationScopes,
           });
           const confirmed = await safeConfirm({
             title: removeMode
@@ -18913,6 +18997,7 @@
             configName,
             appid,
             platform,
+            scopes: mutationScopes,
             remove: removeMode,
           });
           logUiEvent(
@@ -19198,6 +19283,18 @@
           if (!entries.length) return;
 
           const removeMode = selectionCanRemoveFromBlacklist(entries);
+          const resolvedEntries =
+            await resolveDashboardSelectionEntries(selectionNames);
+          const actionable = resolvedEntries.filter((entry) => entry.appid);
+          if (!actionable.length) {
+            alert(
+              tUi(
+                "alert.missingAppIdConfig",
+                "Missing AppID for this configuration.",
+              ),
+            );
+            return;
+          }
           const confirmed = await safeConfirm({
             title: removeMode
               ? tUi(
@@ -19220,18 +19317,6 @@
           if (!confirmed) return;
 
           await safeRefocus();
-          const resolvedEntries =
-            await resolveDashboardSelectionEntries(selectionNames);
-          const actionable = resolvedEntries.filter((entry) => entry.appid);
-          if (!actionable.length) {
-            alert(
-              tUi(
-                "alert.missingAppIdConfig",
-                "Missing AppID for this configuration.",
-              ),
-            );
-            return;
-          }
 
           let latestPayload = null;
           const failures = [];
@@ -19241,6 +19326,11 @@
                 configName: entry.name,
                 appid: entry.appid,
                 platform: entry.platform,
+                scopes: getBlacklistMutationScopes(
+                  entry.appid,
+                  entry.platform,
+                  removeMode,
+                ),
                 remove: removeMode,
               });
               if (response?.success) {
@@ -21711,8 +21801,7 @@
                   const isBlacklisted = appid
                     ? isAppIdInBlacklist(String(appid), platform)
                     : false;
-                  const removeMode =
-                    blacklistState.showBlacklisted && isBlacklisted;
+                  const removeMode = isBlacklisted;
                   await handleDashboardBlacklistAction(
                     target.name,
                     String(appid || ""),
@@ -24179,17 +24268,19 @@
                   Number.isFinite(state?.progress) &&
                   Number.isFinite(state?.max_progress) &&
                   state.max_progress > 0
-                ) {
-                  window.api.queueProgressNotification({
-                    displayName,
-                    icon,
-                    progress: state.progress,
-                    max_progress: state.max_progress,
-                    progress_is_float: state.progress_is_float || undefined,
-                    config_path: achData.config_path,
-                    configName: cfg,
-                  });
-                }
+                  ) {
+                    window.api.queueProgressNotification({
+                      name: achievement.name,
+                      displayName,
+                      icon,
+                      progress: state.progress,
+                      max_progress: state.max_progress,
+                      progress_is_float: state.progress_is_float || undefined,
+                      config_path: achData.config_path,
+                      configName: cfg,
+                      source: "renderer-file-updated",
+                    });
+                  }
               }
             }
 

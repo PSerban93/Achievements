@@ -4,6 +4,10 @@ const fsp = require("fs/promises");
 const path = require("path");
 const chokidar = require("chokidar");
 const { createLogger } = require("./logger");
+const {
+  readJsonWithBackupSync,
+  writeJsonAtomicSync,
+} = require("./atomic-json-store");
 const { normalizePlatform } = require("./config-platform-migrator");
 const {
   buildBlacklistConfigKey,
@@ -452,14 +456,14 @@ module.exports = function makeWatchedFolders({
   let blockedFoldersCache = null;
   const persistPreferences =
     typeof updatePreferences === "function" ? updatePreferences : null;
-  const justUnblocked = new Set(); // appids recently removed from blacklist
+  const justUnblocked = new Set(); // legacy/global AppID-wide unblock suppression
+  const justUnblockedConfigs = new Set(); // exact config names recently unblocked
   const platinumNotified = new Set();
   const platinumNotifiedByApp = new Set();
   const tenokeIds = new Set();
   const persistedTenoke = new Set();
   const seededInitialConfigs = new Set();
   const initialNotifyPromotedConfigs = new Set();
-  const autoSelectedConfigs = new Set();
   const tenokeRelinkedConfigs = new Set();
   const pendingAutoSelect = new Set();
   const autoSelectTimers = new Map();
@@ -556,30 +560,75 @@ module.exports = function makeWatchedFolders({
           version: 1,
           files: Object.fromEntries(cacheMeta),
         };
-        await fsp.mkdir(path.dirname(cacheMetaPath), { recursive: true });
-        await fsp.writeFile(cacheMetaPath, JSON.stringify(payload, null, 2));
+        writeJsonAtomicSync(cacheMetaPath, payload);
       } catch {}
     }, 500);
   }
 
-  function cancelAutoSelectForApp(appid) {
+  function cancelAutoSelectForMeta(meta) {
+    if (!meta?.name) return;
+    pendingAutoSelect.delete(meta.name);
+    autoSelectEmitted.delete(meta.name);
+    suppressAutoSelectByConfig.add(meta.name);
+    const timer = autoSelectTimers.get(meta.name);
+    if (timer) {
+      clearTimeout(timer);
+      autoSelectTimers.delete(meta.name);
+    }
+  }
+
+  function cancelAutoSelectForApp(appid, platform = null) {
+    const normalizedPlatform = platform ? normalizePlatform(platform) : null;
     const metas = getConfigMetas(appid);
     for (const meta of metas) {
-      if (!meta?.name) continue;
-      pendingAutoSelect.delete(meta.name);
-      autoSelectEmitted.delete(meta.name);
-      suppressAutoSelectByConfig.add(meta.name);
-      const t = autoSelectTimers.get(meta.name);
-      if (t) {
-        clearTimeout(t);
-        autoSelectTimers.delete(meta.name);
+      if (
+        normalizedPlatform &&
+        normalizePlatform(meta?.platform) !== normalizedPlatform
+      ) {
+        continue;
       }
+      cancelAutoSelectForMeta(meta);
+    }
+  }
+
+  function isRecentlyUnblocked(appid, meta = null) {
+    return (
+      justUnblocked.has(String(appid || "")) ||
+      (!!meta?.name && justUnblockedConfigs.has(meta.name))
+    );
+  }
+
+  function isAutoSelectSuppressedForMeta(appid, meta = null) {
+    return (
+      suppressAutoSelect.has(String(appid || "")) ||
+      (!!meta?.name && suppressAutoSelectByConfig.has(meta.name))
+    );
+  }
+
+  function releaseUnblockSuppression(appid, meta = null) {
+    const appidKey = String(appid || "");
+    if (appidKey) {
+      suppressAutoSelect.delete(appidKey);
+      justUnblocked.delete(appidKey);
+    }
+    if (meta?.name) {
+      suppressAutoSelectByConfig.delete(meta.name);
+      justUnblockedConfigs.delete(meta.name);
     }
   }
 
   function getConfigMetas(appid) {
-    const list = configIndex.get(String(appid));
-    return Array.isArray(list) ? list : [];
+    const rawKey = String(appid || "");
+    const direct = configIndex.get(rawKey);
+    if (Array.isArray(direct)) return direct;
+    const normalizedKey = normalizeAppIdValue(rawKey);
+    if (!normalizedKey) return [];
+    const matches = [];
+    for (const [indexedAppId, metas] of configIndex.entries()) {
+      if (normalizeAppIdValue(indexedAppId) !== normalizedKey) continue;
+      if (Array.isArray(metas)) matches.push(...metas);
+    }
+    return matches;
   }
 
   function getPs4ConfigMetasByNpCommId(npcommid) {
@@ -878,16 +927,11 @@ module.exports = function makeWatchedFolders({
       watcherLogger.info("auto-select:skip-already-emitted", { config: name });
       return;
     }
-    if (autoSelectedConfigs.has(name)) {
-      watcherLogger.info("auto-select:skip-already-active", { config: name });
-      return;
-    }
     const now = Date.now();
     const last = lastAutoSelectTs.get(name) || 0;
     if (now - last < 1200) return; // throttle duplicate emits
     if (isConfigActive?.(name)) {
       pendingAutoSelect.delete(name);
-      autoSelectedConfigs.add(name);
       autoSelectEmitted.delete(name);
       watcherLogger.info("auto-select:skip-active", { config: name });
       return;
@@ -2011,13 +2055,11 @@ module.exports = function makeWatchedFolders({
 
   // --- prefs helpers ---
   function readPrefsSafe() {
-    try {
-      return fs.existsSync(preferencesPath)
-        ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
-        : {};
-    } catch {
-      return {};
-    }
+    const result = readJsonWithBackupSync(preferencesPath, {
+      backup: true,
+      fallback: {},
+    });
+    return result.value && typeof result.value === "object" ? result.value : {};
   }
   function getPreferredSteamOfficialAccountId(sourcePrefs = null) {
     const prefs =
@@ -2055,7 +2097,7 @@ module.exports = function makeWatchedFolders({
       }
       const current = readPrefsSafe();
       const merged = { ...current, ...(patch || {}) };
-      fs.writeFileSync(preferencesPath, JSON.stringify(merged, null, 2));
+      writeJsonAtomicSync(preferencesPath, merged, { backup: true });
       return merged;
     } catch {
       return readPrefsSafe();
@@ -2623,9 +2665,10 @@ module.exports = function makeWatchedFolders({
         return stored;
       }
       const cur = readPrefsSafe();
-      fs.writeFileSync(
+      writeJsonAtomicSync(
         preferencesPath,
-        JSON.stringify({ ...cur, watchedFolders: uniq }, null, 2),
+        { ...cur, watchedFolders: uniq },
+        { backup: true },
       );
       return uniq;
     } catch (e) {
@@ -2655,9 +2698,10 @@ module.exports = function makeWatchedFolders({
         persistPreferences({ watchedFolders: next });
       } else {
         const prefs = readPrefsSafe();
-        fs.writeFileSync(
+        writeJsonAtomicSync(
           preferencesPath,
-          JSON.stringify({ ...prefs, watchedFolders: next }, null, 2),
+          { ...prefs, watchedFolders: next },
+          { backup: true },
         );
       }
       stopFolderWatcher(oldNorm);
@@ -2708,6 +2752,7 @@ module.exports = function makeWatchedFolders({
     if (!normalized) return false;
     const state = currentState || getBlacklistState();
     if (state?.appIds?.has(normalized)) return true;
+    if (!String(platform || "").trim()) return false;
     const configKey = buildBlacklistConfigKey(normalized, platform);
     return configKey ? state?.configKeys?.has(configKey) === true : false;
   }
@@ -4146,9 +4191,10 @@ module.exports = function makeWatchedFolders({
         return getBlockedFoldersSet();
       }
       const prefs = readPrefsSafe();
-      fs.writeFileSync(
+      writeJsonAtomicSync(
         preferencesPath,
-        JSON.stringify({ ...prefs, blockedWatchedFolders: uniq }, null, 2),
+        { ...prefs, blockedWatchedFolders: uniq },
+        { backup: true },
       );
       blockedFoldersCache = null;
       return getBlockedFoldersSet();
@@ -5211,16 +5257,8 @@ module.exports = function makeWatchedFolders({
     }
 
     if (!preserveUnblockAutoSelectSuppression) {
-      if (suppressAutoSelect.has(String(appid))) {
-        // Drop suppression once we detect a real post-unblock change.
-        suppressAutoSelect.delete(String(appid));
-      }
-      if (meta?.name && suppressAutoSelectByConfig.has(meta.name)) {
-        suppressAutoSelectByConfig.delete(meta.name);
-      }
-      if (justUnblocked.has(String(appid))) {
-        justUnblocked.delete(String(appid));
-      }
+      // Drop only this config's suppression after a real post-unblock change.
+      releaseUnblockSuppression(appid, meta);
     }
 
     const isFirstSeed =
@@ -5594,8 +5632,8 @@ module.exports = function makeWatchedFolders({
         } catch {}
         if (
           !bootMode &&
-          !justUnblocked.has(String(entry.appid)) &&
-          !suppressAutoSelect.has(String(entry.appid))
+          !isRecentlyUnblocked(entry.appid, entry.meta) &&
+          !isAutoSelectSuppressedForMeta(entry.appid, entry.meta)
         ) {
           setTimeout(() => enqueueAutoSelect(entry.meta), 0);
         }
@@ -5699,8 +5737,8 @@ module.exports = function makeWatchedFolders({
         xeniaTargetBeforeSeed || pickExistingSeedTargetForMeta(meta, candidates);
       pendingInitialNotify.delete(meta.name);
       if (existingTarget) {
-        const fromUnblock = justUnblocked.has(id);
         const preferredMeta = pickMetaForPath(id, existingTarget) || meta;
+        const fromUnblock = isRecentlyUnblocked(id, preferredMeta);
         setTimeout(() => {
           (async () => {
             watcherLogger.info("initial-notify:attempt", {
@@ -5764,7 +5802,7 @@ module.exports = function makeWatchedFolders({
               !bootMode &&
               !isConfigActive?.(preferredMeta.name) &&
               !pendingAutoSelect.has(preferredMeta.name) &&
-              !suppressAutoSelect.has(String(id))
+              !isAutoSelectSuppressedForMeta(id, preferredMeta)
             ) {
               enqueueAutoSelect(preferredMeta);
             }
@@ -6132,7 +6170,7 @@ module.exports = function makeWatchedFolders({
                   if (
                     !bootMode &&
                     evalResult &&
-                    !justUnblocked.has(String(appid))
+                    !isRecentlyUnblocked(appid, meta)
                   ) {
                     const tenokeReady =
                       meta.__tenoke !== true ||
@@ -6474,8 +6512,8 @@ module.exports = function makeWatchedFolders({
             if (
               !bootMode &&
               tenokeReady &&
-              !justUnblocked.has(String(appid)) &&
-              !suppressAutoSelect.has(String(appid))
+              !isRecentlyUnblocked(appid, meta) &&
+              !isAutoSelectSuppressedForMeta(appid, meta)
             ) {
               // defer to next tick to allow notifications to emit before activation
               setTimeout(() => enqueueAutoSelect(meta), 0);
@@ -6485,8 +6523,8 @@ module.exports = function makeWatchedFolders({
                 appid: String(appid),
                 bootMode,
                 tenokeReady,
-                justUnblocked: justUnblocked.has(String(appid)),
-                suppressAutoSelect: suppressAutoSelect.has(String(appid)),
+                justUnblocked: isRecentlyUnblocked(appid, meta),
+                suppressAutoSelect: isAutoSelectSuppressedForMeta(appid, meta),
               });
             }
           }
@@ -8101,7 +8139,7 @@ module.exports = function makeWatchedFolders({
       opts.fromBlacklist === true ||
       (Array.isArray(opts.appIdsFromBlacklist) &&
         opts.appIdsFromBlacklist.includes(appid)) ||
-      justUnblocked.has(appid);
+      isRecentlyUnblocked(appid, meta);
 
     // If coming from un-blacklist, preload snapshot from cache to avoid replaying notifications
     const snapKey = makeSnapshotKey(meta, appid);
@@ -10474,8 +10512,8 @@ module.exports = function makeWatchedFolders({
               });
               if (
                 !bootMode &&
-                !justUnblocked.has(String(meta.appid)) &&
-                !suppressAutoSelect.has(String(meta.appid))
+                !isRecentlyUnblocked(meta.appid, meta) &&
+                !isAutoSelectSuppressedForMeta(meta.appid, meta)
               ) {
                 setTimeout(() => enqueueAutoSelect(meta), 0);
               }
@@ -10723,8 +10761,8 @@ module.exports = function makeWatchedFolders({
         if (
           !bootMode &&
           tenokeReady &&
-          !justUnblocked.has(String(appid)) &&
-          !suppressAutoSelect.has(String(appid))
+          !isRecentlyUnblocked(appid, meta) &&
+          !isAutoSelectSuppressedForMeta(appid, meta)
         ) {
           setTimeout(() => enqueueAutoSelect(meta), 0);
         }
@@ -10995,8 +11033,8 @@ module.exports = function makeWatchedFolders({
             if (
               !bootMode &&
               tenokeReady &&
-              !justUnblocked.has(String(appid)) &&
-              !suppressAutoSelect.has(String(appid))
+              !isRecentlyUnblocked(appid, meta) &&
+              !isAutoSelectSuppressedForMeta(appid, meta)
             ) {
               setTimeout(() => enqueueAutoSelect(meta), 0);
             } else {
@@ -11005,8 +11043,8 @@ module.exports = function makeWatchedFolders({
                 appid: String(appid),
                 bootMode,
                 tenokeReady,
-                justUnblocked: justUnblocked.has(String(appid)),
-                suppressAutoSelect: suppressAutoSelect.has(String(appid)),
+                justUnblocked: isRecentlyUnblocked(appid, meta),
+                suppressAutoSelect: isAutoSelectSuppressedForMeta(appid, meta),
               });
             }
           }
@@ -12001,27 +12039,122 @@ module.exports = function makeWatchedFolders({
     maybeEmitBootComplete();
   });
 
-  ipcMain.on("blacklist:removed-appid", (_e, appid) => {
-    if (Array.isArray(appid)) {
-      for (const id of appid) {
+  function collectResetUnblockCandidates(removedEntries = []) {
+    const candidates = [];
+    if (!Array.isArray(removedEntries)) return candidates;
+
+    for (const entry of removedEntries) {
+      if (!entry || typeof entry !== "object") continue;
+      const entryAppId = normalizeAppIdValue(entry.appid);
+      if (!entryAppId) continue;
+
+      const entryScope = String(entry.scope || "")
+        .trim()
+        .toLowerCase();
+      const entryPlatform = entry.platform
+        ? normalizePlatform(entry.platform)
+        : null;
+      if (entryScope !== "global" && entryScope !== "platform") continue;
+      if (entryScope === "platform" && !entryPlatform) continue;
+
+      for (const meta of getConfigMetas(entryAppId)) {
+        if (
+          entryScope === "platform" &&
+          normalizePlatform(meta?.platform) !== entryPlatform
+        ) {
+          continue;
+        }
+        candidates.push(meta);
+      }
+    }
+
+    return candidates;
+  }
+
+  ipcMain.on("blacklist:removed-appid", (_e, payload) => {
+    if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+      const removedScopes = new Set(
+        Array.isArray(payload?.removedScopes)
+          ? payload.removedScopes.map((scope) =>
+              String(scope || "").trim().toLowerCase(),
+            )
+          : [],
+      );
+      const normalizedAppId = normalizeAppIdValue(payload?.appid);
+      const normalizedPlatform = payload?.platform
+        ? normalizePlatform(payload.platform)
+        : null;
+      const candidates = [];
+
+      if (payload?.reset === true) {
+        candidates.push(
+          ...collectResetUnblockCandidates(payload?.removedEntries),
+        );
+      } else if (normalizedAppId) {
+        const appMetas = getConfigMetas(normalizedAppId);
+        const globalScopeRemoved = removedScopes.has("global");
+        for (const meta of appMetas) {
+          if (
+            !globalScopeRemoved &&
+            normalizedPlatform &&
+            normalizePlatform(meta?.platform) !== normalizedPlatform
+          ) {
+            continue;
+          }
+          candidates.push(meta);
+        }
+      }
+
+      const currentBlacklist = getBlacklistState();
+      const markedConfigs = new Set();
+      for (const meta of candidates) {
+        const metaAppId = normalizeAppIdValue(meta?.appid || normalizedAppId);
+        if (!metaAppId || !meta?.name || markedConfigs.has(meta.name)) continue;
+        if (
+          isAppIdBlacklisted(
+            metaAppId,
+            meta?.platform || null,
+            currentBlacklist,
+          )
+        ) {
+          continue;
+        }
+        markedConfigs.add(meta.name);
+        justUnblockedConfigs.add(meta.name);
+        cancelAutoSelectForMeta(meta);
+      }
+      watcherLogger.info("blacklist:unblock-suppression-applied", {
+        appid: normalizedAppId || null,
+        platform: normalizedPlatform || null,
+        reset: payload?.reset === true,
+        removedEntryCount: Array.isArray(payload?.removedEntries)
+          ? payload.removedEntries.length
+          : 0,
+        removedScopes: Array.from(removedScopes),
+        configs: Array.from(markedConfigs),
+      });
+      return;
+    }
+
+    if (Array.isArray(payload)) {
+      for (const id of payload) {
         const normalized = normalizeAppIdValue(id);
         if (normalized) {
           justUnblocked.add(normalized);
           suppressAutoSelect.add(normalized);
-          suppressAutoSelectByConfig.add(normalized);
           cancelAutoSelectForApp(normalized);
         }
       }
       return;
     }
-    const normalized = normalizeAppIdValue(appid);
+    const normalized = normalizeAppIdValue(payload);
     if (normalized) {
       justUnblocked.add(normalized);
       suppressAutoSelect.add(normalized);
-      suppressAutoSelectByConfig.add(normalized);
       cancelAutoSelectForApp(normalized);
-    } else if (appid === null) {
+    } else if (payload === null) {
       justUnblocked.clear();
+      justUnblockedConfigs.clear();
       suppressAutoSelect.clear();
       suppressAutoSelectByConfig.clear();
       autoSelectEmitted.clear();

@@ -6,6 +6,7 @@ const { execFile } = require("child_process");
 const axios = require("axios");
 const { live, xnet } = require("@xboxreplay/xboxlive-auth");
 const { createLogger } = require("./logger");
+const { writeJsonAtomicSync } = require("./atomic-json-store");
 const {
   RARITY_SOURCES,
   writeAchievementPercentagesSidecar,
@@ -1585,12 +1586,7 @@ async function importXboxPcLibrary(configsDir, options = {}) {
           }
         } catch {}
       }
-      await fsp.mkdir(stateDir, { recursive: true });
-      await fsp.writeFile(
-        path.join(stateDir, "achievements.json"),
-        JSON.stringify(snapshot, null, 2),
-        "utf8",
-      );
+      writeJsonAtomicSync(path.join(stateDir, "achievements.json"), snapshot);
       const previousEntry = existing.get(titleId);
       const previous = previousEntry?.config || {};
       const local = installedByTitleId.get(titleId) || {};

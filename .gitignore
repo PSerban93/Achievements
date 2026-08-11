@@ -1,5 +1,8 @@
 node_modules/
 dist/
+!assets/san-runtime/dist/
+!assets/san-runtime/dist/app/
+!assets/san-runtime/dist/app/global.css
 /COMMITMSG.txt
 /.vs
 /.vscode

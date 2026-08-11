@@ -498,7 +498,11 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("blacklist:add-manual", { appids }),
   getBlacklist: () => ipcRenderer.invoke("blacklist:list"),
   resetBlacklist: () => ipcRenderer.invoke("blacklist:reset"),
-  isAppIdBlacklisted: (appid) => ipcRenderer.invoke("blacklist:check", appid),
+  isAppIdBlacklisted: (appid, platform = null) =>
+    ipcRenderer.invoke(
+      "blacklist:check",
+      appid && typeof appid === "object" ? appid : { appid, platform },
+    ),
   getConfigByAppId: (appid) => ipcRenderer.invoke("config:get-by-appid", appid),
 
   // Achievements loading

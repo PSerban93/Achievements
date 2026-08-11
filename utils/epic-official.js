@@ -3,6 +3,7 @@ const path = require("path");
 const crypto = require("crypto");
 const axios = require("axios");
 const { createLogger } = require("./logger");
+const { writeJsonAtomicSync } = require("./atomic-json-store");
 const {
   RARITY_SOURCES,
   normalizeRarityPercent,
@@ -480,10 +481,7 @@ function saveEpicOfficialImportMeta(metaPath, meta) {
           ? meta.noAchievements
           : {},
     };
-    fs.mkdirSync(path.dirname(metaPath), { recursive: true });
-    const tmpPath = `${metaPath}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(payload, null, 2), "utf8");
-    fs.renameSync(tmpPath, metaPath);
+    writeJsonAtomicSync(metaPath, payload);
     return true;
   } catch (err) {
     epicOfficialLogger.warn("epic-official:import-meta:save-failed", {

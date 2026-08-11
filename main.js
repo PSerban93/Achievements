@@ -49,6 +49,10 @@ const AdmZip = require("adm-zip");
 const { copyFolderOnce, copyFolderOverwrite } = require("./utils/fileCopy");
 const { computeFolderContentVersion } = require("./utils/content-version");
 const {
+  readJsonWithBackupSync,
+  writeJsonAtomicSync,
+} = require("./utils/atomic-json-store");
+const {
   validateAppIdDirectoryTarget,
 } = require("./utils/config-deletion-paths");
 const {
@@ -2124,9 +2128,14 @@ function ensurePreferencesFile() {
     const current = readPrefsSafe();
     const merged = mergeWithDefaultPreferences(current);
     const exists = fs.existsSync(preferencesPath);
-    if (!exists || !deepEqual(current, merged)) {
+    const primaryRead = readJsonWithBackupSync(preferencesPath, {
+      backup: false,
+      fallback: null,
+    });
+    const primaryIsValid = primaryRead.source === "primary";
+    if (!exists || !primaryIsValid || !deepEqual(current, merged)) {
       fs.mkdirSync(path.dirname(preferencesPath), { recursive: true });
-      fs.writeFileSync(preferencesPath, JSON.stringify(merged, null, 2));
+      writeJsonAtomicSync(preferencesPath, merged, { backup: true });
     }
     return merged;
   } catch (err) {
@@ -2145,6 +2154,8 @@ let mainWindow;
 let selectedConfigPath = null;
 let selectedConfig = null;
 let selectedPlatform = null;
+let selectedConfigMode = "none";
+let activeConfigUpdateGeneration = 0;
 let overlayControllerService = null;
 let overlayControllerRuntimeStateCache = {
   supportEnabled: false,
@@ -2291,6 +2302,7 @@ function buildBlacklistPayload({
       key: `appid:${appid}`,
       appid,
       platform: null,
+      scope: "global",
       legacy: true,
     })),
     ...configKeys.map((configKey) => {
@@ -2299,6 +2311,7 @@ function buildBlacklistPayload({
         key: configKey,
         appid,
         platform: platform || null,
+        scope: "platform",
         legacy: false,
       };
     }),
@@ -2334,8 +2347,8 @@ function persistBlacklist({ appIds = [], configKeys = [] } = {}) {
     });
   } catch (err) {
     prefsLogger.error("blacklist:write-failed", { error: err.message });
+    throw err;
   }
-  return buildBlacklistPayload();
 }
 
 function addAppIdToBlacklist(appid) {
@@ -2386,12 +2399,31 @@ function resetBlacklist() {
   return persistBlacklist({ appIds: [], configKeys: [] });
 }
 
+function getBlacklistMatch(appid, platform = null) {
+  const normalizedAppId = normalizeAppIdValue(appid);
+  const rawPlatform = String(platform || "").trim();
+  const configKey =
+    normalizedAppId && rawPlatform
+      ? buildBlacklistConfigKey(normalizedAppId, rawPlatform)
+      : "";
+  const globalMatch =
+    !!normalizedAppId && blacklistedAppIdsSet.has(normalizedAppId);
+  const platformMatch =
+    !!configKey && blacklistedConfigKeysSet.has(configKey);
+  return {
+    appid: normalizedAppId || null,
+    platform: rawPlatform
+      ? normalizeBlacklistPlatformValue(rawPlatform)
+      : null,
+    configKey: configKey || null,
+    global: globalMatch,
+    scoped: platformMatch,
+    effective: globalMatch || platformMatch,
+  };
+}
+
 function isAppIdBlacklisted(appid, platform = null) {
-  const normalized = normalizeAppIdValue(appid);
-  if (!normalized) return false;
-  if (blacklistedAppIdsSet.has(normalized)) return true;
-  const configKey = buildBlacklistConfigKey(normalized, platform);
-  return configKey ? blacklistedConfigKeysSet.has(configKey) : false;
+  return getBlacklistMatch(appid, platform).effective;
 }
 
 function refreshBlacklistEffects() {
@@ -6440,7 +6472,7 @@ function updatePreferences(patch = {}) {
       return current;
     }
 
-    fs.writeFileSync(preferencesPath, JSON.stringify(merged, null, 2));
+    writeJsonAtomicSync(preferencesPath, merged, { backup: true });
     cachedPreferences = { ...merged };
     const effectivePatch = {};
     for (const key of changedKeys) {
@@ -7961,13 +7993,16 @@ ipcMain.handle("blacklist:check", async (_event, appid) => {
       ? appid
       : payload?.appid;
   const normalized = normalizeAppIdValue(rawAppId);
-  const blacklisted = normalized
-    ? isAppIdBlacklisted(normalized, payload?.platform || null)
-    : false;
+  const match = normalized
+    ? getBlacklistMatch(normalized, payload?.platform || null)
+    : getBlacklistMatch(null, payload?.platform || null);
   return {
     appid: normalized,
     platform: payload?.platform || null,
-    blacklisted,
+    blacklisted: match.effective,
+    global: match.global,
+    scoped: match.scoped,
+    configKey: match.configKey,
   };
 });
 
@@ -9747,8 +9782,7 @@ ipcMain.handle(
           );
           if (config.save_path) {
             try {
-              fs.mkdirSync(config.save_path, { recursive: true });
-              fs.writeFileSync(statePath, JSON.stringify(snapshot, null, 2));
+              writeJsonAtomicSync(statePath, snapshot);
             } catch (error) {
               xboxPcLogger.warn("xbox-pc:state-write-failed", {
                 configName: safeName,
@@ -11086,6 +11120,29 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
     : null;
   const removeFlag = payload?.remove === true || payload?.action === "remove";
 
+  const normalizeMutationScopes = (match) => {
+    const requested = Array.isArray(payload?.scopes)
+      ? payload.scopes
+      : payload?.scope
+        ? [payload.scope]
+        : [];
+    const normalized = Array.from(
+      new Set(
+        requested
+          .map((scope) => String(scope || "").trim().toLowerCase())
+          .filter((scope) => scope === "global" || scope === "platform"),
+      ),
+    );
+    if (normalized.length) return normalized;
+    if (removeFlag && payload?.scope === "effective") {
+      return [
+        ...(match?.global ? ["global"] : []),
+        ...(match?.scoped ? ["platform"] : []),
+      ];
+    }
+    return resolvedPlatform ? ["platform"] : ["global"];
+  };
+
   ipcLogger.info("config:blacklist:request", {
     configName: safeName || null,
     appid: resolvedAppId || null,
@@ -11107,13 +11164,40 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
     }
     if (!resolvedAppId) throw new Error("AppID missing");
 
-    const updatedList = removeFlag
-      ? resolvedPlatform
-        ? removeConfigKeyFromBlacklist(resolvedAppId, resolvedPlatform)
-        : removeAppIdFromBlacklist(resolvedAppId)
-      : resolvedPlatform
-        ? addConfigKeyToBlacklist(resolvedAppId, resolvedPlatform)
-        : addAppIdToBlacklist(resolvedAppId);
+    const beforeMatch = getBlacklistMatch(resolvedAppId, resolvedPlatform);
+    const mutationScopes = normalizeMutationScopes(beforeMatch);
+    if (!mutationScopes.length) {
+      throw new Error("Blacklist scope missing");
+    }
+    if (mutationScopes.includes("platform") && !resolvedPlatform) {
+      throw new Error("Platform missing for platform-scoped blacklist entry");
+    }
+
+    const nextAppIds = new Set(readBlacklistFromPrefs());
+    const nextConfigKeys = new Set(readBlacklistedConfigKeysFromPrefs());
+    const normalizedAppId = normalizeAppIdValue(resolvedAppId);
+    const scopedKey = resolvedPlatform
+      ? buildBlacklistConfigKey(normalizedAppId, resolvedPlatform)
+      : "";
+    for (const scope of mutationScopes) {
+      const target = scope === "global" ? normalizedAppId : scopedKey;
+      const collection = scope === "global" ? nextAppIds : nextConfigKeys;
+      if (!target) continue;
+      if (removeFlag) collection.delete(target);
+      else collection.add(target);
+    }
+    const updatedList = persistBlacklist({
+      appIds: Array.from(nextAppIds),
+      configKeys: Array.from(nextConfigKeys),
+    });
+    const afterMatch = getBlacklistMatch(resolvedAppId, resolvedPlatform);
+    const removedScopes = removeFlag
+      ? mutationScopes.filter(
+          (scope) =>
+            (scope === "global" && beforeMatch.global) ||
+            (scope === "platform" && beforeMatch.scoped),
+        )
+      : [];
 
     if (!removeFlag) {
       const activeEpicPollName = epicOfficialActivePollState?.configName || "";
@@ -11158,9 +11242,15 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
       }
     }
 
-    if (removeFlag) {
+    if (removeFlag && removedScopes.length) {
       try {
-        ipcMain.emit("blacklist:removed-appid", null, resolvedAppId);
+        ipcMain.emit("blacklist:removed-appid", null, {
+          appid: normalizedAppId,
+          platform: resolvedPlatform || null,
+          configName: safeName || null,
+          removedScopes,
+          effectiveUnblocked: beforeMatch.effective && !afterMatch.effective,
+        });
       } catch {}
     }
 
@@ -11179,7 +11269,9 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
       success: true,
       appid: resolvedAppId,
       platform: resolvedPlatform || null,
-      blacklisted: !removeFlag,
+      blacklisted: afterMatch.effective,
+      blacklistMatch: afterMatch,
+      scopes: mutationScopes,
       blacklist: updatedList.entries,
       blacklistPayload: updatedList,
     };
@@ -11334,13 +11426,29 @@ ipcMain.handle("blacklist:reset", async () => {
   ipcLogger.info("blacklist:reset:request");
   try {
     const before = buildBlacklistPayload();
+    const removedEntries = Array.isArray(before?.entries)
+      ? before.entries.map(({ appid, platform, scope }) => ({
+          appid,
+          platform,
+          scope,
+        }))
+      : [];
+    const removedScopes = Array.from(
+      new Set(
+        removedEntries
+          .map((entry) => String(entry?.scope || "").trim().toLowerCase())
+          .filter((scope) => scope === "global" || scope === "platform"),
+      ),
+    );
     resetBlacklist();
-    if (
-      (before?.appids?.length || 0) > 0 ||
-      (before?.configKeys?.length || 0) > 0
-    ) {
+    if (removedEntries.length > 0) {
       try {
-        ipcMain.emit("blacklist:removed-appid", null, null);
+        ipcMain.emit("blacklist:removed-appid", null, {
+          reset: true,
+          removedEntries,
+          removedScopes,
+          effectiveUnblocked: true,
+        });
       } catch {}
     }
     refreshBlacklistEffects();
@@ -15266,7 +15374,7 @@ function scheduleAchCacheMetaSave() {
         files: Object.fromEntries(achCacheMeta),
       };
       fs.mkdirSync(path.dirname(achCacheMetaPath), { recursive: true });
-      fs.writeFileSync(achCacheMetaPath, JSON.stringify(payload, null, 2));
+      writeJsonAtomicSync(achCacheMetaPath, payload);
     } catch {}
   }, 500);
 }
@@ -15768,7 +15876,7 @@ function savePreviousAchievements(
     if (existing && deepEqual(existing, ordered)) {
       return false;
     }
-    fs.writeFileSync(cachePath, JSON.stringify(ordered, null, 2));
+    writeJsonAtomicSync(cachePath, ordered);
     persistenceLogger.info("save-achievement-cache", {
       config: configName,
       path: cachePath,
@@ -15822,7 +15930,10 @@ function seedCacheFromSnapshot(
       resolvedOptions.savePath ||
       resolvedOptions.save_path ||
       "";
-    if (!isPs4ProgressXmlPath(progressPath)) {
+    if (
+      !isPs4ProgressXmlPath(progressPath) &&
+      resolvedOptions.allowNonProgressSeed !== true
+    ) {
       persistenceLogger.info(
         "save-achievement-cache:shadps4-skip-nonprogress",
         {
@@ -17017,6 +17128,9 @@ async function refreshSelectedSteamOfficialMonitoring() {
 }
 
 async function clearActiveConfigSelection(options = {}) {
+  if (options?.preserveUpdateGeneration !== true) {
+    activeConfigUpdateGeneration += 1;
+  }
   const reason =
     typeof options?.reason === "string" && options.reason
       ? options.reason
@@ -17062,6 +17176,7 @@ async function clearActiveConfigSelection(options = {}) {
   selectedConfigPath = null;
   selectedConfig = null;
   selectedPlatform = null;
+  selectedConfigMode = "none";
   currentAppId = null;
   clearPendingMissingAchievementFile(previousConfig);
 
@@ -17109,6 +17224,7 @@ ipcMain.handle("config:get-active-selection", () => ({
   configName: isNonEmptyString(selectedConfig) ? selectedConfig : null,
   platform: normalizePlatform(selectedPlatform) || null,
   appid: currentAppId != null ? String(currentAppId) : null,
+  mode: selectedConfigMode,
 }));
 
 ipcMain.on(
@@ -17117,11 +17233,13 @@ ipcMain.on(
     event,
     { configName, preset, position, platform, allowBlacklistedSelection },
   ) => {
+    const updateGeneration = ++activeConfigUpdateGeneration;
     const safeName = configName ? sanitizeConfigName(configName) : null;
 
     if (!safeName) {
       await clearActiveConfigSelection({
         reason: "update-config:null",
+        preserveUpdateGeneration: true,
       });
       return;
     }
@@ -17137,62 +17255,85 @@ ipcMain.on(
       return;
     }
 
+    const normalizedPlatform =
+      normalizePlatform(config?.platform) || normalizePlatform(platform) || null;
+    const appIdString =
+      config?.appid != null ? String(config.appid).trim() : "";
+    const isBlacklisted =
+      appIdString && isAppIdBlacklisted(appIdString, config?.platform);
+    if (isBlacklisted && allowBlacklistedSelection !== true) {
+      ipcLogger.info("update-config:ignored-blacklisted", {
+        configName: configName || null,
+        appid: appIdString,
+        platform: normalizedPlatform,
+      });
+      return;
+    }
+
+    const targetMode = isBlacklisted ? "view-only" : "active";
+    const currentSafeName = sanitizeConfigName(selectedConfig || "");
+    const currentPlatform = normalizePlatform(selectedPlatform) || null;
+    const requiresTransition =
+      currentSafeName !== safeName ||
+      currentPlatform !== normalizedPlatform ||
+      selectedConfigMode !== targetMode;
+
+    if (requiresTransition) {
+      await clearActiveConfigSelection({
+        reason: `update-config:transition:${targetMode}`,
+        configName: selectedConfig || null,
+        preserveUpdateGeneration: true,
+      });
+      if (updateGeneration !== activeConfigUpdateGeneration) return;
+    }
+
     selectedPreset = preset || "default";
     selectedPosition = position || "center-bottom";
-    selectedConfig = configName;
-    selectedPlatform =
-      normalizePlatform(platform) ||
-      normalizePlatform(config?.platform) ||
-      null;
-    ipcLogger.info("update-config:selected", {
-      configName,
-      platform: selectedPlatform,
-      appid: config?.appid != null ? String(config.appid) : null,
-    });
+    selectedConfig = safeName;
+    selectedPlatform = normalizedPlatform;
+    selectedConfigMode = targetMode;
     selectedConfigPath = isNonEmptyString(config.config_path)
       ? config.config_path
       : null;
     fullAchievementsConfigPath = isNonEmptyString(config.config_path)
       ? path.join(config.config_path, "achievements.json")
       : null;
+    ipcLogger.info("update-config:selected", {
+      configName: safeName,
+      platform: selectedPlatform,
+      appid: appIdString || null,
+      mode: selectedConfigMode,
+      transitioned: requiresTransition,
+    });
 
-    const normalizedPlatform = normalizePlatform(config.platform);
-    const appIdString =
-      config?.appid != null ? String(config.appid).trim() : "";
-    const isBlacklisted =
-      appIdString && isAppIdBlacklisted(appIdString, config?.platform);
     if (isBlacklisted) {
-      if (
-        normalizedPlatform === "epic-official" &&
-        allowBlacklistedSelection === true
-      ) {
-        currentAppId = appIdString || null;
-        achievementsFilePath = null;
-        stopEpicOfficialActivePoll("blacklisted-selection", {
-          configName: safeName,
-          appid: appIdString,
-        });
-        monitorAchievementsFile(null);
-        if (isNonEmptyString(configName)) {
-          pendingMissingAchievementFiles.delete(configName);
-        }
-        if (overlayWindow && !overlayWindow.isDestroyed()) {
-          overlayWindow.webContents.send("load-overlay-data", selectedConfig);
-          overlayWindow.webContents.send("set-language", {
-            language: selectedLanguage,
-            uiLanguage: selectedUiLanguage,
-          });
-        }
-        ipcLogger.info("update-config:selection-only-blacklisted", {
-          configName: configName || null,
-          appid: appIdString,
-          platform: normalizedPlatform,
-        });
-        return;
-      }
-      ipcLogger.info("update-config:ignored-blacklisted", {
-        configName: configName || null,
+      currentAppId = appIdString || null;
+      achievementsFilePath = null;
+      stopEpicOfficialActivePoll("blacklisted-selection", {
+        configName: safeName,
         appid: appIdString,
+      });
+      clearEpicOfficialRuntimeState("blacklisted-selection", {
+        configName: safeName,
+        appid: appIdString,
+      });
+      stopXboxPcActivePoll("blacklisted-selection", {
+        configName: safeName,
+        appid: appIdString,
+      });
+      monitorAchievementsFile(null);
+      pendingMissingAchievementFiles.delete(safeName);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      ipcLogger.info("update-config:selection-only-blacklisted", {
+        configName: safeName,
+        appid: appIdString,
+        platform: normalizedPlatform,
       });
       return;
     }
@@ -20102,7 +20243,11 @@ function isEpicOfficialConfigActiveForPolling(configName) {
 
 function isEpicOfficialConfigSelectedForPolling(configName) {
   const safeName = sanitizeConfigName(configName || "");
-  if (!safeName || sanitizeConfigName(selectedConfig || "") !== safeName) {
+  if (
+    selectedConfigMode !== "active" ||
+    !safeName ||
+    sanitizeConfigName(selectedConfig || "") !== safeName
+  ) {
     return false;
   }
   if (normalizePlatform(selectedPlatform) === "epic-official") return true;
@@ -20391,7 +20536,12 @@ function isXboxPcConfigActiveForPolling(configName) {
   const safeName = sanitizeConfigName(configName || "");
   if (!safeName) return false;
   if (isXboxPcConfigBlacklisted(safeName)) return false;
-  if (sanitizeConfigName(selectedConfig || "") === safeName) return true;
+  if (
+    selectedConfigMode === "active" &&
+    sanitizeConfigName(selectedConfig || "") === safeName
+  ) {
+    return true;
+  }
   if (sanitizeConfigName(detectedConfigName || "") === safeName) return true;
   for (const activeName of activePlaytimeConfigs) {
     if (sanitizeConfigName(activeName || "") === safeName) return true;
@@ -21960,8 +22110,10 @@ ipcMain.on("queue-progress-notification", async (_event, payload) => {
       payload?.name ||
       (typeof payload?.displayName === "string" ? payload.displayName : null);
     if (configName && achKey) {
+      const config = readConfigForAchievementCache(configName);
       const platform =
         normalizePlatform(payload?.platform) ||
+        normalizePlatform(config?.platform) ||
         normalizePlatform(selectedPlatform) ||
         "steam";
       const prev = (await loadPreviousAchievements(configName, platform)) || {};
@@ -21970,13 +22122,27 @@ ipcMain.on("queue-progress-notification", async (_event, payload) => {
       const prevProg = Number(prevEntry?.progress);
       const prevMax = Number(prevEntry?.max_progress);
       const maxProg = Number(payload.max_progress);
-      if (prevEntry?.earned === true) return;
+      if (prevEntry?.earned === true || prevEntry?.earned === 1) {
+        notificationLogger.info("queue-progress:skip-earned", {
+          config: configName,
+          achievement: achKey,
+          source: payload?.source || null,
+        });
+        return;
+      }
       if (
         Number.isFinite(incomingProg) &&
         Number.isFinite(prevProg) &&
         incomingProg <= prevProg &&
         (Number.isNaN(maxProg) || maxProg === prevMax)
       ) {
+        notificationLogger.info("queue-progress:skip-stale", {
+          config: configName,
+          achievement: achKey,
+          incomingProgress: incomingProg,
+          cachedProgress: prevProg,
+          source: payload?.source || null,
+        });
         return;
       }
     }
@@ -23049,6 +23215,7 @@ async function seedManualConfigsAtBoot() {
           });
         }
         let snapshot = null;
+        let fallbackPs4CacheOptions = null;
         let seededAnyPs4User = false;
         for (const progressFile of progressFiles) {
           const currentProgressPath = progressFile?.progressPath || "";
@@ -23091,20 +23258,21 @@ async function seedManualConfigsAtBoot() {
           }
         }
         if (!seededAnyPs4User && trophyDir && fs.existsSync(trophyDir)) {
-          const ps4CacheOptions = {
+          const schemaFile = path.join(trophyDir, "Xml", "TROP.XML");
+          fallbackPs4CacheOptions = {
             appid: config?.appid || "",
-            filePath: "",
+            filePath: schemaFile,
             savePath: trophyDir || config?.save_path || "",
             shadps4UserId: String(config?.shadps4_user_id || "").trim(),
+            allowNonProgressSeed: true,
           };
-          const schemaFile = path.join(trophyDir, "Xml", "TROP.XML");
           const parsed = ps4Trophy.parsePs4TrophySetDir(trophyDir);
           parsed.appid = String(config?.appid || parsed.appid || "");
           const previous =
             (await loadPreviousAchievements(
               configFileName,
               platform,
-              ps4CacheOptions,
+              fallbackPs4CacheOptions,
             )) || {};
           snapshot = ps4Trophy.buildSnapshotFromPs4(parsed, previous);
           if (fs.existsSync(schemaFile)) {
@@ -23116,12 +23284,16 @@ async function seedManualConfigsAtBoot() {
             );
           }
         }
-        if (snapshot && Object.keys(snapshot).length) {
+        if (
+          fallbackPs4CacheOptions &&
+          snapshot &&
+          Object.keys(snapshot).length
+        ) {
           seedCacheFromSnapshot(
             configFileName,
             snapshot,
             platform,
-            ps4CacheOptions,
+            fallbackPs4CacheOptions,
           );
           if (seedKey) bootSeededCacheKeys.add(seedKey);
           bumpCacheBatchStat("seeded");
@@ -25647,6 +25819,7 @@ watchedFoldersApi = makeWatchedFolders({
     queueProgressNotification(payload);
   },
   isConfigActive: (name) =>
+    selectedConfigMode === "active" &&
     sanitizeConfigName(name) === sanitizeConfigName(selectedConfig),
   onPlatinumComplete: handlePlatinumComplete,
 });
@@ -25664,14 +25837,23 @@ try {
 }
 
 function readPrefsSafe() {
-  try {
-    return fs.existsSync(preferencesPath)
-      ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
-      : {};
-  } catch (err) {
-    prefsLogger.error("read-preferences:error", { error: err.message });
-    return {};
+  const result = readJsonWithBackupSync(preferencesPath, {
+    backup: true,
+    fallback: {},
+  });
+  if (result.source === "backup") {
+    prefsLogger.warn("read-preferences:recovered-backup", {
+      path: preferencesPath,
+      error: result.error?.message || null,
+    });
+  } else if (result.error) {
+    prefsLogger.error("read-preferences:error", {
+      path: preferencesPath,
+      error: result.error.message,
+      backupError: result.backupError?.message || null,
+    });
   }
+  return result.value && typeof result.value === "object" ? result.value : {};
 }
 ipcMain.handle("platinum:manual", async (_event, payload = {}) => {
   const {

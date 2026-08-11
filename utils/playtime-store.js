@@ -1,7 +1,10 @@
 // utils/playtime-store.js
-const fs = require("fs");
 const path = require("path");
 const { preferencesPath } = require("./paths");
+const {
+  readJsonWithBackupSync,
+  writeJsonAtomicSync,
+} = require("./atomic-json-store");
 
 const STORE_PATH = path.join(
   path.dirname(preferencesPath),
@@ -21,17 +24,16 @@ function sanitizeKey(raw) {
 }
 
 function readStore() {
-  try {
-    if (fs.existsSync(STORE_PATH)) {
-      return JSON.parse(fs.readFileSync(STORE_PATH, "utf8"));
-    }
-  } catch {}
-  return {};
+  const result = readJsonWithBackupSync(STORE_PATH, {
+    backup: true,
+    fallback: {},
+  });
+  return result.value && typeof result.value === "object" ? result.value : {};
 }
 
 function writeStore(data) {
   try {
-    fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2));
+    writeJsonAtomicSync(STORE_PATH, data, { backup: true });
   } catch {}
 }
 
