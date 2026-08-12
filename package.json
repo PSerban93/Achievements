@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.2.8-beta.2",
+  "version": "1.2.8",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -126,7 +126,7 @@
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "43.3.0",
+    "electron": "43.4.0",
     "electron-builder": "^26.8.1",
     "eslint": "10.8.1",
     "rcedit": "^5.0.2"
