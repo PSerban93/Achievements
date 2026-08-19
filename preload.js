@@ -480,6 +480,11 @@ contextBridge.exposeInMainWorld("api", {
   loadConfigs: () => ipcRenderer.invoke("loadConfigs"),
   loadDashboardSummary: () => ipcRenderer.invoke("dashboard:summary"),
   selectFolder: () => ipcRenderer.invoke("selectFolder"),
+  selectScreenshotFolder: () => ipcRenderer.invoke("selectScreenshotFolder"),
+  getDefaultScreenshotFolder: () =>
+    ipcRenderer.invoke("getDefaultScreenshotFolder"),
+  selectRecordFolder: () => ipcRenderer.invoke("selectRecordFolder"),
+  getDefaultRecordFolder: () => ipcRenderer.invoke("getDefaultRecordFolder"),
   deleteConfig: (configName, options = {}) => {
     if (configName && typeof configName === "object") {
       return ipcRenderer.invoke("delete-config", configName);

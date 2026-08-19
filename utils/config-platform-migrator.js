@@ -15,6 +15,8 @@ const VALID_PLATFORMS = new Set([
   "xenia",
   "rpcs3",
   "shadps4",
+  "markerpatch",
+  "madnesspatch",
 ]);
 
 function normalizePlatform(value) {
@@ -87,6 +89,12 @@ function inferOfficialPlatformFromMarkers(config = {}) {
   if (configPath.includes(`${schemaNeedle}xbox-pc${path.sep}`)) {
     return "xbox-pc";
   }
+  if (configPath.includes(`${schemaNeedle}markerpatch${path.sep}`)) {
+    return "markerpatch";
+  }
+  if (configPath.includes(`${schemaNeedle}madnesspatch${path.sep}`)) {
+    return "madnesspatch";
+  }
 
   const hasEpicOfficialProductMarker = Boolean(
     config?.epic_product_id || config?.epicProductId,
@@ -128,6 +136,20 @@ function inferOfficialPlatformFromMarkers(config = {}) {
     config?.xbox_aumid
   ) {
     return "xbox-pc";
+  }
+  if (
+    config?.markerpatch_state_file ||
+    String(config?.achievement_source?.provider || "").toLowerCase() ===
+      "markerpatch"
+  ) {
+    return "markerpatch";
+  }
+  if (
+    config?.madnesspatch_checkpoint_root ||
+    String(config?.achievement_source?.provider || "").toLowerCase() ===
+      "madnesspatch"
+  ) {
+    return "madnesspatch";
   }
   return "";
 }
@@ -176,7 +198,9 @@ function inferPlatformAndSteamId({ config, mapping }) {
     platform === "epic-official" ||
     platform === "gog" ||
     platform === "gog-official" ||
-    platform === "xbox-pc"
+    platform === "xbox-pc" ||
+    platform === "markerpatch" ||
+    platform === "madnesspatch"
   ) {
     steamAppId = "";
   } else if (platform === "xenia" || platform === "rpcs3") {
@@ -341,6 +365,18 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
       !platforms?.has("uplay") &&
       !platforms?.has("gog") &&
       !platforms?.has("epic");
+    const prefersMarkerPatch =
+      platforms?.has("markerpatch") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog") &&
+      !platforms?.has("epic");
+    const prefersMadnessPatch =
+      platforms?.has("madnesspatch") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog") &&
+      !platforms?.has("epic");
     const targetPlatform = prefersUplay
       ? "uplay"
       : prefersGogOfficial
@@ -351,9 +387,13 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
         ? "epic-official"
       : prefersXboxPc
         ? "xbox-pc"
-      : prefersGog
-        ? "gog"
-        : "steam";
+      : prefersMarkerPatch
+          ? "markerpatch"
+        : prefersMadnessPatch
+          ? "madnesspatch"
+          : prefersGog
+            ? "gog"
+            : "steam";
     const targetDir = path.join(schemaRoot, targetPlatform, appid);
     try {
       if (fs.existsSync(targetDir)) {
@@ -414,9 +454,13 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
                 ? "xenia"
                 : platform === "rpcs3"
                   ? "rpcs3"
-                : platform === "shadps4"
-                  ? "shadps4"
-                    : "steam";
+                  : platform === "shadps4"
+                    ? "shadps4"
+                    : platform === "markerpatch"
+                      ? "markerpatch"
+                    : platform === "madnesspatch"
+                      ? "madnesspatch"
+                      : "steam";
       const legacyDir = path.join(schemaRoot, appid);
       const nextDir = path.join(schemaRoot, storagePlatform, appid);
       const currentPath =

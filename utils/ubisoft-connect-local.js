@@ -10,6 +10,7 @@ const {
 } = require("./achievement-rarity");
 const { createLogger } = require("./logger");
 const { normalizeProcessNameValue } = require("./process-name-utils");
+const uplayMappingStore = require("./uplay-mapping-store");
 
 let electronApp = null;
 try {
@@ -167,26 +168,12 @@ function extractUbisoftProcessName(block) {
   return normalizeProcessNameValue(ranked.map((entry) => entry.name));
 }
 
-function readUplaySteamMapping() {
-  const candidates = [runtimeUplaySteamMapPath, defaultUplaySteamMapPath];
-  for (const candidate of candidates) {
-    try {
-      if (!candidate || !fs.existsSync(candidate)) continue;
-      const raw = fs.readFileSync(candidate, "utf8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        return parsed;
-      }
-    } catch {}
-  }
-  return [];
-}
-
-const uplayToSteam = new Map(
-  readUplaySteamMapping()
-    .filter((row) => row?.uplay_id != null)
-    .map((row) => [String(row.uplay_id).trim(), row]),
-);
+uplayMappingStore.configure({
+  runtimePath: runtimeUplaySteamMapPath,
+  assetPath: defaultUplaySteamMapPath,
+});
+uplayMappingStore.reloadSnapshot({ preserveLastValid: true });
+const uplayToSteam = uplayMappingStore.getMap();
 
 function resolveUbisoftSteamMapping(appid) {
   const key = String(appid || "").trim();

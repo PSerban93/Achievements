@@ -38,8 +38,7 @@
   --app-shadow-selection: 0 8px 22px rgba(0, 0, 0, 0.24);
   --app-shadow-card-selected: 0 0 0 2px rgba(189, 147, 249, 0.18);
   --app-shadow-card-selected-active:
-    0 0 0 2px rgba(189, 147, 249, 0.18),
-    0 0 0 4px rgba(139, 233, 253, 0.25);
+    0 0 0 2px rgba(189, 147, 249, 0.18), 0 0 0 4px rgba(139, 233, 253, 0.25);
   --app-shadow-action: 0 4px 10px rgba(0, 0, 0, 0.35);
   --dracula-background: var(--app-bg);
   --dracula-current-line: var(--app-surface);
@@ -249,8 +248,7 @@
   --app-shadow-selection: 0 10px 24px rgba(31, 74, 112, 0.22);
   --app-shadow-card-selected: 0 0 0 2px rgba(45, 125, 210, 0.28);
   --app-shadow-card-selected-active:
-    0 0 0 2px rgba(45, 125, 210, 0.32),
-    0 0 0 4px rgba(0, 162, 232, 0.22);
+    0 0 0 2px rgba(45, 125, 210, 0.32), 0 0 0 4px rgba(0, 162, 232, 0.22);
   --app-shadow-action: 0 5px 14px rgba(31, 74, 112, 0.26);
 }
 
@@ -291,8 +289,7 @@
   --app-shadow-selection: 0 10px 24px rgba(0, 0, 0, 0.32);
   --app-shadow-card-selected: 0 0 0 2px rgba(101, 183, 255, 0.28);
   --app-shadow-card-selected-active:
-    0 0 0 2px rgba(101, 183, 255, 0.32),
-    0 0 0 4px rgba(126, 230, 255, 0.18);
+    0 0 0 2px rgba(101, 183, 255, 0.32), 0 0 0 4px rgba(126, 230, 255, 0.18);
   --app-shadow-action: 0 5px 14px rgba(0, 0, 0, 0.38);
 }
 
@@ -321,7 +318,11 @@
 :root[data-theme="aero"] body {
   background: var(
     --app-body-bg,
-    linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(87, 166, 226, 0.18)),
+    linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.42),
+      rgba(87, 166, 226, 0.18)
+    ),
     linear-gradient(180deg, #d8edf9 0%, #9fcce8 52%, #78afd9 100%)
   );
 }
@@ -359,18 +360,25 @@
 :root[data-hardware-acceleration="off"][data-theme="aero"] .settings-content,
 :root[data-hardware-acceleration="off"][data-theme="aero"] #buttonContainer,
 :root[data-hardware-acceleration="off"][data-theme="aero"] #dashboardPanel,
-:root[data-hardware-acceleration="off"][data-theme="aero"] #dashboardSelectionBar,
-:root[data-hardware-acceleration="off"][data-theme="aero"] #dashboardContextMenu,
+:root[data-hardware-acceleration="off"][data-theme="aero"]
+  #dashboardSelectionBar,
+:root[data-hardware-acceleration="off"][data-theme="aero"]
+  #dashboardContextMenu,
 :root[data-hardware-acceleration="off"][data-theme="aero"] .dash-card,
 :root[data-hardware-acceleration="off"][data-theme="aero"] .tray-menu__item,
 :root[data-hardware-acceleration="off"][data-theme="aero-dark"] .modal-content,
-:root[data-hardware-acceleration="off"][data-theme="aero-dark"] .settings-content,
-:root[data-hardware-acceleration="off"][data-theme="aero-dark"] #buttonContainer,
+:root[data-hardware-acceleration="off"][data-theme="aero-dark"]
+  .settings-content,
+:root[data-hardware-acceleration="off"][data-theme="aero-dark"]
+  #buttonContainer,
 :root[data-hardware-acceleration="off"][data-theme="aero-dark"] #dashboardPanel,
-:root[data-hardware-acceleration="off"][data-theme="aero-dark"] #dashboardSelectionBar,
-:root[data-hardware-acceleration="off"][data-theme="aero-dark"] #dashboardContextMenu,
+:root[data-hardware-acceleration="off"][data-theme="aero-dark"]
+  #dashboardSelectionBar,
+:root[data-hardware-acceleration="off"][data-theme="aero-dark"]
+  #dashboardContextMenu,
 :root[data-hardware-acceleration="off"][data-theme="aero-dark"] .dash-card,
-:root[data-hardware-acceleration="off"][data-theme="aero-dark"] .tray-menu__item {
+:root[data-hardware-acceleration="off"][data-theme="aero-dark"]
+  .tray-menu__item {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -380,7 +388,11 @@
 :root[data-theme="aero"] #buttonContainer,
 :root[data-theme="aero"] #dashboardPanel {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.54), rgba(218, 238, 252, 0.72)),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.54),
+      rgba(218, 238, 252, 0.72)
+    ),
     var(--app-panel-bg);
 }
 
@@ -407,7 +419,11 @@
 :root[data-theme="aero-dark"] button:hover,
 :root[data-theme="aero-dark"] select:hover {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--app-surface) 72%, transparent), color-mix(in srgb, var(--app-accent) 22%, transparent)),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--app-surface) 72%, transparent),
+      color-mix(in srgb, var(--app-accent) 22%, transparent)
+    ),
     var(--app-hover-bg);
 }
 
@@ -851,7 +867,7 @@ h1 {
   bottom: 0;
   right: 6px;
   margin: auto;
-  height: 24px;
+  /* height: 24px; */
   width: 24px;
   padding: 0;
   font-size: 14px;
@@ -1351,7 +1367,11 @@ select option:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, var(--app-bg), var(--app-panel-bg-strong));
+  background: linear-gradient(
+    135deg,
+    var(--app-bg),
+    var(--app-panel-bg-strong)
+  );
   color: var(--app-text);
   gap: 18px;
   text-align: center;
@@ -1884,7 +1904,7 @@ body::-webkit-scrollbar {
 }
 
 .settings-control label {
-  margin: 0;
+  /* margin: 0; */
   color: var(--dracula-foreground);
 }
 
@@ -2007,7 +2027,7 @@ body::-webkit-scrollbar {
   position: absolute;
   right: 6px;
   top: 50%;
-  transform: translateY(-50%);
+  /* transform: translateY(-50%); */
   height: 24px;
   width: 24px;
   padding: 0;
@@ -2543,7 +2563,8 @@ body.window-maximized .dashboard-grid {
 
 .wf-row:focus-within {
   border-color: var(--app-accent-2);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-accent-2) 35%, transparent) inset;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--app-accent-2) 35%, transparent)
+    inset;
 }
 
 .wf-path {

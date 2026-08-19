@@ -7,6 +7,7 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { writeJsonAtomicSync } = require("./atomic-json-store");
 const HTTP_TIMEOUT_MS = 15000;
 
 const UPLAY_URL =
@@ -751,7 +752,7 @@ async function main() {
   }
 
   fs.mkdirSync(path.dirname(OUTPUT_FILE), { recursive: true });
-  fs.writeFileSync(OUTPUT_FILE, JSON.stringify(result, null, 2), "utf8");
+  writeJsonAtomicSync(OUTPUT_FILE, result, { trailingNewline: true });
   console.log(
     added
       ? `💾 appended ${added} new entries to ${OUTPUT_FILE}`

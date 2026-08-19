@@ -3,6 +3,17 @@ const path = require("path");
 const ini = require("ini");
 const CRC32 = require("crc-32");
 const parseStatsBin = require("./parseStatsBin");
+const {
+  getMarkerPatchStateFile,
+  isMarkerPatchConfig,
+  readMarkerPatchSnapshot,
+} = require("./markerpatch");
+const {
+  getLatestMadnessPatchStateFile,
+  getMadnessPatchCheckpointRoot,
+  isMadnessPatchConfig,
+  readMadnessPatchSnapshot,
+} = require("./madnesspatch");
 
 function parseIniWithEncoding(filePath) {
   try {
@@ -66,16 +77,16 @@ function parseType2Section(sec) {
     "UNLOCK",
     "Unlocked",
     "unlocked",
-    "UNLOCKED"
+    "UNLOCKED",
   );
   const achieved =
     typeof achRaw === "boolean"
       ? achRaw
       : typeof achRaw === "number"
-      ? achRaw === 1
-      : typeof achRaw === "string"
-      ? ["1", "true", "yes"].includes(achRaw.trim().toLowerCase())
-      : false;
+        ? achRaw === 1
+        : typeof achRaw === "string"
+          ? ["1", "true", "yes"].includes(achRaw.trim().toLowerCase())
+          : false;
 
   const curRaw = get("CurProgress", "curProgress", "progress", "Progress");
   const maxRaw = get(
@@ -83,21 +94,21 @@ function parseType2Section(sec) {
     "maxProgress",
     "max_progress",
     "Max",
-    "max"
+    "max",
   );
 
   const cur =
     typeof curRaw === "string" && /^[0-9]$/.test(curRaw)
       ? Number(curRaw)
       : Number.isFinite(Number(curRaw))
-      ? Number(curRaw)
-      : undefined;
+        ? Number(curRaw)
+        : undefined;
   const max =
     typeof maxRaw === "string" && /^[0-9]$/.test(maxRaw)
       ? Number(maxRaw)
       : Number.isFinite(Number(maxRaw))
-      ? Number(maxRaw)
-      : undefined;
+        ? Number(maxRaw)
+        : undefined;
 
   const tRaw = get(
     "UnlockTime",
@@ -109,7 +120,7 @@ function parseType2Section(sec) {
     "earned_time",
     "earnedTime",
     "Time",
-    "time"
+    "time",
   );
   const tNum = Number(tRaw);
   const time = Number.isFinite(tNum) ? tNum : 0;
@@ -163,10 +174,10 @@ function parseType1Section(sec) {
     typeof unlockedRaw === "boolean"
       ? unlockedRaw
       : typeof unlockedRaw === "number"
-      ? unlockedRaw === 1
-      : typeof unlockedRaw === "string"
-      ? ["1", "true", "yes"].includes(unlockedRaw.trim().toLowerCase())
-      : false;
+        ? unlockedRaw === 1
+        : typeof unlockedRaw === "string"
+          ? ["1", "true", "yes"].includes(unlockedRaw.trim().toLowerCase())
+          : false;
 
   const earned =
     String(sec.achieved ?? sec.Achieved ?? "").trim() === "1" ||
@@ -226,7 +237,10 @@ function parseOnlineFixStatsIni(filePath) {
   if (!Object.keys(parsed).length) return {};
 
   const statsKey = Object.keys(parsed).find(
-    (key) => String(key || "").trim().toLowerCase() === "stats"
+    (key) =>
+      String(key || "")
+        .trim()
+        .toLowerCase() === "stats",
   );
   if (!statsKey || !parsed[statsKey] || typeof parsed[statsKey] !== "object") {
     return null;
@@ -265,9 +279,11 @@ function buildOnlineFixSnapshot(
   const statsAreAuthoritative = options?.statsAreAuthoritative === true;
   const statsByLowerName = new Map(
     Object.entries(stats).map(([name, value]) => [
-      String(name || "").trim().toLowerCase(),
+      String(name || "")
+        .trim()
+        .toLowerCase(),
       value,
-    ])
+    ]),
   );
   const snapshot = {};
 
@@ -276,7 +292,8 @@ function buildOnlineFixSnapshot(
     if (!name) continue;
 
     const unlockedEntry = unlocked[name];
-    const isEarned = unlockedEntry?.earned === true || unlockedEntry?.earned === 1;
+    const isEarned =
+      unlockedEntry?.earned === true || unlockedEntry?.earned === 1;
     const entry = {
       earned: isEarned,
       earned_time: isEarned ? Number(unlockedEntry?.earned_time) || 0 : 0,
@@ -289,7 +306,12 @@ function buildOnlineFixSnapshot(
     const operand = String(progress?.value?.operand1 || "").trim();
     const maxProgress = Number(progress?.max_val);
     const minProgress = Number(progress?.min_val);
-    if (operation === "statvalue" && operand && Number.isFinite(maxProgress) && maxProgress > 0) {
+    if (
+      operation === "statvalue" &&
+      operand &&
+      Number.isFinite(maxProgress) &&
+      maxProgress > 0
+    ) {
       const rawStat = statsByLowerName.get(operand.toLowerCase());
       const previousProgress = Number(previous?.[name]?.progress);
       const defaultProgress = Number.isFinite(minProgress) ? minProgress : 0;
@@ -315,7 +337,8 @@ function buildOnlineFixSnapshot(
 
   for (const [name, unlockedEntry] of Object.entries(unlocked)) {
     if (!name || snapshot[name]) continue;
-    const isEarned = unlockedEntry?.earned === true || unlockedEntry?.earned === 1;
+    const isEarned =
+      unlockedEntry?.earned === true || unlockedEntry?.earned === 1;
     snapshot[name] = {
       earned: isEarned,
       earned_time: isEarned ? Number(unlockedEntry?.earned_time) || 0 : 0,
@@ -408,7 +431,7 @@ function buildDisplayToNameIndex(configArray) {
 function getNameIndexFromConfigPath(
   configPath,
   schemaOverride = null,
-  appid = null
+  appid = null,
 ) {
   try {
     const candidates = [];
@@ -417,7 +440,7 @@ function getNameIndexFromConfigPath(
       candidates.push(path.join(configPath, "achievements.json"));
       if (appid) {
         candidates.push(
-          path.join(configPath, String(appid), "achievements.json")
+          path.join(configPath, String(appid), "achievements.json"),
         );
       }
     }
@@ -459,13 +482,13 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
     if (!base) continue;
     const candidates = new Set();
     candidates.add(path.join(base, "achievements.json"));
-      if (appid) {
-        candidates.add(path.join(base, appid, "achievements.json"));
-        if (normalizedPlatform) {
-          candidates.add(
-            path.join(base, normalizedPlatform, appid, "achievements.json")
-          );
-        }
+    if (appid) {
+      candidates.add(path.join(base, appid, "achievements.json"));
+      if (normalizedPlatform) {
+        candidates.add(
+          path.join(base, normalizedPlatform, appid, "achievements.json"),
+        );
+      }
       [
         "uplay",
         "ubisoft-official",
@@ -480,7 +503,7 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
         "rpcs3",
         "shadps4",
       ].forEach((plat) =>
-        candidates.add(path.join(base, plat, appid, "achievements.json"))
+        candidates.add(path.join(base, plat, appid, "achievements.json")),
       );
     }
     for (const candidate of candidates) {
@@ -497,7 +520,7 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
 function readAchievementSchemaArray(
   configMeta,
   configPathOverride = null,
-  fullSchemaPath = null
+  fullSchemaPath = null,
 ) {
   const candidates = [
     fullSchemaPath,
@@ -554,7 +577,7 @@ function getSafeLocalizedText(input, lang = "english") {
     return (
       input.english ||
       Object.values(input).find(
-        (v) => typeof v === "string" && v.trim() !== ""
+        (v) => typeof v === "string" && v.trim() !== "",
       ) ||
       "Hidden"
     );
@@ -571,7 +594,7 @@ function buildTenokeSnapshot(
   achievementsMap,
   statsMap,
   nameIndex,
-  fallback = {}
+  fallback = {},
 ) {
   const schema = Array.isArray(schemaEntries) ? schemaEntries : [];
   const previous = fallback && typeof fallback === "object" ? fallback : {};
@@ -580,18 +603,24 @@ function buildTenokeSnapshot(
   const stats = statsMap instanceof Map ? statsMap : new Map();
   const statsByLowerName = new Map(
     Array.from(stats.entries(), ([name, value]) => [
-      String(name || "").trim().toLowerCase(),
+      String(name || "")
+        .trim()
+        .toLowerCase(),
       value,
-    ])
+    ]),
   );
   const achievementsByLowerName = new Map();
 
   for (const [rawName, data] of achievements.entries()) {
-    const rawKey = String(rawName || "").trim().toLowerCase();
+    const rawKey = String(rawName || "")
+      .trim()
+      .toLowerCase();
     if (rawKey) achievementsByLowerName.set(rawKey, data);
 
     const canonical = canonNameFromEntry(rawName, nameIndex);
-    const canonicalKey = String(canonical || "").trim().toLowerCase();
+    const canonicalKey = String(canonical || "")
+      .trim()
+      .toLowerCase();
     if (canonicalKey) achievementsByLowerName.set(canonicalKey, data);
   }
 
@@ -676,7 +705,7 @@ function parseTenokeAchievementsIni(
   filePath,
   nameIndex,
   schemaEntries = [],
-  fallback = {}
+  fallback = {},
 ) {
   try {
     const raw = fs.readFileSync(filePath, "utf8");
@@ -748,7 +777,7 @@ function parseTenokeAchievementsIni(
         achievementsMap,
         statsMap,
         nameIndex,
-        fallback
+        fallback,
       );
     }
 
@@ -778,6 +807,25 @@ function parseTenokeAchievementsIni(
   }
 }
 
+function mergeEarnedTimeFromCached(snapshot, cached) {
+  if (!snapshot || typeof snapshot !== "object") return snapshot || {};
+  if (!cached || typeof cached !== "object") return snapshot;
+  let changed = false;
+  const merged = { ...snapshot };
+  for (const [key, entry] of Object.entries(merged)) {
+    if (!entry || typeof entry !== "object") continue;
+    const cacheEntry = cached[key];
+    if (!cacheEntry || typeof cacheEntry !== "object") continue;
+    const entryTime = Number(entry.earned_time || 0);
+    const cacheTime = Number(cacheEntry.earned_time || 0);
+    if (entry.earned && entryTime <= 0 && cacheTime > 0) {
+      merged[key] = { ...entry, earned_time: cacheEntry.earned_time };
+      changed = true;
+    }
+  }
+  return changed ? merged : snapshot;
+}
+
 function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
   const {
     configMeta = null,
@@ -792,10 +840,32 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
     .trim()
     .toLowerCase();
 
+  if (normalizedPlatform === "markerpatch" || isMarkerPatchConfig(configMeta)) {
+    const stateFile =
+      getMarkerPatchStateFile(configMeta) ||
+      (saveDir ? path.join(saveDir, "settings.txt") : "");
+    const parsed = readMarkerPatchSnapshot(stateFile, fallback || {});
+    const snapshot = parsed.valid ? parsed.snapshot : fallback || {};
+    return mergeEarnedTimeFromCached(snapshot, fallback || {});
+  }
+
+  if (
+    normalizedPlatform === "madnesspatch" ||
+    isMadnessPatchConfig(configMeta)
+  ) {
+    const checkpointRoot =
+      getMadnessPatchCheckpointRoot(configMeta) || saveDir || "";
+    const stateFile = getLatestMadnessPatchStateFile(checkpointRoot);
+    if (!stateFile) return fallback || {};
+    const parsed = readMadnessPatchSnapshot(stateFile, fallback || {});
+    const snapshot = parsed.valid ? parsed.snapshot : fallback || {};
+    return mergeEarnedTimeFromCached(snapshot, fallback || {});
+  }
+
   const nameIndex = getNameIndexFromConfigPath(
     configPathOverride,
     fullSchemaPath,
-    appid
+    appid,
   );
 
   const findCaseInsensitive = (dir, target, options = {}) => {
@@ -847,7 +917,9 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
         } = require("./gog-galaxy-local");
         const parsed = readGogGameplayDb(gameplayDbPath);
         const snapshot = buildGogOfficialSnapshot(parsed?.achievements || []);
-        return snapshot && Object.keys(snapshot).length ? snapshot : fallback || {};
+        return snapshot && Object.keys(snapshot).length
+          ? snapshot
+          : fallback || {};
       } catch {
         return fallback || {};
       }
@@ -867,7 +939,9 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
         } = require("./ubisoft-connect-local");
         const parsed = readUbisoftSpoolFile(spoolFilePath);
         const snapshot = buildUbisoftOfficialSnapshot(parsed?.records || []);
-        return snapshot && Object.keys(snapshot).length ? snapshot : fallback || {};
+        return snapshot && Object.keys(snapshot).length
+          ? snapshot
+          : fallback || {};
       } catch {
         return fallback || {};
       }
@@ -881,17 +955,16 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
         resolveEaOfficialAchievementSetForAppId,
         resolveEaOfficialVerboseLogPath,
       } = require("./ea-desktop-local");
-      const logFilePath = resolveEaOfficialVerboseLogPath(
-        configMeta || {},
-        {
-          savePath: saveDir,
-        },
-      );
+      const logFilePath = resolveEaOfficialVerboseLogPath(configMeta || {}, {
+        savePath: saveDir,
+      });
       if (logFilePath && fs.existsSync(logFilePath)) {
         const parsed = readEaDesktopVerboseLog(logFilePath);
         const entry = resolveEaOfficialAchievementSetForAppId(appid, {
           achievementSet:
-            configMeta?.ea_achievement_set || configMeta?.eaAchievementSet || "",
+            configMeta?.ea_achievement_set ||
+            configMeta?.eaAchievementSet ||
+            "",
           parsedLog: parsed,
           logFilePath,
         });
@@ -951,10 +1024,10 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
           typeof achRaw === "boolean"
             ? achRaw
             : typeof achRaw === "number"
-            ? achRaw === 1
-            : typeof achRaw === "string"
-            ? ["1", "true", "yes"].includes(achRaw.trim().toLowerCase())
-            : false;
+              ? achRaw === 1
+              : typeof achRaw === "string"
+                ? ["1", "true", "yes"].includes(achRaw.trim().toLowerCase())
+                : false;
         const prog =
           item?.CurProgress ??
           item?.curProgress ??
@@ -991,8 +1064,8 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
               item?.id ||
               item?.AchievementId ||
               item?.achievementId,
-            item
-          )
+            item,
+          ),
         );
       } else if (parsed && typeof parsed === "object") {
         for (const [name, item] of Object.entries(parsed)) put(name, item);
@@ -1027,7 +1100,7 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
                 item.unlock_time ??
                 item.unlockTime ??
                 item.timestamp ??
-                item.time
+                item.time,
             ) || 0;
           const earned =
             item.Achieved === true ||
@@ -1055,7 +1128,7 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
                 item.UnlockTime ??
                 item.unlockTime ??
                 item.timestamp ??
-                item.time
+                item.time,
             ) || 0;
           const earned =
             item.unlocked === true ||
@@ -1080,21 +1153,18 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
     const schemaEntries = readAchievementSchemaArray(
       configMeta,
       configPathOverride,
-      fullSchemaPath
+      fullSchemaPath,
     );
     const tenokeData = parseTenokeAchievementsIni(
       tenokeIniPath,
       nameIndex,
       schemaEntries,
-      fallback
+      fallback,
     );
     if (tenokeData) return tenokeData;
   }
 
-  if (
-    fs.existsSync(onlineFixIniPath) ||
-    fs.existsSync(onlineFixStatsPath)
-  ) {
+  if (fs.existsSync(onlineFixIniPath) || fs.existsSync(onlineFixStatsPath)) {
     try {
       const converted = {};
       if (fs.existsSync(onlineFixIniPath)) {
@@ -1117,18 +1187,14 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
       const schemaEntries = readAchievementSchemaArray(
         configMeta,
         configPathOverride,
-        fullSchemaPath
+        fullSchemaPath,
       );
       if (!schemaEntries.length) {
         return Object.keys(converted).length ? converted : fallback || {};
       }
-      return buildOnlineFixSnapshot(
-        schemaEntries,
-        converted,
-        stats,
-        fallback,
-        { statsAreAuthoritative: hasOnlineFixStats },
-      );
+      return buildOnlineFixSnapshot(schemaEntries, converted, stats, fallback, {
+        statsAreAuthoritative: hasOnlineFixStats,
+      });
     } catch {
       return fallback || {};
     }
@@ -1184,6 +1250,7 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
 }
 
 module.exports = {
+  mergeEarnedTimeFromCached,
   loadAchievementsFromSaveFile,
   parseAchievementIniSection,
   parseOnlineFixStatsIni,

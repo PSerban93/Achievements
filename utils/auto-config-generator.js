@@ -43,6 +43,7 @@ const {
   lookupSteamDbName,
   lookupUplayMappingEntry,
 } = require("./local-game-name-cache");
+const uplayMappingStore = require("./uplay-mapping-store");
 const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
 const {
   hasSchemaParseOutputArtifacts,
@@ -95,22 +96,12 @@ function ensureUplayMappingFile() {
   }
 }
 ensureUplayMappingFile();
-function loadUplayMapping() {
-  try {
-    const raw = fs.readFileSync(uplaySteamMapPath, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
-    autoConfigLogger.warn("uplay-mapping:load-failed", {
-      error: err?.message || String(err),
-    });
-    return [];
-  }
-}
-const uplaySteamMap = loadUplayMapping();
-const uplayToSteam = new Map(
-  uplaySteamMap.map((row) => [String(row.uplay_id), row]),
-);
+uplayMappingStore.configure({
+  runtimePath: uplaySteamMapPath,
+  assetPath: defaultUplaySteamMapPath,
+});
+uplayMappingStore.reloadSnapshot({ preserveLastValid: true });
+const uplayToSteam = uplayMappingStore.getMap();
 const SCHEMA_LANGUAGE_VALUES = [
   "arabic",
   "bulgarian",
@@ -163,21 +154,32 @@ function shouldSuppressAchgenMessageInUi(message) {
 }
 const gogNameFallbackAppIds = new Set();
 function reloadUplayMappingFromDisk() {
-  try {
-    const refreshed = JSON.parse(fs.readFileSync(uplaySteamMapPath, "utf8"));
-    uplaySteamMap.length = 0;
-    refreshed.forEach((row) => uplaySteamMap.push(row));
-    uplayToSteam.clear();
-    refreshed.forEach((row) => {
-      uplayToSteam.set(String(row.uplay_id), row);
-    });
-    return true;
-  } catch (err) {
+  const result = uplayMappingStore.reloadSnapshot({ preserveLastValid: true });
+  if (!result.ok) {
     autoConfigLogger.warn("uplay-mapping:reload-failed", {
-      error: err?.message || String(err),
+      error: result.error?.message || "Invalid Uplay mapping",
+      preserved: result.preserved === true,
+      entries: result.entries,
     });
     return false;
   }
+  return true;
+}
+
+async function waitForUplayMappingReady(reason) {
+  const before = uplayMappingStore.getStatus();
+  const result = await uplayMappingStore.waitUntilReady();
+  const after = uplayMappingStore.getStatus();
+  if (after.refreshGeneration !== before.refreshGeneration) {
+    autoConfigLogger.info("uplay-mapping:ready", {
+      reason,
+      source: after.source,
+      entries: after.entries,
+      version: after.version,
+      refreshOk: result?.refreshResult?.ok !== false,
+    });
+  }
+  return result;
 }
 function refreshMappingViaScript() {
   try {
@@ -2549,6 +2551,9 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       ? opts.onGenerationProgress
       : null;
   const forcedPlatform = normalizePlatform(opts.forcePlatform) || null;
+  if (!forcedPlatform || forcedPlatform === "uplay") {
+    await waitForUplayMappingReady("generate-game-configs");
+  }
   const schemaLanguages = resolveSchemaLanguagesForGenerator(
     opts.schemaLanguages,
   );
@@ -3531,6 +3536,13 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
   if (!normalizedTasks.length) {
     return { generated: new Set(), results: [] };
   }
+  const needsUplayMapping = normalizedTasks.some((task) => {
+    const platform = normalizePlatform(task?.forcePlatform) || null;
+    return !platform || platform === "uplay";
+  });
+  if (needsUplayMapping) {
+    await waitForUplayMappingReady("generate-configs-batch");
+  }
 
   const tmpRoot = path.join(
     os.tmpdir(),
@@ -3852,6 +3864,9 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
   }
   autoConfigLogger.info("generate-single:start", { appid, outputDir });
   const desiredPlatform = normalizePlatform(opts.forcePlatform) || null;
+  if (!desiredPlatform || desiredPlatform === "uplay") {
+    await waitForUplayMappingReady("generate-config-single");
+  }
   if (desiredPlatform === "gog-official") {
     return generateGogOfficialConfigForProduct(appid, outputDir, {
       ...opts,

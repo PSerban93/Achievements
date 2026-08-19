@@ -52,6 +52,29 @@ const {
   readJsonWithBackupSync,
   writeJsonAtomicSync,
 } = require("./utils/atomic-json-store");
+const uplayMappingStore = require("./utils/uplay-mapping-store");
+const {
+  assertWritableDirectory,
+  buildUniqueAchievementMediaPath,
+  resolveScreenshotGameName,
+  resolveScreenshotRootFolder,
+  resolveWritableMediaRootFolder,
+  sanitizeAchievementMediaFilename,
+} = require("./utils/screenshot-paths");
+const {
+  AchievementRecorderController,
+} = require("./utils/achievement-recorder");
+const {
+  PendingAchievementRecordQueue,
+  getNotificationConfigName,
+} = require("./utils/pending-achievement-records");
+const {
+  getAchievementRecorderTimings,
+  normalizeAchievementRecordDuration,
+  normalizeAchievementRecordFps,
+  normalizeAchievementRecordPreferences,
+  shouldEnableAchievementRecorder,
+} = require("./utils/achievement-record-settings");
 const {
   validateAppIdDirectoryTarget,
 } = require("./utils/config-deletion-paths");
@@ -96,6 +119,15 @@ const {
 const {
   pickWindowsExecutableOrShortcut,
 } = require("./utils/windows-shortcut-picker");
+const {
+  getMarkerPatchStateFile,
+  isMarkerPatchConfig,
+} = require("./utils/markerpatch");
+const {
+  getLatestMadnessPatchStateFile,
+  getMadnessPatchCheckpointRoot,
+  isMadnessPatchConfig,
+} = require("./utils/madnesspatch");
 const { ensureSchemaParseRuntimeReady } = require("./utils/steam-schema-parse");
 const { startPlaytimeLogWatcher } = require("./utils/playtime-log-watcher");
 const { parseGpdFile, buildSnapshotFromGpd } = require("./utils/xenia-gpd");
@@ -194,6 +226,7 @@ const overlayLogger = createLogger("overlay", {
   level: process.env.OVERLAY_LOG_LEVEL || "info",
 });
 const ipcLogger = createLogger("ipc");
+const uplayMappingLogger = createLogger("uplay-mapping");
 const uiLogger = createLogger("ui");
 const coverUiLogger = createLogger("covers");
 const prefsLogger = createLogger("preferences");
@@ -210,6 +243,9 @@ const xboxPcLogger = createLogger("xbox-pc", {
 });
 const controllerLogger = createLogger("controller", {
   level: process.env.CONTROLLER_LOG_LEVEL || "info",
+});
+const recordLogger = createLogger("records", {
+  level: process.env.RECORD_LOG_LEVEL || "info",
 });
 const overlayShortcutManager = createOverlayShortcutManager({
   loadHook: () => {
@@ -321,9 +357,11 @@ const SAN_DEFAULT_PRESET_ICONS = {
   },
 };
 function normalizeSanPresetKey(preset) {
-  return String(preset || "default")
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, "") || "default";
+  return (
+    String(preset || "default")
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]/g, "") || "default"
+  );
 }
 
 function toFileUrl(filePath) {
@@ -387,7 +425,8 @@ function getSanRuntimePresetDimensions(preset) {
       error: err?.message || String(err),
     });
   }
-  const fallback = SAN_PRESET_DIMENSIONS[normalizeSanPresetKey(preset)] ||
+  const fallback =
+    SAN_PRESET_DIMENSIONS[normalizeSanPresetKey(preset)] ||
     SAN_PRESET_DIMENSIONS.default;
   return { ...fallback, offset: 20 };
 }
@@ -456,14 +495,16 @@ function readSanArchive(filePath) {
       )}`,
     }));
 
-  const source = theme.source === "achievements-default" ? "default" : "imported";
+  const source =
+    theme.source === "achievements-default" ? "default" : "imported";
   const preset = String(theme.customisation?.preset || "default").trim();
   const presetKey = normalizeSanPresetKey(preset);
   const fileLabel = path.basename(filePath, ".san").trim();
   const themeLabel = String(theme.label || "").trim();
-  const label = source === "default"
-    ? themeLabel || fileLabel
-    : fileLabel || themeLabel || presetKey;
+  const label =
+    source === "default"
+      ? themeLabel || fileLabel
+      : fileLabel || themeLabel || presetKey;
 
   return {
     id,
@@ -606,7 +647,10 @@ function ensureSanPresetCache(info) {
     }
     const targetPath = path.resolve(cacheDir, safeName);
     const cacheRoot = path.resolve(cacheDir);
-    if (targetPath !== cacheRoot && !targetPath.startsWith(cacheRoot + path.sep)) {
+    if (
+      targetPath !== cacheRoot &&
+      !targetPath.startsWith(cacheRoot + path.sep)
+    ) {
       throw new Error(`Unsafe SAN extraction target: ${entry.entryName}`);
     }
     if (entry.isDirectory) {
@@ -633,7 +677,9 @@ function resolveSanAssetPath(cacheDir, value) {
 
 function resolveSanAssetList(cacheDir, value) {
   if (Array.isArray(value)) {
-    return value.map((item) => resolveSanAssetPath(cacheDir, item)).filter(Boolean);
+    return value
+      .map((item) => resolveSanAssetPath(cacheDir, item))
+      .filter(Boolean);
   }
   const single = resolveSanAssetPath(cacheDir, value);
   return single ? [single] : [];
@@ -660,7 +706,9 @@ function resolveSanThemeAssetList(cacheDir, value) {
 
 function rewriteSanCustomisationAssetPaths(cacheDir, value) {
   if (Array.isArray(value)) {
-    return value.map((item) => rewriteSanCustomisationAssetPaths(cacheDir, item));
+    return value.map((item) =>
+      rewriteSanCustomisationAssetPaths(cacheDir, item),
+    );
   }
   if (value && typeof value === "object") {
     const out = {};
@@ -739,12 +787,18 @@ function mergeSanRuntimeDefaults(customisation = {}) {
     customicons: customIcons,
     iconanim: customisation.iconanim !== false,
     showdecoration: customisation.showdecoration !== false,
-    bgimg: customisation.bgimg || sanRuntimeAssetIfExists("img", "sanimgbg.png"),
-    base64: customisation.base64 || sanRuntimeAssetIfExists("img", "base64.png"),
-    gameicon: customisation.gameicon || sanRuntimeAssetIfExists("img", "gameicon.png"),
-    maskimg: customisation.maskimg || sanRuntimeAssetIfExists("img", "san_trophy_mask.png"),
+    bgimg:
+      customisation.bgimg || sanRuntimeAssetIfExists("img", "sanimgbg.png"),
+    base64:
+      customisation.base64 || sanRuntimeAssetIfExists("img", "base64.png"),
+    gameicon:
+      customisation.gameicon || sanRuntimeAssetIfExists("img", "gameicon.png"),
+    maskimg:
+      customisation.maskimg ||
+      sanRuntimeAssetIfExists("img", "san_trophy_mask.png"),
     iconborderimg:
-      customisation.iconborderimg || sanRuntimeAssetIfExists("img", "saniconborder.png"),
+      customisation.iconborderimg ||
+      sanRuntimeAssetIfExists("img", "saniconborder.png"),
     iconborderimgbronze:
       customisation.iconborderimgbronze ||
       sanRuntimeAssetIfExists("img", "saniconborder_bronze.png"),
@@ -760,8 +814,11 @@ function mergeSanRuntimeDefaults(customisation = {}) {
     percentbadgeimggold:
       customisation.percentbadgeimggold ||
       sanRuntimeAssetIfExists("img", "sanlogotrophy_gold.svg"),
-    hiddenicon: customisation.hiddenicon || sanRuntimeAssetIfExists("icon", "lock.svg"),
-    defaultAchIcon: customisation.defaultAchIcon || sanRuntimeAssetIfExists("img", "achicon.png"),
+    hiddenicon:
+      customisation.hiddenicon || sanRuntimeAssetIfExists("icon", "lock.svg"),
+    defaultAchIcon:
+      customisation.defaultAchIcon ||
+      sanRuntimeAssetIfExists("img", "achicon.png"),
   };
 }
 
@@ -769,29 +826,41 @@ function buildSanThemeForNotification(sanPresetId, notificationScale = 1) {
   const info = findSanPresetById(sanPresetId);
   if (!info) return null;
   const cacheDir = ensureSanPresetCache(info);
-  const theme = JSON.parse(fs.readFileSync(path.join(cacheDir, "usertheme.json"), "utf8"));
+  const theme = JSON.parse(
+    fs.readFileSync(path.join(cacheDir, "usertheme.json"), "utf8"),
+  );
   const customisation = mergeSanRuntimeDefaults(
     rewriteSanCustomisationAssetPaths(cacheDir, theme.customisation || {}),
   );
   const presetKey = normalizeSanPresetKey(customisation.preset);
   const baseDimensions = getSanRuntimePresetDimensions(presetKey);
   const sanScaleRaw = Number(customisation.scale);
-  const baseSanScale = Number.isFinite(sanScaleRaw) && sanScaleRaw > 0
-    ? sanScaleRaw / 100
-    : 1;
+  const baseSanScale =
+    Number.isFinite(sanScaleRaw) && sanScaleRaw > 0 ? sanScaleRaw / 100 : 1;
   const appScaleRaw = Number(notificationScale);
-  const appScale = Number.isFinite(appScaleRaw) && appScaleRaw > 0
-    ? appScaleRaw
-    : 1;
+  const appScale =
+    Number.isFinite(appScaleRaw) && appScaleRaw > 0 ? appScaleRaw : 1;
   const sanScale = baseSanScale * appScale;
   const effectiveSanScalePercent = Math.max(1, sanScale * 100);
   const bgImage = resolveSanThemeAssetPath(cacheDir, customisation.bgimg);
-  const customFont = resolveSanThemeAssetPath(cacheDir, customisation.customfont);
-  const hiddenIcon = resolveSanThemeAssetPath(cacheDir, customisation.hiddenicon);
-  const customIcon = resolveSanThemeAssetPath(cacheDir, customisation.customimgicon);
+  const customFont = resolveSanThemeAssetPath(
+    cacheDir,
+    customisation.customfont,
+  );
+  const hiddenIcon = resolveSanThemeAssetPath(
+    cacheDir,
+    customisation.hiddenicon,
+  );
+  const customIcon = resolveSanThemeAssetPath(
+    cacheDir,
+    customisation.customimgicon,
+  );
   const presetIcons = getSanPresetIcons(customisation);
   const logo = resolveSanThemeAssetPath(cacheDir, presetIcons.logo);
-  const decorations = resolveSanThemeAssetList(cacheDir, presetIcons.decoration);
+  const decorations = resolveSanThemeAssetList(
+    cacheDir,
+    presetIcons.decoration,
+  );
   const mask = resolveSanThemeAssetPath(cacheDir, customisation.maskimg);
 
   return {
@@ -801,11 +870,15 @@ function buildSanThemeForNotification(sanPresetId, notificationScale = 1) {
     preset: presetKey,
     width: Math.max(
       260,
-      Math.ceil((baseDimensions.width + (baseDimensions.offset || 20) * 2) * sanScale),
+      Math.ceil(
+        (baseDimensions.width + (baseDimensions.offset || 20) * 2) * sanScale,
+      ),
     ),
     height: Math.max(
       90,
-      Math.ceil((baseDimensions.height + (baseDimensions.offset || 20) * 2) * sanScale),
+      Math.ceil(
+        (baseDimensions.height + (baseDimensions.offset || 20) * 2) * sanScale,
+      ),
     ),
     scale: sanScale,
     presetHtml: getSanRuntimePresetHtml(presetKey),
@@ -834,8 +907,10 @@ function buildSanThemeForNotification(sanPresetId, notificationScale = 1) {
       secondarycolor: customisation.secondarycolor || "#0c2a66",
       tertiarycolor: customisation.tertiarycolor || "#ffffff",
       fontcolor: customisation.fontcolor || "#ffffff",
-      titlefontcolor: customisation.titlefontcolor || customisation.fontcolor || "#ffffff",
-      descfontcolor: customisation.descfontcolor || customisation.fontcolor || "#ffffff",
+      titlefontcolor:
+        customisation.titlefontcolor || customisation.fontcolor || "#ffffff",
+      descfontcolor:
+        customisation.descfontcolor || customisation.fontcolor || "#ffffff",
       fontshadow: customisation.fontshadow === true,
       fontshadowcolor: customisation.fontshadowcolor || "#000000",
       fontoutline: customisation.fontoutline === true,
@@ -894,12 +969,16 @@ function resolveSanSoundPath(value) {
 }
 
 function isSupportedNotificationSoundFile(fileName) {
-  return SAN_AUDIO_EXTENSIONS.has(path.extname(String(fileName || "")).toLowerCase());
+  return SAN_AUDIO_EXTENSIONS.has(
+    path.extname(String(fileName || "")).toLowerCase(),
+  );
 }
 
 function getSanExportedSoundFileName(info, entryName, index = 0, total = 1) {
   const ext = path.extname(entryName).toLowerCase();
-  const label = sanitizeFilename(info?.label || info?.fileName || "SAN Preset") || "SAN Preset";
+  const label =
+    sanitizeFilename(info?.label || info?.fileName || "SAN Preset") ||
+    "SAN Preset";
   const suffix = total > 1 ? ` ${index + 1}` : "";
   return `SAN - ${label}${suffix}${ext}`;
 }
@@ -907,7 +986,9 @@ function getSanExportedSoundFileName(info, entryName, index = 0, total = 1) {
 function getSanLegacyExportedSoundFileName(info, entryName) {
   const ext = path.extname(entryName).toLowerCase();
   const rawBase = path.basename(entryName, ext);
-  const label = sanitizeFilename(info?.label || info?.fileName || "SAN Preset") || "SAN Preset";
+  const label =
+    sanitizeFilename(info?.label || info?.fileName || "SAN Preset") ||
+    "SAN Preset";
   const base = sanitizeFilename(rawBase || "sound") || "sound";
   const hash = crypto
     .createHash("sha1")
@@ -923,13 +1004,11 @@ function exportSanPresetSoundsToUserSounds(info) {
   try {
     const zip = new AdmZip(info.filePath);
     fs.mkdirSync(userSoundsFolder, { recursive: true });
-    const soundEntries = zip
-      .getEntries()
-      .filter((entry) => {
-        if (entry.isDirectory) return false;
-        const entryName = normalizeSanZipEntryName(entry.entryName);
-        return !!entryName && isSupportedNotificationSoundFile(entryName);
-      });
+    const soundEntries = zip.getEntries().filter((entry) => {
+      if (entry.isDirectory) return false;
+      const entryName = normalizeSanZipEntryName(entry.entryName);
+      return !!entryName && isSupportedNotificationSoundFile(entryName);
+    });
     for (const [index, entry] of soundEntries.entries()) {
       const entryName = normalizeSanZipEntryName(entry.entryName);
       const fileName = getSanExportedSoundFileName(
@@ -965,17 +1044,20 @@ function listExpectedSanExportedSoundNames(presetInfos) {
   for (const info of presetInfos) {
     try {
       const zip = new AdmZip(info.filePath);
-      const soundEntries = zip
-        .getEntries()
-        .filter((entry) => {
-          if (entry.isDirectory) return false;
-          const entryName = normalizeSanZipEntryName(entry.entryName);
-          return !!entryName && isSupportedNotificationSoundFile(entryName);
-        });
+      const soundEntries = zip.getEntries().filter((entry) => {
+        if (entry.isDirectory) return false;
+        const entryName = normalizeSanZipEntryName(entry.entryName);
+        return !!entryName && isSupportedNotificationSoundFile(entryName);
+      });
       soundEntries.forEach((entry, index) => {
         const entryName = normalizeSanZipEntryName(entry.entryName);
         expected.add(
-          getSanExportedSoundFileName(info, entryName, index, soundEntries.length),
+          getSanExportedSoundFileName(
+            info,
+            entryName,
+            index,
+            soundEntries.length,
+          ),
         );
       });
     } catch {}
@@ -987,7 +1069,9 @@ function cleanupStaleSanExportedSounds(expectedNames) {
   if (!fs.existsSync(userSoundsFolder)) return 0;
   let removed = 0;
   try {
-    for (const entry of fs.readdirSync(userSoundsFolder, { withFileTypes: true })) {
+    for (const entry of fs.readdirSync(userSoundsFolder, {
+      withFileTypes: true,
+    })) {
       if (!entry.isFile()) continue;
       if (!entry.name.startsWith("SAN - ")) continue;
       if (!isSupportedNotificationSoundFile(entry.name)) continue;
@@ -1034,7 +1118,10 @@ function syncSanPresetSoundsToUserSounds() {
       exported += exportSanPresetSoundsToUserSounds(info);
     }
     if (exported > 0 || removed > 0) {
-      appLogger.info("san-presets:sounds-exported", { count: exported, removed });
+      appLogger.info("san-presets:sounds-exported", {
+        count: exported,
+        removed,
+      });
     }
     return exported;
   } catch (err) {
@@ -1656,6 +1743,14 @@ function getDefaultScreenshotFolder() {
   }
 }
 
+function getDefaultRecordFolder() {
+  try {
+    return path.join(app.getPath("videos"), "Achievements Records");
+  } catch {
+    return path.join(process.cwd(), "Achievements Records");
+  }
+}
+
 const SCHEMA_LANGUAGE_VALUES = [
   "arabic",
   "bulgarian",
@@ -1952,6 +2047,10 @@ function resolveShadPs4AchievementCacheUserId(
 const DEFAULT_PREFERENCES = {
   startInTray: false,
   screenshotFolder: getDefaultScreenshotFolder(),
+  recordsFolder: getDefaultRecordFolder(),
+  recordFps: 30,
+  recordDurationSeconds: 20,
+  enableHdrRecords: false,
   appTheme: "dracula",
   overlayShortcut: "",
   overlayInteractShortcut: "\\",
@@ -1969,6 +2068,8 @@ const DEFAULT_PREFERENCES = {
   progressMutedConfigs: [],
   windowZoomFactor: 1,
   disableAchievementScreenshot: false,
+  disableAchievementRecords: true,
+  enableHdrScreenshots: false,
   notificationClickRedirectEnabled: false,
   notificationClickRedirectTarget: "overlay",
   showDashboardOnStart: false,
@@ -2089,18 +2190,17 @@ function tUi(key, params = {}, fallback = "") {
 }
 
 function mergeWithDefaultPreferences(prefs = {}) {
-  return { ...DEFAULT_PREFERENCES, ...(prefs || {}) };
+  return normalizeAchievementRecordPreferences(
+    { ...DEFAULT_PREFERENCES, ...(prefs || {}) },
+    DEFAULT_PREFERENCES,
+  );
 }
 
-function isNotificationClickRedirectEnabled(
-  preferences = cachedPreferences,
-) {
+function isNotificationClickRedirectEnabled(preferences = cachedPreferences) {
   return preferences?.notificationClickRedirectEnabled === true;
 }
 
-function getNotificationClickRedirectTarget(
-  preferences = cachedPreferences,
-) {
+function getNotificationClickRedirectTarget(preferences = cachedPreferences) {
   return normalizeNotificationNavigationTarget(
     preferences?.notificationClickRedirectTarget,
     DEFAULT_PREFERENCES.notificationClickRedirectTarget,
@@ -2278,9 +2378,7 @@ function readBlacklistFromPrefs() {
   const arr = Array.isArray(prefs[BLACKLIST_PREF_KEY])
     ? prefs[BLACKLIST_PREF_KEY]
     : [];
-  return Array.from(
-    new Set(arr.map(normalizeAppIdValue).filter(Boolean)),
-  );
+  return Array.from(new Set(arr.map(normalizeAppIdValue).filter(Boolean)));
 }
 
 function readBlacklistedConfigKeysFromPrefs() {
@@ -2408,13 +2506,10 @@ function getBlacklistMatch(appid, platform = null) {
       : "";
   const globalMatch =
     !!normalizedAppId && blacklistedAppIdsSet.has(normalizedAppId);
-  const platformMatch =
-    !!configKey && blacklistedConfigKeysSet.has(configKey);
+  const platformMatch = !!configKey && blacklistedConfigKeysSet.has(configKey);
   return {
     appid: normalizedAppId || null,
-    platform: rawPlatform
-      ? normalizeBlacklistPlatformValue(rawPlatform)
-      : null,
+    platform: rawPlatform ? normalizeBlacklistPlatformValue(rawPlatform) : null,
     configKey: configKey || null,
     global: globalMatch,
     scoped: platformMatch,
@@ -6233,6 +6328,20 @@ function applyPreferenceSideEffects(
     activeNativeAchievementNotifications.releaseAll("preferences-disabled");
     clearNativeWindowsNotificationRoutes("preferences-disabled");
   }
+  if (
+    Object.prototype.hasOwnProperty.call(patch, "disableAchievementRecords") ||
+    Object.prototype.hasOwnProperty.call(patch, "recordFps") ||
+    Object.prototype.hasOwnProperty.call(patch, "recordDurationSeconds") ||
+    Object.prototype.hasOwnProperty.call(patch, "enableHdrRecords")
+  ) {
+    if (prefsSnapshot.disableAchievementRecords !== false) {
+      pendingAchievementRecordQueue.clear("preferences-disabled");
+    }
+    void syncAchievementRecorderState(
+      "preferences:achievement-records",
+      prefsSnapshot,
+    );
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "lumaPlayWatcherEnabled")) {
     try {
       watchedFoldersApi?.refreshConfigState?.();
@@ -6315,6 +6424,27 @@ function updatePreferences(patch = {}) {
       incoming.soundVolume = Math.max(0, Math.min(200, parsedSoundVolume));
     } else {
       delete incoming.soundVolume;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(incoming, "recordFps")) {
+    incoming.recordFps = normalizeAchievementRecordFps(
+      incoming.recordFps,
+      DEFAULT_PREFERENCES.recordFps,
+    );
+  }
+  if (Object.prototype.hasOwnProperty.call(incoming, "recordDurationSeconds")) {
+    incoming.recordDurationSeconds = normalizeAchievementRecordDuration(
+      incoming.recordDurationSeconds,
+      DEFAULT_PREFERENCES.recordDurationSeconds,
+    );
+  }
+  for (const key of ["disableAchievementRecords", "enableHdrRecords"]) {
+    if (
+      Object.prototype.hasOwnProperty.call(incoming, key) &&
+      typeof incoming[key] !== "boolean"
+    ) {
+      delete incoming[key];
     }
   }
 
@@ -6409,6 +6539,14 @@ function updatePreferences(patch = {}) {
       ...current,
       ...incoming,
     });
+    merged.recordFps = normalizeAchievementRecordFps(
+      merged.recordFps,
+      DEFAULT_PREFERENCES.recordFps,
+    );
+    merged.recordDurationSeconds = normalizeAchievementRecordDuration(
+      merged.recordDurationSeconds,
+      DEFAULT_PREFERENCES.recordDurationSeconds,
+    );
     merged.overlayControllerToggleBinding =
       getOverlayControllerToggleBinding(merged);
     merged.overlayControllerControlModeBinding =
@@ -6526,26 +6664,335 @@ ipcMain.on("set-zoom", (_event, zoomFactor) => {
   }
 });
 
-function getScreenshotRootFolder() {
+async function getScreenshotRootFolder() {
   const prefs = readPrefsSafe();
-  // Default Pictures\Achievements Screenshots
-  const fallback = path.join(
-    app.getPath("pictures"),
-    "Achievements Screenshots",
-  );
-  const root = prefs.screenshotFolder || fallback;
-  try {
-    if (!fs.existsSync(root)) fs.mkdirSync(root, { recursive: true });
-  } catch (e) {
-    console.warn(
-      tUi(
-        "main.log.screenshotRootCreateFailed",
-        { error: e.message },
-        `Cannot create screenshot root folder: ${e.message}`,
-      ),
-    );
+  const fallback = getDefaultScreenshotFolder();
+  const preferred = prefs.screenshotFolder || fallback;
+  const resolved = await resolveScreenshotRootFolder({
+    preferredPath: preferred,
+    fallbackPath: fallback,
+  });
+  if (resolved.usedFallback) {
+    notificationLogger.warn("notification:screenshot:root-fallback", {
+      preferred,
+      fallback: resolved.root,
+      error:
+        resolved.preferredError?.message || "Screenshot folder unavailable",
+    });
   }
-  return root;
+  return resolved.root;
+}
+
+async function getRecordRootFolder() {
+  const prefs = readPrefsSafe();
+  const fallback = getDefaultRecordFolder();
+  const preferred = prefs.recordsFolder || fallback;
+  const resolved = await resolveWritableMediaRootFolder({
+    preferredPath: preferred,
+    fallbackPath: fallback,
+  });
+  if (resolved.usedFallback) {
+    notificationLogger.warn("notification:record:root-fallback", {
+      preferred,
+      fallback: resolved.root,
+      error: resolved.preferredError?.message || "Record folder unavailable",
+    });
+  }
+  return resolved.root;
+}
+
+async function prepareAchievementRecordOutputPath(gameName, achievementName) {
+  const root = await getRecordRootFolder();
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const output = buildUniqueAchievementMediaPath({
+      root,
+      gameName,
+      achievementName,
+      extension: ".mp4",
+      now: new Date(Date.now() + attempt),
+    });
+    await fs.promises.mkdir(output.gameFolder, { recursive: true });
+    try {
+      const handle = await fs.promises.open(output.filePath, "wx");
+      await handle.close();
+      return output.filePath;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+  }
+  const error = new Error("Unable to reserve a unique achievement record path");
+  error.code = "record-path-collision";
+  throw error;
+}
+
+let achievementRecorderController = null;
+const pendingAchievementRecordQueue = new PendingAchievementRecordQueue({
+  ttlMs: 20_000,
+  maxSize: 32,
+  onDiscard: (details) => {
+    recordLogger.info("achievement-recorder:pending-discarded", details);
+  },
+});
+
+function getAchievementRecorderController() {
+  if (achievementRecorderController) return achievementRecorderController;
+  achievementRecorderController = new AchievementRecorderController({
+    appDir: path.join(__dirname, "utils"),
+    resourcesPath: process.resourcesPath,
+    bufferDir: path.join(app.getPath("temp"), "Achievements-record-buffer"),
+    timings: getAchievementRecorderTimings(cachedPreferences),
+  });
+  achievementRecorderController.on("starting", (details) => {
+    recordLogger.info("achievement-recorder:starting", details);
+  });
+  achievementRecorderController.on("ready", (details) => {
+    recordLogger.info("achievement-recorder:ready", details);
+  });
+  achievementRecorderController.on("triggered", (details) => {
+    recordLogger.info("achievement-recorder:triggered", details);
+  });
+  achievementRecorderController.on("saved", (details) => {
+    recordLogger.info("achievement-recorder:saved", details);
+  });
+  achievementRecorderController.on("failed", (details) => {
+    recordLogger.warn("achievement-recorder:record-failed", details);
+  });
+  achievementRecorderController.on("cancelled", (details) => {
+    recordLogger.info("achievement-recorder:record-cancelled", details);
+  });
+  achievementRecorderController.on("protocol-error", (details) => {
+    recordLogger.warn("achievement-recorder:protocol-error", details);
+  });
+  achievementRecorderController.on("audio-capture-failed", (details) => {
+    recordLogger.warn("achievement-recorder:audio-capture-failed", details);
+  });
+  achievementRecorderController.on("audio-capture-disabled", (details) => {
+    recordLogger.warn("achievement-recorder:audio-capture-disabled", details);
+  });
+  achievementRecorderController.on("audio-buffer-overflow", (details) => {
+    recordLogger.warn("achievement-recorder:audio-buffer-overflow", details);
+  });
+  achievementRecorderController.on("hdr-tone-map-fallback", (details) => {
+    recordLogger.warn("achievement-recorder:hdr-tone-map-fallback", details);
+  });
+  achievementRecorderController.on("capture-stats", (details) => {
+    recordLogger.info("achievement-recorder:capture-stats", details);
+  });
+  achievementRecorderController.on("segment-rotation-delayed", (details) => {
+    recordLogger.warn("achievement-recorder:segment-rotation-delayed", details);
+  });
+  achievementRecorderController.on("segment-prepare-failed", (details) => {
+    recordLogger.warn("achievement-recorder:segment-prepare-failed", details);
+  });
+  achievementRecorderController.on("segment-finalize-failed", (details) => {
+    recordLogger.warn("achievement-recorder:segment-finalize-failed", details);
+  });
+  achievementRecorderController.on(
+    "pipeline-compatibility-fallback",
+    (details) => {
+      recordLogger.warn(
+        "achievement-recorder:pipeline-compatibility-fallback",
+        details,
+      );
+    },
+  );
+  achievementRecorderController.on("recorder-error", (error) => {
+    recordLogger.warn("achievement-recorder:error", {
+      code: error?.code || null,
+      error: error?.message || String(error),
+    });
+  });
+  achievementRecorderController.on("exit", (details) => {
+    recordLogger.info("achievement-recorder:exit", details);
+  });
+  achievementRecorderController.on("restart-scheduled", (details) => {
+    recordLogger.warn("achievement-recorder:restart-scheduled", details);
+  });
+  achievementRecorderController.on("timings-changed", (details) => {
+    recordLogger.info("achievement-recorder:timings-changed", details);
+  });
+  return achievementRecorderController;
+}
+
+function syncAchievementRecorderState(
+  reason = "unknown",
+  prefs = cachedPreferences,
+) {
+  const preferenceEnabled =
+    process.platform === "win32" && prefs?.disableAchievementRecords === false;
+  const sessionActive =
+    selectedConfigMode === "active" && isNonEmptyString(selectedConfig);
+  const enabled = shouldEnableAchievementRecorder({
+    platform: process.platform,
+    prefs,
+    configName: selectedConfig,
+    configMode: selectedConfigMode,
+  });
+  if (!enabled && !achievementRecorderController) {
+    recordLogger.info("achievement-recorder:disabled", {
+      reason,
+      preferenceEnabled,
+      sessionActive,
+    });
+    return Promise.resolve(false);
+  }
+  const controller = getAchievementRecorderController();
+  const timings = getAchievementRecorderTimings(prefs);
+  const timingsChanged = controller.updateTimings(timings);
+  recordLogger.info("achievement-recorder:sync", {
+    reason,
+    enabled,
+    preferenceEnabled,
+    sessionActive,
+    configName: sessionActive ? selectedConfig : null,
+    timings,
+    timingsChanged,
+  });
+  const operation =
+    enabled && timingsChanged && controller.status.running
+      ? controller.restart(`${reason}:timings-changed`)
+      : controller.setEnabled(enabled, reason);
+  return operation.catch((error) => {
+    recordLogger.warn("achievement-recorder:sync-failed", {
+      reason,
+      enabled,
+      code: error?.code || null,
+      error: error?.message || String(error),
+    });
+    return false;
+  });
+}
+
+function isAchievementRecordNotificationForActiveConfig(notificationData = {}) {
+  if (selectedConfigMode !== "active" || !isNonEmptyString(selectedConfig)) {
+    return false;
+  }
+  const notificationConfigName = getNotificationConfigName(notificationData);
+  if (
+    notificationConfigName &&
+    notificationConfigName.toLowerCase() !==
+      sanitizeConfigName(selectedConfig).toLowerCase()
+  ) {
+    return false;
+  }
+  const notificationPlatform = normalizePlatform(notificationData.platform);
+  const activePlatform = normalizePlatform(selectedPlatform);
+  return !(
+    notificationPlatform &&
+    activePlatform &&
+    notificationPlatform !== activePlatform
+  );
+}
+
+function queuePendingAchievementUnlockRecord(notificationData = {}) {
+  const result = pendingAchievementRecordQueue.enqueue(notificationData);
+  recordLogger.info(
+    result.queued
+      ? "achievement-recorder:pending-queued"
+      : "achievement-recorder:pending-skipped",
+    {
+      reason: result.reason || null,
+      configName:
+        result.configName ||
+        getNotificationConfigName(notificationData) ||
+        null,
+      platform:
+        result.platform || normalizePlatform(notificationData.platform) || null,
+      achievement: notificationData.name || null,
+      displayName: notificationData.displayName || null,
+      pendingCount: pendingAchievementRecordQueue.size,
+    },
+  );
+  return result;
+}
+
+async function flushPendingAchievementUnlockRecords() {
+  if (
+    cachedPreferences?.disableAchievementRecords !== false ||
+    selectedConfigMode !== "active" ||
+    !isNonEmptyString(selectedConfig)
+  ) {
+    return 0;
+  }
+  const pending = pendingAchievementRecordQueue.takeMatching({
+    configName: selectedConfig,
+    platform: selectedPlatform,
+  });
+  if (!pending.length) return 0;
+
+  recordLogger.info("achievement-recorder:pending-flush", {
+    configName: selectedConfig,
+    platform: normalizePlatform(selectedPlatform) || null,
+    count: pending.length,
+    remaining: pendingAchievementRecordQueue.size,
+  });
+  for (const notificationData of pending) {
+    await captureAchievementUnlockRecord(notificationData, {
+      allowPending: true,
+    });
+  }
+  return pending.length;
+}
+
+async function captureAchievementUnlockRecord(
+  notificationData = {},
+  options = {},
+) {
+  if (
+    process.platform !== "win32" ||
+    cachedPreferences?.disableAchievementRecords !== false ||
+    notificationData?.isTest === true ||
+    notificationData?.isPlatinum === true
+  ) {
+    return null;
+  }
+  if (!isAchievementRecordNotificationForActiveConfig(notificationData)) {
+    if (options.allowPending !== false) {
+      queuePendingAchievementUnlockRecord(notificationData);
+    } else {
+      recordLogger.info("achievement-recorder:request-skipped-inactive", {
+        configName: getNotificationConfigName(notificationData) || null,
+        activeConfig: selectedConfig || null,
+        activeMode: selectedConfigMode,
+        displayName: notificationData.displayName || null,
+      });
+    }
+    return null;
+  }
+  const gameName = resolveScreenshotGameName(notificationData, selectedConfig);
+  const achievementName = notificationData.displayName || "Achievement";
+  let outputPath = "";
+  try {
+    outputPath = await prepareAchievementRecordOutputPath(
+      gameName,
+      achievementName,
+    );
+    const result = await getAchievementRecorderController().trigger({
+      outputPath,
+    });
+    recordLogger.info("achievement-recorder:record-requested", {
+      id: result.id,
+      displayName: achievementName,
+      gameName,
+      outputPath,
+      config: notificationData.config_path || null,
+    });
+    return result;
+  } catch (error) {
+    if (outputPath) {
+      try {
+        await fs.promises.rm(outputPath, { force: true });
+      } catch {}
+    }
+    recordLogger.warn("achievement-recorder:request-failed", {
+      displayName: achievementName,
+      gameName,
+      code: error?.code || null,
+      error: error?.message || String(error),
+      config: notificationData.config_path || null,
+    });
+    return null;
+  }
 }
 
 function ensureDir(p) {
@@ -6563,13 +7010,7 @@ function ensureDir(p) {
 }
 
 function sanitizeFilename(name) {
-  return (
-    String(name || "achievement")
-      .replace(/[\\/:*?"<>|]/g, "_")
-      .replace(/\s+/g, " ")
-      .slice(0, 120)
-      .trim() || "achievement"
-  );
+  return sanitizeAchievementMediaFilename(name);
 }
 
 // --- Achievements schema generator (manual configs) ---
@@ -7104,27 +7545,22 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
 /* <root>/<gameName>/<displayName>.png (timestamp if exists) */
 async function saveFullScreenShot(gameName, achDisplayName) {
   if (!screenshot) throw new Error("screenshot-desktop is not installed");
-  const root = getScreenshotRootFolder();
-  const gameFolder = path.join(
+  const root = await getScreenshotRootFolder();
+  const { gameFolder, filePath } = buildUniqueAchievementMediaPath({
     root,
-    sanitizeFilename(gameName || "Unknown Game"),
-  );
-  ensureDir(gameFolder);
-
-  let file = path.join(gameFolder, sanitizeFilename(achDisplayName) + ".png");
-  if (fs.existsSync(file)) {
-    const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    file = path.join(
-      gameFolder,
-      `${sanitizeFilename(achDisplayName)}_${ts}.png`,
-    );
-  }
-
-  await enqueueScreenshotCaptureTask(() => captureFullScreenShotInWorker(file), {
     gameName,
-    achievement: achDisplayName,
+    achievementName: achDisplayName,
+    extension: ".png",
   });
-  return file;
+  ensureDir(gameFolder);
+  await enqueueScreenshotCaptureTask(
+    () => captureFullScreenShotInWorker(filePath),
+    {
+      gameName,
+      achievement: achDisplayName,
+    },
+  );
+  return filePath;
 }
 
 function killProcessTree(pid) {
@@ -7192,8 +7628,16 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
       8000,
   );
   return new Promise((resolve, reject) => {
-    const script = path.join(__dirname, "utils", "screenshot-capture-worker.js");
-    const payload = JSON.stringify({ outputPath, timeoutMs });
+    const script = path.join(
+      __dirname,
+      "utils",
+      "screenshot-capture-worker.js",
+    );
+    const payload = JSON.stringify({
+      outputPath,
+      timeoutMs,
+      enableHdrScreenshots: cachedPreferences?.enableHdrScreenshots === true,
+    });
     const cp = fork(script, [payload], {
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       windowsHide: true,
@@ -7213,7 +7657,9 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
       resolve(result);
     };
     const timer = setTimeout(() => {
-      const err = new Error(`Screenshot capture timed out after ${timeoutMs}ms`);
+      const err = new Error(
+        `Screenshot capture timed out after ${timeoutMs}ms`,
+      );
       err.code = "capture-timeout";
       finish(err);
     }, timeoutMs + 1000);
@@ -7226,6 +7672,13 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
       if (!message || typeof message !== "object") return;
       if (message.ok) {
         reportedSuccessPath = message.outputPath || outputPath;
+        notificationLogger.info("notification:screenshot:capture-backend", {
+          backend: message.captureMode || "unknown",
+          hdrRequested: message.hdrRequested === true,
+          ...(message.fallbackError
+            ? { fallbackError: String(message.fallbackError).slice(0, 500) }
+            : {}),
+        });
         return;
       }
       const err = new Error(message.error || "Screenshot capture failed");
@@ -7250,7 +7703,7 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
 }
 
 ipcMain.handle("load-preferences", () => {
-  cachedPreferences = readPrefsSafe();
+  cachedPreferences = mergeWithDefaultPreferences(readPrefsSafe());
   if (
     typeof cachedPreferences.overlayShortcut === "string" &&
     cachedPreferences.overlayShortcut.trim() &&
@@ -8144,10 +8597,7 @@ ipcMain.handle("xbox-pc:connect", async (event) => {
       parentWindow,
       XBOX_PC_CLIENT_ID,
     );
-    await completeXboxDirectAuthentication(
-      app.getPath("userData"),
-      authResult,
-    );
+    await completeXboxDirectAuthentication(app.getPath("userData"), authResult);
     const status = await getXboxPcStatus({
       userDataDir: app.getPath("userData"),
       timeoutMs: 15000,
@@ -8433,9 +8883,7 @@ ipcMain.on("app-navigation:result", (event, payload = {}) => {
   const meta = {
     requestId: String(payload?.requestId || ""),
     success,
-    configName: resultConfigName
-      ? sanitizeConfigName(resultConfigName)
-      : null,
+    configName: resultConfigName ? sanitizeConfigName(resultConfigName) : null,
     achievementId: String(payload?.achievementId || "").slice(0, 256) || null,
     reason: String(payload?.reason || "").slice(0, 128) || null,
   };
@@ -9063,6 +9511,8 @@ ipcMain.handle("loadConfigs", () => {
               `${path.sep}schema${path.sep}epic-official${path.sep}`.toLowerCase(),
             ));
       meta.platform = platformNorm || null;
+      meta.platinum = raw?.platinum === true;
+      meta.native_platinum = raw?.native_platinum === true;
       if (platformNorm && raw?.platform !== platformNorm) {
         raw.platform = platformNorm;
         try {
@@ -9214,6 +9664,128 @@ ipcMain.handle("selectFolder", async () => {
   return null;
 });
 
+ipcMain.handle("selectScreenshotFolder", async () => {
+  const prefs = readPrefsSafe();
+  const defaultPath = prefs.screenshotFolder || getDefaultScreenshotFolder();
+  ipcLogger.info("selectScreenshotFolder:request", { defaultPath });
+  const result = await dialog.showOpenDialog({
+    defaultPath,
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    ipcLogger.info("selectScreenshotFolder:cancelled");
+    return null;
+  }
+
+  const folder = result.filePaths[0];
+  try {
+    const writableFolder = await assertWritableDirectory(folder, {
+      create: false,
+      probe: true,
+    });
+    ipcLogger.info("selectScreenshotFolder:success", {
+      folder: writableFolder,
+    });
+    return writableFolder;
+  } catch (error) {
+    ipcLogger.warn("selectScreenshotFolder:unwritable", {
+      folder,
+      error: error?.message || String(error),
+    });
+    notifyError(
+      tUi(
+        "main.log.screenshotRootCreateFailed",
+        { error: error?.message || String(error) },
+        `Cannot create screenshot root folder: ${error?.message || String(error)}`,
+      ),
+    );
+    return null;
+  }
+});
+
+ipcMain.handle("getDefaultScreenshotFolder", async () => {
+  const folder = getDefaultScreenshotFolder();
+  try {
+    return await assertWritableDirectory(folder, {
+      create: true,
+      probe: true,
+    });
+  } catch (error) {
+    ipcLogger.warn("getDefaultScreenshotFolder:unwritable", {
+      folder,
+      error: error?.message || String(error),
+    });
+    notifyError(
+      tUi(
+        "main.log.screenshotRootCreateFailed",
+        { error: error?.message || String(error) },
+        `Cannot create screenshot root folder: ${error?.message || String(error)}`,
+      ),
+    );
+    return null;
+  }
+});
+
+ipcMain.handle("selectRecordFolder", async () => {
+  const prefs = readPrefsSafe();
+  const defaultPath = prefs.recordsFolder || getDefaultRecordFolder();
+  ipcLogger.info("selectRecordFolder:request", { defaultPath });
+  const result = await dialog.showOpenDialog({
+    defaultPath,
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || !result.filePaths[0]) {
+    ipcLogger.info("selectRecordFolder:cancelled");
+    return null;
+  }
+
+  const folder = result.filePaths[0];
+  try {
+    const writableFolder = await assertWritableDirectory(folder, {
+      create: false,
+      probe: true,
+    });
+    ipcLogger.info("selectRecordFolder:success", { folder: writableFolder });
+    return writableFolder;
+  } catch (error) {
+    ipcLogger.warn("selectRecordFolder:unwritable", {
+      folder,
+      error: error?.message || String(error),
+    });
+    notifyError(
+      tUi(
+        "main.log.dirCreateFailed",
+        { path: folder, error: error?.message || String(error) },
+        `Cannot access directory ${folder}: ${error?.message || String(error)}`,
+      ),
+    );
+    return null;
+  }
+});
+
+ipcMain.handle("getDefaultRecordFolder", async () => {
+  const folder = getDefaultRecordFolder();
+  try {
+    return await assertWritableDirectory(folder, {
+      create: true,
+      probe: true,
+    });
+  } catch (error) {
+    ipcLogger.warn("getDefaultRecordFolder:unwritable", {
+      folder,
+      error: error?.message || String(error),
+    });
+    notifyError(
+      tUi(
+        "main.log.dirCreateFailed",
+        { path: folder, error: error?.message || String(error) },
+        `Cannot access directory ${folder}: ${error?.message || String(error)}`,
+      ),
+    );
+    return null;
+  }
+});
+
 // Handler for json load
 function resolveAchievementsSchemaPath(config = {}) {
   const cfgDir = isNonEmptyString(config?.config_path)
@@ -9256,7 +9828,10 @@ function normalizeExophaseRarityPct(value) {
   const normalized = normalizeRarityPercent(value);
   if (normalized !== null) return Number(normalized.toFixed(4));
   if (typeof value !== "string") return null;
-  const match = value.replace(",", ".").trim().match(/(\d+(?:\.\d+)?)/);
+  const match = value
+    .replace(",", ".")
+    .trim()
+    .match(/(\d+(?:\.\d+)?)/);
   if (!match) return null;
   const parsed = Number(match[1]);
   return Number.isFinite(parsed)
@@ -9290,7 +9865,11 @@ function getSchemaLocalizedTextForRarity(value) {
     return (
       String(value.english || "").trim() ||
       Object.values(value)
-        .map((v) => (typeof v === "string" || typeof v === "number" ? String(v).trim() : ""))
+        .map((v) =>
+          typeof v === "string" || typeof v === "number"
+            ? String(v).trim()
+            : "",
+        )
         .find(Boolean) ||
       ""
     );
@@ -9320,10 +9899,7 @@ function buildExophaseRaritySlugCandidates(config = {}, platform = "") {
   const variants = buildExophaseSlugVariants(title);
   if (platform === "shadps4") {
     return Array.from(
-      new Set([
-        ...variants,
-        ...variants.map((slug) => `${slug}-ps4`),
-      ]),
+      new Set([...variants, ...variants.map((slug) => `${slug}-ps4`)]),
     );
   }
   if (platform !== "rpcs3") return variants;
@@ -9363,12 +9939,7 @@ function buildExophaseRarityMatchMaps(items = []) {
         buildExophaseMatchKey(title, description),
         item,
       );
-      register(
-        titleMap,
-        titleDupes,
-        normalizeExophaseMatchText(title),
-        item,
-      );
+      register(titleMap, titleDupes, normalizeExophaseMatchText(title), item);
     }
   }
   return { keyMap, keyDupes, titleMap, titleDupes };
@@ -9382,7 +9953,9 @@ function mergeExophaseRarityIntoSchema(schemaAchievements = [], items = []) {
   let matched = 0;
   const seen = new Set();
 
-  for (const entry of Array.isArray(schemaAchievements) ? schemaAchievements : []) {
+  for (const entry of Array.isArray(schemaAchievements)
+    ? schemaAchievements
+    : []) {
     if (!entry || typeof entry !== "object") continue;
     const title = getSchemaLocalizedTextForRarity(entry.displayName);
     const description = getSchemaLocalizedTextForRarity(entry.description);
@@ -9700,6 +10273,8 @@ ipcMain.handle(
         "epic",
         "epic-official",
         "shadps4",
+        "markerpatch",
+        "madnesspatch",
       ]);
       const getCacheFallback = async () =>
         (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
@@ -10480,10 +11055,7 @@ ipcMain.handle(
           statsDir && config.appid
             ? path.join(statsDir, `UserGameStatsSchema_${config.appid}.bin`)
             : "";
-        entries = enrichSchemaEntriesFromAppcacheSchemaFile(
-          entries,
-          schemaBin,
-        );
+        entries = enrichSchemaEntriesFromAppcacheSchemaFile(entries, schemaBin);
         const cached =
           (await loadPreviousAchievements(
             configName,
@@ -10596,7 +11168,7 @@ ipcMain.handle(
         effectiveSavePath = path.dirname(achievementsBinPath);
 
       const schemaPath = resolveConfigSchemaPath(config);
-      const achievements = loadAchievementsFromSaveFile(
+      let achievements = loadAchievementsFromSaveFile(
         effectiveSavePath || saveBase,
         {},
         {
@@ -10618,10 +11190,21 @@ ipcMain.handle(
         }
       }
 
+      if (
+        normalizedPlatform === "markerpatch" ||
+        normalizedPlatform === "madnesspatch"
+      ) {
+        const cached = await loadPreviousAchievements(
+          configName,
+          normalizedPlatform,
+        );
+        if (cached && typeof cached === "object") {
+          achievements = mergeEarnedTimeFromCached(achievements, cached);
+        }
+      }
+
       return {
-        achievements: await applyManualOverridesForReturn(
-          achievements || {},
-        ),
+        achievements: await applyManualOverridesForReturn(achievements || {}),
         save_path: effectiveSavePath || saveBase || "",
       };
     } catch (error) {
@@ -10792,9 +11375,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       const platform =
         inferredConfigPlatform || getPlatformForAppId(appid) || "steam";
       const savePath =
-        typeof configData?.save_path === "string"
-          ? configData.save_path
-          : "";
+        typeof configData?.save_path === "string" ? configData.save_path : "";
       const skipSaveDirectoryDeletion = [
         "steam-official",
         "epic-official",
@@ -10802,6 +11383,8 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         "ubisoft-official",
         "ea-official",
         "xbox-pc",
+        "markerpatch",
+        "madnesspatch",
       ].includes(platform);
       if (deleteSaveFiles && !skipSaveDirectoryDeletion) {
         saveDeletionTargets = collectConfigSaveDeletionDirectories({
@@ -11129,7 +11712,11 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
     const normalized = Array.from(
       new Set(
         requested
-          .map((scope) => String(scope || "").trim().toLowerCase())
+          .map((scope) =>
+            String(scope || "")
+              .trim()
+              .toLowerCase(),
+          )
           .filter((scope) => scope === "global" || scope === "platform"),
       ),
     );
@@ -11211,10 +11798,7 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
         });
       }
       const activeXboxPollName = xboxPcActivePollState?.configName || "";
-      if (
-        activeXboxPollName &&
-        isXboxPcConfigBlacklisted(activeXboxPollName)
-      ) {
+      if (activeXboxPollName && isXboxPcConfigBlacklisted(activeXboxPollName)) {
         stopXboxPcActivePoll("blacklisted", {
           configName: activeXboxPollName,
           appid: resolvedAppId,
@@ -11230,10 +11814,7 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
         ).trim();
         const activePlatform =
           normalizePlatform(activeConfig?.platform) || null;
-        if (
-          activeAppId &&
-          isAppIdBlacklisted(activeAppId, activePlatform)
-        ) {
+        if (activeAppId && isAppIdBlacklisted(activeAppId, activePlatform)) {
           await clearActiveConfigSelection({
             reason: "config-blacklisted",
             configName: activeConfigName,
@@ -11358,10 +11939,7 @@ ipcMain.handle("blacklist:add-manual", async (_event, payload = {}) => {
         });
       }
       const activeXboxPollName = xboxPcActivePollState?.configName || "";
-      if (
-        activeXboxPollName &&
-        isXboxPcConfigBlacklisted(activeXboxPollName)
-      ) {
+      if (activeXboxPollName && isXboxPcConfigBlacklisted(activeXboxPollName)) {
         stopXboxPcActivePoll("blacklisted", {
           configName: activeXboxPollName,
           appid: null,
@@ -11377,10 +11955,7 @@ ipcMain.handle("blacklist:add-manual", async (_event, payload = {}) => {
         ).trim();
         const activePlatform =
           normalizePlatform(activeConfig?.platform) || null;
-        if (
-          activeAppId &&
-          isAppIdBlacklisted(activeAppId, activePlatform)
-        ) {
+        if (activeAppId && isAppIdBlacklisted(activeAppId, activePlatform)) {
           await clearActiveConfigSelection({
             reason: "manual-appid-blacklisted",
             configName: activeConfigName,
@@ -11436,7 +12011,11 @@ ipcMain.handle("blacklist:reset", async () => {
     const removedScopes = Array.from(
       new Set(
         removedEntries
-          .map((entry) => String(entry?.scope || "").trim().toLowerCase())
+          .map((entry) =>
+            String(entry?.scope || "")
+              .trim()
+              .toLowerCase(),
+          )
           .filter((scope) => scope === "global" || scope === "platform"),
       ),
     );
@@ -12107,7 +12686,8 @@ function resolveAppNavigationConfig(route) {
     const configName = path.basename(fileName, ".json");
     if (
       requestedName &&
-      sanitizeConfigName(configName).toLowerCase() !== requestedName.toLowerCase()
+      sanitizeConfigName(configName).toLowerCase() !==
+        requestedName.toLowerCase()
     ) {
       continue;
     }
@@ -13213,8 +13793,7 @@ ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
   const prefs = cachedPreferences || {};
   const baseDir = app.isPackaged ? process.resourcesPath : __dirname;
   const rarity = getRandomTestRareRarity();
-  const tierLabel =
-    rarity.tier.charAt(0).toUpperCase() + rarity.tier.slice(1);
+  const tierLabel = rarity.tier.charAt(0).toUpperCase() + rarity.tier.slice(1);
 
   queueAchievementNotification({
     name: `TEST_RARE_NOTIFICATION_${rarity.tier.toUpperCase()}`,
@@ -13268,10 +13847,15 @@ ipcMain.on("show-test-emulator-notification", (_event, options = {}) => {
     : "xenia";
   const isTrophyPlatform = isTrophyTierNotificationPlatform(platform);
   const trophyType = isTrophyPlatform
-    ? normalizeNotificationTrophyType(options.trophyType) || getRandomTestTrophyType()
+    ? normalizeNotificationTrophyType(options.trophyType) ||
+      getRandomTestTrophyType()
     : "";
   const platformLabel =
-    platform === "rpcs3" ? "RPCS3" : platform === "shadps4" ? "ShadPS4" : "Xenia";
+    platform === "rpcs3"
+      ? "RPCS3"
+      : platform === "shadps4"
+        ? "ShadPS4"
+        : "Xenia";
   const tierLabel = trophyType
     ? trophyType.charAt(0).toUpperCase() + trophyType.slice(1)
     : "";
@@ -13333,11 +13917,7 @@ ipcMain.on("show-test-platinum-notification", (_event, options = {}) => {
 
   queueAchievementNotification({
     name: "TEST_PLATINUM_NOTIFICATION",
-    displayName: tUi(
-      "main.notify.platinumCompleteTitle",
-      {},
-      "100% Completed",
-    ),
+    displayName: tUi("main.notify.platinumCompleteTitle", {}, "100% Completed"),
     description: tUi(
       "main.notify.platinumCompleteDescription",
       {},
@@ -13346,11 +13926,7 @@ ipcMain.on("show-test-platinum-notification", (_event, options = {}) => {
     icon: ICON_PNG_PATH,
     icon_gray: ICON_PNG_PATH,
     config_path: baseDir,
-    preset:
-      options.preset ||
-      prefs.platinumPreset ||
-      prefs.preset ||
-      "default",
+    preset: options.preset || prefs.platinumPreset || prefs.preset || "default",
     position:
       options.position ||
       prefs.platinumPosition ||
@@ -13529,9 +14105,7 @@ ipcMain.handle("load-presets", async () => {
         dir !== PRESET_FOLDER_USERS_LEGACY,
     );
 
-    if (
-      !flatDirs.some((preset) => isNativeWindowsNotificationPreset(preset))
-    ) {
+    if (!flatDirs.some((preset) => isNativeWindowsNotificationPreset(preset))) {
       flatDirs.push(NATIVE_WINDOWS_PRESET_NAME);
     }
     return flatDirs;
@@ -13568,9 +14142,7 @@ function matchesPlatinumNotificationIdentity(notificationData, identity = {}) {
   const rawPayloadName = String(
     notificationData?.configName || notificationData?.config_name || "",
   ).trim();
-  const payloadName = rawPayloadName
-    ? sanitizeConfigName(rawPayloadName)
-    : "";
+  const payloadName = rawPayloadName ? sanitizeConfigName(rawPayloadName) : "";
   if (targetName && payloadName) return targetName === payloadName;
   const targetAppId = String(identity?.appid || "").trim();
   const payloadAppId = String(
@@ -13718,7 +14290,10 @@ function normalizeNotificationRarityPercent(value) {
   const normalized = normalizeRarityPercent(value);
   if (normalized !== null) return normalized;
   if (typeof value !== "string") return null;
-  const match = value.replace(",", ".").trim().match(/-?\d+(?:\.\d+)?/);
+  const match = value
+    .replace(",", ".")
+    .trim()
+    .match(/-?\d+(?:\.\d+)?/);
   if (!match) return null;
   return normalizeRarityPercent(Number(match[0]));
 }
@@ -13851,7 +14426,9 @@ function resolveNotificationRarity(achievement = {}) {
 }
 
 function normalizeNotificationTrophyType(value) {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase();
   if (["platinum", "p"].includes(normalized)) return "platinum";
   if (["gold", "g"].includes(normalized)) return "gold";
   if (["silver", "s"].includes(normalized)) return "silver";
@@ -13861,7 +14438,12 @@ function normalizeNotificationTrophyType(value) {
 
 function isTrophyTierNotificationPlatform(platform) {
   const normalized = normalizePlatform(platform);
-  return normalized === "rpcs3" || normalized === "shadps4";
+  return (
+    normalized === "rpcs3" ||
+    normalized === "shadps4" ||
+    normalized === "markerpatch" ||
+    normalized === "madnesspatch"
+  );
 }
 
 function getEmulatorNotificationPreferencePrefix(platform) {
@@ -13879,7 +14461,8 @@ function queueAchievementNotification(achievement) {
     achievement.trophyType || achievement.trophy_type,
   );
   const usesTrophyTier = isTrophyTierNotificationPlatform(platform);
-  const emulatorPreferencePrefix = getEmulatorNotificationPreferencePrefix(platform);
+  const emulatorPreferencePrefix =
+    getEmulatorNotificationPreferencePrefix(platform);
   const usesEmulatorNotificationProfile = !!emulatorPreferencePrefix;
   const isPlatinum =
     achievement.isPlatinum === true ||
@@ -13889,9 +14472,10 @@ function queueAchievementNotification(achievement) {
   const isTestRare = achievement.isTestRare === true;
   const hasExplicitRarity =
     normalizeNotificationRarityPercent(achievement?.rarityPct) !== null;
-  const rarity = isPlatinum || (isTest && !isTestRare && !hasExplicitRarity)
-    ? { percent: null, source: null }
-    : resolveNotificationRarity(achievement);
+  const rarity =
+    isPlatinum || (isTest && !isTestRare && !hasExplicitRarity)
+      ? { percent: null, source: null }
+      : resolveNotificationRarity(achievement);
   const isRare =
     !usesEmulatorNotificationProfile &&
     rarity.percent !== null &&
@@ -13989,7 +14573,8 @@ function queueAchievementNotification(achievement) {
     preset: resolvedPreset,
     position: resolvedPosition,
     sound: requestedSound,
-    sanPreset: !usesNativeWindowsPreset && useSanPreset ? sanPresetCandidate : "",
+    sanPreset:
+      !usesNativeWindowsPreset && useSanPreset ? sanPresetCandidate : "",
     useSanPreset: !usesNativeWindowsPreset && !!useSanPreset,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: resolvedSkipScreenshot,
@@ -14030,6 +14615,13 @@ function queueAchievementNotification(achievement) {
     config: notificationData.config_path || null,
     test: notificationData.isTest || false,
   });
+  if (
+    !notificationData.isTest &&
+    !notificationData.isPlatinum &&
+    prefs.disableAchievementRecords === false
+  ) {
+    void captureAchievementUnlockRecord(notificationData);
+  }
   if (!isPlatinum && pendingPlatinumNotification) {
     platinumAwaitingNormal = false;
   }
@@ -14093,8 +14685,10 @@ async function captureAchievementUnlockScreenshot(notificationData = {}) {
       );
       return;
     }
-    const gameName =
-      selectedConfig || notificationData.configName || "Unknown Game";
+    const gameName = resolveScreenshotGameName(
+      notificationData,
+      selectedConfig,
+    );
     const achName = notificationData.displayName || "Achievement";
     notificationLogger.info("notification:screenshot:start", {
       displayName: achName,
@@ -14249,8 +14843,7 @@ function createNotificationNavigationRoute(
     {
       appid: notificationData?.appid,
       platform: notificationData?.platform,
-      configName:
-        notificationData?.configName || notificationData?.config_name,
+      configName: notificationData?.configName || notificationData?.config_name,
       achievementId: notificationData?.name,
     },
     source,
@@ -14382,10 +14975,13 @@ function initializeNativeWindowsActivationHandler() {
       hasArguments: !!String(details?.arguments || "").trim(),
     });
     if (activationType !== "click") {
-      notificationLogger.info("native-windows-notification:activation-ignored", {
-        reason: "unsupported-type",
-        type: activationType || null,
-      });
+      notificationLogger.info(
+        "native-windows-notification:activation-ignored",
+        {
+          reason: "unsupported-type",
+          type: activationType || null,
+        },
+      );
       return;
     }
     if (!isNotificationClickRedirectEnabled()) {
@@ -14397,9 +14993,12 @@ function initializeNativeWindowsActivationHandler() {
     }
     const match = findNativeWindowsNotificationRoute(details?.arguments);
     if (!match) {
-      notificationLogger.warn("native-windows-notification:activation-unmatched", {
-        hasArguments: !!String(details?.arguments || "").trim(),
-      });
+      notificationLogger.warn(
+        "native-windows-notification:activation-unmatched",
+        {
+          hasArguments: !!String(details?.arguments || "").trim(),
+        },
+      );
       return;
     }
     notificationLogger.info("native-windows-notification:activated", {
@@ -14419,9 +15018,12 @@ function initializeNativeWindowsActivationHandler() {
       );
     });
   });
-  notificationLogger.info("native-windows-notification:activation-handler-ready", {
-    toastActivatorCLSID: app.toastActivatorCLSID || null,
-  });
+  notificationLogger.info(
+    "native-windows-notification:activation-handler-ready",
+    {
+      toastActivatorCLSID: app.toastActivatorCLSID || null,
+    },
+  );
 }
 
 function removeAnimatedNotificationNavigationRoute(webContentsId) {
@@ -14496,10 +15098,13 @@ function registerAnimatedNotificationNavigation(
       });
     } catch (error) {
       removeAnimatedNotificationNavigationRoute(webContentsId);
-      notificationLogger.warn("notification-navigation:animated-enable-failed", {
-        webContentsId,
-        error: error?.message || String(error),
-      });
+      notificationLogger.warn(
+        "notification-navigation:animated-enable-failed",
+        {
+          webContentsId,
+          error: error?.message || String(error),
+        },
+      );
     }
   };
 
@@ -14640,11 +15245,10 @@ function showNativeWindowsAchievementNotification(
       groupTitle: notificationData.configName || "Achievements",
     };
     if (hasNavigationRoute && registeredNavigationRoute) {
-      const launchArguments =
-        encodeNativeWindowsNotificationLaunchArguments({
-          token: notificationId,
-          ...registeredNavigationRoute,
-        });
+      const launchArguments = encodeNativeWindowsNotificationLaunchArguments({
+        token: notificationId,
+        ...registeredNavigationRoute,
+      });
       notificationOptions.toastXml = buildNativeWindowsAchievementToastXml({
         launchArguments,
         groupId,
@@ -14874,7 +15478,9 @@ function processNextNotification() {
   };
 
   const preset = achievement.preset || "default";
-  const normalizedPreset = String(preset || "").trim().toLowerCase();
+  const normalizedPreset = String(preset || "")
+    .trim()
+    .toLowerCase();
   const isNativeWindowsPreset = isNativeWindowsNotificationPreset(preset);
   const { presetFolder } = isNativeWindowsPreset
     ? { presetFolder: null }
@@ -14961,11 +15567,11 @@ function processNextNotification() {
     (isNativeWindowsPreset
       ? 5000
       : notificationData.sanTheme
-      ? Math.round(
-          (Number(notificationData.sanTheme?.customisation?.displaytime) || 8) *
-            1000,
-        )
-      : getPresetAnimationDuration(presetFolder));
+        ? Math.round(
+            (Number(notificationData.sanTheme?.customisation?.displaytime) ||
+              8) * 1000,
+          )
+        : getPresetAnimationDuration(presetFolder));
   notificationData.durationMs = duration;
   notificationData.durationOverridden = overrideDurationMs > 0;
   if (notificationData.sanTheme?.customisation) {
@@ -15015,8 +15621,7 @@ function processNextNotification() {
       const { presetFolder: fallbackPresetFolder } =
         resolveNotificationPresetFolder(notificationData.preset);
       const fallbackDuration =
-        overrideDurationMs ||
-        getPresetAnimationDuration(fallbackPresetFolder);
+        overrideDurationMs || getPresetAnimationDuration(fallbackPresetFolder);
       notificationData.durationMs = fallbackDuration;
       notificationData.durationOverridden = overrideDurationMs > 0;
       notificationLogger.warn("native-windows-notification:fallback", {
@@ -15040,10 +15645,7 @@ function processNextNotification() {
         onShow: () => {
           if (nativeFallbackStarted || queueEntryFinished) return;
           nativeShowReceived = true;
-          scheduleNativeCompletion(
-            NATIVE_WINDOWS_QUEUE_INTERVAL_MS,
-            "shown",
-          );
+          scheduleNativeCompletion(NATIVE_WINDOWS_QUEUE_INTERVAL_MS, "shown");
         },
         onFailed: (error) => {
           startNativeFallback("failed-event", error);
@@ -15074,11 +15676,7 @@ function processNextNotification() {
         void captureAchievementUnlockScreenshot(notificationData);
       });
     }
-    if (
-      !nativeFallbackStarted &&
-      !nativeShowReceived &&
-      !queueEntryFinished
-    ) {
+    if (!nativeFallbackStarted && !nativeShowReceived && !queueEntryFinished) {
       scheduleNativeCompletion(
         NATIVE_WINDOWS_SHOW_WATCHDOG_MS,
         "no-show-signal",
@@ -15147,9 +15745,8 @@ function queueProgressNotification(data) {
   const scale =
     data?.scale != null
       ? normalizeNotificationScale(data.scale).scale
-      : normalizeNotificationScale(
-          cachedPreferences?.notificationScale ?? 1,
-        ).scale;
+      : normalizeNotificationScale(cachedPreferences?.notificationScale ?? 1)
+          .scale;
   data = { ...(data || {}), scale };
   notificationLogger.info("queue-progress", {
     displayName: data?.displayName || "",
@@ -15400,6 +15997,16 @@ function resolveBootSeedCandidatePath(config) {
   const savePathRaw = config?.save_path;
   if (!savePathRaw) return null;
   const normalizedPlatform = normalizePlatform(config?.platform) || "steam";
+  if (normalizedPlatform === "markerpatch" || isMarkerPatchConfig(config)) {
+    const stateFile = getMarkerPatchStateFile(config);
+    return stateFile && fs.existsSync(stateFile) ? stateFile : null;
+  }
+  if (normalizedPlatform === "madnesspatch" || isMadnessPatchConfig(config)) {
+    const stateFile = getLatestMadnessPatchStateFile(
+      getMadnessPatchCheckpointRoot(config),
+    );
+    return stateFile && fs.existsSync(stateFile) ? stateFile : null;
+  }
   let saveRoot = savePathRaw;
   let candidatePath = null;
   try {
@@ -16270,6 +16877,7 @@ async function monitorAchievementsFile(filePath) {
     normalizePlatform(configMeta?.platform) === "ubisoft-official" ||
     /\.spool$/i.test(String(filePath || ""));
   const isLumaPlay = isLumaPlayConfig(configMeta) && isLumaPlayWatcherEnabled();
+  const isMarkerPatch = isMarkerPatchConfig(configMeta);
   try {
     if (
       fullAchievementsConfigPath &&
@@ -16344,15 +16952,9 @@ async function monitorAchievementsFile(filePath) {
         let entries = normalizeAppcacheSchemaEntries(schemaArr);
         const schemaBin =
           statsDir && configMeta?.appid
-            ? path.join(
-                statsDir,
-                `UserGameStatsSchema_${configMeta.appid}.bin`,
-              )
+            ? path.join(statsDir, `UserGameStatsSchema_${configMeta.appid}.bin`)
             : "";
-        entries = enrichSchemaEntriesFromAppcacheSchemaFile(
-          entries,
-          schemaBin,
-        );
+        entries = enrichSchemaEntriesFromAppcacheSchemaFile(entries, schemaBin);
         let userBin = activeFilePath;
         const base = path.basename(userBin || "").toLowerCase();
         if (!base.startsWith("usergamestats_") || !base.endsWith(".bin")) {
@@ -16597,7 +17199,11 @@ async function monitorAchievementsFile(filePath) {
       const lang = selectedLanguage || "english";
       const newlyEarned =
         Boolean(current.earned) && (!previous || !Boolean(previous.earned));
-      if (newlyEarned && (isRpcs3 || isLumaPlay) && !current.earned_time) {
+      if (
+        newlyEarned &&
+        (isRpcs3 || isLumaPlay || isMarkerPatch) &&
+        !current.earned_time
+      ) {
         current.earned_time = Date.now();
       }
 
@@ -17179,6 +17785,7 @@ async function clearActiveConfigSelection(options = {}) {
   selectedConfigMode = "none";
   currentAppId = null;
   clearPendingMissingAchievementFile(previousConfig);
+  void syncAchievementRecorderState(`active-config:clear:${reason}`);
 
   if (overlayWindow && !overlayWindow.isDestroyed()) {
     overlayWindow.webContents.send("load-overlay-data", null);
@@ -17256,7 +17863,9 @@ ipcMain.on(
     }
 
     const normalizedPlatform =
-      normalizePlatform(config?.platform) || normalizePlatform(platform) || null;
+      normalizePlatform(config?.platform) ||
+      normalizePlatform(platform) ||
+      null;
     const appIdString =
       config?.appid != null ? String(config.appid).trim() : "";
     const isBlacklisted =
@@ -17304,6 +17913,12 @@ ipcMain.on(
       appid: appIdString || null,
       mode: selectedConfigMode,
       transitioned: requiresTransition,
+    });
+    void syncAchievementRecorderState(
+      `active-config:selected:${selectedConfigMode}`,
+    ).then((ready) => {
+      if (ready !== true || selectedConfigMode !== "active") return 0;
+      return flushPendingAchievementUnlockRecords();
     });
 
     if (isBlacklisted) {
@@ -17503,6 +18118,45 @@ ipcMain.on(
         pendingMissingAchievementFiles.delete(configName);
       }
       monitorAchievementsFile(achievementsFilePath);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      return;
+    }
+
+    if (normalizedPlatform === "markerpatch" || isMarkerPatchConfig(config)) {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      // Local patch sources are owned by the adaptive save watcher. Keeping a
+      // second exact-file watcher here would miss late file creation and could
+      // duplicate notifications after the file becomes available.
+      achievementsFilePath = null;
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      monitorAchievementsFile(null);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      return;
+    }
+
+    if (normalizedPlatform === "madnesspatch" || isMadnessPatchConfig(config)) {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      achievementsFilePath = null;
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      monitorAchievementsFile(null);
       if (overlayWindow && !overlayWindow.isDestroyed()) {
         overlayWindow.webContents.send("load-overlay-data", selectedConfig);
         overlayWindow.webContents.send("set-language", {
@@ -20021,7 +20675,9 @@ ipcMain.handle("selectExecutable", async (_event, currentPath) => {
       initialDirectory = currentStat.isDirectory()
         ? requestedPath
         : path.dirname(requestedPath);
-      initialFileName = currentStat.isFile() ? path.basename(requestedPath) : "";
+      initialFileName = currentStat.isFile()
+        ? path.basename(requestedPath)
+        : "";
     }
   } catch {}
   if (!initialDirectory) {
@@ -20104,79 +20760,82 @@ ipcMain.handle("selectExecutable", async (_event, currentPath) => {
 ipcMain.handle(
   "launchExecutable",
   async (_event, exePath, argsString, workingDirectory) => {
-  try {
-    if (!exePath) {
-      notifyError(tUi("main.notify.executable.pathMissing"));
-      return;
-    }
-    const args = splitArgsString(argsString);
-    const isAppsFolderTarget = /^shell:AppsFolder\\/i.test(
-      String(exePath || "").trim(),
-    );
-    const requestedCwd = String(workingDirectory || "").trim();
-    const cwd =
-      requestedCwd && fs.existsSync(requestedCwd)
-        ? requestedCwd
-        : isAppsFolderTarget
-          ? undefined
-          : path.dirname(exePath);
-    const launchExecutable = isAppsFolderTarget ? "explorer.exe" : exePath;
-    const launchArgs = isAppsFolderTarget ? [exePath] : args;
-    const child = spawn(launchExecutable, launchArgs, {
-      cwd,
-      detached: true,
-      stdio: "ignore",
-    });
-    child.on("error", (err) => {
-      if (err.code === "ENOENT") {
-        notifyError(tUi("main.notify.executable.notFound", { path: exePath }));
-      } else if (err.code === "EACCES") {
-        notifyError(
-          "❌ Permission denied. Try running the app as administrator or check file permissions.",
-        );
-      } else {
-        notifyError(
-          tUi("main.notify.executable.launchFailed", { error: err.message }),
-        );
+    try {
+      if (!exePath) {
+        notifyError(tUi("main.notify.executable.pathMissing"));
+        return;
       }
-    });
-    child.unref();
-
-    if (selectedConfig) {
-      const configPath = path.join(configsDir, `${selectedConfig}.json`);
-      if (fs.existsSync(configPath)) {
-        const configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
-        const safeConfigName = sanitizeConfigName(selectedConfig);
-        configData.__playtimeKey = safeConfigName;
-        if (child?.pid) {
-          configData.__launchPid = child.pid;
-          manualLaunchPidMap.set(child.pid, selectedConfig);
-          setTimeout(() => {
-            if (manualLaunchPidMap.get(child.pid) === selectedConfig) {
-              manualLaunchPidMap.delete(child.pid);
-            }
-          }, 120000);
+      const args = splitArgsString(argsString);
+      const isAppsFolderTarget = /^shell:AppsFolder\\/i.test(
+        String(exePath || "").trim(),
+      );
+      const requestedCwd = String(workingDirectory || "").trim();
+      const cwd =
+        requestedCwd && fs.existsSync(requestedCwd)
+          ? requestedCwd
+          : isAppsFolderTarget
+            ? undefined
+            : path.dirname(exePath);
+      const launchExecutable = isAppsFolderTarget ? "explorer.exe" : exePath;
+      const launchArgs = isAppsFolderTarget ? [exePath] : args;
+      const child = spawn(launchExecutable, launchArgs, {
+        cwd,
+        detached: true,
+        stdio: "ignore",
+      });
+      child.on("error", (err) => {
+        if (err.code === "ENOENT") {
+          notifyError(
+            tUi("main.notify.executable.notFound", { path: exePath }),
+          );
+        } else if (err.code === "EACCES") {
+          notifyError(
+            "❌ Permission denied. Try running the app as administrator or check file permissions.",
+          );
+        } else {
+          notifyError(
+            tUi("main.notify.executable.launchFailed", { error: err.message }),
+          );
         }
-        manualLaunchInProgress = true;
-        detectedConfigName = configData.name;
-        activePlaytimeConfigs.add(configData.name);
-        startPlaytimeLogWatcher(configData);
+      });
+      child.unref();
+
+      if (selectedConfig) {
+        const configPath = path.join(configsDir, `${selectedConfig}.json`);
+        if (fs.existsSync(configPath)) {
+          const configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
+          const safeConfigName = sanitizeConfigName(selectedConfig);
+          configData.__playtimeKey = safeConfigName;
+          if (child?.pid) {
+            configData.__launchPid = child.pid;
+            manualLaunchPidMap.set(child.pid, selectedConfig);
+            setTimeout(() => {
+              if (manualLaunchPidMap.get(child.pid) === selectedConfig) {
+                manualLaunchPidMap.delete(child.pid);
+              }
+            }, 120000);
+          }
+          manualLaunchInProgress = true;
+          detectedConfigName = configData.name;
+          activePlaytimeConfigs.add(configData.name);
+          startPlaytimeLogWatcher(configData);
+        } else {
+          notifyError(
+            tUi("main.notify.config.notFound", { config: selectedConfig }),
+          );
+        }
       } else {
         notifyError(
-          tUi("main.notify.config.notFound", { config: selectedConfig }),
+          `❌ selectedConfig is null – cannot start playtime log watcher.`,
         );
       }
-    } else {
+    } catch (err) {
       notifyError(
-        `❌ selectedConfig is null – cannot start playtime log watcher.`,
+        tUi("main.notify.executable.launchFailed", { error: err.message }),
       );
     }
-  } catch (err) {
-    notifyError(
-      tUi("main.notify.executable.launchFailed", { error: err.message }),
-    );
-  }
-});
+  },
+);
 
 let currentAppId = null;
 const EPIC_OFFICIAL_ACTIVE_POLL_INITIAL_MS = 45000;
@@ -20497,7 +21156,8 @@ function notifyXboxPcProgress(
   snapshot,
   progressKeys,
 ) {
-  if (!Array.isArray(schemaAchievements) || !schemaAchievements.length) return 0;
+  if (!Array.isArray(schemaAchievements) || !schemaAchievements.length)
+    return 0;
   if (!Array.isArray(progressKeys) || !progressKeys.length) return 0;
   const schemaMap = new Map();
   for (const entry of schemaAchievements) {
@@ -20645,8 +21305,7 @@ async function runXboxPcActivePoll(trigger = "manual") {
       });
       return;
     }
-    const cached =
-      (await loadPreviousAchievements(safeName, "xbox-pc")) || {};
+    const cached = (await loadPreviousAchievements(safeName, "xbox-pc")) || {};
     const synced = await syncXboxPcAchievements(config, {
       userDataDir: app.getPath("userData"),
       timeoutMs: 15000,
@@ -21427,9 +22086,8 @@ app.whenReady().then(async () => {
   }
   // Load preferences
   try {
-    const prefs = fs.existsSync(preferencesPath)
-      ? JSON.parse(fs.readFileSync(preferencesPath, "utf-8"))
-      : {};
+    const prefs = mergeWithDefaultPreferences(readPrefsSafe());
+    cachedPreferences = prefs;
 
     selectedLanguage = prefs.language || selectedLanguage;
     let overlayShortcut = prefs.overlayShortcut || null;
@@ -21492,6 +22150,8 @@ app.whenReady().then(async () => {
   } catch (err) {
     notifyError(tUi("main.notify.language.loadFailed", { error: err.message }));
   }
+
+  void syncAchievementRecorderState("app-ready", cachedPreferences);
 
   copyFolderOnce(defaultSoundsFolder, userSoundsFolder);
   renameLegacyPresetFoldersIfNeeded();
@@ -21591,8 +22251,7 @@ function showProgressNotification(data) {
   const gapY = 10;
   const centeredPaddingOffsetY = Math.floor(progressAnimationPaddingY / 2);
   let x = ax + gapX;
-  let y =
-    ay + ah - scaledProgressContentHeight - gapY - centeredPaddingOffsetY;
+  let y = ay + ah - scaledProgressContentHeight - gapY - centeredPaddingOffsetY;
   switch (position) {
     case "center-top":
       x = ax + Math.floor((aw - scaledProgressWidth) / 2);
@@ -21604,12 +22263,7 @@ function showProgressNotification(data) {
       break;
     case "bottom-right":
       x = ax + aw - scaledProgressWidth - gapX;
-      y =
-        ay +
-        ah -
-        scaledProgressContentHeight -
-        gapY -
-        centeredPaddingOffsetY;
+      y = ay + ah - scaledProgressContentHeight - gapY - centeredPaddingOffsetY;
       break;
     case "middle-right":
       x = ax + aw - scaledProgressWidth - gapX;
@@ -21621,12 +22275,7 @@ function showProgressNotification(data) {
       break;
     case "bottom-left":
       x = ax + gapX;
-      y =
-        ay +
-        ah -
-        scaledProgressContentHeight -
-        gapY -
-        centeredPaddingOffsetY;
+      y = ay + ah - scaledProgressContentHeight - gapY - centeredPaddingOffsetY;
       break;
     case "middle-left":
       x = ax + gapX;
@@ -21635,12 +22284,7 @@ function showProgressNotification(data) {
     case "center-bottom":
     default:
       x = ax + Math.floor((aw - scaledProgressWidth) / 2);
-      y =
-        ay +
-        ah -
-        scaledProgressContentHeight -
-        gapY -
-        centeredPaddingOffsetY;
+      y = ay + ah - scaledProgressContentHeight - gapY - centeredPaddingOffsetY;
       break;
   }
   const progressWindow = new BrowserWindow({
@@ -21869,11 +22513,7 @@ ipcMain.on("show-test-progress-notification", (_event, options = {}) => {
 
   queueProgressNotification({
     name: "TEST_PROGRESS_NOTIFICATION",
-    displayName: tUi(
-      "progress.testAchievementName",
-      {},
-      "Test Progress",
-    ),
+    displayName: tUi("progress.testAchievementName", {}, "Test Progress"),
     progress,
     max_progress: maxProgress,
     position,
@@ -22048,10 +22688,7 @@ function createPlaytimeWindow(playData = {}) {
   const localWindow = playtimeWindow;
   localWindow.on("closed", () => {
     windowLogger.info("create-playtime-window:closed");
-    ipcMain.removeListener(
-      "close-playtime-window",
-      closePlaytimeWindowHandler,
-    );
+    ipcMain.removeListener("close-playtime-window", closePlaytimeWindowHandler);
     if (playtimeWindow === localWindow) {
       playtimeWindow = null;
       playtimeAlreadyClosing = false;
@@ -22625,7 +23262,9 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
       if (!requireCommandLineForArguments) continue;
       if (normalizeProcessCmdLine(proc)) continue;
 
-      const processName = String(proc?.name || "").trim().toLowerCase();
+      const processName = String(proc?.name || "")
+        .trim()
+        .toLowerCase();
       const cached = processCommandLineCache.get(pid);
       if (
         cached &&
@@ -22662,14 +23301,15 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
     processCommandLineCache.set(pid, {
       processName: pending.processName,
       cmd,
-      expiresAt:
-        cmd
-          ? Number.POSITIVE_INFINITY
-          : Date.now() + PROCESS_COMMAND_LINE_FAILURE_TTL_MS,
+      expiresAt: cmd
+        ? Number.POSITIVE_INFINITY
+        : Date.now() + PROCESS_COMMAND_LINE_FAILURE_TTL_MS,
     });
     if (cmd) pending.proc.cmd = cmd;
   }
-  while (processCommandLineCache.size > PROCESS_COMMAND_LINE_CACHE_MAX_ENTRIES) {
+  while (
+    processCommandLineCache.size > PROCESS_COMMAND_LINE_CACHE_MAX_ENTRIES
+  ) {
     const oldestPid = processCommandLineCache.keys().next().value;
     if (oldestPid === undefined) break;
     processCommandLineCache.delete(oldestPid);
@@ -22920,9 +23560,7 @@ async function autoSelectRunningGameConfigOnce(processes) {
               entry.name,
             ),
           }))
-          .filter(
-            ({ matchKind }) => matchKind !== PROCESS_CONFIG_MATCH.NONE,
-          );
+          .filter(({ matchKind }) => matchKind !== PROCESS_CONFIG_MATCH.NONE);
         if (!processMatches.length) continue;
         processMatches.sort(
           (a, b) =>
@@ -22939,9 +23577,8 @@ async function autoSelectRunningGameConfigOnce(processes) {
       }
 
       if (!matchingCandidates.length) continue;
-      const candidateSelection = selectBestProcessConfigCandidate(
-        matchingCandidates,
-      );
+      const candidateSelection =
+        selectBestProcessConfigCandidate(matchingCandidates);
       const detectionMode = String(
         processPoller.getStatus()?.processDetectionMode || "",
       );
@@ -23624,16 +24261,15 @@ function ensureRuntimeUplayMap() {
   });
 }
 function loadRuntimeUplayMap() {
-  try {
-    const raw = fs.readFileSync(runtimeUplaySteamMapPath, "utf8");
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch (err) {
+  const result = uplayMappingStore.reloadSnapshot({ preserveLastValid: true });
+  if (!result.ok) {
     ipcLogger.warn("uplay-mapping:load-failed", {
-      error: err?.message || String(err),
+      error: result.error?.message || "Invalid Uplay mapping",
+      preserved: result.preserved === true,
+      entries: result.entries,
     });
-    return [];
   }
+  return uplayMappingStore.getRows();
 }
 function refreshRuntimeUplayMapping() {
   try {
@@ -23647,7 +24283,11 @@ function refreshRuntimeUplayMapping() {
         env: getRuntimeUplayMappingEnv(),
       },
     );
-    ipcLogger.info("uplay-mapping:refresh-success");
+    const rows = loadRuntimeUplayMap();
+    hydrateRuntimeMapping(rows);
+    ipcLogger.info("uplay-mapping:refresh-success", {
+      entries: uplaySteamMap.length,
+    });
   } catch (err) {
     ipcLogger.warn("uplay-mapping:refresh-failed", {
       error: err?.message || String(err),
@@ -23655,53 +24295,127 @@ function refreshRuntimeUplayMapping() {
   }
 }
 function hydrateRuntimeMapping(rows) {
-  uplaySteamMap = Array.isArray(rows) ? rows : [];
-  uplayToSteam.clear();
-  for (const row of uplaySteamMap) {
-    if (row && row.uplay_id) {
-      uplayToSteam.set(String(row.uplay_id), row);
-    }
-  }
+  const result = uplayMappingStore.replaceSnapshot(
+    Array.isArray(rows) ? rows : [],
+    "runtime",
+  );
+  uplaySteamMap = uplayMappingStore.getRows();
+  return result;
 }
 
 function refreshRuntimeUplayMappingAsync() {
-  if (refreshRuntimeUplayMappingAsync.inflight) return;
+  if (refreshRuntimeUplayMappingAsync.inflight) {
+    return refreshRuntimeUplayMappingAsync.inflight;
+  }
+
   const script = path.join(__dirname, "utils", "match-uplay-steam.js");
-  refreshRuntimeUplayMappingAsync.inflight = true;
-  execFile(
-    process.execPath,
-    ["--run-as-node", script, `--output=${runtimeUplaySteamMapPath}`],
-    { windowsHide: true, env: getRuntimeUplayMappingEnv() },
-    (err) => {
-      if (err) {
-        ipcLogger.warn("uplay-mapping:refresh-failed", {
-          error: err?.message || String(err),
+
+  const refreshWork = new Promise((resolve) => {
+    execFile(
+      process.execPath,
+      [script, `--output=${runtimeUplaySteamMapPath}`],
+      {
+        windowsHide: true,
+        env: {
+          ...getRuntimeUplayMappingEnv(),
+          ELECTRON_RUN_AS_NODE: "1",
+        },
+      },
+      (err, stdout, stderr) => {
+        const childResult = {
+          ok: !err,
+          error: err || null,
+          stdout: String(stdout || "").trim(),
+          stderr: String(stderr || "").trim(),
+        };
+
+        uplayMappingLogger.info("uplay-mapping:child-finished", {
+          ok: childResult.ok,
+          error: childResult.error?.message || null,
+          stdout: childResult.stdout || null,
+          stderr: childResult.stderr || null,
+          script,
+          outputPath: runtimeUplaySteamMapPath,
+          steamDbPath: runtimeSteamDbPath,
+        });
+
+        resolve(childResult);
+      },
+    );
+  });
+
+  const tracked = uplayMappingStore
+    .trackRefresh(refreshWork)
+    .then((result) => {
+      uplaySteamMap = uplayMappingStore.getRows();
+
+      if (result?.refreshResult?.ok === false) {
+        uplayMappingLogger.warn("uplay-mapping:refresh-failed", {
+          error:
+            result.refreshResult.error?.message ||
+            "Uplay mapping refresh failed",
+          stdout: result.refreshResult.stdout || null,
+          stderr: result.refreshResult.stderr || null,
+          preserved: result.preserved === true,
+          entries: result.entries,
+        });
+      } else if (!result.ok) {
+        uplayMappingLogger.warn("uplay-mapping:refresh-reload-failed", {
+          error: result.error?.message || "Invalid Uplay mapping",
+          preserved: result.preserved === true,
+          entries: result.entries,
         });
       } else {
-        try {
-          const rows = loadRuntimeUplayMap();
-          hydrateRuntimeMapping(rows);
-          ipcLogger.info("uplay-mapping:refresh-success", {
-            entries: uplaySteamMap.length,
-          });
-        } catch (reloadErr) {
-          ipcLogger.warn("uplay-mapping:refresh-reload-failed", {
-            error: reloadErr?.message || String(reloadErr),
-          });
-        }
+        uplayMappingLogger.info("uplay-mapping:refresh-success", {
+          entries: result.entries,
+          version: result.version,
+          output: result.refreshResult?.stdout || null,
+        });
       }
-      refreshRuntimeUplayMappingAsync.inflight = false;
-    },
-  );
+
+      return result;
+    })
+    .catch((err) => {
+      uplayMappingLogger.warn("uplay-mapping:refresh-unexpected-failed", {
+        error: err?.message || String(err),
+      });
+
+      return {
+        ok: false,
+        error: err,
+      };
+    });
+
+  refreshRuntimeUplayMappingAsync.inflight = tracked;
+
+  tracked.finally(() => {
+    if (refreshRuntimeUplayMappingAsync.inflight === tracked) {
+      refreshRuntimeUplayMappingAsync.inflight = null;
+    }
+  });
+
+  return tracked;
 }
-refreshRuntimeUplayMappingAsync.inflight = false;
+
+refreshRuntimeUplayMappingAsync.inflight = null;
 
 ensureRuntimeSteamDb();
+
 process.env.STEAM_DB_PATH = runtimeSteamDbPath;
+
 ensureRuntimeUplayMap();
+
+uplayMappingStore.configure({
+  runtimePath: runtimeUplaySteamMapPath,
+  assetPath: defaultUplaySteamMapPath,
+});
+
 let uplaySteamMap = loadRuntimeUplayMap();
-const uplayToSteam = new Map();
+
+const uplayToSteam = uplayMappingStore.getMap();
+
 hydrateRuntimeMapping(uplaySteamMap);
+
 refreshRuntimeUplayMappingAsync();
 
 function applyConfigPlatformDefaults(payload = {}) {
@@ -23771,6 +24485,8 @@ const SCHEMA_PLATFORM_DIRS = [
   "xenia",
   "rpcs3",
   "shadps4",
+  "markerpatch",
+  "madnesspatch",
 ];
 
 function normalizeStoragePlatform(platform) {
@@ -23787,6 +24503,8 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "xenia") return "xenia";
   if (normalized === "rpcs3") return "rpcs3";
   if (normalized === "shadps4") return "shadps4";
+  if (normalized === "markerpatch") return "markerpatch";
+  if (normalized === "madnesspatch") return "madnesspatch";
   return "steam";
 }
 
@@ -23854,6 +24572,8 @@ function getPlatformForAppId(appid) {
           "xenia",
           "rpcs3",
           "shadps4",
+          "markerpatch",
+          "madnesspatch",
         ]
       : [
           "epic-official",
@@ -23868,6 +24588,8 @@ function getPlatformForAppId(appid) {
           "xenia",
           "rpcs3",
           "shadps4",
+          "markerpatch",
+          "madnesspatch",
         ];
     for (const p of order) {
       if (set.has(p)) return p;
@@ -24375,7 +25097,9 @@ function quoteForCmd(arg) {
 
 function buildStartupCommandLine() {
   const exe = quoteForCmd(process.execPath);
-  const argList = stripAppNavigationArgs(process.argv.slice(1)).map(quoteForCmd);
+  const argList = stripAppNavigationArgs(process.argv.slice(1)).map(
+    quoteForCmd,
+  );
   return [exe].concat(argList).join(" ").trim();
 }
 
@@ -24564,7 +25288,11 @@ ipcMain.handle(
       }
     }
 
-    if (platform === "xenia" || platform === "rpcs3" || platform === "shadps4") {
+    if (
+      platform === "xenia" ||
+      platform === "rpcs3" ||
+      platform === "shadps4"
+    ) {
       const appid = config?.appid != null ? String(config.appid).trim() : "";
       if (!appid) {
         return {
@@ -25087,7 +25815,9 @@ function buildGogProductUrlCandidates(product = {}) {
   const slug = String(product?.slug || "").trim();
   if (slug) {
     if (/_game$/i.test(slug)) {
-      candidates.push(`https://www.gog.com/en/game/${slug.replace(/_game$/i, "")}`);
+      candidates.push(
+        `https://www.gog.com/en/game/${slug.replace(/_game$/i, "")}`,
+      );
     }
     candidates.push(`https://www.gog.com/en/game/${slug}`);
     candidates.push(`https://www.gog.com/game/${slug}`);
@@ -25168,7 +25898,9 @@ function normalizePlayStationContentId(value) {
 }
 
 function getPlayStationStoreLocaleForContentId(contentId) {
-  const prefix = String(contentId || "").slice(0, 2).toUpperCase();
+  const prefix = String(contentId || "")
+    .slice(0, 2)
+    .toUpperCase();
   if (prefix === "EP") return "en-gb";
   if (prefix === "JP") return "ja-jp";
   if (prefix === "HP") return "en-hk";
@@ -25180,7 +25912,9 @@ function buildPlayStationStoreProductUrl(contentId, locale = "") {
   const normalizedContentId = normalizePlayStationContentId(contentId);
   if (!normalizedContentId) return "";
   const resolvedLocale =
-    String(locale || "").trim().toLowerCase() ||
+    String(locale || "")
+      .trim()
+      .toLowerCase() ||
     getPlayStationStoreLocaleForContentId(normalizedContentId);
   return `https://store.playstation.com/${resolvedLocale}/product/${encodeURIComponent(
     normalizedContentId,
@@ -25251,7 +25985,9 @@ function scorePlayStationProductMatch(product, cusa, searchName) {
   if (productId.includes(cusa)) score += 400;
   if (classification === "FULL_GAME") score += 120;
   if (classification === "BUNDLE") score += 40;
-  if (["LEVEL", "COSTUME", "ADD_ON", "VIRTUAL_CURRENCY"].includes(classification)) {
+  if (
+    ["LEVEL", "COSTUME", "ADD_ON", "VIRTUAL_CURRENCY"].includes(classification)
+  ) {
     score -= 200;
   }
   if (platforms.includes("PS4")) score += 30;
@@ -25259,7 +25995,10 @@ function scorePlayStationProductMatch(product, cusa, searchName) {
   const productName = normalizePlayStationComparableTitle(product?.name || "");
   if (expectedName && productName) {
     if (productName === expectedName) score += 35;
-    else if (productName.includes(expectedName) || expectedName.includes(productName)) {
+    else if (
+      productName.includes(expectedName) ||
+      expectedName.includes(productName)
+    ) {
       score += 15;
     }
   }
@@ -25396,13 +26135,20 @@ ipcMain.handle("playstation:store-url", async (_evt, payload = {}) => {
       payload?.displayName || payload?.title || payload?.name || "",
     );
     if (!searchName) throw new Error("playstation-search-term-required");
-    const product = await resolvePlayStationStoreProductByCusa(cusa, searchName);
+    const product = await resolvePlayStationStoreProductByCusa(
+      cusa,
+      searchName,
+    );
     const contentId = normalizePlayStationContentId(product?.id || "");
     if (!product || !contentId) {
       throw new Error("playstation-product-not-found");
     }
     const url = buildPlayStationStoreProductUrl(contentId, product.locale);
-    const persisted = persistPlayStationStoreMetadata(configName, contentId, url);
+    const persisted = persistPlayStationStoreMetadata(
+      configName,
+      contentId,
+      url,
+    );
     return {
       ok: true,
       url,
@@ -25461,7 +26207,10 @@ ipcMain.handle("epic:store-url", async (_evt, payload = {}) => {
     payload?.displayName || payload?.name || payload?.configName || "",
   );
   const namespace = String(
-    payload?.namespace || payload?.epic_namespace || payload?.epicNamespace || "",
+    payload?.namespace ||
+      payload?.epic_namespace ||
+      payload?.epicNamespace ||
+      "",
   )
     .trim()
     .toLowerCase();
@@ -25515,8 +26264,7 @@ ipcMain.handle("epic:store-url", async (_evt, payload = {}) => {
     if (res.status >= 400) {
       throw new Error(`epic-store-search-${res.status}`);
     }
-    const elements =
-      res?.data?.data?.Catalog?.searchStore?.elements || [];
+    const elements = res?.data?.data?.Catalog?.searchStore?.elements || [];
     if (!Array.isArray(elements) || !elements.length) {
       throw new Error("epic-store-search-empty");
     }
@@ -25525,8 +26273,9 @@ ipcMain.handle("epic:store-url", async (_evt, payload = {}) => {
       (namespace &&
         elements.find(
           (element) =>
-            String(element?.namespace || "").trim().toLowerCase() === namespace &&
-            pickEpicStorePageSlug(element),
+            String(element?.namespace || "")
+              .trim()
+              .toLowerCase() === namespace && pickEpicStorePageSlug(element),
         )) ||
       elements.find(
         (element) =>
@@ -25605,8 +26354,7 @@ ipcMain.handle("covers:steam-product-assets", async (_evt, payload = {}) => {
       message: String(err?.message || err),
     };
   }
-  },
-);
+});
 
 ipcMain.handle("covers:steamdb", async (_evt, payload) => {
   try {
@@ -25863,10 +26611,19 @@ ipcMain.handle("platinum:manual", async (_event, payload = {}) => {
     configPath = null,
     suppressNotify = false,
   } = payload || {};
+  let usesNativePlatinum = false;
+  try {
+    const configFile = resolveConfigJsonPath(configsDir, configName);
+    if (configFile && fs.existsSync(configFile)) {
+      const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+      usesNativePlatinum = config?.native_platinum === true;
+    }
+  } catch {}
   const flagged = markConfigPlatinumFlag(configName);
   const alreadyFlagged = flagged === false;
   if (
     !suppressNotify &&
+    !usesNativePlatinum &&
     !cachedPreferences.disablePlatinum &&
     !alreadyFlagged
   ) {
@@ -26135,6 +26892,8 @@ async function flagPlatinumFromCacheOnBoot() {
 
 app.on("before-quit", () => {
   stopActiveLumaPlayRegistryWatcher();
+  pendingAchievementRecordQueue.clear("app-before-quit");
+  achievementRecorderController?.forceStop("app-before-quit");
   stopAutoSelectProcessPoller();
   try {
     processPoller.setEnabled(false);

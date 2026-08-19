@@ -7,7 +7,7 @@ A desktop application built with Electron that monitors running games and displa
 - 📈 Progress updates
 - 🖼️ Game image overlays
 - 📊 Real-time achievement dashboard
-- Steam/Uplay/GOG/Epic emulators, Xbox PC and official launcher schema support (auto-detected where possible)
+- Steam/Uplay/GOG/Epic emulators, Xbox PC, MarkerPatch, MadnessPatch and official launcher schema support (auto-detected where possible)
 
 **Platform:** Windows (uses Task Scheduler + Windows paths).
 
@@ -25,6 +25,8 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
   - Real-time progress monitoring and updates
   - Supports progress stats from Online-Fix `Stats.ini` and Tenoke `user_stats.ini`
   - Screenshots achievements when unlocked (optional)
+  - Records optional achievement clips with selectable 10–30 second duration, 30/60 FPS, and system audio
+  - Optional GPU HDR-to-SDR conversion keeps recorded H.264/MP4 clips compatible with standard SDR players
 - **Smart Dashboard**
   - Grid view of all configured games
   - Real-time progress tracking per game
@@ -132,6 +134,9 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
 | `utils/logger.js`                       | Logging utilities                                    |
 | `utils/lumaplay-event-watcher.js`       | Native LumaPlay registry change watcher              |
 | `utils/lumaplay-registry.js`            | LumaPlay registry handling                           |
+| `utils/markerpatch.js`                  | Dead Space 2 MarkerPatch detection and bitflag parser |
+| `utils/madnesspatch.js`                 | Alice MadnessPatch detection, schema and profile bitflag parser |
+| `utils/adaptive-path-watcher.js`        | Late-created local achievement path monitoring       |
 | `utils/match-uplay-steam.js`            | Uplay to Steam matching                              |
 | `utils/native-windows-notification-navigation.js` | Native toast activation routing          |
 | `utils/overlay-controller-service.js`   | Overlay controller service                           |
@@ -199,7 +204,7 @@ Achievements.exe --appid=239140 --platform=steam
 - Both formats are supported and are equivalent.
 - If Achievements is already running, the existing instance is opened and navigates to the matching config.
 - The AppID and platform must match one existing config exactly. These arguments do not generate a config or launch the game.
-- Supported platform values: `steam`, `steam-official`, `uplay`, `ubisoft-official`, `ea-official`, `epic`, `epic-official`, `gog`, `gog-official`, `xbox-pc`, `xenia`, `rpcs3`, `shadps4`.
+- Supported platform values: `steam`, `steam-official`, `uplay`, `ubisoft-official`, `ea-official`, `epic`, `epic-official`, `gog`, `gog-official`, `xbox-pc`, `xenia`, `rpcs3`, `shadps4`, `markerpatch`, `madnesspatch`.
 
 ## 🧱 Building a Windows Executable
 
@@ -238,6 +243,7 @@ Build output is created in the `dist/` folder. The build scripts verify the nati
 ### Features
 
 - [screenshot-desktop](https://www.npmjs.com/package/screenshot-desktop) - Optional achievement screenshot capture
+- [windows-capture](https://github.com/NiiightmareXD/windows-capture) - Windows Graphics Capture and hardware-accelerated H.264 encoding for optional achievement video clips and HDR screenshots. The bundled recorder uses a locally patched MIT-licensed 2.0.1 source snapshot to pass GPU tone-mapped surfaces directly to the encoder.
 - [@xboxreplay/xboxlive-auth](https://www.npmjs.com/package/@xboxreplay/xboxlive-auth) - Microsoft/Xbox Network authentication
 - [ws](https://www.npmjs.com/package/ws) - WebSocket support
 - [ini](https://www.npmjs.com/package/ini) - Config file parsing
@@ -247,6 +253,7 @@ Build output is created in the `dist/` folder. The build scripts verify the nati
 - `chokidar` keeps config/save directories under watch to trigger UI refreshes
 - `@vscode/windows-process-tree` runs in an isolated Electron utility process and provides process events plus command-line data when required
 - `ps-list` (via `utils/pslist-wrapper.mjs`) reconciles native snapshots and remains active as the limited fallback
+- `achievements-recorder.exe` runs only while achievement records are enabled, retains bounded rolling video/audio segments on disk, and captures the default Windows output mix through WASAPI loopback (microphone input is not captured; unavailable audio safely falls back to video-only)
 - Native snapshots run at ~1s; fallback detection runs at ~2s and hybrid reconciliation at ~12s
 - Disabling the native process watcher in **Settings -> Advanced** keeps executable-name detection active through the limited `ps-list` fallback; command-line arguments are not available in that mode
 
@@ -287,7 +294,7 @@ Build output is created in the `dist/` folder. The build scripts verify the nati
 **Config JSON fields (reference):**
 
 - `appid` (string) – game id
-- `platform` (string) – steam/uplay/gog/gog-official/epic/epic-official/xbox-pc/xenia/rpcs3/shadps4/steam-official/ubisoft-official/ea-official
+- `platform` (string) – steam/uplay/gog/gog-official/epic/epic-official/xbox-pc/xenia/rpcs3/shadps4/markerpatch/madnesspatch/steam-official/ubisoft-official/ea-official
 - `config_path` (string) – folder containing `achievements.json` and `img/`
 - `save_path` (string) – location of save/achievement progress
 - `process_name` (string) – executable name for process tracking
@@ -387,6 +394,36 @@ Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG
 - Modern ShadPS4 storage is based on `%APPDATA%\shadPS4\trophy\<NPWR>` for schema/icons and `%APPDATA%\shadPS4\home\<userId>\trophy\<NPWR>.xml` for progress.
 - Legacy ShadPS4 storage under `%APPDATA%\shadPS4\game_data\<CUSA>\TrophyFiles\trophy00` is still supported, but the modern trophy/progress layout is preferred when both exist.
 - If multiple ShadPS4 users exist, caches are scoped per user so switching users does not overwrite another user's achievement state.
+
+#### Dead Space 2 MarkerPatch Support
+
+1. Install MarkerPatch in the Dead Space 2 game directory.
+2. In **Settings -> Folders**, add the game directory containing `deadspace2.exe`, `MarkerPatch.ini` and the `achievements` folder.
+3. The app creates a local `markerpatch` config and schema from the mod's text and image resources.
+4. Achievement unlocks are monitored from `%LOCALAPPDATA%\EA Games\Dead Space 2\settings.txt` by reading `Controls.AcL.X` and `Controls.AcL.Y` as one 64-bit bitflag.
+
+**Important notes:**
+
+- The selected game directory is treated as a MarkerPatch root and is not scanned as a generic AppID container, including when it contains numeric subfolders.
+- Only unlock state is supported. MarkerPatch progress values are not imported or displayed.
+- The app reads the installed mod resources and the external settings file; it does not modify the game, the mod or its settings.
+- If the settings directory or `settings.txt` does not exist yet, an adaptive watcher waits for it and attaches automatically without requiring an app restart.
+
+#### Alice: Madness Returns MadnessPatch Support
+
+1. Install MadnessPatch in the game's `Binaries\Win32` directory.
+2. In **Settings -> Folders**, add either that `Win32` directory or the game directory containing it.
+3. The app creates a local `madnesspatch` config and schema from the mod's `Achievements\txt` and `Achievements\img` resources.
+4. Unlocks are monitored from the active profile files under `Documents\My Games\Alice Madness Returns\AliceGame\CheckPoint\<profile>\Achievements.txt`.
+
+**Important notes:**
+
+- The Documents base is resolved through the Windows/Electron known folder, so a relocated Documents folder is supported without hardcoding `C:\Users\...`.
+- The app does not create the `CheckPoint` tree or `Achievements.txt`. If they do not exist yet, monitoring attaches automatically after MadnessPatch creates them.
+- Each profile keeps an independent in-memory baseline. A newly discovered profile is seeded silently, while later bitflag changes generate notifications.
+- Only the persisted unlock bitflag is imported. Runtime-only progress shown by the mod is not read from `Achievements.txt`.
+- `AchievementSupport` must remain enabled in `MadnessPatch.ini` for the mod to create and update the state file.
+- The selected game directory is treated as a MadnessPatch root and is not scanned as a generic AppID container.
 
 #### Steam Launcher Support
 
@@ -531,6 +568,9 @@ Notes:
 - Enable/disable controller support for the overlay from **Settings -> Advanced -> Rendering**
 - Enable/disable features:
   - Achievement screenshots
+  - Achievement records
+    - Choose 30 or 60 FPS
+    - Choose a total clip duration from 10 to 30 seconds, divided equally before and after the unlock
   - Progress Notification
   - Playtime Notification
   - Startup behavior
@@ -544,6 +584,8 @@ Notes:
 - `%APPDATA%/Achievements/configs` – configs
 - `%APPDATA%/Achievements/configs/schema` – generated achievement schemas + local achievement images
 - `%APPDATA%/Achievements/images` – cached covers
+- `%USERPROFILE%/Pictures/Achievements Screenshots` – default achievement screenshot output
+- `%USERPROFILE%/Videos/Achievements Records` – default achievement video output
 - `%APPDATA%/Achievements/ach_cache` – cached achievements
 - `%APPDATA%/Achievements/ach_cache_meta.json` – cache metadata used to avoid unnecessary cache rewrites
 - `%APPDATA%/Achievements/logs` – application logs

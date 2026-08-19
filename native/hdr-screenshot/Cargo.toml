@@ -1,0 +1,23 @@
+[package]
+name = "achievements-hdr-screenshot"
+version = "1.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+half = "2.6.0"
+png = "0.18.0"
+windows = { version = "0.62.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+] }
+windows-capture = "2.0.1"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "abort"
+strip = "symbols"
+

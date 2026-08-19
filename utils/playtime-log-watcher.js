@@ -9,6 +9,7 @@ const { accumulatePlaytime, sanitizeConfigName } = require("./playtime-store");
 const { fetchSteamGridDbImage } = require("./game-cover");
 const { normalizePlatform } = require("./config-platform-migrator");
 const { resolveSteamProductAssetUrls } = require("./steam-product-assets");
+const uplayMappingStore = require("./uplay-mapping-store");
 const processPoller = require("./process-poller");
 const {
   getProcessExecutableNames,
@@ -27,28 +28,13 @@ const runtimeUplaySteamMapPath = path.join(
   "uplay-steam.json",
 );
 
-let steamLookupCache = null;
+uplayMappingStore.configure({
+  runtimePath: runtimeUplaySteamMapPath,
+  assetPath: defaultUplaySteamMapPath,
+});
+uplayMappingStore.reloadSnapshot({ preserveLastValid: true });
 function loadUplaySteamMap() {
-  if (steamLookupCache) return steamLookupCache;
-  steamLookupCache = new Map();
-  const candidates = [runtimeUplaySteamMapPath, defaultUplaySteamMapPath];
-  for (const file of candidates) {
-    if (!file) continue;
-    try {
-      if (!fs.existsSync(file)) continue;
-      const raw = fs.readFileSync(file, "utf8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((row) => {
-          if (row?.uplay_id) {
-            steamLookupCache.set(String(row.uplay_id), row);
-          }
-        });
-      }
-      if (steamLookupCache.size) break;
-    } catch {}
-  }
-  return steamLookupCache;
+  return uplayMappingStore.getMap();
 }
 
 function resolveSteamAppId(appid) {

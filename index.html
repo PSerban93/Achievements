@@ -21,7 +21,9 @@
         };
         const applyHardwareAccelerationPreference = (value) => {
           if (window.AppTheme?.applyHardwareAccelerationPreferenceToDocument) {
-            window.AppTheme.applyHardwareAccelerationPreferenceToDocument(value);
+            window.AppTheme.applyHardwareAccelerationPreferenceToDocument(
+              value,
+            );
           }
         };
         applyHardwareAccelerationPreference(true);
@@ -242,11 +244,15 @@
         border-bottom: 2px solid var(--dracula-cyan) !important;
       }
 
-      #achievementsTableBody tr.achievement-row-navigation-target td:first-child {
+      #achievementsTableBody
+        tr.achievement-row-navigation-target
+        td:first-child {
         border-left: 2px solid var(--dracula-cyan) !important;
       }
 
-      #achievementsTableBody tr.achievement-row-navigation-target td:last-child {
+      #achievementsTableBody
+        tr.achievement-row-navigation-target
+        td:last-child {
         border-right: 2px solid var(--dracula-cyan) !important;
       }
 
@@ -647,8 +653,12 @@
     <div id="bootLoading" role="status" aria-live="polite">
       <div class="boot-loading-card">
         <div class="boot-spinner" aria-hidden="true"></div>
-        <div class="boot-loading-title" data-i18n="boot.loading.title">Booting…</div>
-        <div class="boot-loading-sub" data-i18n="boot.loading.sub">Preparing achievements cache</div>
+        <div class="boot-loading-title" data-i18n="boot.loading.title">
+          Booting…
+        </div>
+        <div class="boot-loading-sub" data-i18n="boot.loading.sub">
+          Preparing achievements cache
+        </div>
       </div>
     </div>
 
@@ -794,7 +804,9 @@
                       Light
                     </option>
                     <option value="oled" id="option.appTheme.oled">OLED</option>
-                    <option value="metro" id="option.appTheme.metro">Metro</option>
+                    <option value="metro" id="option.appTheme.metro">
+                      Metro
+                    </option>
                     <option value="metro-dark" id="option.appTheme.metroDark">
                       Metro Dark
                     </option>
@@ -948,16 +960,93 @@
                   </div>
                 </div>
                 <div
-                  class="checkbox-control"
-                  style="margin-top: -10px; margin-bottom: 5px"
+                  class="settings-control"
+                  style="gap: 12px; margin-top: -8px; margin-bottom: 5px"
                 >
-                  <input
-                    type="checkbox"
-                    id="settings-disableScreenshotCheckbox"
-                  />
-                  <label for="settings-disableScreenshotCheckbox"
-                    >Disable Screenshot</label
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
+                      id="settings-disableScreenshotCheckbox"
+                    />
+                    <label for="settings-disableScreenshotCheckbox"
+                      >Disable Screenshot</label
+                    >
+                  </div>
+                  <button type="button" id="settings-resetScreenshotFolderBtn">
+                    Reset to Default
+                  </button>
+                </div>
+              </div>
+              <hr style="margin: 18px 0 14px" />
+              <div class="settings-section" style="margin-bottom: 5px">
+                <h4 id="settings-recordsTitle">Achievements Records</h4>
+                <div class="settings-control">
+                  <div class="input-with-button">
+                    <label
+                      for="settings-recordFolder"
+                      data-i18n="label.settings-screenshotFolder"
+                      >Save to folder:</label
+                    >
+                    <input
+                      type="text"
+                      id="settings-recordFolder"
+                      placeholder="Default folder: Videos\Achievements Records"
+                      readonly
+                    />
+                    <button
+                      type="button"
+                      id="settings-selectRecordFolder"
+                      aria-label="Choose folder"
+                    >
+                      📂
+                    </button>
+                  </div>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-recordFpsSelect"
+                    data-i18n="label.settings-recordFps"
+                    >Recording frame rate:</label
                   >
+                  <select id="settings-recordFpsSelect">
+                    <option value="30">30 FPS</option>
+                    <option value="60">60 FPS</option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-recordDurationSelect"
+                    data-i18n="label.settings-recordDuration"
+                    >Total duration (before + after):</label
+                  >
+                  <select id="settings-recordDurationSelect">
+                    <option value="10">10 s (5 + 5)</option>
+                    <option value="15">15 s (7.5 + 7.5)</option>
+                    <option value="20" selected>20 s (10 + 10)</option>
+                    <option value="25">25 s (12.5 + 12.5)</option>
+                    <option value="30">30 s (15 + 15)</option>
+                  </select>
+                </div>
+                <div
+                  class="settings-control"
+                  style="gap: 12px; margin-top: -8px; margin-bottom: 5px"
+                >
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
+                      id="settings-disableRecordCheckbox"
+                    />
+                    <label for="settings-disableRecordCheckbox"
+                      >Disable Records</label
+                    >
+                  </div>
+                  <button
+                    type="button"
+                    id="settings-resetRecordFolderBtn"
+                    data-i18n="settings-resetScreenshotFolderBtn"
+                  >
+                    Reset to Default
+                  </button>
                 </div>
               </div>
             </div>
@@ -1266,14 +1355,54 @@
                     >Xenia Achievement Position:</label
                   >
                   <select id="settings-xeniaPositionDropdown">
-                    <option value="center-bottom" data-i18n="option.positionDropdown.center-bottom">Center Bottom</option>
-                    <option value="center-top" data-i18n="option.positionDropdown.center-top">Center Top</option>
-                    <option value="top-right" data-i18n="option.positionDropdown.top-right">Top Right</option>
-                    <option value="bottom-right" data-i18n="option.positionDropdown.bottom-right">Bottom Right</option>
-                    <option value="middle-right" data-i18n="option.positionDropdown.middle-right">Middle Right</option>
-                    <option value="top-left" data-i18n="option.positionDropdown.top-left">Top Left</option>
-                    <option value="bottom-left" data-i18n="option.positionDropdown.bottom-left">Bottom Left</option>
-                    <option value="middle-left" data-i18n="option.positionDropdown.middle-left">Middle Left</option>
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
                   </select>
                 </div>
                 <div class="settings-control">
@@ -1324,14 +1453,54 @@
                     >RPCS3 Achievement Position:</label
                   >
                   <select id="settings-rpcs3PositionDropdown">
-                    <option value="center-bottom" data-i18n="option.positionDropdown.center-bottom">Center Bottom</option>
-                    <option value="center-top" data-i18n="option.positionDropdown.center-top">Center Top</option>
-                    <option value="top-right" data-i18n="option.positionDropdown.top-right">Top Right</option>
-                    <option value="bottom-right" data-i18n="option.positionDropdown.bottom-right">Bottom Right</option>
-                    <option value="middle-right" data-i18n="option.positionDropdown.middle-right">Middle Right</option>
-                    <option value="top-left" data-i18n="option.positionDropdown.top-left">Top Left</option>
-                    <option value="bottom-left" data-i18n="option.positionDropdown.bottom-left">Bottom Left</option>
-                    <option value="middle-left" data-i18n="option.positionDropdown.middle-left">Middle Left</option>
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
                   </select>
                 </div>
                 <div class="settings-control">
@@ -1382,14 +1551,54 @@
                     >ShadPS4 Achievement Position:</label
                   >
                   <select id="settings-shadps4PositionDropdown">
-                    <option value="center-bottom" data-i18n="option.positionDropdown.center-bottom">Center Bottom</option>
-                    <option value="center-top" data-i18n="option.positionDropdown.center-top">Center Top</option>
-                    <option value="top-right" data-i18n="option.positionDropdown.top-right">Top Right</option>
-                    <option value="bottom-right" data-i18n="option.positionDropdown.bottom-right">Bottom Right</option>
-                    <option value="middle-right" data-i18n="option.positionDropdown.middle-right">Middle Right</option>
-                    <option value="top-left" data-i18n="option.positionDropdown.top-left">Top Left</option>
-                    <option value="bottom-left" data-i18n="option.positionDropdown.bottom-left">Bottom Left</option>
-                    <option value="middle-left" data-i18n="option.positionDropdown.middle-left">Middle Left</option>
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
                   </select>
                 </div>
                 <div class="settings-control">
@@ -1518,8 +1727,7 @@
                   Playtime Notification Scale
                 </h4>
                 <div class="settings-slider">
-                  <label
-                    for="settings-playtimeScaleSlider"
+                  <label for="settings-playtimeScaleSlider"
                     >Scale:
                     <span id="settings-playtimeScaleValue">1.0</span></label
                   >
@@ -1532,9 +1740,7 @@
                       step="0.01"
                       value="1.0"
                     />
-                    <span
-                      class="value"
-                      id="settings-playtimeScaleValueDisplay"
+                    <span class="value" id="settings-playtimeScaleValueDisplay"
                       >100%</span
                     >
                   </div>
@@ -1837,6 +2043,30 @@
                       >
                         (restart required)
                       </span>
+                    </label>
+                  </div>
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
+                      id="settings-enableHdrScreenshotsCheckbox"
+                    />
+                    <label
+                      for="settings-enableHdrScreenshotsCheckbox"
+                      data-i18n="label.settings-enableHdrScreenshotsCheckbox"
+                    >
+                      Enable HDR for Screenshots
+                    </label>
+                  </div>
+                  <div class="checkbox-control">
+                    <input
+                      type="checkbox"
+                      id="settings-enableHdrRecordsCheckbox"
+                    />
+                    <label
+                      for="settings-enableHdrRecordsCheckbox"
+                      data-i18n="label.settings-enableHdrRecordsCheckbox"
+                    >
+                      Enable HDR-to-SDR Conversion for Records
                     </label>
                   </div>
                   <div class="checkbox-control">
@@ -3463,8 +3693,8 @@
                       auto-generated.
                     </li>
                     <li id="platformGuideEpicOfficialItem4">
-                      Polling runs for the detected running Epic game, or for
-                      an Epic Official config explicitly selected by the user.
+                      Polling runs for the detected running Epic game, or for an
+                      Epic Official config explicitly selected by the user.
                     </li>
                   </ul>
                 </details>
@@ -3508,14 +3738,14 @@
                       Xbox App installations are imported.
                     </li>
                     <li id="platformGuideXboxPcItem3">
-                      Local discovery reads <code>MicrosoftGame.config</code>
-                      from GDK packages and <code>XboxGames</code> folders.
+                      Local discovery reads
+                      <code>MicrosoftGame.config</code> from GDK packages and
+                      <code>XboxGames</code> folders.
                     </li>
                     <li id="platformGuideXboxPcItem4">
-                      The active title is first refreshed after 45 seconds,
-                      then every 5 seconds. Existing
-                      unlocks seed the cache silently; later unlocks trigger
-                      notifications.
+                      The active title is first refreshed after 45 seconds, then
+                      every 5 seconds. Existing unlocks seed the cache silently;
+                      later unlocks trigger notifications.
                     </li>
                   </ul>
                 </details>
@@ -3919,7 +4149,6 @@
             </div>
           </div>
         </div>
-
       </div>
     </div>
 
@@ -3962,7 +4191,9 @@
               z-index: 10;
             "
           >
-            <label id="achStatsText" style="color: var(--app-text); font-weight: bold"
+            <label
+              id="achStatsText"
+              style="color: var(--app-text); font-weight: bold"
               >Progress: 0 / 0</label
             >
             <div
@@ -4187,6 +4418,12 @@
                           <option value="rpcs3" disabled>RPCS3</option>
                           <option value="shadps4" disabled>
                             PS4 (shadps4)
+                          </option>
+                          <option value="markerpatch" disabled>
+                            MarkerPatch
+                          </option>
+                          <option value="madnesspatch" disabled>
+                            MadnessPatch
                           </option>
                         </select>
 
@@ -4900,7 +5137,10 @@
           Was found folders with achievement data. Select which folders should
           be scanned automatically.
         </p>
-        <div id="foldersRescanSelectionActions" class="folder-selection-actions hidden">
+        <div
+          id="foldersRescanSelectionActions"
+          class="folder-selection-actions hidden"
+        >
           <button id="foldersRescanSelectAllBtn" type="button">
             Select All
           </button>
@@ -5076,7 +5316,9 @@
         return themes;
       }
       function getAppThemeDisplayName(theme) {
-        const id = String(theme?.id || "").trim().toLowerCase();
+        const id = String(theme?.id || "")
+          .trim()
+          .toLowerCase();
         const key = APP_THEME_LABEL_KEYS[id];
         const fallback =
           String(theme?.name || "").trim() ||
@@ -5100,7 +5342,9 @@
         }
         if (
           selected &&
-          !Array.from(select.options).some((option) => option.value === selected)
+          !Array.from(select.options).some(
+            (option) => option.value === selected,
+          )
         ) {
           const option = document.createElement("option");
           option.value = selected;
@@ -5125,7 +5369,9 @@
       function refreshAppThemeText() {
         const title = document.getElementById("settings-appThemeTitle");
         const label = document.getElementById("label.appThemeSelect");
-        const hint = document.getElementById("settings-appThemePerformanceHint");
+        const hint = document.getElementById(
+          "settings-appThemePerformanceHint",
+        );
         const dracula = document.getElementById("option.appTheme.dracula");
         const dark = document.getElementById("option.appTheme.dark");
         const light = document.getElementById("option.appTheme.light");
@@ -5134,22 +5380,30 @@
         const metroDark = document.getElementById("option.appTheme.metroDark");
         const aero = document.getElementById("option.appTheme.aero");
         const aeroDark = document.getElementById("option.appTheme.aeroDark");
-        if (title) title.textContent = tUi("settings-appThemeTitle", "App Theme");
-        if (label) label.textContent = tUi("label.appThemeSelect", "App Theme:");
+        if (title)
+          title.textContent = tUi("settings-appThemeTitle", "App Theme");
+        if (label)
+          label.textContent = tUi("label.appThemeSelect", "App Theme:");
         if (hint) {
           hint.textContent = tUi(
             "settings-appThemePerformanceHint",
             "If Aero, Aero Dark, or other visual themes feel slow, turn off the Disable Hardware Acceleration option in Advanced > Rendering and restart the app.",
           );
         }
-        if (dracula) dracula.textContent = tUi("option.appTheme.dracula", "Dracula");
+        if (dracula)
+          dracula.textContent = tUi("option.appTheme.dracula", "Dracula");
         if (dark) dark.textContent = tUi("option.appTheme.dark", "Dark");
         if (light) light.textContent = tUi("option.appTheme.light", "Light");
         if (oled) oled.textContent = tUi("option.appTheme.oled", "OLED");
         if (metro) metro.textContent = tUi("option.appTheme.metro", "Metro");
-        if (metroDark) metroDark.textContent = tUi("option.appTheme.metroDark", "Metro Dark");
+        if (metroDark)
+          metroDark.textContent = tUi(
+            "option.appTheme.metroDark",
+            "Metro Dark",
+          );
         if (aero) aero.textContent = tUi("option.appTheme.aero", "Aero");
-        if (aeroDark) aeroDark.textContent = tUi("option.appTheme.aeroDark", "Aero Dark");
+        if (aeroDark)
+          aeroDark.textContent = tUi("option.appTheme.aeroDark", "Aero Dark");
         populateAppThemeSelect(getCachedPreferences()?.appTheme || "dracula");
       }
       const tUiFmt = (key, params = {}, fallback) => {
@@ -5233,6 +5487,7 @@
         savedAchievementsObj,
       ) {
         if (!configMeta) return { triggered: false };
+        if (configMeta.native_platinum === true) return { triggered: false };
         if (configMeta.platinum === true) return { triggered: false }; // already flagged, skip
         const total = Array.isArray(achievementsList)
           ? achievementsList.length
@@ -5442,7 +5697,12 @@
           const target = String(targetAppId || "").trim();
           const remote = String(fetchAppId || "").trim();
           if (!platform) return /^\d+$/.test(remote);
-          if (platform === "steam" || platform === "steam-official") {
+          if (
+            platform === "steam" ||
+            platform === "steam-official" ||
+            platform === "markerpatch" ||
+            platform === "madnesspatch"
+          ) {
             return /^\d+$/.test(remote);
           }
           if (platform === "uplay" || platform === "ubisoft-official") {
@@ -5454,7 +5714,7 @@
           let out = String(name || "").trim();
           if (!out) return "";
           const rx =
-            /\s*\((?:steam|steam[-\s]?official|epic[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
+            /\s*\((?:steam|steam[-\s]?official|epic[-\s]?official|xenia|rpcs3|ps4|shadps4|markerpatch|madnesspatch)\)\s*$/i;
           while (rx.test(out)) out = out.replace(rx, "").trim();
           return out;
         }
@@ -5647,7 +5907,8 @@
           }
           return "";
         }
-        window.__resolveRenderableCustomCoverSrc = resolveRenderableCustomCoverSrc;
+        window.__resolveRenderableCustomCoverSrc =
+          resolveRenderableCustomCoverSrc;
 
         function setImg(src, token = null) {
           return new Promise((resolve, reject) => {
@@ -5805,7 +6066,10 @@
           } catch {}
           return null;
         }
-        async function getConfigForCoverContext(appid, explicitConfigName = "") {
+        async function getConfigForCoverContext(
+          appid,
+          explicitConfigName = "",
+        ) {
           try {
             const configName =
               String(explicitConfigName || "").trim() ||
@@ -5814,11 +6078,7 @@
             const cfg = await window.api.getConfigByName(configName);
             if (!cfg || cfg.__notFound || cfg.__failed) return null;
             const wantedAppId = String(appid || "").trim();
-            const cfgIds = [
-              cfg?.appid,
-              cfg?.appId,
-              cfg?.steamAppId,
-            ]
+            const cfgIds = [cfg?.appid, cfg?.appId, cfg?.steamAppId]
               .map((value) => String(value || "").trim())
               .filter(Boolean);
             if (
@@ -6481,7 +6741,8 @@
 
           sources.push({
             id: "store-api",
-            run: () => downloadFromStoreHeader(fetchAppId, targetAppId, platform),
+            run: () =>
+              downloadFromStoreHeader(fetchAppId, targetAppId, platform),
           });
 
           return sources;
@@ -6562,7 +6823,11 @@
         }
 
         // --- loader: local -> (fallback) -> CDN -> local ---
-        async function loadLocalCover(appid, platformHint = null, options = {}) {
+        async function loadLocalCover(
+          appid,
+          platformHint = null,
+          options = {},
+        ) {
           if (!appid) {
             showFallbackLogo();
             return;
@@ -6593,7 +6858,8 @@
               try {
                 const customCoverSrc =
                   await resolveRenderableCustomCoverSrc(customCoverPath);
-                if (!customCoverSrc) throw new Error("custom-cover-read-failed");
+                if (!customCoverSrc)
+                  throw new Error("custom-cover-read-failed");
                 await setImg(customCoverSrc, loadToken);
                 if (loadToken !== embeddedCoverLoadToken) return;
                 setVisible(true);
@@ -6686,7 +6952,10 @@
           imgWrap.style.display = "flex";
         };
 
-        async function redownloadGameCoverForConfig(configName = "", options = {}) {
+        async function redownloadGameCoverForConfig(
+          configName = "",
+          options = {},
+        ) {
           const controlButton = options?.button || null;
           if (controlButton?.disabled) {
             showNotification?.(
@@ -6720,12 +6989,14 @@
           let activeRedownloadAppId = "";
           if (controlButton) controlButton.disabled = true;
           try {
-            const currentConfig = await window.api.getConfigByName(
-              selectedConfig,
-            );
+            const currentConfig =
+              await window.api.getConfigByName(selectedConfig);
             if (!currentConfig || currentConfig.__failed) {
               showNotification?.(
-                tUi("alert.configLoadFailed", "Something went wrong loading the config."),
+                tUi(
+                  "alert.configLoadFailed",
+                  "Something went wrong loading the config.",
+                ),
                 "#f44336",
               );
               return;
@@ -7017,7 +7288,9 @@
           }
           const field = document.getElementById("customCoverPath");
           if (field) {
-            field.value = String(result?.sourceCoverPath || picked || "").trim();
+            field.value = String(
+              result?.sourceCoverPath || picked || "",
+            ).trim();
           }
           window.__clearDashboardCachesFor?.(selectedConfig);
           const renderableCustomSrc = await resolveRenderableCustomCoverSrc(
@@ -7033,7 +7306,8 @@
               localStorage.removeItem(`${IMG_CACHE_PREFIX}${selectedConfig}`);
             }
           } catch {}
-          const currentConfig = await window.api.getConfigByName(selectedConfig);
+          const currentConfig =
+            await window.api.getConfigByName(selectedConfig);
           const currentAppId = String(
             currentConfig?.appid || currentConfig?.appId || "",
           ).trim();
@@ -7060,7 +7334,10 @@
             document.getElementById("configList")?.value || "",
           ).trim();
           if (!selectedConfig) return;
-          const result = await window.api.setCustomCoverPath(selectedConfig, "");
+          const result = await window.api.setCustomCoverPath(
+            selectedConfig,
+            "",
+          );
           if (!result?.success) {
             showNotification?.(
               result?.error || "Failed to clear custom cover image.",
@@ -7080,7 +7357,8 @@
           try {
             localStorage.removeItem(`${IMG_CACHE_PREFIX}${selectedConfig}`);
           } catch {}
-          const currentConfig = await window.api.getConfigByName(selectedConfig);
+          const currentConfig =
+            await window.api.getConfigByName(selectedConfig);
           const currentAppId = String(
             currentConfig?.appid || currentConfig?.appId || "",
           ).trim();
@@ -7112,47 +7390,49 @@
               window.__imageListenerUnsub();
             } catch {}
           }
-          window.__imageListenerUnsub = window.api.onImageUpdate(async (payload) => {
-            const appid =
-              typeof payload === "object" && payload?.appid
-                ? String(payload.appid)
-                : /^\d+$/.test(String(payload))
-                  ? String(payload)
+          window.__imageListenerUnsub = window.api.onImageUpdate(
+            async (payload) => {
+              const appid =
+                typeof payload === "object" && payload?.appid
+                  ? String(payload.appid)
+                  : /^\d+$/.test(String(payload))
+                    ? String(payload)
+                    : null;
+              if (!appid) return;
+              const platformHint =
+                typeof payload === "object" && payload?.platform
+                  ? String(payload.platform)
                   : null;
-            if (!appid) return;
-            const platformHint =
-              typeof payload === "object" && payload?.platform
-                ? String(payload.platform)
-                : null;
-            let selectedAppId = null;
-            let selectedConfig = "";
-            try {
-              selectedConfig = String(
-                document.getElementById("configList")?.value || "",
-              ).trim();
-              const payloadConfigName =
-                typeof payload === "object" && payload?.configName
-                  ? String(payload.configName).trim()
-                  : "";
-              if (
-                payloadConfigName &&
-                selectedConfig &&
-                payloadConfigName !== selectedConfig
-              ) {
-                return;
-              }
-              if (selectedConfig && window.api.getConfigByName) {
-                const cfg = await window.api.getConfigByName(selectedConfig);
-                selectedAppId = String(
-                  cfg?.appid || cfg?.appId || cfg?.steamAppId || "",
+              let selectedAppId = null;
+              let selectedConfig = "";
+              try {
+                selectedConfig = String(
+                  document.getElementById("configList")?.value || "",
                 ).trim();
-              }
-            } catch {}
-            if (!selectedAppId || selectedAppId !== appid) return;
-            await loadLocalCover(appid, platformHint, {
-              configName: selectedConfig,
-            });
-          });
+                const payloadConfigName =
+                  typeof payload === "object" && payload?.configName
+                    ? String(payload.configName).trim()
+                    : "";
+                if (
+                  payloadConfigName &&
+                  selectedConfig &&
+                  payloadConfigName !== selectedConfig
+                ) {
+                  return;
+                }
+                if (selectedConfig && window.api.getConfigByName) {
+                  const cfg = await window.api.getConfigByName(selectedConfig);
+                  selectedAppId = String(
+                    cfg?.appid || cfg?.appId || cfg?.steamAppId || "",
+                  ).trim();
+                }
+              } catch {}
+              if (!selectedAppId || selectedAppId !== appid) return;
+              await loadLocalCover(appid, platformHint, {
+                configName: selectedConfig,
+              });
+            },
+          );
 
           window.__imageListenerAttached = true;
         }
@@ -7513,7 +7793,9 @@
             "achievement-row-navigation-target",
           );
           row.style.display =
-            isNavigationTarget || (searchMatches && statusMatches) ? "" : "none";
+            isNavigationTarget || (searchMatches && statusMatches)
+              ? ""
+              : "none";
         });
       }
 
@@ -7680,9 +7962,7 @@
       function getAchievementRows() {
         const tableBody = document.getElementById("achievementsTableBody");
         return tableBody
-          ? Array.from(
-              tableBody.querySelectorAll("tr[data-achievement-name]"),
-            )
+          ? Array.from(tableBody.querySelectorAll("tr[data-achievement-name]"))
           : [];
       }
 
@@ -7716,7 +7996,9 @@
           if (!rendered.has(name)) achievementSelection.delete(name);
         }
         rows.forEach((row) => {
-          const selected = achievementSelection.has(row.dataset.achievementName);
+          const selected = achievementSelection.has(
+            row.dataset.achievementName,
+          );
           row.classList.toggle("achievement-row-selected", selected);
           row.setAttribute("aria-selected", selected ? "true" : "false");
         });
@@ -7828,8 +8110,7 @@
         if (!names.length) return false;
         const manualRows = rows.filter((item) => item.dataset.manual === "1");
         const unlockableRows = rows.filter(
-          (item) =>
-            item.dataset.earned !== "1" && item.dataset.manual !== "1",
+          (item) => item.dataset.earned !== "1" && item.dataset.manual !== "1",
         );
         const clickedManual = row?.dataset?.manual === "1";
         const clickedUnlockable =
@@ -7879,7 +8160,11 @@
         actionBtn.title = actionBtn.textContent;
         menu.classList.remove("hidden");
         menu.setAttribute("aria-hidden", "false");
-        positionAchievementManualContextMenu(menu, event.clientX, event.clientY);
+        positionAchievementManualContextMenu(
+          menu,
+          event.clientX,
+          event.clientY,
+        );
         actionBtn.focus({ preventScroll: true });
         return true;
       }
@@ -7968,10 +8253,7 @@
                       { count: result.updatedCount },
                       `${result.updatedCount} manual unlocks cleared.`,
                     )
-                  : tUi(
-                      "achievementManualClearDone",
-                      "Manual unlock cleared.",
-                    )
+                  : tUi("achievementManualClearDone", "Manual unlock cleared.")
                 : Number(result?.updatedCount || 0) > 1
                   ? tUiFmt(
                       "achievementManualUnlockSelectedDone",
@@ -8369,10 +8651,7 @@
           if (saved?.manual === true) {
             const manualLine = document.createElement("div");
             manualLine.className = "status-manual";
-            manualLine.textContent = tUi(
-              "achievementManualBadge",
-              "Manual",
-            );
+            manualLine.textContent = tUi("achievementManualBadge", "Manual");
             tdStatus.appendChild(manualLine);
           }
           if (saved?.earned_time) {
@@ -8573,7 +8852,11 @@
         );
       }
 
-      function getGenerationProgressPhaseLabel(phase, detail = "", state = null) {
+      function getGenerationProgressPhaseLabel(
+        phase,
+        detail = "",
+        state = null,
+      ) {
         if (detail) return detail;
         if (state?.kind === "boot-background") {
           switch (String(phase || "")) {
@@ -8837,7 +9120,8 @@
         const incoming = nextState || {};
         const isBoot = isBootBackgroundProgressState(incoming);
         const id = String(
-          incoming.id || (isBoot ? "boot-background" : generationProgressState?.id || ""),
+          incoming.id ||
+            (isBoot ? "boot-background" : generationProgressState?.id || ""),
         );
         const kind = isBoot ? "boot-background" : "primary";
         const hideKey = getProgressHideKey(kind, id);
@@ -9430,8 +9714,7 @@
           document.getElementById("configPath").value =
             currentConfig.config_path;
           document.getElementById("savePath").value = currentConfig.save_path;
-          const executablePathInput =
-            document.getElementById("executablePath");
+          const executablePathInput = document.getElementById("executablePath");
           executablePathInput.value = currentConfig.executable || "";
           executablePathInput.dataset.shortcutPath =
             currentConfig.shortcut_path || "";
@@ -9459,6 +9742,8 @@
               "xenia",
               "rpcs3",
               "shadps4",
+              "markerpatch",
+              "madnesspatch",
             ].includes(currentPlatform)
               ? currentPlatform
               : "auto";
@@ -9842,8 +10127,7 @@
       document
         .getElementById("selectExecutable")
         .addEventListener("click", async () => {
-          const executablePathInput =
-            document.getElementById("executablePath");
+          const executablePathInput = document.getElementById("executablePath");
           const selectedExe = await window.api.selectExecutable(
             executablePathInput.value,
           );
@@ -10109,8 +10393,7 @@
       }
 
       let cachedAppVersion = "";
-      const SETTINGS_GITHUB_URL =
-        "https://github.com/PSerban93/Achievements";
+      const SETTINGS_GITHUB_URL = "https://github.com/PSerban93/Achievements";
       const SETTINGS_DOCS_URL =
         "https://pserban93.github.io/Achievements-Docs/";
 
@@ -10156,10 +10439,7 @@
 
         const docsBtn = document.getElementById("settingsDocsLink");
         if (docsBtn) {
-          const docsLabel = tUi(
-            "settings.docsLink",
-            "Configs Setup Guide",
-          );
+          const docsLabel = tUi("settings.docsLink", "Configs Setup Guide");
           docsBtn.title = docsLabel;
           docsBtn.setAttribute("aria-label", docsLabel);
         }
@@ -10656,7 +10936,8 @@
           const appid = String(entry?.appid || "").trim();
           const platform = entry?.platform || null;
           const entryScope =
-            entry?.scope || (platform && !entry?.legacy ? "platform" : "global");
+            entry?.scope ||
+            (platform && !entry?.legacy ? "platform" : "global");
           const rowKey = entry?.key || buildBlacklistConfigKey(appid, platform);
           const displayKey =
             platform && !entry?.legacy ? `${appid} [${platform}]` : appid;
@@ -10839,9 +11120,7 @@
       const confirmMessageEl = document.getElementById("appConfirmMessage");
       const confirmDetailEl = document.getElementById("appConfirmDetail");
       const confirmInputRow = document.getElementById("appConfirmInputRow");
-      const confirmInputLabel = document.getElementById(
-        "appConfirmInputLabel",
-      );
+      const confirmInputLabel = document.getElementById("appConfirmInputLabel");
       const confirmInput = document.getElementById("appConfirmInput");
       const confirmNotesEl = document.getElementById("appConfirmNotes");
       const confirmNotesTitleEl = document.getElementById(
@@ -12069,8 +12348,9 @@
 
       function isNativeWindowsPresetValue(value) {
         return (
-          String(value || "").trim().toLowerCase() ===
-          NATIVE_WINDOWS_PRESET_VALUE
+          String(value || "")
+            .trim()
+            .toLowerCase() === NATIVE_WINDOWS_PRESET_VALUE
         );
       }
 
@@ -12164,7 +12444,9 @@
               preset === "Modern" ||
               preset === "xqjan" ||
               preset === "Neon Future" ||
-              String(preset || "").trim().toLowerCase() === "native windows"
+              String(preset || "")
+                .trim()
+                .toLowerCase() === "native windows"
             ) {
               defaultPresetsGroup.appendChild(option);
             } else {
@@ -12491,10 +12773,7 @@
         addManualBlacklistBtn.addEventListener("click", async () => {
           try {
             const promptResult = await showAppTextPrompt({
-              title: tUi(
-                "blacklist.manual.title",
-                "Add blacklisted AppIDs",
-              ),
+              title: tUi("blacklist.manual.title", "Add blacklisted AppIDs"),
               message: tUi(
                 "blacklist.manual.message",
                 "Enter one or more AppIDs to ignore globally. Separate multiple values with commas, spaces, or new lines.",
@@ -12519,10 +12798,7 @@
               .filter(Boolean);
             if (!appids.length) {
               showNotification(
-                tUi(
-                  "blacklist.manual.empty",
-                  "Enter at least one AppID.",
-                ),
+                tUi("blacklist.manual.empty", "Enter at least one AppID."),
                 "#ff9800",
               );
               return;
@@ -12834,7 +13110,10 @@
           })
           .catch((error) => {
             soundOptionsLoadPromise = null;
-            console.error(tUi("log.soundLoadError", "Sound Load Error:"), error);
+            console.error(
+              tUi("log.soundLoadError", "Sound Load Error:"),
+              error,
+            );
             throw error;
           });
         return soundOptionsLoadPromise;
@@ -13094,9 +13373,7 @@
           document.getElementById("settings-soundSelect");
         const sounds = Array.from(select?.options || [])
           .map((option) => option.value)
-          .filter(
-            (value) => value && value !== "mute" && value !== "random",
-          );
+          .filter((value) => value && value !== "mute" && value !== "random");
         if (!sounds.length) return "mute";
 
         const key = sourceSelectId || "settings-soundSelect";
@@ -13116,15 +13393,11 @@
           activePreviewSelectId = sourceSelectId;
         }
         stopUiAudioPlayback();
-        const resolvedFileName = resolvePreviewSound(
-          fileName,
-          sourceSelectId,
-        );
+        const resolvedFileName = resolvePreviewSound(fileName, sourceSelectId);
         if (!resolvedFileName || resolvedFileName === "mute") return;
 
         try {
-          const fullPath =
-            await window.api.getSoundFullPath(resolvedFileName);
+          const fullPath = await window.api.getSoundFullPath(resolvedFileName);
           activePreviewAudio = new Audio(fullPath);
           const volume = await getSoundVolumeValue();
           playAudioWithVolume(
@@ -13201,7 +13474,8 @@
         const matchedPreset = selectedPreset
           ? cachedSanPresets.find(
               (preset) =>
-                preset.id === selectedPreset || preset.legacyId === selectedPreset,
+                preset.id === selectedPreset ||
+                preset.legacyId === selectedPreset,
             )
           : null;
         select.value = matchedPreset ? matchedPreset.id : "";
@@ -13430,9 +13704,7 @@
           presetSelect.value = rarePreset;
         }
 
-        const soundSelect = document.getElementById(
-          "settings-rareSoundSelect",
-        );
+        const soundSelect = document.getElementById("settings-rareSoundSelect");
         if (
           soundSelect &&
           Array.from(soundSelect.options).some(
@@ -13760,6 +14032,22 @@
                 : !!prefs.disableHardwareAcceleration;
           }
         }
+        {
+          const hdrScreenshotsCb = document.getElementById(
+            "settings-enableHdrScreenshotsCheckbox",
+          );
+          if (hdrScreenshotsCb) {
+            hdrScreenshotsCb.checked = prefs?.enableHdrScreenshots === true;
+          }
+        }
+        {
+          const hdrRecordsCb = document.getElementById(
+            "settings-enableHdrRecordsCheckbox",
+          );
+          if (hdrRecordsCb) {
+            hdrRecordsCb.checked = prefs?.enableHdrRecords === true;
+          }
+        }
 
         if (prefs.windowZoomFactor) {
           const zoomDropdown = document.getElementById("app-zoom-dropdown");
@@ -13995,20 +14283,35 @@
             const ssButton = document.getElementById(
               "settings-selectScreenshotFolder",
             );
+            const ssResetButton = document.getElementById(
+              "settings-resetScreenshotFolderBtn",
+            );
             if (ssInput) {
               ssInput.value = prefs?.screenshotFolder || "";
             }
             if (ssButton) {
               ssButton.addEventListener("click", async () => {
-                const dir = await window.api.selectFolder();
+                const dir = await window.api.selectScreenshotFolder();
                 if (dir) {
-                  ssInput.value = dir;
                   await window.api.savePreferences({ screenshotFolder: dir });
+                  ssInput.value = dir;
                   console.log(
                     tUi("log.screenshotFolderSet", "Screenshot folder set to:"),
                     dir,
                   );
                 }
+              });
+            }
+            if (ssResetButton) {
+              ssResetButton.addEventListener("click", async () => {
+                const dir = await window.api.getDefaultScreenshotFolder();
+                if (!dir) return;
+                await window.api.savePreferences({ screenshotFolder: dir });
+                ssInput.value = dir;
+                console.log(
+                  tUi("log.screenshotFolderSet", "Screenshot folder set to:"),
+                  dir,
+                );
               });
             }
 
@@ -14020,6 +14323,86 @@
               dsCb.addEventListener("change", async (e) => {
                 await window.api.savePreferences({
                   disableAchievementScreenshot: e.target.checked,
+                });
+              });
+            }
+
+            const recordInput = document.getElementById(
+              "settings-recordFolder",
+            );
+            const recordButton = document.getElementById(
+              "settings-selectRecordFolder",
+            );
+            const recordResetButton = document.getElementById(
+              "settings-resetRecordFolderBtn",
+            );
+            if (recordInput) {
+              recordInput.value = prefs?.recordsFolder || "";
+            }
+            if (recordButton) {
+              recordButton.addEventListener("click", async () => {
+                const dir = await window.api.selectRecordFolder();
+                if (!dir) return;
+                await window.api.savePreferences({ recordsFolder: dir });
+                recordInput.value = dir;
+                console.log(
+                  tUi("log.recordFolderSet", "Record folder set to:"),
+                  dir,
+                );
+              });
+            }
+            if (recordResetButton) {
+              recordResetButton.addEventListener("click", async () => {
+                const dir = await window.api.getDefaultRecordFolder();
+                if (!dir) return;
+                await window.api.savePreferences({ recordsFolder: dir });
+                recordInput.value = dir;
+                console.log(
+                  tUi("log.recordFolderSet", "Record folder set to:"),
+                  dir,
+                );
+              });
+            }
+
+            const recordFpsSelect = document.getElementById(
+              "settings-recordFpsSelect",
+            );
+            if (recordFpsSelect) {
+              recordFpsSelect.value =
+                Number(prefs?.recordFps) === 60 ? "60" : "30";
+              recordFpsSelect.addEventListener("change", async (e) => {
+                await window.api.savePreferences({
+                  recordFps: Number(e.target.value),
+                });
+              });
+            }
+
+            const recordDurationSelect = document.getElementById(
+              "settings-recordDurationSelect",
+            );
+            if (recordDurationSelect) {
+              const duration = Number(prefs?.recordDurationSeconds);
+              recordDurationSelect.value = [10, 15, 20, 25, 30].includes(
+                duration,
+              )
+                ? String(duration)
+                : "20";
+              recordDurationSelect.addEventListener("change", async (e) => {
+                await window.api.savePreferences({
+                  recordDurationSeconds: Number(e.target.value),
+                });
+              });
+            }
+
+            const disableRecordCheckbox = document.getElementById(
+              "settings-disableRecordCheckbox",
+            );
+            if (disableRecordCheckbox) {
+              disableRecordCheckbox.checked =
+                prefs?.disableAchievementRecords === true;
+              disableRecordCheckbox.addEventListener("change", async (e) => {
+                await window.api.savePreferences({
+                  disableAchievementRecords: e.target.checked,
                 });
               });
             }
@@ -14277,9 +14660,7 @@
                         "settings.xboxPc.connectSuccess",
                         {
                           account:
-                            result.gamertag ||
-                            result.xuid ||
-                            "Xbox Network",
+                            result.gamertag || result.xuid || "Xbox Network",
                         },
                         `Xbox PC connected: ${result.gamertag || result.xuid || "Xbox Network"}`,
                       )
@@ -14575,6 +14956,30 @@
           });
         }
 
+        const hdrScreenshotsEl = document.getElementById(
+          "settings-enableHdrScreenshotsCheckbox",
+        );
+        if (hdrScreenshotsEl) {
+          hdrScreenshotsEl.checked = prefs?.enableHdrScreenshots === true;
+          hdrScreenshotsEl.addEventListener("change", async (e) => {
+            await window.api.savePreferences({
+              enableHdrScreenshots: e.target.checked,
+            });
+          });
+        }
+
+        const hdrRecordsEl = document.getElementById(
+          "settings-enableHdrRecordsCheckbox",
+        );
+        if (hdrRecordsEl) {
+          hdrRecordsEl.checked = prefs?.enableHdrRecords === true;
+          hdrRecordsEl.addEventListener("change", async (e) => {
+            await window.api.savePreferences({
+              enableHdrRecords: e.target.checked,
+            });
+          });
+        }
+
         const forceGlobalOverlayShortcutsEl = document.getElementById(
           "settings-forceGlobalOverlayShortcutsCheckbox",
         );
@@ -14806,6 +15211,7 @@
         ) {
           return false;
         }
+
         if (watcherAutoSelectClearTimer) {
           clearTimeout(watcherAutoSelectClearTimer);
           watcherAutoSelectClearTimer = null;
@@ -14955,8 +15361,7 @@
           const domAfterReload =
             sanitizeConfigName(configList.value || "") === targetSafe;
           const uiAppliedAfterReload = configUiAppliedName === targetSafe;
-          const uiInFlightAfterReload =
-            isConfigUiSelectionInFlight(targetSafe);
+          const uiInFlightAfterReload = isConfigUiSelectionInFlight(targetSafe);
           if (
             activeAfterReload.available &&
             activeAfterReload.configName === targetSafe &&
@@ -15172,7 +15577,10 @@
           if (typeof isSettingsOpen === "function" && isSettingsOpen()) {
             closeSettingsModal();
           }
-          if (window.__dashboardOpen && typeof window.closeDashboard === "function") {
+          if (
+            window.__dashboardOpen &&
+            typeof window.closeDashboard === "function"
+          ) {
             window.closeDashboard();
           }
 
@@ -15684,13 +16092,8 @@
         const menu = document.getElementById("settingsMenu");
         const open = menu && !menu.classList.contains("hidden");
         if (!open) return;
-        const onboardingModal = document.getElementById(
-          "bootOnboardingModal",
-        );
-        if (
-          onboardingModal &&
-          !onboardingModal.classList.contains("hidden")
-        ) {
+        const onboardingModal = document.getElementById("bootOnboardingModal");
+        if (onboardingModal && !onboardingModal.classList.contains("hidden")) {
           return;
         }
         const confirmModal = document.getElementById("appConfirmModal");
@@ -15946,9 +16349,9 @@
             "settings-positionDropdown",
           ).value;
           const sound = document.getElementById("settings-soundSelect").value;
-          const useSanPreset = document.getElementById(
-            "settings-useSanPresetCheckbox",
-          )?.checked === true;
+          const useSanPreset =
+            document.getElementById("settings-useSanPresetCheckbox")
+              ?.checked === true;
           const sanPreset =
             document.getElementById("settings-sanPresetDropdown")?.value || "";
           const scale = parseFloat(
@@ -15993,9 +16396,9 @@
           const sound =
             document.getElementById("settings-rareSoundSelect")?.value ||
             "mute";
-          const useSanPreset = document.getElementById(
-            "settings-useSanPresetCheckbox",
-          )?.checked === true;
+          const useSanPreset =
+            document.getElementById("settings-useSanPresetCheckbox")
+              ?.checked === true;
           const sanPreset =
             document.getElementById("settings-rareSanPresetDropdown")?.value ||
             "";
@@ -16026,9 +16429,9 @@
           const sound =
             document.getElementById("settings-platinumSoundSelect")?.value ||
             "mute";
-          const useSanPreset = document.getElementById(
-            "settings-useSanPresetCheckbox",
-          )?.checked === true;
+          const useSanPreset =
+            document.getElementById("settings-useSanPresetCheckbox")
+              ?.checked === true;
           const sanPreset =
             document.getElementById("settings-platinumSanPresetDropdown")
               ?.value || "";
@@ -16076,9 +16479,9 @@
           });
         });
         testButton?.addEventListener("click", () => {
-          const useSanPreset = document.getElementById(
-            "settings-useSanPresetCheckbox",
-          )?.checked === true;
+          const useSanPreset =
+            document.getElementById("settings-useSanPresetCheckbox")
+              ?.checked === true;
           const scale = parseFloat(
             document.getElementById("settings-scaleSlider")?.value || 1,
           );
@@ -16095,7 +16498,9 @@
         });
       }
 
-      EMULATOR_NOTIFICATION_SETTINGS.forEach(registerEmulatorNotificationSettings);
+      EMULATOR_NOTIFICATION_SETTINGS.forEach(
+        registerEmulatorNotificationSettings,
+      );
 
       // Settings scale slider
       const settingsScaleSlider = document.getElementById(
@@ -16350,7 +16755,9 @@
       document
         .getElementById("settings-useSanPresetCheckbox")
         ?.addEventListener("change", (e) => {
-          window.api.savePreferences({ useSanPreset: e.target.checked === true });
+          window.api.savePreferences({
+            useSanPreset: e.target.checked === true,
+          });
         });
 
       document
@@ -16777,7 +17184,9 @@
           overlayControllerControlModeBinding:
             getOverlayControllerControlModeBindingFromPrefs(base),
           schemaLanguages: getSchemaLanguageSelectionFromUi(),
-          appTheme: normalizeAppTheme(getVal("appThemeSelect") || base.appTheme),
+          appTheme: normalizeAppTheme(
+            getVal("appThemeSelect") || base.appTheme,
+          ),
           startMaximized: checkbox("settings-startMaximizedCheckbox"),
           startInTray: checkbox("settings-startInTrayCheckbox"),
           closeToTray: checkbox("settings-closeToTrayCheckbox"),
@@ -16788,6 +17197,12 @@
           disableHardwareAcceleration: checkbox(
             "settings-disableHardwareAccelerationCheckbox",
           ),
+          enableHdrScreenshots: checkbox(
+            "settings-enableHdrScreenshotsCheckbox",
+          ),
+          enableHdrRecords: checkbox(
+            "settings-enableHdrRecordsCheckbox",
+          ),
           screenshotFolder: pick(
             getVal("settings-screenshotFolder").trim(),
             base.screenshotFolder || "",
@@ -16795,6 +17210,16 @@
           disableAchievementScreenshot: checkbox(
             "settings-disableScreenshotCheckbox",
           ),
+          recordsFolder: pick(
+            getVal("settings-recordFolder").trim(),
+            base.recordsFolder || "",
+          ),
+          disableAchievementRecords: checkbox(
+            "settings-disableRecordCheckbox",
+          ),
+          recordFps: Number(getVal("settings-recordFpsSelect")) || 30,
+          recordDurationSeconds:
+            Number(getVal("settings-recordDurationSelect")) || 20,
           windowZoomFactor: Number.isFinite(zoomValue)
             ? zoomValue
             : base.windowZoomFactor || 1,
@@ -16802,8 +17227,7 @@
         };
 
         snapshot.rarePreset = pick(
-          getVal("settings-rarePresetDropdown") ||
-            getVal("rarePresetValue"),
+          getVal("settings-rarePresetDropdown") || getVal("rarePresetValue"),
           base.rarePreset || snapshot.preset,
         );
         snapshot.rarePosition = pick(
@@ -16812,12 +17236,10 @@
           base.rarePosition || snapshot.position,
         );
         snapshot.rareSound = pick(
-          getVal("settings-rareSoundSelect") ||
-            getVal("rareSoundValue"),
+          getVal("settings-rareSoundSelect") || getVal("rareSoundValue"),
           base.rareSound || snapshot.sound,
         );
-        snapshot.rareSanPreset =
-          getVal("settings-rareSanPresetDropdown") || "";
+        snapshot.rareSanPreset = getVal("settings-rareSanPresetDropdown") || "";
         snapshot.platinumPreset = pick(
           getVal("settings-platinumPresetDropdown") ||
             getVal("platinumPresetValue"),
@@ -18547,9 +18969,10 @@
         const applyDashboardCardImage = (img, src, options = {}) => {
           if (!img || !src) return;
           const forceReload = options?.forceReload === true;
-          const nextSrc = forceReload && /^file:/i.test(String(src || ""))
-            ? withDashboardImageCacheBuster(src)
-            : src;
+          const nextSrc =
+            forceReload && /^file:/i.test(String(src || ""))
+              ? withDashboardImageCacheBuster(src)
+              : src;
           img.dataset.src = nextSrc;
           ensureLazyObserver().observe(img);
           if (!isDashboardBooting()) {
@@ -18884,52 +19307,54 @@
               window.__dashboardImageListenerUnsub();
             } catch {}
           }
-          window.__dashboardImageListenerUnsub = window.api.onImageUpdate(async (payload) => {
-            const payloadConfigName =
-              typeof payload === "object" && payload?.configName
-                ? String(payload.configName).trim()
-                : "";
-            const isCustomCoverUpdate =
-              typeof payload === "object" &&
-              payload &&
-              Object.prototype.hasOwnProperty.call(payload, "custom");
-            if (
-              isCustomCoverUpdate &&
-              payloadConfigName &&
-              typeof buildDashboard === "function"
-            ) {
-              window.__clearDashboardCachesFor?.(payloadConfigName);
-              dashboardConfigCache.delete(payloadConfigName);
-              try {
-                localStorage.removeItem(IMG_CACHE_PREFIX + payloadConfigName);
-              } catch {}
-              if (window.__dashboardOpen) {
-                if (typeof buildDashboard === "function") {
-                  await buildDashboard();
+          window.__dashboardImageListenerUnsub = window.api.onImageUpdate(
+            async (payload) => {
+              const payloadConfigName =
+                typeof payload === "object" && payload?.configName
+                  ? String(payload.configName).trim()
+                  : "";
+              const isCustomCoverUpdate =
+                typeof payload === "object" &&
+                payload &&
+                Object.prototype.hasOwnProperty.call(payload, "custom");
+              if (
+                isCustomCoverUpdate &&
+                payloadConfigName &&
+                typeof buildDashboard === "function"
+              ) {
+                window.__clearDashboardCachesFor?.(payloadConfigName);
+                dashboardConfigCache.delete(payloadConfigName);
+                try {
+                  localStorage.removeItem(IMG_CACHE_PREFIX + payloadConfigName);
+                } catch {}
+                if (window.__dashboardOpen) {
+                  if (typeof buildDashboard === "function") {
+                    await buildDashboard();
+                  } else {
+                    await refreshDashboardImageByConfigName(payloadConfigName);
+                  }
                 } else {
-                  await refreshDashboardImageByConfigName(payloadConfigName);
+                  window.__dashboardNeedsRebuild = true;
                 }
-              } else {
-                window.__dashboardNeedsRebuild = true;
+                return;
               }
-              return;
-            }
-            const appid =
-              typeof payload === "object" && payload?.appid
-                ? String(payload.appid)
-                : /^\d+$/.test(String(payload))
-                  ? String(payload)
+              const appid =
+                typeof payload === "object" && payload?.appid
+                  ? String(payload.appid)
+                  : /^\d+$/.test(String(payload))
+                    ? String(payload)
+                    : null;
+              if (!appid) return;
+              const platformHint =
+                typeof payload === "object" && payload?.platform
+                  ? String(payload.platform)
                   : null;
-            if (!appid) return;
-            const platformHint =
-              typeof payload === "object" && payload?.platform
-                ? String(payload.platform)
-                : null;
-            clearDashboardCoverEnsureState(appid, platformHint);
-            await refreshDashboardImageByAppId(appid, platformHint, {
-              forceReload: true,
-            });
-          });
+              clearDashboardCoverEnsureState(appid, platformHint);
+              await refreshDashboardImageByAppId(appid, platformHint, {
+                forceReload: true,
+              });
+            },
+          );
           window.__dashboardImageListenerAttached = true;
         }
 
@@ -19581,7 +20006,9 @@
             }
             const name = String(anchor.name || "").trim();
             const card = name
-              ? grid.querySelector(`.dash-card[data-name="${CSS.escape(name)}"]`)
+              ? grid.querySelector(
+                  `.dash-card[data-name="${CSS.escape(name)}"]`,
+                )
               : null;
             let targetScrollTop = Number(anchor.scrollTop || 0);
             if (
@@ -19899,7 +20326,11 @@
           );
           const localAppId = String(target.appid || cfg?.appid || "").trim();
           const supportsDirectSteamLink =
-            !platform || platform === "steam" || platform === "steam-official";
+            !platform ||
+            platform === "steam" ||
+            platform === "steam-official" ||
+            platform === "markerpatch" ||
+            platform === "madnesspatch";
 
           if (platform === "uplay" || platform === "ubisoft-official") {
             const configSteamAppId = String(cfg?.steamAppId || "").trim();
@@ -20159,14 +20590,16 @@
         }
 
         function normalizePlayStationContentId(value) {
-          const raw = String(value || "").trim().toUpperCase();
-          return /^[A-Z]{2}\d{4}-CUSA\d{5}_00-[A-Z0-9_]+$/.test(raw)
-            ? raw
-            : "";
+          const raw = String(value || "")
+            .trim()
+            .toUpperCase();
+          return /^[A-Z]{2}\d{4}-CUSA\d{5}_00-[A-Z0-9_]+$/.test(raw) ? raw : "";
         }
 
         function getPlayStationStoreLocaleForContentId(contentId) {
-          const prefix = String(contentId || "").slice(0, 2).toUpperCase();
+          const prefix = String(contentId || "")
+            .slice(0, 2)
+            .toUpperCase();
           if (prefix === "EP") return "en-gb";
           if (prefix === "JP") return "ja-jp";
           if (prefix === "HP") return "en-hk";
@@ -20240,7 +20673,8 @@
               });
               const resolvedUrl = String(result?.url || "").trim();
               if (result?.ok && resolvedUrl) {
-                if (cfg && result.contentId) cfg.ps_content_id = result.contentId;
+                if (cfg && result.contentId)
+                  cfg.ps_content_id = result.contentId;
                 if (cfg && resolvedUrl) cfg.ps_store_url = resolvedUrl;
                 if (metaCfg && result.contentId) {
                   metaCfg.ps_content_id = result.contentId;
@@ -20388,15 +20822,15 @@
             deleteBtn.title = deleteBtn.textContent;
           }
           const normalizedPlatform = normalizeDashboardPlatformValue(
-            target.platform ||
-              configMetaIndex.get(target.name)?.platform ||
-              "",
+            target.platform || configMetaIndex.get(target.name)?.platform || "",
           );
           const hasSteamAppId = /^\d+$/.test(String(target.appid || "").trim());
           const supportsDirectSteamLink =
             !normalizedPlatform ||
             normalizedPlatform === "steam" ||
-            normalizedPlatform === "steam-official";
+            normalizedPlatform === "steam-official" ||
+            normalizedPlatform === "markerpatch" ||
+            normalizedPlatform === "madnesspatch";
           const supportsSteamMetadata =
             supportsDirectSteamLink ||
             normalizedPlatform === "uplay" ||
@@ -20454,8 +20888,7 @@
               "",
           ).trim();
           const hasEaAppTarget =
-            supportsEaAppMetadata &&
-            /^[A-Za-z0-9:._,-]+$/.test(eaLaunchId);
+            supportsEaAppMetadata && /^[A-Za-z0-9:._,-]+$/.test(eaLaunchId);
           setMenuItemVisible(steamBtn, supportsSteamMetadata);
           setMenuItemVisible(steamDbBtn, supportsSteamMetadata);
           setMenuItemVisible(epicStoreBtn, supportsEpicStoreMetadata);
@@ -20482,17 +20915,11 @@
             epicStoreBtn.title = epicStoreBtn.textContent;
           }
           if (gogStoreBtn) {
-            gogStoreBtn.textContent = tUi(
-              "dashboardMenuGogStore",
-              "GOG Store",
-            );
+            gogStoreBtn.textContent = tUi("dashboardMenuGogStore", "GOG Store");
             gogStoreBtn.title = gogStoreBtn.textContent;
           }
           if (eaAppBtn) {
-            eaAppBtn.textContent = tUi(
-              "dashboardMenuEaApp",
-              "EA App",
-            );
+            eaAppBtn.textContent = tUi("dashboardMenuEaApp", "EA App");
             eaAppBtn.title = eaAppBtn.textContent;
           }
           if (playStationStoreBtn) {
@@ -20775,6 +21202,10 @@
               return "RPCS3";
             case "shadps4":
               return "PS4";
+            case "markerpatch":
+              return "MarkerPatch";
+            case "madnesspatch":
+              return "MadnessPatch";
             case "unknown":
               return tUi("dashboard.platformFilter.unknown", "Unknown");
             default:
@@ -21055,9 +21486,7 @@
                 total: Number(stored?.total) || 0,
                 updated: Number(stored?.updated) || 0,
               };
-              const customCoverPath = String(
-                it.custom_cover_path || "",
-              ).trim();
+              const customCoverPath = String(it.custom_cover_path || "").trim();
               const imgCacheKey = IMG_CACHE_PREFIX + it.name;
               const cachedImg = localStorage.getItem(imgCacheKey);
 
@@ -21255,9 +21684,10 @@
                   const applyDashboardImg = (img, src, options = {}) => {
                     if (!img || !src) return;
                     const forceReload = options?.forceReload === true;
-                    const nextSrc = forceReload && /^file:/i.test(String(src || ""))
-                      ? withDashboardImageCacheBuster(src)
-                      : src;
+                    const nextSrc =
+                      forceReload && /^file:/i.test(String(src || ""))
+                        ? withDashboardImageCacheBuster(src)
+                        : src;
                     img.dataset.src = nextSrc;
                     ensureLazyObserver().observe(img);
                     if (!bootChunkMode) {
@@ -22413,7 +22843,10 @@
               : {};
           if (
             prefs &&
-            Object.prototype.hasOwnProperty.call(prefs, "hideZeroCompletionGames")
+            Object.prototype.hasOwnProperty.call(
+              prefs,
+              "hideZeroCompletionGames",
+            )
           ) {
             return prefs.hideZeroCompletionGames === true;
           }
@@ -22814,8 +23247,10 @@
           bootOnboardingList.innerHTML = "";
           const searching = document.createElement("div");
           searching.className = "boot-onboarding-hint";
-          searching.textContent =
-            tUi("boot.onboarding.searching", "Searching folders…");
+          searching.textContent = tUi(
+            "boot.onboarding.searching",
+            "Searching folders…",
+          );
           bootOnboardingList.appendChild(searching);
         };
 
@@ -22947,7 +23382,8 @@
         };
 
         const closeFoldersRescanModal = () => {
-          if (folderSelectionModalMode !== "rescan" || bootOnboardingBusy) return;
+          if (folderSelectionModalMode !== "rescan" || bootOnboardingBusy)
+            return;
           setBootOnboardingModalVisible(false);
           folderSelectionModalMode = "boot";
           window.__foldersRescanModalActive = false;
@@ -22990,10 +23426,7 @@
             if (bootOnboardingHint) {
               bootOnboardingHint.textContent =
                 result?.error ||
-                tUi(
-                  "alert.watcherRestartFailed",
-                  "Failed to restart watchers",
-                );
+                tUi("alert.watcherRestartFailed", "Failed to restart watchers");
             }
             setBootOnboardingBusy(false);
             return;
@@ -23027,10 +23460,7 @@
           window.__foldersRescanModalActive = true;
           bootOnboardingCandidates = [];
           if (bootOnboardingTitle) {
-            bootOnboardingTitle.textContent = tUi(
-              "foldersRescanBtn",
-              "Rescan",
-            );
+            bootOnboardingTitle.textContent = tUi("foldersRescanBtn", "Rescan");
           }
           if (bootOnboardingMessage) {
             bootOnboardingMessage.textContent = tUi(
@@ -23073,10 +23503,7 @@
           if (bootOnboardingList) {
             bootOnboardingList.setAttribute(
               "aria-label",
-              tUi(
-                "aria.bootOnboardingList",
-                "Auto-config folder selection",
-              ),
+              tUi("aria.bootOnboardingList", "Auto-config folder selection"),
             );
           }
 
@@ -23094,13 +23521,14 @@
           }
           if (folderSelectionModalMode !== "rescan") return;
 
-          bootOnboardingCandidates = (Array.isArray(response?.folders)
-            ? response.folders
-            : []
+          bootOnboardingCandidates = (
+            Array.isArray(response?.folders) ? response.folders : []
           )
             .filter(
               (entry) =>
-                entry?.path && entry?.exists !== false && entry?.blocked !== true,
+                entry?.path &&
+                entry?.exists !== false &&
+                entry?.blocked !== true,
             )
             .map((entry) => ({
               path: entry.path,
@@ -23114,10 +23542,7 @@
             if (!response?.ok) {
               bootOnboardingHint.textContent =
                 response?.error ||
-                tUi(
-                  "alert.watcherRestartFailed",
-                  "Failed to restart watchers",
-                );
+                tUi("alert.watcherRestartFailed", "Failed to restart watchers");
             } else if (!bootOnboardingCandidates.length) {
               bootOnboardingHint.textContent = tUi(
                 "folders.empty",
@@ -23231,10 +23656,7 @@
           if (bootOnboardingList) {
             bootOnboardingList.setAttribute(
               "aria-label",
-              tUi(
-                "aria.bootOnboardingList",
-                "Auto-config folder selection",
-              ),
+              tUi("aria.bootOnboardingList", "Auto-config folder selection"),
             );
           }
           if (bootOnboardingTitle) {
@@ -24268,19 +24690,19 @@
                   Number.isFinite(state?.progress) &&
                   Number.isFinite(state?.max_progress) &&
                   state.max_progress > 0
-                  ) {
-                    window.api.queueProgressNotification({
-                      name: achievement.name,
-                      displayName,
-                      icon,
-                      progress: state.progress,
-                      max_progress: state.max_progress,
-                      progress_is_float: state.progress_is_float || undefined,
-                      config_path: achData.config_path,
-                      configName: cfg,
-                      source: "renderer-file-updated",
-                    });
-                  }
+                ) {
+                  window.api.queueProgressNotification({
+                    name: achievement.name,
+                    displayName,
+                    icon,
+                    progress: state.progress,
+                    max_progress: state.max_progress,
+                    progress_is_float: state.progress_is_float || undefined,
+                    config_path: achData.config_path,
+                    configName: cfg,
+                    source: "renderer-file-updated",
+                  });
+                }
               }
             }
 
@@ -25122,7 +25544,10 @@
             window.openDashboard?.();
             return;
           }
-          if (action.type === "settings" || action.type === "settings-section") {
+          if (
+            action.type === "settings" ||
+            action.type === "settings-section"
+          ) {
             window.openSettingsModal?.() || byId("settingsBtn")?.click();
             if (action.tabId) {
               const tab = document.querySelector(
@@ -25267,7 +25692,9 @@
             return true;
           }
           if (
-            target.closest?.("input, textarea, select, [contenteditable='true']")
+            target.closest?.(
+              "input, textarea, select, [contenteditable='true']",
+            )
           ) {
             return true;
           }
