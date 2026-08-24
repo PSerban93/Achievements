@@ -599,6 +599,8 @@ contextBridge.exposeInMainWorld("api", {
 
   // Update the configuration (now uses the 'update-config' event)
   updateConfig: (configData) => ipcRenderer.send("update-config", configData),
+  selectActiveConfig: (configData) =>
+    ipcRenderer.invoke("config:select-active", configData),
   toggleOverlay: (selectedConfig) =>
     ipcRenderer.send("toggle-overlay", selectedConfig),
   syncAchievementTableViewState: (state) =>
@@ -639,6 +641,14 @@ contextBridge.exposeInMainWorld("api", {
   connectXboxPc: () => ipcRenderer.invoke("xbox-pc:connect"),
   disconnectXboxPc: () => ipcRenderer.invoke("xbox-pc:disconnect"),
   importXboxPcLibrary: () => ipcRenderer.invoke("xbox-pc:import-library"),
+  getRetroAchievementsStatus: () =>
+    ipcRenderer.invoke("retroachievements:status"),
+  connectRetroAchievements: (credentials) =>
+    ipcRenderer.invoke("retroachievements:connect", credentials),
+  disconnectRetroAchievements: () =>
+    ipcRenderer.invoke("retroachievements:disconnect"),
+  importRetroAchievementsLibrary: () =>
+    ipcRenderer.invoke("retroachievements:import-library"),
   getSounds: () => ipcRenderer.invoke("get-sound-files"),
   getSoundFullPath: (fileName) =>
     ipcRenderer.invoke("get-sound-path", fileName),
@@ -664,8 +674,13 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("renameAndSaveConfig", oldName, config),
   selectExecutable: (currentPath) =>
     ipcRenderer.invoke("selectExecutable", currentPath),
-  launchExecutable: (exe, args, workingDirectory) =>
-    ipcRenderer.invoke("launchExecutable", exe, args, workingDirectory),
+  launchExecutable: (exeOrPayload, args, workingDirectory) =>
+    ipcRenderer.invoke(
+      "launchExecutable",
+      exeOrPayload,
+      args,
+      workingDirectory,
+    ),
   requestPlatinumManual: (payload) =>
     ipcRenderer.invoke("platinum:manual", payload),
   onAchievementsMissing: (callback) =>
@@ -727,6 +742,15 @@ contextBridge.exposeInMainWorld("api", {
     subscribeIpc("app-navigation:error", handler, (_event, data) => [data]),
   getBootStatus: () => ipcRenderer.invoke("boot:status"),
   getAppVersion: () => ipcRenderer.invoke("app:get-version"),
+  getChangelogs: (options = {}) =>
+    ipcRenderer.invoke("settings:changelogs:list", options),
+  listLogSources: () => ipcRenderer.invoke("settings:logs:list-sources"),
+  subscribeLogSource: (sourceId, options = {}) =>
+    ipcRenderer.invoke("settings:logs:subscribe", { sourceId, ...options }),
+  unsubscribeLogSource: () => ipcRenderer.invoke("settings:logs:unsubscribe"),
+  openLogsFolder: () => ipcRenderer.invoke("settings:logs:open-folder"),
+  onSettingsLogAppend: (handler) =>
+    subscribeIpc("settings:logs:append", handler, (_event, payload) => [payload]),
   bootOverlayHidden: () => ipcRenderer.send("boot:overlay-hidden"),
   getBootOnboardingState: () => ipcRenderer.invoke("boot:onboarding:get-state"),
   discoverBootOnboardingFolders: () =>
@@ -865,6 +889,10 @@ contextBridge.exposeInMainWorld("electron", {
         "xbox-pc:connect",
         "xbox-pc:disconnect",
         "xbox-pc:import-library",
+        "retroachievements:status",
+        "retroachievements:connect",
+        "retroachievements:disconnect",
+        "retroachievements:import-library",
         "get-sound-files",
         "get-sound-path",
         "resolve-icon-url",

@@ -1,5 +1,4 @@
 const fs = require("fs");
-const fsp = require("fs/promises");
 const path = require("path");
 
 // Electron main process may not define File; undici expects it.
@@ -9,19 +8,9 @@ if (typeof global.File === "undefined") {
 
 const cheerio = require("cheerio");
 
-function resolvePlaywrightBrowsersPath() {
-  const current = process.env.PLAYWRIGHT_BROWSERS_PATH || "";
-  if (current && current !== "0") return current;
-  const resourcesRoot = process.resourcesPath;
-  if (resourcesRoot) {
-    const candidate = path.join(resourcesRoot, "playwright-browsers");
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return current || "0";
-}
-
-process.env.PLAYWRIGHT_BROWSERS_PATH = resolvePlaywrightBrowsersPath();
-const { chromium } = require("playwright");
+const {
+  launchChromiumSafe: launchPlaywrightChromium,
+} = require("./playwright-runtime");
 
 const DEFAULT_WAIT_MS = 30000;
 const BASE_EXOPHASE_URL = "https://www.exophase.com/game/";
@@ -107,16 +96,19 @@ function ensureDir(p) {
 
 async function launchChromiumSafe(opts = {}) {
   const baseArgs = ["--disable-blink-features=AutomationControlled"];
-  try {
-    return await chromium.launch({
+
+  return launchPlaywrightChromium(
+    "playwright",
+    {
       headless: true,
       args: baseArgs,
       ...opts,
-    });
-  } catch (firstErr) {
-    // Fallback: retry without extra options
-    return await chromium.launch({ headless: true, args: baseArgs });
-  }
+    },
+    {
+      headless: true,
+      args: baseArgs,
+    },
+  );
 }
 
 function mapExophasePlatform(platform) {
@@ -532,8 +524,10 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
         } catch {}
       })
       .catch(() => {});
+
     await installAdBlockRouting(context).catch(() => {});
   }
+
   if (page && options.page) {
     await page
       .addInitScript(() => {

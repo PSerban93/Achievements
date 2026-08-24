@@ -1,26 +1,34 @@
 {
   "name": "Achievements",
-  "version": "1.2.9-beta.4",
+  "version": "1.2.9-beta.7",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test:xbox-pc": "node tests/xbox-pc.test.js",
+    "test:xlivelessness": "node tests/xlivelessness.test.js && node tests/xlivelessness-folders.test.js",
     "test:uplay-mapping": "node tests/uplay-mapping-refresh.test.js",
     "test:screenshot-paths": "node tests/screenshot-paths.test.js",
     "test:record-paths": "node tests/record-paths.test.js",
     "test:achievement-recorder": "node tests/achievement-recorder.test.js",
     "build:recorder": "cargo build --release --locked --manifest-path native/achievement-recorder/Cargo.toml",
     "copy:recorder": "node -e \"require('fs').copyFileSync('native/achievement-recorder/target/release/achievements-recorder.exe','utils/native/achievements-recorder.exe')\"",
-    "verify:recorder": "node -e \"const fs=require('fs');const crypto=require('crypto');const p='utils/native/achievements-recorder.exe';const h=crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').toUpperCase();console.log('achievement-recorder SHA256:',h)\"",
+    "build:hdr-screenshot": "cargo build --release --locked --manifest-path native/hdr-screenshot/Cargo.toml",
+    "copy:hdr-screenshot": "node -e \"const fs=require('fs');fs.mkdirSync('utils/native',{recursive:true});fs.copyFileSync('native/hdr-screenshot/target/release/achievements-hdr-screenshot.exe','utils/native/achievements-hdr-screenshot.exe')\"",
+    "verify:recorder": "node build/verify-recorder.js",
+    "verify:packaged-recorder": "node build/verify-recorder.js --packaged",
+    "verify:hdr-screenshot": "node build/verify-hdr-screenshot.js",
+    "verify:packaged-hdr-screenshot": "node build/verify-hdr-screenshot.js --packaged",
     "verify:process-tree": "node build/run-electron-script.js build/verify-windows-process-tree.js",
     "verify:san-runtime": "node build/verify-san-runtime.js",
     "prepare:process-tree": "npm run verify:process-tree",
-    "prepare:recorder": "npm run build:recorder && npm run copy:recorder && npm run verify:recorder",
-    "pack": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --dir",
-    "dl-browsers": "cross-env PLAYWRIGHT_BROWSERS_PATH=0 node ./node_modules/playwright-core/cli.js install chromium chromium-headless-shell",
-    "dist": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64"
+    "prepare:native:windows": "npm run build:recorder && npm run copy:recorder && npm run verify:recorder && npm run build:hdr-screenshot && npm run copy:hdr-screenshot && npm run verify:hdr-screenshot",
+    "prepare:recorder:windows": "npm run prepare:native:windows",
+    "prepare:recorder": "node build/prepare-recorder.js",
+    "pack": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --dir && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dl-browsers": "node build/prepare-playwright-browsers.js",
+    "dist": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64 && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot"
   },
   "build": {
     "appId": "com.achievements.app",
@@ -33,8 +41,7 @@
       "**/node_modules/@vscode/windows-process-tree/**",
       "**/node_modules/screenshot-desktop/**",
       "**/node_modules/playwright/**",
-      "**/node_modules/playwright-core/**",
-      "**/node_modules/**/.local-browsers/**"
+      "**/node_modules/playwright-core/**"
     ],
     "directories": {
       "output": "dist"
@@ -58,7 +65,9 @@
       "presets/**/*",
       "utils/**/*",
       "utils/pslist-wrapper.mjs",
-      "assets/**"
+      "assets/**",
+      "!**/node_modules/playwright/.local-browsers${/*}",
+      "!**/node_modules/playwright-core/.local-browsers${/*}"
     ],
     "extraResources": [
       {
@@ -110,7 +119,33 @@
         "owner": "PSerban93",
         "repo": "Achievements"
       }
-    ]
+    ],
+    "linux": {
+      "files": [
+        "icon.ico",
+        "main.js",
+        "preload.js",
+        "index.html",
+        "san-notification.html",
+        "overlay.html",
+        "progress.html",
+        "playtime.html",
+        "utils/playtime-log-watcher.js",
+        "style.css",
+        "tray-menu.html",
+        "tray-menu.js",
+        "tray-menu.css",
+        "sounds/**/*",
+        "presets/**/*",
+        "utils/**/*",
+        "utils/pslist-wrapper.mjs",
+        "assets/**",
+        "!**/node_modules/playwright/.local-browsers${/*}",
+        "!**/node_modules/playwright-core/.local-browsers${/*}",
+        "!utils/native/achievements-recorder.exe",
+        "!utils/native/achievements-hdr-screenshot.exe"
+      ]
+    }
   },
   "dependencies": {
     "@vscode/windows-process-tree": ">=0.8.0",
@@ -123,7 +158,7 @@
     "electron-updater": "^6.8.3",
     "ini": "6.0.0",
     "jsdom": "29.1.1",
-    "koffi": "^3.1.5",
+    "koffi": "3.1.6",
     "playwright": "^1.62.1",
     "playwright-extra": "^4.3.6",
     "ps-list": "9.0.0",
@@ -134,9 +169,9 @@
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "43.4.0",
+    "electron": "43.4.1",
     "electron-builder": "^26.8.1",
-    "eslint": "10.8.1",
+    "eslint": "10.9.0",
     "rcedit": "^5.0.2"
   },
   "overrides": {

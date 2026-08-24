@@ -1,119 +1,21 @@
 const path = require("path");
-const fs = require("fs/promises");
-const fsSync = require("fs");
+
 const { createLogger } = require("./logger");
 const { normalizeProcessNameValue } = require("./process-name-utils");
 
-const resolvePlaywrightBrowsersPath = () => {
-  const current = process.env.PLAYWRIGHT_BROWSERS_PATH || "";
-  if (current && current !== "0") return current;
-  const resourcesRoot = process.resourcesPath;
-  if (resourcesRoot) {
-    const candidate = path.join(resourcesRoot, "playwright-browsers");
-    if (fsSync.existsSync(candidate)) return candidate;
-  }
-  return current || "0";
-};
-
-process.env.PLAYWRIGHT_BROWSERS_PATH = resolvePlaywrightBrowsersPath();
-const { chromium } = require("playwright-core");
+const {
+  launchChromiumSafe: launchPlaywrightChromium,
+} = require("./playwright-runtime");
 
 const autoConfigLogger = createLogger("autoconfig");
 const baseLaunchArgs = ["--disable-blink-features=AutomationControlled"];
 
 async function launchChromiumSafe(opts = {}) {
-  try {
-    return await chromium.launch({
-      headless: true,
-      args: baseLaunchArgs,
-      ...opts,
-    });
-  } catch (firstErr) {
-    const unAsar = (p) =>
-      p.replace(/app\.asar(?!\.unpacked)/, "app.asar.unpacked");
-
-    const roots = [];
-    const envRoot = process.env.PLAYWRIGHT_BROWSERS_PATH || "";
-    if (envRoot && envRoot !== "0") {
-      roots.push(envRoot);
-    }
-
-    for (const pkg of ["playwright-core", "playwright"]) {
-      try {
-        const pkgDir = path.dirname(require.resolve(`${pkg}/package.json`));
-        const rootA = path.join(pkgDir, ".local-browsers");
-        const rootB = unAsar(rootA);
-        roots.push(rootA, rootB);
-      } catch {}
-    }
-
-    if (process.resourcesPath) {
-      roots.push(
-        path.join(
-          process.resourcesPath,
-          "app.asar.unpacked",
-          "node_modules",
-          "playwright-core",
-          ".local-browsers"
-        ),
-        path.join(
-          process.resourcesPath,
-          "app.asar.unpacked",
-          "node_modules",
-          "playwright",
-          ".local-browsers"
-        ),
-        path.join(process.resourcesPath, "playwright-browsers")
-      );
-    }
-
-    const exeCandidates = [];
-    for (const root of roots) {
-      const dirs = await fs.readdir(root).catch(() => []);
-      for (const d of dirs) {
-        if (/^chromium_headless_shell-/i.test(d)) {
-          exeCandidates.push(
-            path.join(root, d, "chrome-win", "headless_shell.exe")
-          );
-          exeCandidates.push(
-            path.join(
-              root,
-              d,
-              "chrome-headless-shell-win64",
-              "chrome-headless-shell.exe"
-            )
-          );
-          exeCandidates.push(
-            path.join(
-              root,
-              d,
-              "chrome-headless-shell-win32",
-              "chrome-headless-shell.exe"
-            )
-          );
-        }
-        if (/^chromium-/i.test(d)) {
-          exeCandidates.push(path.join(root, d, "chrome-win", "chrome.exe"));
-          exeCandidates.push(path.join(root, d, "chrome-win64", "chrome.exe"));
-          exeCandidates.push(path.join(root, d, "chrome-win32", "chrome.exe"));
-        }
-      }
-    }
-
-    for (const exe of exeCandidates) {
-      try {
-        await fs.access(exe);
-        return await chromium.launch({
-          executablePath: exe,
-          headless: true,
-          args: baseLaunchArgs,
-          ...opts,
-        });
-      } catch {}
-    }
-
-    throw firstErr;
-  }
+  return launchPlaywrightChromium("playwright-core", {
+    headless: true,
+    args: baseLaunchArgs,
+    ...opts,
+  });
 }
 
 function normalizeText(value) {
@@ -128,14 +30,14 @@ function normalizeLaunchOption(raw = {}) {
     executable: normalizeText(raw.Executable || raw.executable),
     arguments: normalizeText(raw.Arguments || raw.arguments),
     workingDirectory: normalizeText(
-      raw["Working Directory"] || raw.workingDirectory
+      raw["Working Directory"] || raw.workingDirectory,
     ),
     launchType: normalizeText(raw["Launch Type"] || raw.launchType),
     operatingSystem: normalizeText(
-      raw["Operating System"] || raw.operatingSystem
+      raw["Operating System"] || raw.operatingSystem,
     ).toLowerCase(),
     cpuArchitecture: normalizeText(
-      raw["CPU Architecture"] || raw.cpuArchitecture
+      raw["CPU Architecture"] || raw.cpuArchitecture,
     ),
   };
 }
@@ -186,8 +88,8 @@ function collectProcessNames(options = []) {
   const sorted = getCandidateLaunchOptions(options);
   return normalizeProcessNameValue(
     sorted.map((option) =>
-      path.win32.basename(String(option.executable).replace(/\//g, "\\"))
-    )
+      path.win32.basename(String(option.executable).replace(/\//g, "\\")),
+    ),
   );
 }
 
@@ -210,7 +112,7 @@ async function extractLaunchOptionsFromPage(page) {
         .trim();
 
     const heading = Array.from(document.querySelectorAll("h2")).find(
-      (el) => norm(el.textContent) === "Launch Options"
+      (el) => norm(el.textContent) === "Launch Options",
     );
     if (!heading) return [];
 

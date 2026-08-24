@@ -4,7 +4,7 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const axios = require("axios");
-const { fork, execFileSync } = require("child_process");
+const { fork } = require("child_process");
 const ini = require("ini");
 const CRC32 = require("crc-32");
 const { loadAchievementsFromSaveFile } = require("./achievement-data");
@@ -181,21 +181,6 @@ async function waitForUplayMappingReady(reason) {
   }
   return result;
 }
-function refreshMappingViaScript() {
-  try {
-    execFileSync(process.execPath, [
-      "--run-as-node",
-      path.join(__dirname, "match-uplay-steam.js"),
-      `--output=${uplaySteamMapPath}`,
-    ]);
-    reloadUplayMappingFromDisk();
-  } catch (err) {
-    autoConfigLogger.warn("uplay-mapping:script-failed", {
-      error: err?.message || String(err),
-    });
-  }
-}
-
 function loadConfigVariantIndex(outputDir) {
   const map = new Map();
   try {

@@ -12,11 +12,13 @@ const VALID_PLATFORMS = new Set([
   "gog",
   "gog-official",
   "xbox-pc",
+  "retroachievements",
   "xenia",
   "rpcs3",
   "shadps4",
   "markerpatch",
   "madnesspatch",
+  "xlivelessness",
 ]);
 
 function normalizePlatform(value) {
@@ -41,6 +43,11 @@ function sanitizeXboxPcTitleId(value) {
   return /^\d{1,20}$/.test(raw) ? raw : "";
 }
 
+function sanitizeRetroAchievementsGameId(value) {
+  const raw = String(value || "").trim();
+  return /^\d{1,12}$/.test(raw) && Number(raw) > 0 ? raw : "";
+}
+
 function sanitizeAppIdForPlatform(value, platform) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -50,6 +57,9 @@ function sanitizeAppIdForPlatform(value, platform) {
   }
   if (normalized === "xbox-pc") {
     return sanitizeXboxPcTitleId(raw);
+  }
+  if (normalized === "retroachievements") {
+    return sanitizeRetroAchievementsGameId(raw);
   }
   if (normalized === "rpcs3") {
     // Trophy set ids like NPWR12345_00
@@ -64,6 +74,9 @@ function sanitizeAppIdForPlatform(value, platform) {
     if (/^0x[0-9a-f]+$/i.test(raw)) return raw.slice(2);
     if (/^[0-9a-f]+$/i.test(raw)) return raw;
     return raw;
+  }
+  if (normalized === "xlivelessness") {
+    return /^[0-9a-f]{8}$/i.test(raw) ? raw.toUpperCase() : "";
   }
   return sanitizeAppId(raw);
 }
@@ -89,11 +102,17 @@ function inferOfficialPlatformFromMarkers(config = {}) {
   if (configPath.includes(`${schemaNeedle}xbox-pc${path.sep}`)) {
     return "xbox-pc";
   }
+  if (configPath.includes(`${schemaNeedle}retroachievements${path.sep}`)) {
+    return "retroachievements";
+  }
   if (configPath.includes(`${schemaNeedle}markerpatch${path.sep}`)) {
     return "markerpatch";
   }
   if (configPath.includes(`${schemaNeedle}madnesspatch${path.sep}`)) {
     return "madnesspatch";
+  }
+  if (configPath.includes(`${schemaNeedle}xlivelessness${path.sep}`)) {
+    return "xlivelessness";
   }
 
   const hasEpicOfficialProductMarker = Boolean(
@@ -138,6 +157,13 @@ function inferOfficialPlatformFromMarkers(config = {}) {
     return "xbox-pc";
   }
   if (
+    config?.retroachievements_game_id ||
+    config?.retroachievements_ulid ||
+    config?.retroachievements_username
+  ) {
+    return "retroachievements";
+  }
+  if (
     config?.markerpatch_state_file ||
     String(config?.achievement_source?.provider || "").toLowerCase() ===
       "markerpatch"
@@ -150,6 +176,14 @@ function inferOfficialPlatformFromMarkers(config = {}) {
       "madnesspatch"
   ) {
     return "madnesspatch";
+  }
+  if (
+    config?.xlln_title_id ||
+    config?.xlln_title_config_path ||
+    String(config?.achievement_source?.provider || "").toLowerCase() ===
+      "xlivelessness"
+  ) {
+    return "xlivelessness";
   }
   return "";
 }
@@ -199,8 +233,10 @@ function inferPlatformAndSteamId({ config, mapping }) {
     platform === "gog" ||
     platform === "gog-official" ||
     platform === "xbox-pc" ||
+    platform === "retroachievements" ||
     platform === "markerpatch" ||
-    platform === "madnesspatch"
+    platform === "madnesspatch" ||
+    platform === "xlivelessness"
   ) {
     steamAppId = "";
   } else if (platform === "xenia" || platform === "rpcs3") {
@@ -365,6 +401,12 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
       !platforms?.has("uplay") &&
       !platforms?.has("gog") &&
       !platforms?.has("epic");
+    const prefersRetroAchievements =
+      platforms?.has("retroachievements") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog") &&
+      !platforms?.has("epic");
     const prefersMarkerPatch =
       platforms?.has("markerpatch") &&
       !platforms?.has("steam") &&
@@ -373,6 +415,12 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
       !platforms?.has("epic");
     const prefersMadnessPatch =
       platforms?.has("madnesspatch") &&
+      !platforms?.has("steam") &&
+      !platforms?.has("uplay") &&
+      !platforms?.has("gog") &&
+      !platforms?.has("epic");
+    const prefersXLiveLessNess =
+      platforms?.has("xlivelessness") &&
       !platforms?.has("steam") &&
       !platforms?.has("uplay") &&
       !platforms?.has("gog") &&
@@ -387,10 +435,14 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
         ? "epic-official"
       : prefersXboxPc
         ? "xbox-pc"
+      : prefersRetroAchievements
+        ? "retroachievements"
       : prefersMarkerPatch
           ? "markerpatch"
-        : prefersMadnessPatch
+      : prefersMadnessPatch
           ? "madnesspatch"
+        : prefersXLiveLessNess
+          ? "xlivelessness"
           : prefersGog
             ? "gog"
             : "steam";
@@ -450,6 +502,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
                 ? "gog-official"
               : platform === "xbox-pc"
                 ? "xbox-pc"
+              : platform === "retroachievements"
+                ? "retroachievements"
               : platform === "xenia"
                 ? "xenia"
                 : platform === "rpcs3"
@@ -460,6 +514,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
                       ? "markerpatch"
                     : platform === "madnesspatch"
                       ? "madnesspatch"
+                    : platform === "xlivelessness"
+                      ? "xlivelessness"
                       : "steam";
       const legacyDir = path.join(schemaRoot, appid);
       const nextDir = path.join(schemaRoot, storagePlatform, appid);

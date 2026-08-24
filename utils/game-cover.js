@@ -1,20 +1,8 @@
 const path = require("path");
-const fs = require("fs/promises");
-const fsSync = require("fs");
 
-const resolvePlaywrightBrowsersPath = () => {
-  const current = process.env.PLAYWRIGHT_BROWSERS_PATH || "";
-  if (current && current !== "0") return current;
-  const resourcesRoot = process.resourcesPath;
-  if (resourcesRoot) {
-    const candidate = path.join(resourcesRoot, "playwright-browsers");
-    if (fsSync.existsSync(candidate)) return candidate;
-  }
-  return current || "0";
-};
-
-process.env.PLAYWRIGHT_BROWSERS_PATH = resolvePlaywrightBrowsersPath();
-const { chromium } = require("playwright-core");
+const {
+  launchChromiumSafe: launchPlaywrightChromium,
+} = require("./playwright-runtime");
 const { createLogger } = require("./logger");
 
 const STEAM_DB_NOT_FOUND_TAG = Symbol.for("steamdb-miss");
@@ -41,98 +29,11 @@ function markSteamGridNotFound(err, message) {
 }
 
 async function launchChromiumSafe(opts = {}) {
-  try {
-    return await chromium.launch({
-      headless: true,
-      args: baseLaunchArgs,
-      ...opts,
-    });
-  } catch (firstErr) {
-    const unAsar = (p) =>
-      p.replace(/app\.asar(?!\.unpacked)/, "app.asar.unpacked");
-
-    const roots = [];
-    const envRoot = process.env.PLAYWRIGHT_BROWSERS_PATH || "";
-    if (envRoot && envRoot !== "0") {
-      roots.push(envRoot);
-    }
-
-    for (const pkg of ["playwright-core", "playwright"]) {
-      try {
-        const pkgDir = path.dirname(require.resolve(`${pkg}/package.json`));
-        const rootA = path.join(pkgDir, ".local-browsers");
-        const rootB = unAsar(rootA);
-        roots.push(rootA, rootB);
-      } catch {}
-    }
-
-    if (process.resourcesPath) {
-      roots.push(
-        path.join(
-          process.resourcesPath,
-          "app.asar.unpacked",
-          "node_modules",
-          "playwright-core",
-          ".local-browsers"
-        ),
-        path.join(
-          process.resourcesPath,
-          "app.asar.unpacked",
-          "node_modules",
-          "playwright",
-          ".local-browsers"
-        ),
-        path.join(process.resourcesPath, "playwright-browsers")
-      );
-    }
-
-    const exeCandidates = [];
-    for (const root of roots) {
-      const dirs = await fs.readdir(root).catch(() => []);
-      for (const d of dirs) {
-        if (/^chromium_headless_shell-/i.test(d)) {
-          exeCandidates.push(
-            path.join(root, d, "chrome-win", "headless_shell.exe")
-          );
-          exeCandidates.push(
-            path.join(
-              root,
-              d,
-              "chrome-headless-shell-win64",
-              "chrome-headless-shell.exe"
-            )
-          );
-          exeCandidates.push(
-            path.join(
-              root,
-              d,
-              "chrome-headless-shell-win32",
-              "chrome-headless-shell.exe"
-            )
-          );
-        }
-        if (/^chromium-/i.test(d)) {
-          exeCandidates.push(path.join(root, d, "chrome-win", "chrome.exe"));
-          exeCandidates.push(path.join(root, d, "chrome-win64", "chrome.exe"));
-          exeCandidates.push(path.join(root, d, "chrome-win32", "chrome.exe"));
-        }
-      }
-    }
-
-    for (const exe of exeCandidates) {
-      try {
-        await fs.access(exe);
-        return await chromium.launch({
-          executablePath: exe,
-          headless: true,
-          args: baseLaunchArgs,
-          ...opts,
-        });
-      } catch {}
-    }
-
-    throw firstErr;
-  }
+  return launchPlaywrightChromium("playwright-core", {
+    headless: true,
+    args: baseLaunchArgs,
+    ...opts,
+  });
 }
 
 async function getBrowserForApp(appid, opts = {}) {
@@ -192,7 +93,7 @@ async function fetchSteamDbLibraryCover(appid) {
         `a.image-hover, a[href*="library_600x900.jpg"], a[href*="library_capsule.jpg"], ${steamDbCapsuleFallbackSelector}`,
         {
           timeout: 5000,
-        }
+        },
       )
       .catch(() => {});
 
@@ -202,8 +103,8 @@ async function fetchSteamDbLibraryCover(appid) {
         /library_capsule(?:_[a-z0-9]+)*\.jpg/i.test(s || "");
       const anchors = Array.from(
         document.querySelectorAll(
-          `a.image-hover, a[href*="library_600x900.jpg"], a[href*="library_capsule.jpg"], ${capsuleSelector}`
-        )
+          `a.image-hover, a[href*="library_600x900.jpg"], a[href*="library_capsule.jpg"], ${capsuleSelector}`,
+        ),
       );
       for (const a of anchors) {
         const href = a.getAttribute("href") || "";
@@ -215,11 +116,11 @@ async function fetchSteamDbLibraryCover(appid) {
       }
       const html = document.documentElement.innerHTML;
       const abs = html.match(
-        /https?:\/\/[^"'<\s]*(?:library_600x900\.jpg|library_capsule(?:_[a-z0-9]+)*\.jpg)/i
+        /https?:\/\/[^"'<\s]*(?:library_600x900\.jpg|library_capsule(?:_[a-z0-9]+)*\.jpg)/i,
       );
       if (abs) return abs[0].split("?")[0];
       const rel = html.match(
-        /store_item_assets\/steam\/apps\/\d+\/[^"'<\s]*(?:library_600x900\.jpg|library_capsule(?:_[a-z0-9]+)*\.jpg)/i
+        /store_item_assets\/steam\/apps\/\d+\/[^"'<\s]*(?:library_600x900\.jpg|library_capsule(?:_[a-z0-9]+)*\.jpg)/i,
       );
       if (rel) return rel[0].replace(/^\/+/, "");
       return "";
@@ -310,7 +211,7 @@ async function fetchSteamGridDbImage(term, options = {}) {
     const src = await page.evaluate(() => {
       const target =
         document.querySelector(
-          "div.asset-container.compact div.preview div.img-container img"
+          "div.asset-container.compact div.preview div.img-container img",
         ) ||
         document.querySelector("div.asset-container img") ||
         document.querySelector("img.grid-image");
@@ -334,7 +235,7 @@ async function fetchSteamGridDbImage(term, options = {}) {
       ? src
       : new URL(
           src.replace(/^\//, ""),
-          "https://www.steamgriddb.com/"
+          "https://www.steamgriddb.com/",
         ).toString();
     coverLogger.info("steamgrid:fetch:success", { term, size, url: resolved });
     return resolved;

@@ -28,13 +28,15 @@ use windows::Win32::System::Com::{
 };
 use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
 use windows::core::HSTRING;
-use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
+use windows_capture::capture::{Context, GraphicsCaptureApiError, GraphicsCaptureApiHandler};
 use windows_capture::encoder::{
     AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
     VideoSettingsSubType,
 };
 use windows_capture::frame::Frame;
-use windows_capture::graphics_capture_api::InternalCaptureControl;
+use windows_capture::graphics_capture_api::{
+    Error as GraphicsCaptureError, InternalCaptureControl,
+};
 use windows_capture::monitor::Monitor;
 use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
@@ -51,6 +53,9 @@ const AUDIO_CHANNELS: u16 = 2;
 const AUDIO_BITS_PER_SAMPLE: u16 = 16;
 const AUDIO_BLOCK_ALIGN: u16 = AUDIO_CHANNELS * (AUDIO_BITS_PER_SAMPLE / 8);
 const AUDIO_BITRATE: u32 = 192_000;
+const MAX_FAILED_SEGMENTS: usize = 256;
+const MAX_FAILED_ERROR_CHARS: usize = 1_000;
+const PENDING_JOB_FINALIZE_GRACE_MS: u64 = 120_000;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -74,6 +79,8 @@ struct CaptureFlags {
     width: u32,
     height: u32,
     hdr_tone_map: bool,
+    border_mode: &'static str,
+    border_fallback: bool,
     ready_signal: Arc<AtomicBool>,
 }
 
@@ -108,6 +115,7 @@ struct PendingJob {
     output_path: PathBuf,
     event_ms: u64,
     due_ms: u64,
+    expires_ms: u64,
     boundary_requested: bool,
 }
 
@@ -170,7 +178,9 @@ struct Capture {
     render_tx: Sender<RenderResult>,
     render_rx: Receiver<RenderResult>,
     audio: Option<AudioLoopback>,
+    audio_error: Option<String>,
     tone_mapper: Option<ToneMapper>,
+    ready_emitted: bool,
     shutdown_requested: bool,
 }
 
@@ -207,6 +217,52 @@ fn estimate_missing_frames(delta_ticks: i64, fps: u32) -> u64 {
         return 0;
     }
     (delta_ticks / expected).saturating_sub(1).max(0) as u64
+}
+
+fn truncate_error(value: &str) -> String {
+    let mut chars = value.chars();
+    let truncated = chars
+        .by_ref()
+        .take(MAX_FAILED_ERROR_CHARS)
+        .collect::<String>();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+fn pending_job_expiry(due_ms: u64) -> u64 {
+    due_ms.saturating_add(PENDING_JOB_FINALIZE_GRACE_MS)
+}
+
+fn is_border_unsupported(error: &GraphicsCaptureApiError<AnyError>) -> bool {
+    if matches!(
+        error,
+        GraphicsCaptureApiError::GraphicsCaptureApiError(
+            GraphicsCaptureError::BorderConfigUnsupported
+        )
+    ) {
+        return true;
+    }
+
+    // Keep the exact errors observed on older Windows builds as a compatibility
+    // fallback in case a future windows-capture release wraps the typed error.
+    let message = error.to_string().to_ascii_lowercase();
+    message.contains("borderconfigunsupported")
+        || message.contains("toggling the capture border is not supported")
+}
+
+fn should_retry_sdr(error: &GraphicsCaptureApiError<AnyError>) -> bool {
+    matches!(
+        error,
+        GraphicsCaptureApiError::DirectXError(_)
+            | GraphicsCaptureApiError::NewHandlerError(_)
+            | GraphicsCaptureApiError::FrameHandlerError(_)
+            | GraphicsCaptureApiError::GraphicsCaptureApiError(
+                GraphicsCaptureError::DirectXError(_) | GraphicsCaptureError::WindowsError(_)
+            )
+    )
 }
 
 fn audio_wave_format() -> WAVEFORMATEX {
@@ -431,6 +487,73 @@ impl Capture {
         self.flags
             .session_dir
             .join(format!("segment-{:08}.mp4", self.next_segment_id))
+    }
+
+    fn emit_ready(&mut self) {
+        if self.ready_emitted {
+            return;
+        }
+        self.ready_emitted = true;
+        self.flags.ready_signal.store(true, Ordering::Release);
+        emit(json!({
+            "type": "capture-border-mode",
+            "requested": "without-border",
+            "effective": self.flags.border_mode,
+            "fallback": self.flags.border_fallback,
+        }));
+        emit(json!({
+            "type": "ready",
+            "width": self.flags.width,
+            "height": self.flags.height,
+            "fps": self.flags.fps,
+            "preMs": self.flags.pre_ms,
+            "postMs": self.flags.post_ms,
+            "segmentMs": self.flags.segment_ms,
+            "audioEnabled": self.audio.is_some(),
+            "audioSampleRate": self.audio.as_ref().map(|_| AUDIO_SAMPLE_RATE),
+            "audioChannels": self.audio.as_ref().map(|_| AUDIO_CHANNELS),
+            "audioError": self.audio_error.clone(),
+            "captureBackend": if self.tone_mapper.is_some() { "hdr-to-sdr-gpu" } else { "sdr" },
+            "hdrToneMapping": self.tone_mapper.is_some(),
+            "borderMode": self.flags.border_mode,
+            "borderFallback": self.flags.border_fallback,
+            "pipeline": "precreated-segments-async-finalize",
+        }));
+    }
+
+    fn fail_jobs_overlapping_segment(&mut self, failed: &FailedSegment) {
+        let mut index = 0;
+        while index < self.pending_jobs.len() {
+            let target_start = self.pending_jobs[index]
+                .event_ms
+                .saturating_sub(self.flags.pre_ms);
+            let target_end = self.pending_jobs[index].due_ms;
+            if failed.end_ms > target_start && failed.start_ms < target_end {
+                let job = self.pending_jobs.remove(index);
+                let _ = fs::remove_file(&job.output_path);
+                emit(json!({
+                    "type": "failed",
+                    "id": job.id,
+                    "outputPath": job.output_path,
+                    "error": format!("A rolling video segment could not be finalized: {}", failed.error),
+                }));
+            } else {
+                index += 1;
+            }
+        }
+    }
+
+    fn push_failed_segment(&mut self, start_ms: u64, end_ms: u64, error: &str) {
+        let failed = FailedSegment {
+            start_ms,
+            end_ms,
+            error: truncate_error(error),
+        };
+        self.fail_jobs_overlapping_segment(&failed);
+        self.failed_segments.push_back(failed);
+        while self.failed_segments.len() > MAX_FAILED_SEGMENTS {
+            self.failed_segments.pop_front();
+        }
     }
 
     fn request_prepared_segment(&mut self, now_ms: u64) {
@@ -659,11 +782,13 @@ impl Capture {
                 Ok(Command::Trigger { id, output_path }) => {
                     let event_ms = self.elapsed_ms();
                     let output_path = PathBuf::from(output_path);
+                    let due_ms = event_ms.saturating_add(self.flags.post_ms);
                     self.pending_jobs.push(PendingJob {
                         id: id.clone(),
                         output_path: output_path.clone(),
                         event_ms,
-                        due_ms: event_ms.saturating_add(self.flags.post_ms),
+                        due_ms,
+                        expires_ms: pending_job_expiry(due_ms),
                         boundary_requested: false,
                     });
                     emit(json!({
@@ -773,11 +898,7 @@ impl Capture {
                 }
                 Err(error) => {
                     let _ = fs::remove_file(&result.path);
-                    self.failed_segments.push_back(FailedSegment {
-                        start_ms: result.start_ms,
-                        end_ms: result.end_ms,
-                        error: error.clone(),
-                    });
+                    self.push_failed_segment(result.start_ms, result.end_ms, &error);
                     emit(json!({
                         "type": "segment-finalize-failed",
                         "path": result.path,
@@ -828,6 +949,12 @@ impl Capture {
             "encoderPrepared": self.prepared.is_some(),
             "encoderPreparing": self.preparing,
             "pendingRecords": self.pending_jobs.len(),
+            "failedSegments": self.failed_segments.len(),
+            "oldestFailedSegmentAgeMs": self
+                .failed_segments
+                .front()
+                .map(|failed| now_ms.saturating_sub(failed.end_ms))
+                .unwrap_or(0),
         }));
     }
 
@@ -847,6 +974,17 @@ impl Capture {
     fn schedule_due_jobs(&mut self, now_ms: u64) {
         let mut index = 0;
         while index < self.pending_jobs.len() {
+            if now_ms >= self.pending_jobs[index].expires_ms {
+                let job = self.pending_jobs.remove(index);
+                let _ = fs::remove_file(&job.output_path);
+                emit(json!({
+                    "type": "failed",
+                    "id": job.id,
+                    "outputPath": job.output_path,
+                    "error": "Timed out waiting for rolling video segments to finalize",
+                }));
+                continue;
+            }
             if self.pending_jobs[index].due_ms > now_ms {
                 index += 1;
                 continue;
@@ -1022,7 +1160,6 @@ impl GraphicsCaptureApiHandler for Capture {
             Ok(audio) => (Some(audio), None),
             Err(error) => (None, Some(error)),
         };
-        let ready_signal = Arc::clone(&ctx.flags.ready_signal);
         let first_path = ctx.flags.session_dir.join("segment-00000001.mp4");
         let first_encoder = create_segment_encoder(
             &first_path,
@@ -1031,7 +1168,7 @@ impl GraphicsCaptureApiHandler for Capture {
             ctx.flags.fps,
             audio.is_some(),
         )?;
-        let mut capture = Self {
+        let capture = Self {
             flags: ctx.flags,
             started_at: Instant::now(),
             active: Some(ActiveSegment {
@@ -1070,27 +1207,11 @@ impl GraphicsCaptureApiHandler for Capture {
             render_tx,
             render_rx,
             audio,
+            audio_error,
             tone_mapper,
+            ready_emitted: false,
             shutdown_requested: false,
         };
-        capture.request_prepared_segment(0);
-        ready_signal.store(true, Ordering::Release);
-        emit(json!({
-            "type": "ready",
-            "width": capture.flags.width,
-            "height": capture.flags.height,
-            "fps": capture.flags.fps,
-            "preMs": capture.flags.pre_ms,
-            "postMs": capture.flags.post_ms,
-            "segmentMs": capture.flags.segment_ms,
-            "audioEnabled": capture.audio.is_some(),
-            "audioSampleRate": capture.audio.as_ref().map(|_| AUDIO_SAMPLE_RATE),
-            "audioChannels": capture.audio.as_ref().map(|_| AUDIO_CHANNELS),
-            "audioError": audio_error,
-            "captureBackend": if capture.tone_mapper.is_some() { "hdr-to-sdr-gpu" } else { "sdr" },
-            "hdrToneMapping": capture.tone_mapper.is_some(),
-            "pipeline": "precreated-segments-async-finalize",
-        }));
         Ok(capture)
     }
 
@@ -1120,20 +1241,36 @@ impl GraphicsCaptureApiHandler for Capture {
         let should_send = self
             .last_frame_ms
             .is_none_or(|last| now_ms.saturating_sub(last) >= frame_interval_ms);
+        let mut encoded_this_frame = false;
         if should_send {
             if let Some(active) = self.active.as_mut() {
                 if let Some(tone_mapper) = self.tone_mapper.as_ref() {
-                    let surface = tone_mapper.convert(frame)?;
-                    active.encoder.send_surface(surface, frame_timestamp)?;
+                    let surface = tone_mapper.convert(frame).map_err(|error| {
+                        std::io::Error::other(format!(
+                            "HDR tone-map frame conversion failed: {error}"
+                        ))
+                    })?;
+                    active
+                        .encoder
+                        .send_surface(surface, frame_timestamp)
+                        .map_err(|error| {
+                            std::io::Error::other(format!(
+                                "HDR encoded-surface submission failed: {error}"
+                            ))
+                        })?;
                 } else {
                     active.encoder.send_frame(frame)?;
                 }
                 active.frames = active.frames.saturating_add(1);
                 self.encoded_frames = self.encoded_frames.saturating_add(1);
+                encoded_this_frame = true;
             }
             self.last_frame_ms = Some(now_ms);
         } else {
             self.rate_limited_frames = self.rate_limited_frames.saturating_add(1);
+        }
+        if encoded_this_frame {
+            self.emit_ready();
         }
 
         let segment_due = self
@@ -1348,11 +1485,19 @@ fn try_capture_with_border_fallback<T>(
     dirty_region_settings: DirtyRegionSettings,
     color_format: ColorFormat,
     flags: CaptureFlags,
-) -> Result<(), AnyError>
+) -> Result<(), GraphicsCaptureApiError<AnyError>>
 where
     T: TryInto<GraphicsCaptureItemType> + Clone,
 {
     // Attempt 1: Without border (preferred)
+    let mut borderless_flags = flags.clone();
+    borderless_flags.border_mode = "without-border";
+    borderless_flags.border_fallback = false;
+    emit(json!({
+        "type": "capture-border-attempt",
+        "requested": "without-border",
+        "captureBackend": if borderless_flags.hdr_tone_map { "hdr-to-sdr-gpu" } else { "sdr" },
+    }));
     let settings = Settings::new(
         monitor.clone(),
         cursor_capture_settings,
@@ -1361,28 +1506,40 @@ where
         minimum_update_interval_settings,
         dirty_region_settings,
         color_format,
-        flags.clone(),
+        borderless_flags.clone(),
     );
 
     match Capture::start(settings) {
-        Ok(()) => {
-            emit(json!({
-                "type": "capture-border-mode",
-                "mode": "without-border"
-            }));
-            Ok(())
-        }
+        Ok(()) => Ok(()),
         Err(err) => {
-            // Check if error is specifically about border settings not supported
-            let err_str = err.to_string();
-            if err_str.contains("border") || err_str.contains("BorderConfigUnsupported") {
+            // A runtime failure after the first encoded frame belongs to the
+            // active session and must not start a second capture pipeline.
+            if !borderless_flags.ready_signal.load(Ordering::Acquire) && is_border_unsupported(&err)
+            {
+                let err_str = err.to_string();
                 emit(json!({
                     "type": "capture-border-fallback",
                     "error": &err_str,
-                    "fallback_to": "default"
+                    "requested": "without-border",
+                    "effective": "default",
+                    "reason": "unsupported",
+                    "captureBackend": if flags.hdr_tone_map { "hdr-to-sdr-gpu" } else { "sdr" },
                 }));
 
                 // Attempt 2: Use default border settings (fallback)
+                let fallback_session_dir = flags.session_dir.join("border-default");
+                if fallback_session_dir.exists() {
+                    fs::remove_dir_all(&fallback_session_dir).map_err(|error| {
+                        GraphicsCaptureApiError::NewHandlerError(Box::new(error) as AnyError)
+                    })?;
+                }
+                fs::create_dir_all(&fallback_session_dir).map_err(|error| {
+                    GraphicsCaptureApiError::NewHandlerError(Box::new(error) as AnyError)
+                })?;
+                let mut fallback_flags = flags;
+                fallback_flags.session_dir = fallback_session_dir;
+                fallback_flags.border_mode = "default";
+                fallback_flags.border_fallback = true;
                 let fallback_settings = Settings::new(
                     monitor,
                     cursor_capture_settings,
@@ -1391,22 +1548,12 @@ where
                     minimum_update_interval_settings,
                     dirty_region_settings,
                     color_format,
-                    flags,
+                    fallback_flags,
                 );
-
-                match Capture::start(fallback_settings) {
-                    Ok(()) => {
-                        emit(json!({
-                            "type": "capture-border-mode",
-                            "mode": "default"
-                        }));
-                        Ok(())
-                    }
-                    Err(fallback_err) => Err(Box::new(fallback_err)),
-                }
+                Capture::start(fallback_settings)
             } else {
                 // If error is not about border, propagate it
-                Err(Box::new(err))
+                Err(err)
             }
         }
     }
@@ -1415,6 +1562,7 @@ where
 fn run() -> Result<(), AnyError> {
     let options = parse_options()?;
     fs::create_dir_all(&options.buffer_dir)?;
+    cleanup_stale_session_dirs(&options.buffer_dir);
     let session_dir = options
         .buffer_dir
         .join(format!("session-{}", std::process::id()));
@@ -1447,6 +1595,8 @@ fn run() -> Result<(), AnyError> {
         width,
         height,
         hdr_tone_map: options.hdr_tone_map,
+        border_mode: "without-border",
+        border_fallback: false,
         ready_signal: Arc::clone(&ready_signal),
     };
 
@@ -1461,20 +1611,29 @@ fn run() -> Result<(), AnyError> {
     );
 
     // If HDR tone-mapping failed and capture hasn't started, fallback to SDR
-    if options.hdr_tone_map && capture_result.is_err() && !ready_signal.load(Ordering::Acquire) {
+    if options.hdr_tone_map
+        && capture_result.as_ref().is_err_and(should_retry_sdr)
+        && !ready_signal.load(Ordering::Acquire)
+    {
         emit(json!({
             "type": "hdr-tone-map-fallback",
             "error": capture_result.as_ref().err().map(ToString::to_string),
             "fallback": "sdr",
+            "reason": "hdr-capture-failed-before-ready",
         }));
         let fallback_monitor = Monitor::primary()?;
         let fallback_width = fallback_monitor.width()?;
         let fallback_height = fallback_monitor.height()?;
         ready_signal.store(false, Ordering::Release);
+        let fallback_session_dir = session_dir.join("sdr-fallback");
+        if fallback_session_dir.exists() {
+            fs::remove_dir_all(&fallback_session_dir)?;
+        }
+        fs::create_dir_all(&fallback_session_dir)?;
 
         let fallback_flags = CaptureFlags {
             command_rx,
-            session_dir: session_dir.clone(),
+            session_dir: fallback_session_dir,
             pre_ms: options.pre_ms,
             post_ms: options.post_ms,
             segment_ms: options.segment_ms,
@@ -1482,6 +1641,8 @@ fn run() -> Result<(), AnyError> {
             width: fallback_width,
             height: fallback_height,
             hdr_tone_map: false,
+            border_mode: "without-border",
+            border_fallback: false,
             ready_signal,
         };
 
@@ -1500,6 +1661,28 @@ fn run() -> Result<(), AnyError> {
     capture_result?;
     emit(json!({ "type": "stopped" }));
     Ok(())
+}
+
+fn cleanup_stale_session_dirs(buffer_dir: &Path) {
+    let Ok(entries) = fs::read_dir(buffer_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name = file_name.to_string_lossy();
+        let Some(pid) = name.strip_prefix("session-") else {
+            continue;
+        };
+        if pid.is_empty() || !pid.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 fn main() {
@@ -1565,5 +1748,68 @@ mod tests {
         assert!(parse_bool_arg(std::ffi::OsStr::new("true")).unwrap());
         assert!(!parse_bool_arg(std::ffi::OsStr::new("off")).unwrap());
         assert!(parse_bool_arg(std::ffi::OsStr::new("invalid")).is_err());
+    }
+
+    #[test]
+    fn border_fallback_recognizes_typed_windows_error() {
+        let error = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
+            GraphicsCaptureError::BorderConfigUnsupported,
+        );
+        assert!(is_border_unsupported(&error));
+    }
+
+    #[test]
+    fn hdr_fallback_does_not_mask_unrelated_optional_setting_errors() {
+        let minimum_interval = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
+            GraphicsCaptureError::MinimumUpdateIntervalUnsupported,
+        );
+        let border = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
+            GraphicsCaptureError::BorderConfigUnsupported,
+        );
+        let tone_mapper = GraphicsCaptureApiError::<AnyError>::NewHandlerError(
+            std::io::Error::other("HDR tone-map initialization failed").into(),
+        );
+        assert!(!should_retry_sdr(&minimum_interval));
+        assert!(!should_retry_sdr(&border));
+        assert!(should_retry_sdr(&tone_mapper));
+    }
+
+    #[test]
+    fn failed_segment_errors_and_pending_deadlines_are_bounded() {
+        let long_error = "é".repeat(MAX_FAILED_ERROR_CHARS + 5);
+        let truncated = truncate_error(&long_error);
+        assert_eq!(truncated.chars().count(), MAX_FAILED_ERROR_CHARS + 1);
+        assert!(truncated.ends_with('…'));
+        assert_eq!(
+            pending_job_expiry(5_000),
+            5_000 + PENDING_JOB_FINALIZE_GRACE_MS
+        );
+        assert_eq!(pending_job_expiry(u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn stale_recorder_sessions_are_removed_without_touching_other_entries() {
+        let root = std::env::temp_dir().join(format!(
+            "achievements-recorder-cleanup-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let stale_session = root.join("session-12345");
+        let unrelated = root.join("keep-me");
+        let malformed_session = root.join("session-not-a-pid");
+        fs::create_dir_all(&stale_session).unwrap();
+        fs::create_dir_all(&unrelated).unwrap();
+        fs::create_dir_all(&malformed_session).unwrap();
+        fs::write(stale_session.join("segment.mp4"), b"test").unwrap();
+
+        cleanup_stale_session_dirs(&root);
+
+        assert!(!stale_session.exists());
+        assert!(unrelated.exists());
+        assert!(malformed_session.exists());
+        let _ = fs::remove_dir_all(root);
     }
 }

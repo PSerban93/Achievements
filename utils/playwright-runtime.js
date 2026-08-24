@@ -140,30 +140,6 @@ async function collectChromiumExecutables() {
     const dirs = await fsp.readdir(root).catch(() => []);
 
     for (const dir of dirs) {
-      if (/^chromium_headless_shell-/i.test(dir)) {
-        addCandidate(
-          path.join(root, dir, "chrome-win", "headless_shell.exe"),
-        );
-
-        addCandidate(
-          path.join(
-            root,
-            dir,
-            "chrome-headless-shell-win64",
-            "chrome-headless-shell.exe",
-          ),
-        );
-
-        addCandidate(
-          path.join(
-            root,
-            dir,
-            "chrome-headless-shell-win32",
-            "chrome-headless-shell.exe",
-          ),
-        );
-      }
-
       if (/^chromium-/i.test(dir)) {
         addCandidate(
           path.join(root, dir, "chrome-win", "chrome.exe"),
@@ -192,6 +168,23 @@ async function collectChromiumExecutables() {
   return existing;
 }
 
+function normalizeChromiumLaunchOptions(options = {}) {
+  const normalized = { ...options };
+
+  // Playwright's default headless mode targets Chromium Headless Shell.
+  // The packaged app intentionally ships full Chromium only, so force
+  // Chromium's new headless mode for every headless launch.
+  if (
+    normalized.headless !== false &&
+    !normalized.channel &&
+    !normalized.executablePath
+  ) {
+    normalized.channel = "chromium";
+  }
+
+  return normalized;
+}
+
 async function launchChromiumSafe(
   packageName,
   launchOptions = {},
@@ -199,21 +192,27 @@ async function launchChromiumSafe(
 ) {
   const chromium = getChromium(packageName);
 
+  const primaryLaunchOptions =
+    normalizeChromiumLaunchOptions(launchOptions);
+
   let firstError = null;
 
   try {
-    return await chromium.launch(launchOptions);
+    return await chromium.launch(primaryLaunchOptions);
   } catch (err) {
     firstError = err;
   }
 
   // Some existing callers intentionally retry with simpler options.
-  const effectiveFallbackOptions =
-    fallbackLaunchOptions || launchOptions;
+  const effectiveFallbackOptions = normalizeChromiumLaunchOptions(
+    fallbackLaunchOptions || launchOptions,
+  );
 
   if (fallbackLaunchOptions) {
     try {
-      return await chromium.launch(fallbackLaunchOptions);
+      return await chromium.launch(
+        normalizeChromiumLaunchOptions(fallbackLaunchOptions),
+      );
     } catch {}
   }
 
@@ -221,8 +220,16 @@ async function launchChromiumSafe(
 
   for (const executablePath of executables) {
     try {
+      // executablePath already selects the browser binary explicitly.
+      // Do not combine it with a Playwright channel.
+      const {
+        channel: _channel,
+        executablePath: _ignoredExecutablePath,
+        ...manualLaunchOptions
+      } = effectiveFallbackOptions;
+
       return await chromium.launch({
-        ...effectiveFallbackOptions,
+        ...manualLaunchOptions,
         executablePath,
       });
     } catch {}

@@ -2,19 +2,10 @@
 const path = require("path");
 const fsSync = require("fs");
 
-function resolvePlaywrightBrowsersPath() {
-  const current = process.env.PLAYWRIGHT_BROWSERS_PATH || "";
-  if (current && current !== "0") return current;
-  const resourcesRoot = process.resourcesPath;
-  if (resourcesRoot) {
-    const candidate = path.join(resourcesRoot, "playwright-browsers");
-    if (fsSync.existsSync(candidate)) return candidate;
-  }
-  return current || "0";
-}
+const {
+  launchChromiumSafe: launchPlaywrightChromium,
+} = require("./playwright-runtime");
 
-process.env.PLAYWRIGHT_BROWSERS_PATH = resolvePlaywrightBrowsersPath();
-const { chromium } = require("playwright");
 const { execFileSync } = require("child_process");
 const fs = require("fs/promises");
 const crypto = require("crypto");
@@ -245,17 +236,38 @@ function reloadUplayMappingFromDisk() {
 }
 
 function refreshMappingViaScript() {
+  const scriptPath = path.join(__dirname, "match-uplay-steam.js");
+
   try {
-    execFileSync(process.execPath, [
-      "--run-as-node",
-      path.join(__dirname, "match-uplay-steam.js"),
-      `--output=${uplaySteamMapPath}`,
-    ]);
+    const stdout = execFileSync(
+      process.execPath,
+      [scriptPath, `--output=${uplaySteamMapPath}`],
+      {
+        windowsHide: true,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+        },
+      },
+    );
+
     reloadUplayMappingFromDisk();
     mappingRefreshed = true;
-    info("uplay-mapping:refreshed");
+
+    info("uplay-mapping:refreshed", {
+      script: scriptPath,
+      outputPath: uplaySteamMapPath,
+      stdoutPreview: summarizeCommandOutput(stdout),
+    });
   } catch (err) {
-    warn("uplay-mapping:script-failed", { error: err?.message || String(err) });
+    warn("uplay-mapping:script-failed", {
+      error: err?.message || String(err),
+      script: scriptPath,
+      outputPath: uplaySteamMapPath,
+      ...buildCommandFailureMeta(err),
+    });
   }
 }
 
@@ -265,6 +277,10 @@ function getFlag(name, def = null) {
   return hit ? hit.split("=").slice(1).join("=") : def;
 }
 const ARGS = process.argv.slice(2);
+
+const DISABLE_SCHEMA_PARSE =
+  ARGS.includes("--disable-schema-parse") ||
+  process.env.ACHIEVEMENTS_DISABLE_SCHEMA_PARSE === "1";
 const APPIDS = ARGS.filter((a) => /^[0-9a-fA-F]+$/.test(a));
 const platformModeArg = (getFlag("--platform", "auto") || "auto").toLowerCase();
 const VALID_PLATFORM_MODES = ["auto", "uplay", "steam", "epic", "gog"];
@@ -367,7 +383,7 @@ const resolvedAppIds = buildResolvedAppIds(APPIDS, EFFECTIVE_PLATFORM_MODE);
 
 if (!APPIDS.length) {
   error(
-    "Usage: node generate_achievements_schema.js <APPID...> [--headed] [--verbose] [--apps-concurrency=2] [--langs=english,german,... | --english --spanish ...] [--key=XXXXX] [--out=ABS_OR_REL_PATH] [--platform=steam|uplay|epic|gog] [--steam-source=auto|steamdb|steamhunters] [--gog] [--gog-user=email --gog-pass=pass] [--gog-tokens-file=PATH]",
+    "Usage: node generate_achievements_schema.js <APPID...> [--headed] [--verbose] [--apps-concurrency=2] [--langs=english,german,... | --english --spanish ...] [--key=XXXXX] [--out=ABS_OR_REL_PATH] [--platform=steam|uplay|epic|gog] [--steam-source=auto|steamdb|steamhunters] [--disable-schema-parse] [--gog] [--gog-user=email --gog-pass=pass] [--gog-tokens-file=PATH]",
   );
   process.exit(1);
 }
@@ -494,6 +510,7 @@ info("achschema:start", {
   customLangSelection: HAS_CUSTOM_LANG_SELECTION,
   output: OUT_BASE,
   steamSource: STEAM_SCRAPE_SOURCE,
+  disableSchemaParse: DISABLE_SCHEMA_PARSE,
 });
 
 /* ---------- utils ---------- */
@@ -1089,15 +1106,14 @@ function buildSteamExophaseSlugCandidates(title = "") {
   }
   const baseVariants = Array.from(
     new Set(
-      titleSources.flatMap((sourceTitle) => buildExophaseSlugVariants(sourceTitle)),
+      titleSources.flatMap((sourceTitle) =>
+        buildExophaseSlugVariants(sourceTitle),
+      ),
     ),
   );
   if (!baseVariants.length) return [];
   return Array.from(
-    new Set([
-      ...baseVariants,
-      ...baseVariants.map((slug) => `${slug}-steam`),
-    ]),
+    new Set([...baseVariants, ...baseVariants.map((slug) => `${slug}-steam`)]),
   ).filter(Boolean);
 }
 
@@ -1220,77 +1236,12 @@ const appLimit = createLimiter(appsConcurrency);
 
 async function launchChromiumSafe(opts = {}) {
   const baseArgs = ["--disable-blink-features=AutomationControlled"];
-  try {
-    return await chromium.launch({
-      headless: !headed,
-      args: baseArgs,
-      ...opts,
-    });
-  } catch (firstErr) {
-    const unAsar = (p) =>
-      p.replace(/app\.asar(?!\.unpacked)/, "app.asar.unpacked");
 
-    const roots = [];
-
-    for (const pkg of ["playwright-core", "playwright"]) {
-      try {
-        const pkgDir = path.dirname(require.resolve(`${pkg}/package.json`));
-        const rootA = path.join(pkgDir, ".local-browsers");
-        const rootB = unAsar(rootA);
-        roots.push(rootA, rootB);
-      } catch {}
-    }
-
-    if (process.resourcesPath) {
-      roots.push(
-        path.join(
-          process.resourcesPath,
-          "app.asar.unpacked",
-          "node_modules",
-          "playwright-core",
-          ".local-browsers",
-        ),
-        path.join(
-          process.resourcesPath,
-          "app.asar.unpacked",
-          "node_modules",
-          "playwright",
-          ".local-browsers",
-        ),
-        path.join(process.resourcesPath, "playwright-browsers"),
-      );
-    }
-
-    const exeCandidates = [];
-    for (const root of roots) {
-      const dirs = await fs.readdir(root).catch(() => []);
-      for (const d of dirs) {
-        if (/^chromium_headless_shell-/i.test(d)) {
-          exeCandidates.push(
-            path.join(root, d, "chrome-win", "headless_shell.exe"),
-          );
-        }
-        if (/^chromium-/i.test(d)) {
-          exeCandidates.push(path.join(root, d, "chrome-win", "chrome.exe"));
-        }
-      }
-    }
-
-    for (const exe of exeCandidates) {
-      try {
-        await fs.access(exe);
-        // if (verbose) emit('info', `[achgen] Using Chromium: ${exe}`);
-        return await chromium.launch({
-          executablePath: exe,
-          headless: !headed,
-          args: baseArgs,
-          ...opts,
-        });
-      } catch {}
-    }
-
-    throw firstErr;
-  }
+  return launchPlaywrightChromium("playwright", {
+    headless: !headed,
+    args: baseArgs,
+    ...opts,
+  });
 }
 
 /* ---------- Steam Web API ---------- */
@@ -2346,8 +2297,19 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
   let steamLaunchMetadata = null;
   let steamLaunchMetadataSent = false;
   let steamSession = null;
+
   const canUseSchemaParse =
-    !wantsGog && !wantsEpic && /^\d+$/.test(String(appid || ""));
+    !DISABLE_SCHEMA_PARSE &&
+    !wantsGog &&
+    !wantsEpic &&
+    /^\d+$/.test(String(appid || ""));
+
+  if (DISABLE_SCHEMA_PARSE && !wantsGog && !wantsEpic) {
+    info("schema-parse:disabled-by-flag", {
+      appid,
+    });
+  }
+
   const schemaParseBatchResults =
     options.schemaParseBatchResults instanceof Map
       ? options.schemaParseBatchResults
@@ -2488,8 +2450,7 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
           }
           if (hasEpicAchievementRows(fallback?.perLangByApi)) {
             for (const lang of langsToFetch) {
-              perLangByApi[lang] =
-                fallback.perLangByApi[lang] || new Map();
+              perLangByApi[lang] = fallback.perLangByApi[lang] || new Map();
             }
           }
         } catch (e) {
@@ -2963,9 +2924,10 @@ async function fetchEpicArtifactAchievementsFallback(appid, langsToFetch) {
   const sandboxId = String(identity?.namespace || "").trim();
   if (!identity || !sandboxId) return null;
 
-  const langs = Array.isArray(langsToFetch) && langsToFetch.length
-    ? langsToFetch
-    : ["english"];
+  const langs =
+    Array.isArray(langsToFetch) && langsToFetch.length
+      ? langsToFetch
+      : ["english"];
   const seedLang = langs.includes("english") ? "english" : langs[0];
   let seedItems = [];
   let seedSource = "";
@@ -3060,7 +3022,7 @@ async function fetchEpicArtifactAchievementsFallback(appid, langsToFetch) {
         : "ℹ Steam API key not found. Running in SteamDB/SteamHunters mode. (English only)",
     );
     let schemaParseBatchResults = null;
-    if (!apiKey && resolvedAppIds.length > 1) {
+    if (!DISABLE_SCHEMA_PARSE && !apiKey && resolvedAppIds.length > 1) {
       const batchItems = resolvedAppIds
         .map((meta) => buildSchemaParseBatchItem(meta, OUT_BASE))
         .filter(Boolean);

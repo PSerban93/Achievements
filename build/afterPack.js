@@ -9,6 +9,19 @@ module.exports = async (context) => {
     throw new Error("afterPack: appOutDir is missing");
   }
 
+  const xLiveLessNessWorkerPath = path.join(
+    appOutDir,
+    "resources",
+    "app.asar.unpacked",
+    "utils",
+    "xlivelessness-worker.js",
+  );
+  if (!fs.existsSync(xLiveLessNessWorkerPath)) {
+    throw new Error(
+      `afterPack: XLiveLessNess worker missing at ${xLiveLessNessWorkerPath}`,
+    );
+  }
+
   const exeName = context.packager?.appInfo?.productFilename
     ? `${context.packager.appInfo.productFilename}.exe`
     : null;

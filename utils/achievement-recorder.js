@@ -12,6 +12,7 @@ const DEFAULT_RECORDER_TIMINGS = Object.freeze({
   fps: 30,
   hdrToneMapping: false,
 });
+const DEFAULT_FORCE_STOP_GRACE_MS = 4_000;
 
 function resolveAchievementRecorderHelper(options = {}) {
   const executableName = "achievements-recorder.exe";
@@ -77,6 +78,10 @@ class AchievementRecorderController extends EventEmitter {
     this.stopping = false;
     this.stopPromise = null;
     this.pendingOutputs = new Map();
+    this.forceStopGraceMs = Math.max(
+      100,
+      Number(options.forceStopGraceMs) || DEFAULT_FORCE_STOP_GRACE_MS,
+    );
   }
 
   get status() {
@@ -119,16 +124,19 @@ class AchievementRecorderController extends EventEmitter {
 
   async restart(reason = "configuration-changed") {
     if (!this.enabled) return false;
+    this.restartAttempt = 0;
     await this.stopChild(reason);
     return this.enabled ? this.ensureStarted(`${reason}:restart`) : false;
   }
 
   setEnabled(enabled, reason = "unknown") {
+    const wasEnabled = this.enabled;
     this.enabled = enabled === true;
     if (!this.enabled) {
       this.restartAttempt = 0;
       return this.stop(reason);
     }
+    if (!wasEnabled) this.restartAttempt = 0;
     if (this.stopping && this.stopPromise) {
       return this.stopPromise.then(() =>
         this.enabled ? this.ensureStarted(`${reason}:after-stop`) : false,
@@ -243,8 +251,11 @@ class AchievementRecorderController extends EventEmitter {
 
   handleMessage(message) {
     if (message.type === "ready") {
+      if (this.ready) {
+        this.emit("duplicate-ready", message);
+        return;
+      }
       this.ready = true;
-      this.restartAttempt = 0;
       if (this.startTimer) clearTimeout(this.startTimer);
       this.startTimer = null;
       const resolve = this.startResolve;
@@ -256,8 +267,17 @@ class AchievementRecorderController extends EventEmitter {
     if (message.type === "fatal") {
       const error = new Error(message.error || "Achievement recorder failed");
       error.code = "recorder-fatal";
+      this.rejectStart(error);
       this.emit("recorder-error", error);
       return;
+    }
+    if (message.type === "segment-finalized" && this.restartAttempt > 0) {
+      const previousAttempt = this.restartAttempt;
+      this.restartAttempt = 0;
+      this.emit("restart-stabilized", {
+        previousAttempt,
+        reason: "first-segment-finalized",
+      });
     }
     if (message.type === "saved" || message.type === "failed") {
       const id = String(message.id || "").trim();
@@ -331,6 +351,7 @@ class AchievementRecorderController extends EventEmitter {
 
   forceStop(reason = "unknown") {
     this.enabled = false;
+    this.restartAttempt = 0;
     this.stopping = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = null;
@@ -348,14 +369,23 @@ class AchievementRecorderController extends EventEmitter {
         child.stdin.write(`${JSON.stringify({ type: "shutdown" })}\n`);
       }
     } catch {}
-    try {
-      child.kill();
-    } catch {}
+    // Give the native helper time to finalize its capture pipeline and remove
+    // the per-process buffer directory. A hard kill is retained as a bounded
+    // fallback for a helper that no longer responds to the protocol command.
+    const killTimer = setTimeout(() => {
+      if (this.child !== child || child.killed) return;
+      try {
+        child.kill();
+      } catch {}
+    }, this.forceStopGraceMs);
+    killTimer.unref?.();
+    child.once("exit", () => clearTimeout(killTimer));
     return true;
   }
 
   stop(reason = "unknown") {
     this.enabled = false;
+    this.restartAttempt = 0;
     return this.stopChild(reason);
   }
 
@@ -404,6 +434,7 @@ class AchievementRecorderController extends EventEmitter {
 
 module.exports = {
   AchievementRecorderController,
+  DEFAULT_FORCE_STOP_GRACE_MS,
   DEFAULT_RECORDER_TIMINGS,
   parseRecorderProtocolLine,
   resolveAchievementRecorderHelper,

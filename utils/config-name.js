@@ -13,6 +13,11 @@ function sanitizeConfigName(raw) {
     : base;
 }
 
+function sanitizeOptionalConfigName(raw) {
+  const value = String(raw ?? "").trim();
+  return value ? sanitizeConfigName(value) : "";
+}
+
 function normalizeRawConfigBase(raw) {
   const value = String(raw || "").trim();
   return value.toLowerCase().endsWith(".json") ? value.slice(0, -5) : value;
@@ -71,4 +76,5 @@ function resolveConfigJsonPath(configsDir, rawName) {
 module.exports = {
   resolveConfigJsonPath,
   sanitizeConfigName,
+  sanitizeOptionalConfigName,
 };

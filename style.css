@@ -1721,6 +1721,164 @@ body::-webkit-scrollbar {
   animation: fadeIn 0.3s ease;
 }
 
+.settings-data-tab-inner {
+  min-height: 100%;
+  padding: 0 42px 28px;
+  box-sizing: border-box;
+}
+
+.settings-data-tab-header,
+.settings-logs-actions,
+.settings-logs-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-data-tab-header {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.settings-data-tab-header h4,
+.settings-logs-layout h4 {
+  margin: 0 0 6px;
+}
+
+.settings-data-tab-description {
+  margin: 0;
+}
+
+.settings-data-status {
+  min-height: 20px;
+  margin: 12px 0;
+  color: var(--dracula-comment);
+  font-size: 12px;
+}
+
+.settings-data-status-error {
+  color: var(--dracula-red);
+}
+
+.changelog-list {
+  display: grid;
+  gap: 12px;
+}
+
+.changelog-release {
+  padding: 14px 16px;
+  border: 1px solid var(--dracula-current-line);
+  border-radius: var(--app-radius-md);
+  background: color-mix(in srgb, var(--dracula-background) 82%, transparent);
+}
+
+.changelog-release-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.changelog-release-title {
+  margin: 0;
+  color: var(--dracula-cyan);
+  font-size: 15px;
+}
+
+.changelog-release-meta {
+  margin-top: 3px;
+  color: var(--dracula-comment);
+  font-size: 11px;
+}
+
+.changelog-release-body {
+  margin: 12px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--dracula-foreground);
+  font-family: inherit;
+  line-height: 1.45;
+}
+
+.settings-logs-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.settings-logs-controls {
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.settings-logs-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 150px;
+  color: var(--dracula-comment);
+  font-size: 12px;
+}
+
+.settings-logs-search-field {
+  flex: 1;
+  min-width: 220px;
+}
+
+.settings-logs-field input,
+.settings-logs-field select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.settings-logs-actions {
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.settings-logs-autoscroll {
+  margin: 0 0 0 auto;
+}
+
+.settings-logs-output {
+  flex: 1;
+  min-height: 240px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  box-sizing: border-box;
+  border: 1px solid var(--dracula-current-line);
+  border-radius: var(--app-radius-md);
+  background: color-mix(in srgb, var(--dracula-background) 92%, black);
+  color: var(--dracula-foreground);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.settings-logs-privacy {
+  margin: 8px 0 0;
+}
+
+@media (max-width: 760px) {
+  .settings-data-tab-inner {
+    padding: 0 18px 24px;
+  }
+
+  .settings-data-tab-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-logs-autoscroll {
+    margin-left: 0;
+  }
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

@@ -1,21 +1,11 @@
 const path = require("path");
 const fs = require("fs");
 
-function resolvePlaywrightBrowsersPath() {
-  const current = process.env.PLAYWRIGHT_BROWSERS_PATH || "";
-  if (current && current !== "0") return current;
-  const resourcesRoot = process.resourcesPath;
-  if (resourcesRoot) {
-    const candidate = path.join(resourcesRoot, "playwright-browsers");
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return current || "0";
-}
-
-process.env.PLAYWRIGHT_BROWSERS_PATH = resolvePlaywrightBrowsersPath();
+const {
+  launchChromiumSafe: launchPlaywrightChromium,
+} = require("./playwright-runtime");
 
 const cheerio = require("cheerio");
-const { chromium } = require("playwright");
 const { createLogger } = require("./logger");
 
 const DEFAULT_URL = "https://steamladder.com/ladder/games/";
@@ -48,11 +38,14 @@ function extractSteamIdsFromHtml(html = "", limit = 250) {
 
 async function scrapeSteamIdsWithPlaywright(options = {}) {
   const url = String(options.url || DEFAULT_URL);
-  const timeoutMs = Math.max(10000, Number(options.timeoutMs || 30000) || 30000);
+  const timeoutMs = Math.max(
+    10000,
+    Number(options.timeoutMs || 30000) || 30000,
+  );
   const headless = options.headless !== false;
   let browser = null;
   try {
-    browser = await chromium.launch({
+    browser = await launchPlaywrightChromium("playwright", {
       headless,
       args: ["--disable-blink-features=AutomationControlled"],
     });
@@ -82,9 +75,14 @@ async function scrapeSteamIdsWithPlaywright(options = {}) {
 }
 
 async function updateTopOwnersIds(options = {}) {
-  const outputPath = normalizeOutputPath(options.outputPath || "top_owners_ids.txt");
+  const outputPath = normalizeOutputPath(
+    options.outputPath || "top_owners_ids.txt",
+  );
   const limit = Math.max(10, Number(options.limit || 250) || 250);
-  const timeoutMs = Math.max(10000, Number(options.timeoutMs || 30000) || 30000);
+  const timeoutMs = Math.max(
+    10000,
+    Number(options.timeoutMs || 30000) || 30000,
+  );
   const headless = options.headless !== false;
 
   logger.info("schema-parse:top-owners:update:start", {

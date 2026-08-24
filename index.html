@@ -482,7 +482,7 @@
         );
         box-shadow: var(--app-shadow-panel);
         color: var(--app-text);
-        z-index: 10001;
+        z-index: 200000;
         opacity: 0;
         pointer-events: none;
         transition:
@@ -721,6 +721,22 @@
             title="Platform & Emulator Guide"
           >
             Platform Guide
+          </button>
+          <button
+            id="tab-changelogs"
+            class="settings-tab"
+            data-tab="changelogs"
+            data-i18n="settings.changelogs.tab"
+          >
+            Changelogs
+          </button>
+          <button
+            id="tab-logs"
+            class="settings-tab"
+            data-tab="logs"
+            data-i18n="settings.logs.tab"
+          >
+            Logs
           </button>
           <button
             id="settingsDocsLink"
@@ -1940,6 +1956,82 @@
                     your Microsoft password is never stored. This direct Xbox
                     OAuth route is experimental and can be restricted by
                     Microsoft.
+                  </div>
+                </div>
+                <hr style="margin: 18px 0 14px" />
+                <div class="settings-section" style="margin-bottom: 5px">
+                  <h4
+                    id="settings-retroAchievementsTitle"
+                    data-i18n="settings.retroAchievements.title"
+                  >
+                    RetroAchievements
+                  </h4>
+                  <div
+                    id="settings-retroAchievementsStatus"
+                    data-i18n="settings.retroAchievements.notConnected"
+                    class="hint"
+                    style="margin-top: 6px"
+                  >
+                    Not connected.
+                  </div>
+                  <div class="settings-control">
+                    <label
+                      for="settings-retroAchievementsUsernameInput"
+                      data-i18n="settings.retroAchievements.username"
+                      >Username</label
+                    >
+                    <input
+                      type="text"
+                      id="settings-retroAchievementsUsernameInput"
+                      autocomplete="username"
+                      placeholder="RetroAchievements username"
+                    />
+                  </div>
+                  <div class="settings-control">
+                    <label
+                      for="settings-retroAchievementsApiKeyInput"
+                      data-i18n="settings.retroAchievements.apiKey"
+                      >Web API Key</label
+                    >
+                    <input
+                      type="password"
+                      id="settings-retroAchievementsApiKeyInput"
+                      autocomplete="off"
+                      placeholder="Web API key from your RetroAchievements control panel"
+                    />
+                  </div>
+                  <div class="settings-control" style="gap: 8px">
+                    <button
+                      type="button"
+                      id="settings-retroAchievementsConnectBtn"
+                      data-i18n="settings.retroAchievements.connect"
+                    >
+                      Connect
+                    </button>
+                    <button
+                      type="button"
+                      id="settings-retroAchievementsDisconnectBtn"
+                      data-i18n="settings.retroAchievements.disconnect"
+                    >
+                      Disconnect
+                    </button>
+                    <button
+                      type="button"
+                      id="settings-retroAchievementsImportBtn"
+                      data-i18n="settings.retroAchievements.importLibrary"
+                    >
+                      Import Library
+                    </button>
+                  </div>
+                  <div
+                    id="settings-retroAchievementsHint"
+                    data-i18n="settings.retroAchievements.hint"
+                    class="hint"
+                    style="margin-top: 6px; margin-bottom: 30px"
+                  >
+                    Uses the read-only RetroAchievements Web API. The API key is
+                    stored encrypted. Notifications are checked only while a
+                    RetroAchievements config is selected.
                   </div>
                 </div>
                 <hr style="margin: 18px 0 14px" />
@@ -3753,6 +3845,31 @@
 
               <div class="settings-section">
                 <details class="platform-guide-item">
+                  <summary id="platformGuideRetroAchievementsSummary">
+                    RetroAchievements
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideRetroAchievementsItem1">
+                      In Settings → Advanced, enter the RetroAchievements
+                      username and Web API key, select Connect, then Import
+                      Library.
+                    </li>
+                    <li id="platformGuideRetroAchievementsItem2">
+                      This is an API-only integration. It does not scan local
+                      emulators, ROMs, processes or game folders, and the API
+                      key is stored encrypted.
+                    </li>
+                    <li id="platformGuideRetroAchievementsItem3">
+                      Polling runs only while a RetroAchievements config is
+                      selected. Existing unlocks seed the cache silently; later
+                      unlocks trigger notifications.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
                   <summary id="platformGuideUbisoftOfficialSummary">
                     Ubisoft Connect (Official)
                   </summary>
@@ -3894,11 +4011,102 @@
                   <ul class="platform-guide-list">
                     <li id="platformGuideShadps4Item1">
                       Watch folder:
-                      <code>%APPDATA%\shadPS4\game_data</code>.
+                      <code>%APPDATA%\shadPS4</code>.
                     </li>
                     <li id="platformGuideShadps4Item2">
-                      Trophy discovery and schema generation are based on PS4
-                      trophy files (for example <code>TROP.XML</code>).
+                      Modern schema and icons are read from
+                      <code>trophy\&lt;NPWR&gt;\Xml</code> and
+                      <code>trophy\&lt;NPWR&gt;\Icons</code>; user progress is
+                      read from
+                      <code>home\&lt;userId&gt;\trophy\&lt;NPWR&gt;.xml</code>.
+                    </li>
+                    <li id="platformGuideShadps4Item3">
+                      Legacy <code>game_data\&lt;CUSA&gt;\TrophyFiles</code>
+                      layouts remain supported, but the modern trophy and user
+                      progress layout is preferred.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
+                  <summary id="platformGuideMarkerPatchSummary">
+                    Dead Space 2 MarkerPatch
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideMarkerPatchItem1">
+                      Add the game directory containing
+                      <code>deadspace2.exe</code>, <code>MarkerPatch.ini</code>
+                      and the mod's <code>achievements</code> resources in
+                      Settings → Folders.
+                    </li>
+                    <li id="platformGuideMarkerPatchItem2">
+                      Schema and images come from the mod. Unlocks are read from
+                      <code>%LOCALAPPDATA%\EA Games\Dead Space 2\settings.txt</code>
+                      using <code>Controls.AcL.X</code> and
+                      <code>Controls.AcL.Y</code> as one bitflag.
+                    </li>
+                    <li id="platformGuideMarkerPatchItem3">
+                      Only unlock state is supported. If the state file does
+                      not exist yet, the adaptive watcher attaches after the
+                      mod creates it.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
+                  <summary id="platformGuideMadnessPatchSummary">
+                    Alice: Madness Returns MadnessPatch
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideMadnessPatchItem1">
+                      Add either the game root or its
+                      <code>Binaries\Win32</code> directory containing
+                      <code>MadnessPatch.ini</code> and the mod achievement
+                      resources.
+                    </li>
+                    <li id="platformGuideMadnessPatchItem2">
+                      Per-profile unlock flags are read from
+                      <code>Documents\My Games\Alice Madness Returns\AliceGame\CheckPoint\&lt;profile&gt;\Achievements.txt</code>.
+                    </li>
+                    <li id="platformGuideMadnessPatchItem3">
+                      Missing profile files are attached adaptively and each
+                      profile keeps an independent baseline. AchievementSupport
+                      must remain enabled in <code>MadnessPatch.ini</code>.
+                    </li>
+                  </ul>
+                </details>
+              </div>
+
+              <div class="settings-section">
+                <details class="platform-guide-item">
+                  <summary id="platformGuideXLiveLessNessSummary">
+                    XLiveLessNess
+                  </summary>
+                  <ul class="platform-guide-list">
+                    <li id="platformGuideXLiveLessNessItem1">
+                      Add the game directory containing <code>xlive.dll</code>,
+                      <code>&lt;game&gt;.exe</code> and its matching
+                      <code>&lt;game&gt;.exe.cfg</code>. Metadata and images are
+                      read asynchronously from the executable's SPAFILE.
+                    </li>
+                    <li id="platformGuideXLiveLessNessItem2">
+                      The generated config stores the detected executable and
+                      process names for launch, auto-select and playtime.
+                    </li>
+                    <li id="platformGuideXLiveLessNessItem3">
+                      Global, game-local and custom XLiveLessNess state roots
+                      are monitored adaptively; <code>-xllnconfig</code> is also
+                      resolved when process arguments are available.
+                    </li>
+                    <li id="platformGuideXLiveLessNessItem4">
+                      The config can be generated before
+                      <code>achievements.dat</code> exists. Profiles keep
+                      independent baselines so profile changes do not create
+                      false unlock notifications.
                     </li>
                   </ul>
                 </details>
@@ -4146,6 +4354,130 @@
                   </ul>
                 </details>
               </div>
+            </div>
+          </div>
+          <div
+            id="changelogsTab"
+            class="tab-content settings-data-tab"
+            role="tabpanel"
+            aria-labelledby="tab-changelogs"
+          >
+            <div class="settings-data-tab-inner">
+              <div class="settings-data-tab-header">
+                <div>
+                  <h4 data-i18n="settings.changelogs.title">
+                    Release Changelogs
+                  </h4>
+                  <p
+                    class="hint settings-data-tab-description"
+                    data-i18n="settings.changelogs.description"
+                  >
+                    Release notes published for this project on GitHub.
+                  </p>
+                </div>
+                <button
+                  id="settingsChangelogsRefreshBtn"
+                  type="button"
+                  data-i18n="settings.changelogs.refresh"
+                >
+                  Refresh
+                </button>
+              </div>
+              <div
+                id="settingsChangelogsStatus"
+                class="settings-data-status"
+                role="status"
+                aria-live="polite"
+              ></div>
+              <div id="settingsChangelogsList" class="changelog-list"></div>
+            </div>
+          </div>
+          <div
+            id="logsTab"
+            class="tab-content settings-data-tab"
+            role="tabpanel"
+            aria-labelledby="tab-logs"
+          >
+            <div class="settings-data-tab-inner settings-logs-layout">
+              <div>
+                <h4 data-i18n="settings.logs.title">Application Logs</h4>
+                <p
+                  class="hint settings-data-tab-description"
+                  data-i18n="settings.logs.description"
+                >
+                  View application log files in real time.
+                </p>
+              </div>
+              <div class="settings-logs-controls">
+                <label class="settings-logs-field">
+                  <span data-i18n="settings.logs.source">Log</span>
+                  <select id="settingsLogsSourceSelect"></select>
+                </label>
+                <label class="settings-logs-field settings-logs-search-field">
+                  <span data-i18n="settings.logs.search">Search</span>
+                  <input
+                    id="settingsLogsSearchInput"
+                    type="search"
+                    autocomplete="off"
+                    data-i18n-placeholder="settings.logs.searchPlaceholder"
+                    placeholder="Filter log lines"
+                  />
+                </label>
+                <label class="settings-logs-field">
+                  <span data-i18n="settings.logs.level">Level</span>
+                  <select id="settingsLogsLevelSelect">
+                    <option value="all" data-i18n="settings.logs.levelAll">
+                      All
+                    </option>
+                    <option value="DEBUG">DEBUG</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARN">WARN</option>
+                    <option value="ERROR">ERROR</option>
+                  </select>
+                </label>
+              </div>
+              <div class="settings-logs-actions">
+                <button
+                  id="settingsLogsPauseBtn"
+                  type="button"
+                  data-i18n="settings.logs.pause"
+                >
+                  Pause
+                </button>
+                <button
+                  id="settingsLogsClearBtn"
+                  type="button"
+                  data-i18n="settings.logs.clear"
+                >
+                  Clear View
+                </button>
+                <button
+                  id="settingsLogsOpenFolderBtn"
+                  type="button"
+                  data-i18n="settings.logs.openFolder"
+                >
+                  Open Logs Folder
+                </button>
+                <label class="checkbox-control settings-logs-autoscroll">
+                  <input id="settingsLogsAutoScroll" type="checkbox" checked />
+                  <span data-i18n="settings.logs.autoScroll">Auto-scroll</span>
+                </label>
+              </div>
+              <div
+                id="settingsLogsStatus"
+                class="settings-data-status"
+                role="status"
+                aria-live="polite"
+              ></div>
+              <pre
+                id="settingsLogsOutput"
+                class="settings-logs-output"
+                tabindex="0"
+                aria-live="off"
+              ></pre>
+              <p class="hint settings-logs-privacy" data-i18n="settings.logs.privacy">
+                Logs can contain local paths or account identifiers. Review them before sharing.
+              </p>
             </div>
           </div>
         </div>
@@ -4414,6 +4746,9 @@
                           <option value="xbox-pc" disabled>
                             Xbox PC (Microsoft / Xbox Network)
                           </option>
+                          <option value="retroachievements" disabled>
+                            RetroAchievements
+                          </option>
                           <option value="xenia" disabled>Xenia</option>
                           <option value="rpcs3" disabled>RPCS3</option>
                           <option value="shadps4" disabled>
@@ -4424,6 +4759,9 @@
                           </option>
                           <option value="madnesspatch" disabled>
                             MadnessPatch
+                          </option>
+                          <option value="xlivelessness" disabled>
+                            XLiveLessNess
                           </option>
                         </select>
 
@@ -5685,7 +6023,8 @@
             platform === "xenia" ||
             platform === "rpcs3" ||
             platform === "shadps4" ||
-            platform === "ps4"
+            platform === "ps4" ||
+            platform === "xlivelessness"
           );
         }
         function shouldUseSteamCoverSources(
@@ -5714,7 +6053,7 @@
           let out = String(name || "").trim();
           if (!out) return "";
           const rx =
-            /\s*\((?:steam|steam[-\s]?official|epic[-\s]?official|xenia|rpcs3|ps4|shadps4|markerpatch|madnesspatch)\)\s*$/i;
+            /\s*\((?:steam|steam[-\s]?official|epic[-\s]?official|retroachievements|xenia|rpcs3|ps4|shadps4|markerpatch|madnesspatch|xlivelessness)\)\s*$/i;
           while (rx.test(out)) out = out.replace(rx, "").trim();
           return out;
         }
@@ -8956,6 +9295,16 @@
               "main.generation.progress.fetchEpic",
               "Fetching Epic achievements",
             );
+          case "fetchingLibrary":
+            return tUi(
+              "main.generation.progress.fetchingRetroAchievementsLibrary",
+              "Fetching RetroAchievements library",
+            );
+          case "importingLibrary":
+            return tUi(
+              "main.generation.progress.importingRetroAchievementsLibrary",
+              "Importing RetroAchievements library",
+            );
           case "finalizing":
             return tUi("main.generation.progress.finalizing", "Finalizing");
           case "completed":
@@ -9059,7 +9408,10 @@
       function clearGenerationProgressState(kind, id) {
         if (kind === "boot-background") {
           bootBackgroundProgressStates.delete(String(id || "boot-background"));
-        } else {
+        } else if (
+          !id ||
+          String(generationProgressState?.id || "") === String(id)
+        ) {
           generationProgressState = null;
         }
         updateGenerationProgressActiveFlag();
@@ -9739,11 +10091,13 @@
               "gog",
               "gog-official",
               "xbox-pc",
+              "retroachievements",
               "xenia",
               "rpcs3",
               "shadps4",
               "markerpatch",
               "madnesspatch",
+              "xlivelessness",
             ].includes(currentPlatform)
               ? currentPlatform
               : "auto";
@@ -10171,11 +10525,12 @@
           return;
         }
         const args = config.arguments || "";
-        await window.api.launchExecutable(
-          config.executable,
-          args,
-          config.working_directory || "",
-        );
+        await window.api.launchExecutable({
+          configName: name,
+          executable: config.executable,
+          arguments: args,
+          workingDirectory: config.working_directory || "",
+        });
       });
 
       const languageSelect = document.getElementById("languageSelect");
@@ -10500,11 +10855,14 @@
         syncAppLanguageOptions();
         await syncSteamOfficialAccountDropdown(getCachedPreferences());
         await syncXboxPcStatus();
+        await syncRetroAchievementsStatus();
         if (appLanguageSelect) appLanguageSelect.value = uiLanguage;
         refreshAppThemeText();
         renderSchemaLanguageSelection(getCachedPreferences());
         bindSchemaLanguageSelectionEvents();
         bindSettingsProjectLinks();
+        renderSettingsChangelogs();
+        refreshSettingsLogsText();
         if (typeof updateSortIconsUI === "function") {
           updateSortIconsUI();
         }
@@ -10646,8 +11004,13 @@
         startedAt: 0,
       };
 
+      function sanitizeOptionalConfigName(raw) {
+        const value = String(raw ?? "").trim();
+        return value ? sanitizeConfigName(value) : "";
+      }
+
       function markConfigUiSelectionStarted(configName, requestSeq) {
-        const safeName = sanitizeConfigName(configName || "");
+        const safeName = sanitizeOptionalConfigName(configName);
         configUiSelectionInFlight = {
           name: safeName,
           requestSeq: Number(requestSeq) || 0,
@@ -10657,7 +11020,7 @@
       }
 
       function markConfigUiSelectionApplied(configName, requestSeq) {
-        const safeName = sanitizeConfigName(configName || "");
+        const safeName = sanitizeOptionalConfigName(configName);
         if (
           configUiSelectionInFlight.requestSeq !== (Number(requestSeq) || 0) ||
           configUiSelectionInFlight.name !== safeName
@@ -10674,7 +11037,7 @@
       }
 
       function clearConfigUiSelectionState(configName = "") {
-        const safeName = sanitizeConfigName(configName || "");
+        const safeName = sanitizeOptionalConfigName(configName);
         if (!safeName || configUiAppliedName === safeName) {
           configUiAppliedName = "";
         }
@@ -10691,7 +11054,7 @@
         configName,
         maxAgeMs = CONFIG_UI_SELECTION_IN_FLIGHT_TTL_MS,
       ) {
-        const safeName = sanitizeConfigName(configName || "");
+        const safeName = sanitizeOptionalConfigName(configName);
         if (!safeName || configUiSelectionInFlight.name !== safeName) {
           return false;
         }
@@ -12147,6 +12510,12 @@
         configList.addEventListener("change", async () => {
           clearAppNavigationAchievementTarget();
           const selectedConfig = configList.value;
+          const skipMainUpdate =
+            !!selectedConfig &&
+            configList.dataset.skipMainUpdateFor === selectedConfig;
+          if (configList.dataset.skipMainUpdateFor) {
+            delete configList.dataset.skipMainUpdateFor;
+          }
           const requestSeq = ++configChangeRequestSeq;
           markConfigUiSelectionStarted(selectedConfig, requestSeq);
           const isStaleSelection = () =>
@@ -12177,12 +12546,13 @@
           updateBlacklistButtonState(cachedMeta || null);
           updateMainPlayButtonState(cachedMeta);
 
-          if (selectedConfig) {
+          if (selectedConfig && !skipMainUpdate) {
             window.api.updateConfig({
               configName: selectedConfig,
               preset: presetDropdown.value,
               position: positionDropdown.value,
               allowBlacklistedSelection: !!blocked,
+              selectionSource: getConfigSelectionSource(selectedConfig),
             });
           }
           const achievementsDataObj = await window.api.loadAchievementData(
@@ -12974,63 +13344,97 @@
         });
       })();
 
+      async function clearSelectedConfigLikeBack(options = {}) {
+        const configList = document.getElementById("configList");
+        const backButton = document.getElementById("backButton");
+        const expectedConfig = sanitizeOptionalConfigName(
+          options?.expectedConfig,
+        );
+        const currentConfig = sanitizeOptionalConfigName(configList?.value);
+        if (expectedConfig && currentConfig !== expectedConfig) {
+          logUiEvent("info", "ui:auto-deselect:skip-config-mismatch", {
+            expectedConfig,
+            currentConfig: currentConfig || null,
+          });
+          return false;
+        }
+
+        configChangeRequestSeq += 1;
+        autoSelectUiSequence += 1;
+        autoSelectPendingName = "";
+        clearWatcherAutoSelect();
+        clearConfigUiSelectionState(currentConfig || expectedConfig);
+        clearAppNavigationAchievementTarget();
+        lastSelectedConfigMeta = null;
+        window.__cancelEmbeddedCoverLoads?.();
+
+        if (configList) configList.value = "";
+        if (backButton) {
+          backButton.classList.add("hidden");
+          backButton.style.display = "none";
+        }
+        const selectOption = configList?.querySelector?.('option[value=""]');
+        if (selectOption) {
+          selectOption.selected = true;
+          selectOption.disabled = true;
+        }
+
+        const hide = (id) => {
+          const el = document.getElementById(id);
+          if (el) el.style.display = "none";
+        };
+        hide("deleteConfigBtn");
+        hide("editConfigBtn");
+        hide("playBtn");
+        hide("achStats");
+        hide("blacklistConfigBtn");
+        hide("muteProgressRow");
+        const tableBody = document.getElementById("achievementsTableBody");
+        if (tableBody) tableBody.innerHTML = "";
+        updateMainPlayButtonState(null);
+        updateBlacklistButtonState(null);
+        setAchievementsHeaderVisible(false);
+        updateMuteProgressUI().catch(() => {});
+        window.__showFallbackLogo?.();
+        window.__setEmbeddedPlatinumBadgeByConfig?.(null);
+
+        if (options?.skipMainClear !== true) {
+          try {
+            await window.api.clearActiveConfig({
+              reason: options?.reason || "back-button",
+              configName: currentConfig || expectedConfig,
+            });
+          } catch (error) {
+            logUiEvent("warn", "ui:config-clear:failed", {
+              reason: options?.reason || "back-button",
+              configName: currentConfig || expectedConfig || null,
+              error: error?.message || String(error),
+            });
+          }
+        }
+
+        try {
+          await loadPreferencesCached();
+          const prefs = getCachedPreferences();
+          if (prefs?.showDashboardOnStart) {
+            await window.openDashboard?.();
+          }
+        } catch (e) {
+          console.warn(
+            tUi(
+              "log.dashboardOpenAfterBackFailed",
+              "Cannot open Dashboard after Back:",
+            ),
+            e,
+          );
+        }
+        return true;
+      }
+
       document
         .getElementById("backButton")
-        .addEventListener("click", async () => {
-          const configList = document.getElementById("configList");
-          const backButton = document.getElementById("backButton");
-
-          // 1) reset UI + state
-          if (configList) configList.value = "";
-          if (backButton) {
-            backButton.classList.add("hidden");
-            backButton.style.display = "none";
-          }
-          const selectOption = configList?.querySelector?.('option[value=""]');
-          if (selectOption) {
-            selectOption.selected = true;
-            selectOption.disabled = true;
-          }
-
-          const hide = (id) => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = "none";
-          };
-          hide("deleteConfigBtn");
-          hide("editConfigBtn");
-          hide("playBtn");
-          hide("achStats");
-          hide("blacklistConfigBtn");
-          hide("muteProgressRow");
-          const tableBody = document.getElementById("achievementsTableBody");
-          if (tableBody) tableBody.innerHTML = "";
-          setAchievementsHeaderVisible(false);
-
-          try {
-            window.api.updateConfig({
-              configName: null,
-              preset: null,
-              position: null,
-            });
-          } catch {}
-
-          window.__showFallbackLogo?.();
-
-          try {
-            await loadPreferencesCached();
-            const prefs = getCachedPreferences();
-            if (prefs?.showDashboardOnStart) {
-              await window.openDashboard?.();
-            }
-          } catch (e) {
-            console.warn(
-              tUi(
-                "log.dashboardOpenAfterBackFailed",
-                "Cannot open Dashboard after Back:",
-              ),
-              e,
-            );
-          }
+        .addEventListener("click", () => {
+          void clearSelectedConfigLikeBack({ reason: "back-button" });
         });
 
       function handleOverlayToggleShortcutFromUi() {
@@ -13767,6 +14171,74 @@
         }
       }
 
+      let __retroAchievementsStatusSyncActive = false;
+
+      async function syncRetroAchievementsStatus() {
+        if (__retroAchievementsStatusSyncActive) return null;
+        __retroAchievementsStatusSyncActive = true;
+        try {
+          const statusEl = document.getElementById(
+            "settings-retroAchievementsStatus",
+          );
+          const usernameInput = document.getElementById(
+            "settings-retroAchievementsUsernameInput",
+          );
+          const apiKeyInput = document.getElementById(
+            "settings-retroAchievementsApiKeyInput",
+          );
+          const connectBtn = document.getElementById(
+            "settings-retroAchievementsConnectBtn",
+          );
+          const disconnectBtn = document.getElementById(
+            "settings-retroAchievementsDisconnectBtn",
+          );
+          const importBtn = document.getElementById(
+            "settings-retroAchievementsImportBtn",
+          );
+          if (!statusEl || !window.api?.getRetroAchievementsStatus) {
+            return null;
+          }
+
+          if (usernameInput) {
+            usernameInput.placeholder = tUi(
+              "settings.retroAchievements.usernamePlaceholder",
+              "RetroAchievements username",
+            );
+          }
+          if (apiKeyInput) {
+            apiKeyInput.placeholder = tUi(
+              "settings.retroAchievements.apiKeyPlaceholder",
+              "Web API key from your RetroAchievements control panel",
+            );
+          }
+
+          const status = await window.api.getRetroAchievementsStatus();
+          if (status?.connected) {
+            const account = String(status.username || "").trim();
+            statusEl.textContent = tUiFmt(
+              "settings.retroAchievements.connected",
+              { account },
+              `Connected: ${account}`,
+            );
+            if (usernameInput && !usernameInput.value.trim()) {
+              usernameInput.value = account;
+            }
+          } else {
+            statusEl.textContent = tUi(
+              "settings.retroAchievements.notConnected",
+              "Not connected.",
+            );
+          }
+
+          if (connectBtn) connectBtn.disabled = status?.connected === true;
+          if (disconnectBtn) disconnectBtn.disabled = !status?.configured;
+          if (importBtn) importBtn.disabled = !status?.connected;
+          return status;
+        } finally {
+          __retroAchievementsStatusSyncActive = false;
+        }
+      }
+
       function applyEmulatorNotificationPreferences(prefs = {}) {
         for (const setting of EMULATOR_NOTIFICATION_SETTINGS) {
           const position =
@@ -13851,6 +14323,7 @@
         await syncSteamOfficialAccountDropdown(prefs);
         await syncEpicOfficialAccountStatus();
         await syncXboxPcStatus();
+        await syncRetroAchievementsStatus();
         applyShowBlacklistPreference(prefs?.showBlacklistedGames);
         await syncBlacklistList();
         renderBlacklistList();
@@ -14743,6 +15216,152 @@
               await syncXboxPcStatus();
             });
           }
+
+          const retroAchievementsConnectBtn = document.getElementById(
+            "settings-retroAchievementsConnectBtn",
+          );
+          if (
+            retroAchievementsConnectBtn &&
+            !retroAchievementsConnectBtn.dataset.bound
+          ) {
+            retroAchievementsConnectBtn.dataset.bound = "1";
+            retroAchievementsConnectBtn.addEventListener("click", async () => {
+              const usernameInput = document.getElementById(
+                "settings-retroAchievementsUsernameInput",
+              );
+              const apiKeyInput = document.getElementById(
+                "settings-retroAchievementsApiKeyInput",
+              );
+              const username = String(usernameInput?.value || "").trim();
+              const webApiKey = String(apiKeyInput?.value || "").trim();
+              if (!username || !webApiKey) {
+                showNotification(
+                  tUi(
+                    "settings.retroAchievements.credentialsRequired",
+                    "Enter your RetroAchievements username and Web API key.",
+                  ),
+                  "#f44336",
+                );
+                return;
+              }
+
+              retroAchievementsConnectBtn.disabled = true;
+              try {
+                const result = await window.api.connectRetroAchievements({
+                  username,
+                  webApiKey,
+                });
+                if (result?.success && apiKeyInput) apiKeyInput.value = "";
+                showNotification(
+                  result?.success
+                    ? tUiFmt(
+                        "settings.retroAchievements.connectSuccess",
+                        { account: result.username || username },
+                        `RetroAchievements connected: ${result.username || username}`,
+                      )
+                    : result?.error ||
+                        tUi(
+                          "settings.retroAchievements.connectFailed",
+                          "RetroAchievements connection failed.",
+                        ),
+                  result?.success ? "#4CAF50" : "#f44336",
+                );
+              } catch (error) {
+                showNotification(
+                  error?.message ||
+                    tUi(
+                      "settings.retroAchievements.connectFailed",
+                      "RetroAchievements connection failed.",
+                    ),
+                  "#f44336",
+                );
+              } finally {
+                await syncRetroAchievementsStatus();
+              }
+            });
+          }
+
+          const retroAchievementsDisconnectBtn = document.getElementById(
+            "settings-retroAchievementsDisconnectBtn",
+          );
+          if (
+            retroAchievementsDisconnectBtn &&
+            !retroAchievementsDisconnectBtn.dataset.bound
+          ) {
+            retroAchievementsDisconnectBtn.dataset.bound = "1";
+            retroAchievementsDisconnectBtn.addEventListener(
+              "click",
+              async () => {
+                const result = await window.api.disconnectRetroAchievements();
+                if (!result?.success) {
+                  showNotification(
+                    result?.error ||
+                      tUi(
+                        "settings.retroAchievements.disconnectFailed",
+                        "RetroAchievements disconnect failed.",
+                      ),
+                    "#f44336",
+                  );
+                }
+                await syncRetroAchievementsStatus();
+              },
+            );
+          }
+
+          const retroAchievementsImportBtn = document.getElementById(
+            "settings-retroAchievementsImportBtn",
+          );
+          if (
+            retroAchievementsImportBtn &&
+            !retroAchievementsImportBtn.dataset.bound
+          ) {
+            retroAchievementsImportBtn.dataset.bound = "1";
+            retroAchievementsImportBtn.addEventListener("click", async () => {
+              retroAchievementsImportBtn.disabled = true;
+              try {
+                const result =
+                  await window.api.importRetroAchievementsLibrary();
+                showNotification(
+                  result?.success
+                    ? tUiFmt(
+                        "settings.retroAchievements.importComplete",
+                        {
+                          created: Number(result.created) || 0,
+                          updated: Number(result.updated) || 0,
+                          skipped: Number(result.skipped) || 0,
+                          failed: Number(result.failed) || 0,
+                        },
+                        `RetroAchievements import complete. Created ${Number(result.created) || 0}, updated ${Number(result.updated) || 0}, skipped ${Number(result.skipped) || 0}, failed ${Number(result.failed) || 0}.`,
+                      )
+                    : result?.message ||
+                        tUi(
+                          "settings.retroAchievements.importFailed",
+                          "RetroAchievements library import failed.",
+                        ),
+                  result?.success ? "#4CAF50" : "#f44336",
+                );
+                if (result?.success) {
+                  if (typeof reloadConfigsDropdown === "function") {
+                    await reloadConfigsDropdown(true).catch(() => {});
+                  }
+                  if (typeof window.refreshFoldersList === "function") {
+                    window.refreshFoldersList();
+                  }
+                }
+              } catch (error) {
+                showNotification(
+                  error?.message ||
+                    tUi(
+                      "settings.retroAchievements.importFailed",
+                      "RetroAchievements library import failed.",
+                    ),
+                  "#f44336",
+                );
+              } finally {
+                await syncRetroAchievementsStatus();
+              }
+            });
+          }
         } catch (e) {
           console.warn(
             tUi("log.settingsLoadFailed", "Settings cannot be loaded:"),
@@ -14763,6 +15382,7 @@
         renderSteamApiKeyStatusFromPrefs(prefs);
         await syncEpicOfficialAccountStatus();
         await syncXboxPcStatus();
+        await syncRetroAchievementsStatus();
         renderSchemaLanguageSelection(prefs);
         bindSchemaLanguageSelectionEvents();
         const startMaxEl = document.getElementById(
@@ -15071,8 +15691,8 @@
       });
       window.api.onPlaytimeUpdate?.((payload = {}) => {
         const activeRaw = document.getElementById("configList")?.value || "";
-        const activeSafe = sanitizeConfigName(activeRaw);
-        const payloadSafe = sanitizeConfigName(payload.configName || "");
+        const activeSafe = sanitizeOptionalConfigName(activeRaw);
+        const payloadSafe = sanitizeOptionalConfigName(payload.configName);
 
         if (activeSafe && payloadSafe && activeSafe === payloadSafe) {
           const label = document.getElementById("achStatsPlaytime");
@@ -15199,15 +15819,16 @@
       const AUTO_SELECT_MAIN_CONFIRM_TIMEOUT_MS = 1000;
       const AUTO_SELECT_MAIN_CONFIRM_POLL_MS = 50;
       let __watcherAutoSelect = null;
+      let __watcherAutoSelectSource = "watcher";
       let watcherAutoSelectClearTimer = null;
       let autoSelectUiSequence = 0;
       let autoSelectPendingName = "";
 
       function clearWatcherAutoSelect(expectedName = "") {
-        const expectedSafe = sanitizeConfigName(expectedName || "");
+        const expectedSafe = sanitizeOptionalConfigName(expectedName);
         if (
           expectedSafe &&
-          sanitizeConfigName(__watcherAutoSelect || "") !== expectedSafe
+          sanitizeOptionalConfigName(__watcherAutoSelect) !== expectedSafe
         ) {
           return false;
         }
@@ -15217,12 +15838,15 @@
           watcherAutoSelectClearTimer = null;
         }
         __watcherAutoSelect = null;
+        __watcherAutoSelectSource = "watcher";
         return true;
       }
 
-      function setWatcherAutoSelect(configName) {
+      function setWatcherAutoSelect(configName, source = "watcher") {
         clearWatcherAutoSelect();
-        __watcherAutoSelect = sanitizeConfigName(configName || "");
+        __watcherAutoSelect = sanitizeOptionalConfigName(configName);
+        __watcherAutoSelectSource =
+          source === "process" ? "process" : "watcher";
         if (!__watcherAutoSelect) return;
         const expectedName = __watcherAutoSelect;
         watcherAutoSelectClearTimer = setTimeout(() => {
@@ -15238,7 +15862,8 @@
           const result = await window.api.getActiveConfigSelection();
           return {
             available: true,
-            configName: sanitizeConfigName(result?.configName || ""),
+            configName: sanitizeOptionalConfigName(result?.configName),
+            selectionSource: String(result?.selectionSource || ""),
           };
         } catch (error) {
           logUiEvent("warn", "ui:auto-select:active-query-failed", {
@@ -15249,7 +15874,7 @@
       }
 
       async function waitForMainAutoSelectConfirmation(configName, sequence) {
-        const targetSafe = sanitizeConfigName(configName || "");
+        const targetSafe = sanitizeOptionalConfigName(configName);
         const deadline = Date.now() + AUTO_SELECT_MAIN_CONFIRM_TIMEOUT_MS;
         while (Date.now() <= deadline) {
           if (sequence !== autoSelectUiSequence) {
@@ -15266,12 +15891,31 @@
         return { confirmed: false, superseded: false };
       }
 
-      async function handleAutoSelectConfig(configName) {
-        const targetName = String(configName || "").trim();
+      function getConfigSelectionSource(configName) {
+        const safeName = sanitizeOptionalConfigName(configName);
+        if (
+          safeName &&
+          sanitizeOptionalConfigName(__watcherAutoSelect) === safeName
+        ) {
+          return __watcherAutoSelectSource === "process"
+            ? "process-auto-select"
+            : "watcher-auto-select";
+        }
+        return "manual";
+      }
+
+      async function handleAutoSelectConfig(request) {
+        const requestPayload =
+          request && typeof request === "object" ? request : null;
+        const targetName = String(
+          requestPayload?.configName || request || "",
+        ).trim();
+        const autoSelectSource =
+          requestPayload?.source === "process" ? "process" : "watcher";
         const targetSafe = sanitizeConfigName(targetName);
         if (!targetName || !targetSafe) return;
 
-        setWatcherAutoSelect(targetSafe);
+        setWatcherAutoSelect(targetSafe, autoSelectSource);
         if (autoSelectPendingName === targetSafe) {
           logUiEvent("info", "ui:auto-select:skip-request-in-flight", {
             configName: targetName,
@@ -15290,7 +15934,7 @@
             return;
           }
 
-          const currentSafe = sanitizeConfigName(configList.value || "");
+          const currentSafe = sanitizeOptionalConfigName(configList.value);
           const domAlreadySelected = currentSafe === targetSafe;
           const uiApplied = configUiAppliedName === targetSafe;
           const uiSelectionInFlight = isConfigUiSelectionInFlight(targetSafe);
@@ -15359,7 +16003,7 @@
           const activeAfterReload = await readMainActiveConfigSelection();
           if (sequence !== autoSelectUiSequence) return;
           const domAfterReload =
-            sanitizeConfigName(configList.value || "") === targetSafe;
+            sanitizeOptionalConfigName(configList.value) === targetSafe;
           const uiAppliedAfterReload = configUiAppliedName === targetSafe;
           const uiInFlightAfterReload = isConfigUiSelectionInFlight(targetSafe);
           if (
@@ -15374,6 +16018,7 @@
             return;
           }
 
+          setWatcherAutoSelect(targetSafe, autoSelectSource);
           configList.value = targetName;
           configList.dispatchEvent(new Event("change", { bubbles: true }));
           logUiEvent("info", "ui:auto-select:change-dispatched", {
@@ -15406,6 +16051,32 @@
 
       window.api.on("auto-select-config", (configName) => {
         void handleAutoSelectConfig(configName);
+      });
+
+      window.api.on("auto-deselect-config", (payload = {}) => {
+        void (async () => {
+          const expectedConfig = sanitizeOptionalConfigName(
+            payload?.configName,
+          );
+          if (!expectedConfig) return;
+          const active = await readMainActiveConfigSelection();
+          if (
+            active.available &&
+            active.configName === expectedConfig &&
+            active.selectionSource !== "process-auto-select"
+          ) {
+            logUiEvent("info", "ui:auto-deselect:skip-manual-selection", {
+              configName: expectedConfig,
+              selectionSource: active.selectionSource || null,
+            });
+            return;
+          }
+          await clearSelectedConfigLikeBack({
+            expectedConfig,
+            reason: `process-auto-deselect:${payload?.reason || "process-exit"}`,
+            skipMainClear: payload?.mainAlreadyCleared === true,
+          });
+        })();
       });
 
       const APP_NAVIGATION_ACHIEVEMENT_TARGET_TIMEOUT_MS = 10000;
@@ -15623,7 +16294,7 @@
           } catch {}
           if (sequence !== appNavigationUiSequence) return;
           const mainHasExpectedSelection =
-            sanitizeConfigName(activeSelection?.configName || "") ===
+            sanitizeOptionalConfigName(activeSelection?.configName) ===
               sanitizeConfigName(configName) &&
             activeSelection?.mode === expectedSelectionMode;
           const selectionNeedsRefresh =
@@ -15733,10 +16404,9 @@
           dropdown.appendChild(option);
         });
 
-        const prevSanitized = sanitizeConfigName(selectedBefore || "");
-        const autoSelectSanitized = sanitizeConfigName(
-          __watcherAutoSelect || "",
-        );
+        const prevSanitized = sanitizeOptionalConfigName(selectedBefore);
+        const autoSelectSanitized =
+          sanitizeOptionalConfigName(__watcherAutoSelect);
         const findMatchingValue = () => {
           const byPrev = visibleConfigs.find(
             (cfg) => sanitizeConfigName(cfg.name) === prevSanitized,
@@ -16116,6 +16786,385 @@
         document.getElementById("closeSettingsBtn")?.click();
       }
 
+      const SETTINGS_LOG_MAX_LINES = 2000;
+      let settingsChangelogsLoaded = false;
+      let settingsChangelogsLoading = false;
+      let settingsChangelogReleases = [];
+      let settingsLogsSources = [];
+      let settingsLogsLines = [];
+      let settingsLogsActive = false;
+      let settingsLogsPaused = false;
+      let settingsLogsSubscriptionSequence = 0;
+
+      function setSettingsDataStatus(elementId, message, isError = false) {
+        const element = document.getElementById(elementId);
+        if (!element) return;
+        element.textContent = message || "";
+        element.classList.toggle("settings-data-status-error", isError);
+      }
+
+      function formatChangelogDate(value) {
+        const parsed = new Date(value || "");
+        if (!Number.isFinite(parsed.getTime())) return "";
+        try {
+          return new Intl.DateTimeFormat(undefined, {
+            year: "numeric",
+            month: "long",
+            day: "numeric",
+          }).format(parsed);
+        } catch {
+          return parsed.toLocaleDateString();
+        }
+      }
+
+      function renderSettingsChangelogs() {
+        const list = document.getElementById("settingsChangelogsList");
+        if (!list) return;
+        const fragment = document.createDocumentFragment();
+        for (const release of settingsChangelogReleases) {
+          const article = document.createElement("article");
+          article.className = "changelog-release";
+
+          const header = document.createElement("div");
+          header.className = "changelog-release-header";
+          const headingWrap = document.createElement("div");
+          const title = document.createElement("h5");
+          title.className = "changelog-release-title";
+          title.textContent = release.name || release.tag || "";
+          const meta = document.createElement("div");
+          meta.className = "changelog-release-meta";
+          const kind = release.prerelease
+            ? tUi("settings.changelogs.prerelease", "Pre-release")
+            : tUi("settings.changelogs.stable", "Stable release");
+          const date = formatChangelogDate(release.publishedAt);
+          meta.textContent = [release.tag, kind, date].filter(Boolean).join(" · ");
+          headingWrap.append(title, meta);
+          header.appendChild(headingWrap);
+
+          if (release.url) {
+            const openButton = document.createElement("button");
+            openButton.type = "button";
+            openButton.textContent = tUi(
+              "settings.changelogs.openRelease",
+              "Open on GitHub",
+            );
+            openButton.addEventListener("click", () => {
+              void openSettingsExternalUrl(release.url);
+            });
+            header.appendChild(openButton);
+          }
+
+          const body = document.createElement("div");
+          body.className = "changelog-release-body";
+          body.textContent =
+            release.body ||
+            tUi("settings.changelogs.noNotes", "No release notes provided.");
+          article.append(header, body);
+          fragment.appendChild(article);
+        }
+        list.replaceChildren(fragment);
+      }
+
+      async function loadSettingsChangelogs(force = false) {
+        if (settingsChangelogsLoading) return;
+        if (settingsChangelogsLoaded && !force) {
+          renderSettingsChangelogs();
+          return;
+        }
+        const refreshButton = document.getElementById(
+          "settingsChangelogsRefreshBtn",
+        );
+        settingsChangelogsLoading = true;
+        if (refreshButton) refreshButton.disabled = true;
+        setSettingsDataStatus(
+          "settingsChangelogsStatus",
+          tUi("settings.changelogs.loading", "Loading release notes…"),
+        );
+        try {
+          const result = await window.api?.getChangelogs?.({ force });
+          if (!result?.ok) {
+            throw new Error(
+              result?.error ||
+                tUi(
+                  "settings.changelogs.loadFailed",
+                  "Could not load release notes.",
+                ),
+            );
+          }
+          settingsChangelogReleases = Array.isArray(result.releases)
+            ? result.releases
+            : [];
+          settingsChangelogsLoaded = true;
+          renderSettingsChangelogs();
+          if (!settingsChangelogReleases.length) {
+            setSettingsDataStatus(
+              "settingsChangelogsStatus",
+              tUi("settings.changelogs.empty", "No releases were found."),
+            );
+          } else if (result.stale) {
+            setSettingsDataStatus(
+              "settingsChangelogsStatus",
+              tUi(
+                "settings.changelogs.offline",
+                "GitHub is unavailable. Showing the last cached release notes.",
+              ),
+            );
+          } else {
+            setSettingsDataStatus("settingsChangelogsStatus", "");
+          }
+        } catch (error) {
+          setSettingsDataStatus(
+            "settingsChangelogsStatus",
+            error?.message ||
+              tUi(
+                "settings.changelogs.loadFailed",
+                "Could not load release notes.",
+              ),
+            true,
+          );
+        } finally {
+          settingsChangelogsLoading = false;
+          if (refreshButton) refreshButton.disabled = false;
+        }
+      }
+
+      function getSettingsLogSourceLabel(sourceId) {
+        const source = settingsLogsSources.find((entry) => entry.id === sourceId);
+        return tUi(`settings.logs.source.${sourceId}`, source?.label || sourceId);
+      }
+
+      function populateSettingsLogSources() {
+        const select = document.getElementById("settingsLogsSourceSelect");
+        if (!select) return;
+        const previous = select.value;
+        const fragment = document.createDocumentFragment();
+        for (const source of settingsLogsSources) {
+          const option = document.createElement("option");
+          option.value = source.id;
+          option.textContent = getSettingsLogSourceLabel(source.id);
+          fragment.appendChild(option);
+        }
+        select.replaceChildren(fragment);
+        if (settingsLogsSources.some((source) => source.id === previous)) {
+          select.value = previous;
+        } else {
+          const preferred =
+            settingsLogsSources.find(
+              (source) => source.id === "app" && source.exists,
+            ) ||
+            settingsLogsSources.find((source) => source.exists) ||
+            settingsLogsSources.find((source) => source.id === "app") ||
+            settingsLogsSources[0];
+          select.value = preferred?.id || "";
+        }
+      }
+
+      function renderSettingsLogs() {
+        const output = document.getElementById("settingsLogsOutput");
+        if (!output) return;
+        const query = String(
+          document.getElementById("settingsLogsSearchInput")?.value || "",
+        )
+          .trim()
+          .toLocaleLowerCase();
+        const level =
+          document.getElementById("settingsLogsLevelSelect")?.value || "all";
+        const filtered = settingsLogsLines.filter((line) => {
+          const text = String(line || "");
+          if (level !== "all" && !text.includes(`[${level}]`)) return false;
+          return !query || text.toLocaleLowerCase().includes(query);
+        });
+        output.textContent = filtered.length
+          ? filtered.join("\n")
+          : tUi("settings.logs.empty", "No matching log entries.");
+        const autoScroll = document.getElementById("settingsLogsAutoScroll");
+        if (autoScroll?.checked) output.scrollTop = output.scrollHeight;
+      }
+
+      function refreshSettingsLogsText() {
+        const search = document.getElementById("settingsLogsSearchInput");
+        if (search) {
+          search.placeholder = tUi(
+            "settings.logs.searchPlaceholder",
+            "Filter log lines",
+          );
+        }
+        const pause = document.getElementById("settingsLogsPauseBtn");
+        if (pause) {
+          pause.textContent = settingsLogsPaused
+            ? tUi("settings.logs.resume", "Resume")
+            : tUi("settings.logs.pause", "Pause");
+        }
+        populateSettingsLogSources();
+        renderSettingsLogs();
+      }
+
+      async function subscribeSettingsLogSource() {
+        const select = document.getElementById("settingsLogsSourceSelect");
+        const sourceId = String(select?.value || "");
+        const sequence = ++settingsLogsSubscriptionSequence;
+        if (!settingsLogsActive || !sourceId) return;
+        setSettingsDataStatus(
+          "settingsLogsStatus",
+          tUi("settings.logs.loading", "Loading log…"),
+        );
+        const result = await window.api?.subscribeLogSource?.(sourceId, {
+          maxLines: 1000,
+        });
+        if (
+          sequence !== settingsLogsSubscriptionSequence ||
+          !settingsLogsActive ||
+          select?.value !== sourceId
+        ) {
+          return;
+        }
+        if (!result?.ok) {
+          settingsLogsLines = [];
+          renderSettingsLogs();
+          setSettingsDataStatus(
+            "settingsLogsStatus",
+            result?.error ||
+              tUi("settings.logs.loadFailed", "Could not read this log."),
+            true,
+          );
+          return;
+        }
+        settingsLogsLines = Array.isArray(result.lines) ? result.lines : [];
+        renderSettingsLogs();
+        setSettingsDataStatus(
+          "settingsLogsStatus",
+          result.exists
+            ? `${tUi("settings.logs.live", "Live")}: ${getSettingsLogSourceLabel(sourceId)}`
+            : tUi(
+                "settings.logs.waiting",
+                "Waiting for this log file to be created…",
+              ),
+        );
+      }
+
+      async function activateSettingsLogs() {
+        settingsLogsActive = true;
+        try {
+          const result = await window.api?.listLogSources?.();
+          if (!settingsLogsActive) return;
+          if (!result?.ok) {
+            throw new Error(result?.error || "logs-list-failed");
+          }
+          settingsLogsSources = Array.isArray(result.sources)
+            ? result.sources
+            : [];
+          populateSettingsLogSources();
+          await subscribeSettingsLogSource();
+        } catch (error) {
+          setSettingsDataStatus(
+            "settingsLogsStatus",
+            error?.message ||
+              tUi("settings.logs.loadFailed", "Could not read application logs."),
+            true,
+          );
+        }
+      }
+
+      function deactivateSettingsLogs() {
+        settingsLogsActive = false;
+        settingsLogsSubscriptionSequence += 1;
+        void window.api?.unsubscribeLogSource?.();
+      }
+
+      function bindSettingsDataTabs() {
+        const refresh = document.getElementById("settingsChangelogsRefreshBtn");
+        if (refresh && refresh.dataset.bound !== "1") {
+          refresh.dataset.bound = "1";
+          refresh.addEventListener("click", () => {
+            void loadSettingsChangelogs(true);
+          });
+        }
+
+        const sourceSelect = document.getElementById("settingsLogsSourceSelect");
+        if (sourceSelect && sourceSelect.dataset.bound !== "1") {
+          sourceSelect.dataset.bound = "1";
+          sourceSelect.addEventListener("change", () => {
+            settingsLogsLines = [];
+            renderSettingsLogs();
+            void subscribeSettingsLogSource();
+          });
+        }
+        for (const id of ["settingsLogsSearchInput", "settingsLogsLevelSelect"]) {
+          const element = document.getElementById(id);
+          if (element && element.dataset.bound !== "1") {
+            element.dataset.bound = "1";
+            element.addEventListener(id.endsWith("Input") ? "input" : "change", () => {
+              renderSettingsLogs();
+            });
+          }
+        }
+        const pause = document.getElementById("settingsLogsPauseBtn");
+        if (pause && pause.dataset.bound !== "1") {
+          pause.dataset.bound = "1";
+          pause.addEventListener("click", () => {
+            settingsLogsPaused = !settingsLogsPaused;
+            refreshSettingsLogsText();
+            setSettingsDataStatus(
+              "settingsLogsStatus",
+              settingsLogsPaused
+                ? tUi("settings.logs.paused", "Live updates paused.")
+                : `${tUi("settings.logs.live", "Live")}: ${getSettingsLogSourceLabel(document.getElementById("settingsLogsSourceSelect")?.value || "")}`,
+            );
+          });
+        }
+        const clear = document.getElementById("settingsLogsClearBtn");
+        if (clear && clear.dataset.bound !== "1") {
+          clear.dataset.bound = "1";
+          clear.addEventListener("click", () => {
+            settingsLogsLines = [];
+            renderSettingsLogs();
+          });
+        }
+        const openFolder = document.getElementById("settingsLogsOpenFolderBtn");
+        if (openFolder && openFolder.dataset.bound !== "1") {
+          openFolder.dataset.bound = "1";
+          openFolder.addEventListener("click", async () => {
+            const result = await window.api?.openLogsFolder?.();
+            if (!result?.ok) {
+              showNotification(
+                result?.error ||
+                  tUi("settings.logs.openFolderFailed", "Could not open the logs folder."),
+                "#f44336",
+              );
+            }
+          });
+        }
+
+        if (!window.__settingsLogsAppendUnsubscribe) {
+          window.__settingsLogsAppendUnsubscribe =
+            window.api?.onSettingsLogAppend?.((payload) => {
+              if (!settingsLogsActive || !payload) return;
+              const sourceId = document.getElementById(
+                "settingsLogsSourceSelect",
+              )?.value;
+              if (payload.sourceId !== sourceId) return;
+              const incoming = Array.isArray(payload.lines) ? payload.lines : [];
+              settingsLogsLines = payload.reset
+                ? incoming
+                : settingsLogsLines.concat(incoming);
+              if (settingsLogsLines.length > SETTINGS_LOG_MAX_LINES) {
+                settingsLogsLines = settingsLogsLines.slice(
+                  -SETTINGS_LOG_MAX_LINES,
+                );
+              }
+              if (!settingsLogsPaused) renderSettingsLogs();
+              if (!settingsLogsPaused) {
+                setSettingsDataStatus(
+                  "settingsLogsStatus",
+                  `${tUi("settings.logs.live", "Live")}: ${getSettingsLogSourceLabel(sourceId)}`,
+                );
+              }
+            });
+        }
+      }
+
+      bindSettingsDataTabs();
+
       let __bodyOverflowPrev = "";
 
       function openSettingsModal() {
@@ -16171,6 +17220,15 @@
         });
         void syncEpicOfficialAccountStatus();
         void syncXboxPcStatus();
+        void syncRetroAchievementsStatus();
+        const activeSettingsTab = document.querySelector(
+          ".settings-tab.active",
+        )?.getAttribute("data-tab");
+        if (activeSettingsTab === "changelogs") {
+          void loadSettingsChangelogs();
+        } else if (activeSettingsTab === "logs") {
+          void activateSettingsLogs();
+        }
       }
 
       let settingsOpenPreparationPromise = null;
@@ -16254,6 +17312,7 @@
 
       function closeSettingsModal() {
         window.__settingsMode = null;
+        deactivateSettingsLogs();
 
         const settingsMenu = document.getElementById("settingsMenu");
         const content = document.querySelector(".settings-content");
@@ -16321,6 +17380,7 @@
           tab.classList.add("active");
           const tabId = tab.getAttribute("data-tab");
           if (tabId === "shortcuts") ensureShortcutsTabContent();
+          if (tabId !== "logs") deactivateSettingsLogs();
           const tabContent = document.getElementById(tabId + "Tab");
           if (tabContent) {
             tabContent.classList.add("active");
@@ -16334,6 +17394,10 @@
             setTimeout(() => {
               void syncEpicOfficialAccountStatus();
             }, 0);
+          } else if (tabId === "changelogs") {
+            void loadSettingsChangelogs();
+          } else if (tabId === "logs") {
+            void activateSettingsLogs();
           }
         });
       });
@@ -17200,9 +18264,7 @@
           enableHdrScreenshots: checkbox(
             "settings-enableHdrScreenshotsCheckbox",
           ),
-          enableHdrRecords: checkbox(
-            "settings-enableHdrRecordsCheckbox",
-          ),
+          enableHdrRecords: checkbox("settings-enableHdrRecordsCheckbox"),
           screenshotFolder: pick(
             getVal("settings-screenshotFolder").trim(),
             base.screenshotFolder || "",
@@ -17214,9 +18276,7 @@
             getVal("settings-recordFolder").trim(),
             base.recordsFolder || "",
           ),
-          disableAchievementRecords: checkbox(
-            "settings-disableRecordCheckbox",
-          ),
+          disableAchievementRecords: checkbox("settings-disableRecordCheckbox"),
           recordFps: Number(getVal("settings-recordFpsSelect")) || 30,
           recordDurationSeconds:
             Number(getVal("settings-recordDurationSelect")) || 20,
@@ -21196,6 +22256,8 @@
               return "GOG Official";
             case "xbox-pc":
               return "Xbox PC";
+            case "retroachievements":
+              return "RetroAchievements";
             case "xenia":
               return "Xenia";
             case "rpcs3":
@@ -21206,6 +22268,8 @@
               return "MarkerPatch";
             case "madnesspatch":
               return "MadnessPatch";
+            case "xlivelessness":
+              return "XLiveLessNess";
             case "unknown":
               return tUi("dashboard.platformFilter.unknown", "Unknown");
             default:
@@ -21910,18 +22974,33 @@
                     const position =
                       document.getElementById("positionDropdown")?.value;
 
-                    await window.api.updateConfig({
-                      configName: cfgName,
-                      preset,
-                      position,
-                    });
+                    const selectionResult =
+                      await window.api.selectActiveConfig({
+                        configName: cfgName,
+                        preset,
+                        position,
+                      });
+                    if (!selectionResult?.success) {
+                      logUiEvent("warn", "dashboard:play-selection-failed", {
+                        configName: cfgName,
+                        error: selectionResult?.error || null,
+                      });
+                      return;
+                    }
 
                     const sel = document.getElementById("configList");
                     if (sel) {
+                      sel.dataset.skipMainUpdateFor = cfgName;
                       sel.value = cfgName;
                       sel.dispatchEvent(new Event("change", { bubbles: true }));
                     }
-                  } catch {}
+                  } catch (error) {
+                    logUiEvent("warn", "dashboard:play-selection-failed", {
+                      configName: cfgName,
+                      error: error?.message || String(error),
+                    });
+                    return;
+                  }
                   closeDashboard?.();
 
                   const container = document.getElementById("buttonContainer");
@@ -21936,7 +23015,14 @@
                       "Hide Options",
                     );
 
-                  if (exe) window.api.launchExecutable(exe, args);
+                  if (exe) {
+                    window.api.launchExecutable({
+                      configName: cfgName,
+                      executable: exe,
+                      arguments: args,
+                      workingDirectory: data.working_directory || "",
+                    });
+                  }
                 });
 
                 card.dataset.blacklisted = cardBlacklisted ? "1" : "0";

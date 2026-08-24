@@ -14,6 +14,11 @@ const {
   isMadnessPatchConfig,
   readMadnessPatchSnapshot,
 } = require("./madnesspatch");
+const {
+  isXLiveLessNessConfig,
+  listAllXLiveLessNessStateFiles,
+  readXLiveLessNessSnapshot,
+} = require("./xlivelessness");
 
 function parseIniWithEncoding(filePath) {
   try {
@@ -499,6 +504,7 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
         "gog",
         "gog-official",
         "xbox-pc",
+        "retroachievements",
         "xenia",
         "rpcs3",
         "shadps4",
@@ -858,6 +864,23 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
     const stateFile = getLatestMadnessPatchStateFile(checkpointRoot);
     if (!stateFile) return fallback || {};
     const parsed = readMadnessPatchSnapshot(stateFile, fallback || {});
+    const snapshot = parsed.valid ? parsed.snapshot : fallback || {};
+    return mergeEarnedTimeFromCached(snapshot, fallback || {});
+  }
+
+  if (
+    normalizedPlatform === "xlivelessness" ||
+    isXLiveLessNessConfig(configMeta)
+  ) {
+    const configuredStateFile = String(
+      configMeta?.xlln_active_state_file || "",
+    ).trim();
+    const stateFile =
+      (configuredStateFile && fs.existsSync(configuredStateFile)
+        ? configuredStateFile
+        : "") || listAllXLiveLessNessStateFiles(configMeta)[0]?.filePath || "";
+    if (!stateFile) return fallback || {};
+    const parsed = readXLiveLessNessSnapshot(stateFile, fallback || {});
     const snapshot = parsed.valid ? parsed.snapshot : fallback || {};
     return mergeEarnedTimeFromCached(snapshot, fallback || {});
   }

@@ -2,50 +2,109 @@ function normalizeAppId(value) {
   return String(value || "").trim().toLowerCase();
 }
 
-function createTimeoutError(appid, timeoutMs) {
+function normalizePlatform(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeConfigName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeIdentity(appid, options = {}) {
+  if (appid && typeof appid === "object" && !Array.isArray(appid)) {
+    options = appid;
+    appid = options.appid;
+  }
+  const normalizedAppId = normalizeAppId(appid);
+  const platform = normalizePlatform(options?.platform);
+  const configName = normalizeConfigName(
+    options?.configName || options?.config_name,
+  );
+  return {
+    appid: normalizedAppId,
+    platform,
+    configName,
+    key: `${normalizedAppId}::${platform || "*"}::${configName || "*"}`,
+  };
+}
+
+function identitiesOverlap(left, right) {
+  if (!left?.appid || !right?.appid || left.appid !== right.appid) return false;
+  if (left.platform && right.platform && left.platform !== right.platform) {
+    return false;
+  }
+  if (
+    left.configName &&
+    right.configName &&
+    left.configName !== right.configName
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function createTimeoutError(identity, timeoutMs) {
   const error = new Error(
-    `Timed out waiting for config generation to finish for AppID ${appid}.`,
+    `Timed out waiting for config generation to finish for AppID ${identity.appid}.`,
   );
   error.code = "CONFIG_GENERATION_DRAIN_TIMEOUT";
-  error.appid = appid;
+  error.appid = identity.appid;
+  error.platform = identity.platform || null;
+  error.configName = identity.configName || null;
   error.timeoutMs = timeoutMs;
   return error;
 }
 
 function createConfigDeletionGuard() {
   const suppressionTokens = new Map();
-  const activeGenerationCounts = new Map();
-  const idleWaiters = new Map();
+  const activeGenerations = new Map();
+  const idleWaiters = new Set();
   let nextTokenId = 1;
 
-  const isSuppressed = (appid) => {
-    const key = normalizeAppId(appid);
-    return !!key && (suppressionTokens.get(key)?.size || 0) > 0;
+  const matchingSuppressionCount = (identity) => {
+    let count = 0;
+    for (const token of suppressionTokens.values()) {
+      if (identitiesOverlap(identity, token)) count += 1;
+    }
+    return count;
   };
 
-  const notifyIdle = (appid) => {
-    if ((activeGenerationCounts.get(appid) || 0) > 0) return;
-    const waiters = idleWaiters.get(appid);
-    if (!waiters?.size) return;
-    idleWaiters.delete(appid);
-    for (const resolve of waiters) {
+  const matchingGenerationCount = (identity) => {
+    let count = 0;
+    for (const entry of activeGenerations.values()) {
+      if (identitiesOverlap(identity, entry.identity)) count += entry.count;
+    }
+    return count;
+  };
+
+  const isSuppressed = (appid, options = {}) => {
+    const identity = normalizeIdentity(appid, options);
+    return !!identity.appid && matchingSuppressionCount(identity) > 0;
+  };
+
+  const notifyIdle = () => {
+    for (const waiter of Array.from(idleWaiters)) {
+      if (matchingGenerationCount(waiter.identity) > 0) continue;
+      idleWaiters.delete(waiter);
       try {
-        resolve();
+        waiter.resolve();
       } catch {}
     }
   };
 
-  const waitForIdle = async (appid, timeoutMs = 60000) => {
-    const key = normalizeAppId(appid);
-    if (!key || (activeGenerationCounts.get(key) || 0) === 0) return;
+  const waitForIdle = async (appid, options = {}, timeoutMs = 60000) => {
+    if (typeof options === "number") {
+      timeoutMs = options;
+      options = {};
+    }
+    const identity = normalizeIdentity(appid, options);
+    if (!identity.appid || matchingGenerationCount(identity) === 0) return;
 
-    let resolveWait;
+    let waiter = null;
     const idlePromise = new Promise((resolve) => {
-      resolveWait = resolve;
-      if (!idleWaiters.has(key)) idleWaiters.set(key, new Set());
-      idleWaiters.get(key).add(resolve);
+      waiter = { identity, resolve };
+      idleWaiters.add(waiter);
     });
-
     const safeTimeoutMs = Math.max(1, Number(timeoutMs) || 60000);
     let timeout = null;
     try {
@@ -53,50 +112,37 @@ function createConfigDeletionGuard() {
         idlePromise,
         new Promise((_, reject) => {
           timeout = setTimeout(
-            () => reject(createTimeoutError(key, safeTimeoutMs)),
+            () => reject(createTimeoutError(identity, safeTimeoutMs)),
             safeTimeoutMs,
           );
         }),
       ]);
     } finally {
       if (timeout) clearTimeout(timeout);
-      const waiters = idleWaiters.get(key);
-      if (waiters) {
-        waiters.delete(resolveWait);
-        if (waiters.size === 0) idleWaiters.delete(key);
-      }
+      if (waiter) idleWaiters.delete(waiter);
     }
   };
 
   const releaseToken = (token) => {
-    const key = normalizeAppId(token?.appid);
-    if (!key || !token?.id) return false;
-    const tokens = suppressionTokens.get(key);
-    if (!tokens || !tokens.delete(token.id)) return false;
-    if (tokens.size === 0) suppressionTokens.delete(key);
+    if (!token?.id || !suppressionTokens.has(token.id)) return false;
+    suppressionTokens.delete(token.id);
     return true;
   };
 
   const begin = async (appid, options = {}) => {
-    const key = normalizeAppId(appid);
-    if (!key) {
+    const identity = normalizeIdentity(appid, options);
+    if (!identity.appid) {
       const error = new Error("AppID is required for config deletion guard.");
       error.code = "CONFIG_DELETION_APPID_MISSING";
       throw error;
     }
-
-    const token = Object.freeze({
-      appid: key,
-      id: nextTokenId++,
-    });
-    if (!suppressionTokens.has(key)) suppressionTokens.set(key, new Set());
-    suppressionTokens.get(key).add(token.id);
-
+    const token = Object.freeze({ ...identity, id: nextTokenId++ });
+    suppressionTokens.set(token.id, token);
     try {
       if (typeof options.onSuppressed === "function") {
         await options.onSuppressed(token);
       }
-      await waitForIdle(key, options.timeoutMs);
+      await waitForIdle(identity, {}, options.timeoutMs);
       return token;
     } catch (error) {
       releaseToken(token);
@@ -105,9 +151,8 @@ function createConfigDeletionGuard() {
   };
 
   const end = async (token, options = {}) => {
-    const key = normalizeAppId(token?.appid);
-    if (!key || !token?.id) return false;
-    await waitForIdle(key, options.timeoutMs);
+    if (!token?.id || !token?.appid) return false;
+    await waitForIdle(token, {}, options.timeoutMs);
     const settleMs = Math.max(0, Number(options.settleMs) || 0);
     if (settleMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, settleMs));
@@ -115,37 +160,33 @@ function createConfigDeletionGuard() {
     return releaseToken(token);
   };
 
-  const tryStartGeneration = (appid) => {
-    const key = normalizeAppId(appid);
-    if (!key || isSuppressed(key)) return null;
-    activeGenerationCounts.set(
-      key,
-      (activeGenerationCounts.get(key) || 0) + 1,
-    );
+  const tryStartGeneration = (appid, options = {}) => {
+    const identity = normalizeIdentity(appid, options);
+    if (!identity.appid || isSuppressed(identity)) return null;
+    const existing = activeGenerations.get(identity.key);
+    activeGenerations.set(identity.key, {
+      identity,
+      count: (existing?.count || 0) + 1,
+    });
     let finished = false;
     return () => {
       if (finished) return;
       finished = true;
-      const nextCount = Math.max(
-        0,
-        (activeGenerationCounts.get(key) || 0) - 1,
-      );
-      if (nextCount === 0) {
-        activeGenerationCounts.delete(key);
-        notifyIdle(key);
-      } else {
-        activeGenerationCounts.set(key, nextCount);
-      }
+      const entry = activeGenerations.get(identity.key);
+      const nextCount = Math.max(0, (entry?.count || 0) - 1);
+      if (nextCount === 0) activeGenerations.delete(identity.key);
+      else activeGenerations.set(identity.key, { identity, count: nextCount });
+      notifyIdle();
     };
   };
 
-  const getState = (appid) => {
-    const key = normalizeAppId(appid);
+  const getState = (appid, options = {}) => {
+    const identity = normalizeIdentity(appid, options);
     return {
-      appid: key,
-      suppressed: isSuppressed(key),
-      suppressionCount: suppressionTokens.get(key)?.size || 0,
-      activeGenerationCount: activeGenerationCounts.get(key) || 0,
+      appid: identity.appid,
+      suppressed: isSuppressed(identity),
+      suppressionCount: matchingSuppressionCount(identity),
+      activeGenerationCount: matchingGenerationCount(identity),
     };
   };
 

@@ -33,7 +33,6 @@ const {
   spawn,
   fork,
   execFile,
-  execFileSync,
   spawnSync,
 } = require("child_process");
 const path = require("path");
@@ -111,6 +110,7 @@ const {
 const {
   resolveConfigJsonPath,
   sanitizeConfigName,
+  sanitizeOptionalConfigName,
 } = require("./utils/config-name");
 const {
   ensureUserThemes,
@@ -128,6 +128,18 @@ const {
   getMadnessPatchCheckpointRoot,
   isMadnessPatchConfig,
 } = require("./utils/madnesspatch");
+const {
+  isXLiveLessNessConfig,
+  listAllXLiveLessNessStateFiles,
+  getXLiveLessNessProfileFromStatePath,
+  normalizePathForComparison: normalizeXLiveLessNessPath,
+  resolveXLiveLessNessConfigArgument,
+} = require("./utils/xlivelessness");
+const {
+  getFf7AchievementStateFile,
+  isFf7AchievementDatConfig,
+  readFf7AchievementSnapshot,
+} = require("./utils/ff7-achievement-dat");
 const { ensureSchemaParseRuntimeReady } = require("./utils/steam-schema-parse");
 const { startPlaytimeLogWatcher } = require("./utils/playtime-log-watcher");
 const { parseGpdFile, buildSnapshotFromGpd } = require("./utils/xenia-gpd");
@@ -207,6 +219,10 @@ const EPIC_OFFICIAL_SILENT_SEED_MAX_ENTRIES = 500;
 const EPIC_OFFICIAL_CACHE_ONLY_LOG_MAX_ENTRIES = 500;
 const { createLogger } = require("./utils/logger");
 const {
+  createGitHubChangelogService,
+} = require("./utils/github-changelog-service");
+const { createLogViewerService } = require("./utils/log-viewer-service");
+const {
   getProcessExecutableNames,
   hasProcessNameValue,
   normalizeProcessNameValue,
@@ -241,12 +257,27 @@ const epicOfficialLogger = createLogger("epic-official", {
 const xboxPcLogger = createLogger("xbox-pc", {
   level: process.env.XBOX_PC_LOG_LEVEL || "info",
 });
+const retroAchievementsLogger = createLogger("retroachievements", {
+  level: process.env.RETROACHIEVEMENTS_LOG_LEVEL || "info",
+});
 const controllerLogger = createLogger("controller", {
   level: process.env.CONTROLLER_LOG_LEVEL || "info",
 });
 const recordLogger = createLogger("records", {
   level: process.env.RECORD_LOG_LEVEL || "info",
 });
+const changelogService = createGitHubChangelogService({
+  httpClient: axios,
+  cachePath: path.join(cacheDir, "github-releases.json"),
+  owner: "PSerban93",
+  repo: "Achievements",
+  logger: updateLogger,
+});
+const settingsLogViewer = createLogViewerService({
+  logDir: path.join(app.getPath("userData"), "logs"),
+  logger: appLogger,
+});
+app.once("before-quit", () => settingsLogViewer.close());
 const overlayShortcutManager = createOverlayShortcutManager({
   loadHook: () => {
     const { uIOhook, UiohookKey } = require("uiohook-napi");
@@ -356,6 +387,9 @@ const SAN_DEFAULT_PRESET_ICONS = {
     elems: ["unlockmsg", "title", "desc"],
   },
 };
+if (process.argv.includes("--disable-schema-parse")) {
+  process.env.ACHIEVEMENTS_DISABLE_SCHEMA_PARSE = "1";
+}
 function normalizeSanPresetKey(preset) {
   return (
     String(preset || "default")
@@ -2255,6 +2289,8 @@ let selectedConfigPath = null;
 let selectedConfig = null;
 let selectedPlatform = null;
 let selectedConfigMode = "none";
+let selectedConfigSelectionSource = "none";
+let activeConfigSelectionRevision = 0;
 let activeConfigUpdateGeneration = 0;
 let overlayControllerService = null;
 let overlayControllerRuntimeStateCache = {
@@ -2521,10 +2557,12 @@ function isAppIdBlacklisted(appid, platform = null) {
   return getBlacklistMatch(appid, platform).effective;
 }
 
-function refreshBlacklistEffects() {
+async function refreshBlacklistEffects() {
   try {
     if (watchedFoldersApi?.refreshConfigState) {
-      watchedFoldersApi.refreshConfigState();
+      await watchedFoldersApi.refreshConfigState({
+        suppressInitialNotify: true,
+      });
     }
   } catch (err) {
     ipcLogger.error("blacklist:refresh-config-state-failed", {
@@ -2533,7 +2571,7 @@ function refreshBlacklistEffects() {
   }
   try {
     if (watchedFoldersApi?.rebuildKnownAppIds) {
-      watchedFoldersApi.rebuildKnownAppIds();
+      await watchedFoldersApi.rebuildKnownAppIds();
     }
   } catch (err) {
     ipcLogger.error("blacklist:rebuild-known-appids-failed", {
@@ -2697,6 +2735,7 @@ function findConfigDirFromSelection(selDir, appid = "", platform = "") {
       "gog",
       "gog-official",
       "xbox-pc",
+      "retroachievements",
     ].forEach((plat) =>
       pushCandidate(path.join(selDir, plat, normalizedAppId)),
     );
@@ -6353,7 +6392,7 @@ function applyPreferenceSideEffects(
     let selectedLumaAppId = "";
     let selectedIsLumaPlay = false;
     try {
-      const safeConfig = sanitizeConfigName(selectedConfig || "");
+      const safeConfig = sanitizeOptionalConfigName(selectedConfig);
       const cfgPath = safeConfig
         ? path.join(configsDir, `${safeConfig}.json`)
         : "";
@@ -6748,6 +6787,18 @@ function getAchievementRecorderController() {
   achievementRecorderController.on("ready", (details) => {
     recordLogger.info("achievement-recorder:ready", details);
   });
+  achievementRecorderController.on("duplicate-ready", (details) => {
+    recordLogger.warn("achievement-recorder:duplicate-ready", details);
+  });
+  achievementRecorderController.on("capture-border-attempt", (details) => {
+    recordLogger.info("achievement-recorder:capture-border-attempt", details);
+  });
+  achievementRecorderController.on("capture-border-mode", (details) => {
+    recordLogger.info("achievement-recorder:capture-border-mode", details);
+  });
+  achievementRecorderController.on("capture-border-fallback", (details) => {
+    recordLogger.warn("achievement-recorder:capture-border-fallback", details);
+  });
   achievementRecorderController.on("triggered", (details) => {
     recordLogger.info("achievement-recorder:triggered", details);
   });
@@ -6807,6 +6858,9 @@ function getAchievementRecorderController() {
   });
   achievementRecorderController.on("restart-scheduled", (details) => {
     recordLogger.warn("achievement-recorder:restart-scheduled", details);
+  });
+  achievementRecorderController.on("restart-stabilized", (details) => {
+    recordLogger.info("achievement-recorder:restart-stabilized", details);
   });
   achievementRecorderController.on("timings-changed", (details) => {
     recordLogger.info("achievement-recorder:timings-changed", details);
@@ -6871,7 +6925,7 @@ function isAchievementRecordNotificationForActiveConfig(notificationData = {}) {
   if (
     notificationConfigName &&
     notificationConfigName.toLowerCase() !==
-      sanitizeConfigName(selectedConfig).toLowerCase()
+      sanitizeOptionalConfigName(selectedConfig).toLowerCase()
   ) {
     return false;
   }
@@ -7048,6 +7102,14 @@ async function runAchievementsGenerator(
     ];
     if (platform) args.push(`--platform=${platform}`);
     if (schemaLangs.length) args.push(`--langs=${schemaLangs.join(",")}`);
+    const disableSchemaParse =
+      process.env.ACHIEVEMENTS_DISABLE_SCHEMA_PARSE === "1" ||
+      process.argv.includes("--disable-schema-parse");
+
+    if (disableSchemaParse) {
+      args.push("--disable-schema-parse");
+    }
+
     const cp = fork(script, args, {
       stdio: ["pipe", "pipe", "pipe", "ipc"],
       env: {
@@ -8717,6 +8779,176 @@ ipcMain.handle("xbox-pc:import-library", async () => {
   }
 });
 
+ipcMain.handle("retroachievements:status", async () => {
+  try {
+    const status = await getRetroAchievementsStatus({
+      userDataDir: app.getPath("userData"),
+    });
+    return { success: status.connected === true, ...status };
+  } catch (error) {
+    retroAchievementsLogger.warn("retroachievements:status-failed", {
+      error: error?.message || String(error),
+    });
+    return {
+      success: false,
+      connected: false,
+      configured: false,
+      error: error?.message || String(error),
+    };
+  }
+});
+
+ipcMain.handle("retroachievements:connect", async (_event, payload = {}) => {
+  try {
+    const result = await connectRetroAchievements(
+      app.getPath("userData"),
+      {
+        username: payload?.username,
+        webApiKey: payload?.webApiKey,
+      },
+      { timeoutMs: 15000 },
+    );
+    retroAchievementsLogger.info("retroachievements:connect-success", {
+      username: result.auth.username,
+      ulid: result.auth.ulid || null,
+    });
+    startRetroAchievementsActivePoll(selectedConfig, "connect");
+    return {
+      success: true,
+      connected: true,
+      configured: true,
+      username: result.auth.username,
+      ulid: result.auth.ulid,
+      userId: result.auth.userId,
+    };
+  } catch (error) {
+    retroAchievementsLogger.warn("retroachievements:connect-failed", {
+      statusCode: Number(error?.statusCode) || 0,
+      error: error?.message || String(error),
+    });
+    return {
+      success: false,
+      connected: false,
+      error: error?.message || "RetroAchievements connection failed.",
+    };
+  }
+});
+
+ipcMain.handle("retroachievements:disconnect", async () => {
+  try {
+    stopRetroAchievementsActivePoll("disconnect");
+    await clearRetroAchievementsAuth(app.getPath("userData"));
+    retroAchievementsLogger.info("retroachievements:disconnect-success");
+    return { success: true, connected: false, configured: false };
+  } catch (error) {
+    retroAchievementsLogger.warn("retroachievements:disconnect-failed", {
+      error: error?.message || String(error),
+    });
+    return { success: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle("retroachievements:import-library", async () => {
+  let progressJob = null;
+  stopRetroAchievementsActivePoll("import-library");
+  try {
+    progressJob = createGenerationProgressJob({
+      kind: "config-generate",
+      scope: "batch",
+      status: "running",
+      itemName: "RetroAchievements",
+      appid: "",
+      phase: "fetchingLibrary",
+      detail: tUi(
+        "main.generation.progress.fetchingRetroAchievementsLibrary",
+        {},
+        "Fetching RetroAchievements library",
+      ),
+      current: 0,
+      total: 0,
+      percent: 5,
+    });
+    const result = await importRetroAchievementsLibrary(configsDir, {
+      userDataDir: app.getPath("userData"),
+      schemaRootDir: SCHEMA_ROOT_PATH,
+      timeoutMs: 15000,
+      isTitleBlacklisted: (gameId, platform) =>
+        isAppIdBlacklisted(gameId, platform || "retroachievements"),
+      onProgress: (progress = {}) => {
+        progressJob?.update({
+          itemName: progress.detail || "RetroAchievements",
+          appid: progress.appid || "",
+          phase: "importingLibrary",
+          detail: progress.detail || "",
+          current: Number(progress.current) || 0,
+          total: Number(progress.total) || 0,
+          percent: clampGenerationPercent(progress.percent, 5),
+        });
+      },
+    });
+    for (const entry of result.imported || []) {
+      savePreviousAchievements(
+        entry.name,
+        entry.snapshot || {},
+        "retroachievements",
+      );
+    }
+    notifyConfigsChanged();
+    progressJob?.succeed({
+      phase: "completed",
+      detail: tUi(
+        "main.generation.progress.retroAchievementsLibraryImported",
+        {},
+        "RetroAchievements library imported",
+      ),
+      current: result.libraryTotal || 0,
+      total: result.libraryTotal || 0,
+      percent: 100,
+    });
+    startRetroAchievementsActivePoll(selectedConfig, "import-library-complete");
+    return {
+      success: true,
+      message: tUi(
+        "settings.retroAchievements.importComplete",
+        {
+          created: result.created,
+          updated: result.updated,
+          skipped: result.skipped,
+          failed: result.failed,
+        },
+        `RetroAchievements import complete. Created ${result.created}, updated ${result.updated}, skipped ${result.skipped}, failed ${result.failed}.`,
+      ),
+      ...result,
+    };
+  } catch (error) {
+    progressJob?.fail({
+      phase: "failed",
+      detail:
+        error?.message ||
+        tUi(
+          "settings.retroAchievements.importFailed",
+          {},
+          "RetroAchievements library import failed.",
+        ),
+    });
+    retroAchievementsLogger.warn("retroachievements:import-library-failed", {
+      statusCode: Number(error?.statusCode) || 0,
+      error: error?.message || String(error),
+    });
+    startRetroAchievementsActivePoll(selectedConfig, "import-library-failed");
+    return {
+      success: false,
+      message:
+        error?.message ||
+        tUi(
+          "settings.retroAchievements.importFailed",
+          {},
+          "RetroAchievements library import failed.",
+        ),
+    };
+  }
+});
+
 ipcMain.handle("get-sound-path", (_event, fileName) => {
   const sanSoundPath = resolveSanSoundPath(fileName);
   if (sanSoundPath) {
@@ -8961,6 +9193,50 @@ ipcMain.handle("boot:status", () => ({
   bootOnboardingRequired: global.bootOnboardingRequired === true,
 }));
 ipcMain.handle("app:get-version", () => app.getVersion());
+
+ipcMain.handle("settings:changelogs:list", async (_event, payload = {}) => {
+  try {
+    const result = await changelogService.list({ force: payload?.force === true });
+    return { ok: true, ...result };
+  } catch (error) {
+    updateLogger.warn("changelog:list-failed", {
+      error: error?.message || String(error),
+    });
+    return { ok: false, error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle("settings:logs:list-sources", async () => {
+  try {
+    return { ok: true, sources: await settingsLogViewer.listSources() };
+  } catch (error) {
+    return { ok: false, sources: [], error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle("settings:logs:subscribe", async (event, payload = {}) => {
+  try {
+    const snapshot = await settingsLogViewer.subscribe(
+      event.sender,
+      payload?.sourceId,
+      { maxLines: payload?.maxLines },
+    );
+    return { ok: true, ...snapshot };
+  } catch (error) {
+    return { ok: false, lines: [], error: error?.message || String(error) };
+  }
+});
+
+ipcMain.handle("settings:logs:unsubscribe", (event) => ({
+  ok: settingsLogViewer.unsubscribe(event.sender),
+}));
+
+ipcMain.handle("settings:logs:open-folder", async () => {
+  const logDir = path.join(app.getPath("userData"), "logs");
+  await fs.promises.mkdir(logDir, { recursive: true });
+  const error = await shell.openPath(logDir);
+  return { ok: !error, error: error || "" };
+});
 ipcMain.on("boot:overlay-hidden", () => {
   if (global.bootOverlayHidden === true) return;
   global.bootOverlayHidden = true;
@@ -10270,11 +10546,13 @@ ipcMain.handle(
         "gog",
         "gog-official",
         "xbox-pc",
+        "retroachievements",
         "epic",
         "epic-official",
         "shadps4",
         "markerpatch",
         "madnesspatch",
+        "xlivelessness",
       ]);
       const getCacheFallback = async () =>
         (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
@@ -10320,7 +10598,7 @@ ipcMain.handle(
         const shouldSync =
           Boolean(titleId && xuid) &&
           !activePollOwnsSync &&
-          (safeName === sanitizeConfigName(selectedConfig || "") ||
+          (safeName === sanitizeOptionalConfigName(selectedConfig) ||
             !Object.keys(cached || {}).length) &&
           Date.now() - lastSync >= 30000;
         if (!shouldSync) {
@@ -11043,6 +11321,36 @@ ipcMain.handle(
         }
       }
 
+      if (isFf7AchievementDatConfig(config)) {
+        const cached =
+          (await loadPreviousAchievements(configName, normalizedPlatform)) || {};
+        const stateFile = getFf7AchievementStateFile(config);
+        if (!stateFile || !fs.existsSync(stateFile)) {
+          return {
+            achievements: await applyManualOverridesForReturn(
+              cached,
+              null,
+              cached,
+            ),
+            save_path: config.save_path || "",
+            error: "achievement.dat not found (cached)",
+          };
+        }
+        const parsed = readFf7AchievementSnapshot(stateFile, cached);
+        const snapshot = parsed.valid ? parsed.snapshot : cached;
+        return {
+          achievements: await applyManualOverridesForReturn(
+            mergeEarnedTimeFromCached(snapshot, cached),
+            null,
+            cached,
+          ),
+          save_path: config.save_path || path.dirname(stateFile),
+          ...(parsed.valid
+            ? {}
+            : { error: parsed.reason || "achievement.dat invalid" }),
+        };
+      }
+
       if (normalizedPlatform === "steam-official") {
         const schemaPath = resolveConfigSchemaPath(config);
         const statsDir = config.save_path || "";
@@ -11192,7 +11500,8 @@ ipcMain.handle(
 
       if (
         normalizedPlatform === "markerpatch" ||
-        normalizedPlatform === "madnesspatch"
+        normalizedPlatform === "madnesspatch" ||
+        normalizedPlatform === "xlivelessness"
       ) {
         const cached = await loadPreviousAchievements(
           configName,
@@ -11374,18 +11683,26 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         normalizePlatform(configData?.platform);
       const platform =
         inferredConfigPlatform || getPlatformForAppId(appid) || "steam";
+      const isFf7LocalAchievementSource = isFf7AchievementDatConfig(configData);
+      const cachePathsForDelete = deleteExtras
+        ? listScopedAchievementCachePaths(safeName, platform)
+        : [];
       const savePath =
         typeof configData?.save_path === "string" ? configData.save_path : "";
-      const skipSaveDirectoryDeletion = [
-        "steam-official",
-        "epic-official",
-        "gog-official",
-        "ubisoft-official",
-        "ea-official",
-        "xbox-pc",
-        "markerpatch",
-        "madnesspatch",
-      ].includes(platform);
+      const skipSaveDirectoryDeletion =
+        isFf7LocalAchievementSource ||
+        [
+          "steam-official",
+          "epic-official",
+          "gog-official",
+          "ubisoft-official",
+          "ea-official",
+          "xbox-pc",
+          "retroachievements",
+          "markerpatch",
+          "madnesspatch",
+          "xlivelessness",
+        ].includes(platform);
       if (deleteSaveFiles && !skipSaveDirectoryDeletion) {
         saveDeletionTargets = collectConfigSaveDeletionDirectories({
           appid,
@@ -11420,7 +11737,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       }
 
       const deletingActiveConfig =
-        sanitizeConfigName(selectedConfig || "") === safeName;
+        sanitizeOptionalConfigName(selectedConfig) === safeName;
       if (deletingActiveConfig) {
         logDeleteInfo("delete-config:active-clear:start", {
           configName,
@@ -11442,13 +11759,14 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       deletedConfigIdentity = {
         configName: safeName,
         appid,
+        platform,
       };
       clearPendingMissingAchievementFile(configName);
 
       if (deleteExtras) {
         try {
-          const cachePath = getCachePath(configName, platform);
-          if (fs.existsSync(cachePath)) {
+          for (const cachePath of cachePathsForDelete) {
+            if (!cachePath || !fs.existsSync(cachePath)) continue;
             await runDeleteWithRetries("cache-file", cachePath, () =>
               fs.unlinkSync(cachePath),
             );
@@ -11470,7 +11788,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
             error: err?.message || String(err),
           });
         }
-        if (appid) {
+        if (appid && !isFf7LocalAchievementSource) {
           try {
             const imagePlatforms = getImagePlatformCandidates(appid, platform);
             for (const imagePlatform of imagePlatforms) {
@@ -11497,8 +11815,11 @@ ipcMain.handle("delete-config", async (_event, payload) => {
           typeof configData?.config_path === "string"
             ? configData.config_path
             : "";
+        // This local source intentionally reuses Steam metadata for 39140.
+        // Keep shared schema/images intact when only its config is deleted.
         const canDeleteSchema =
-          !configPathValue || isManagedSchemaPath(configPathValue);
+          !isFf7LocalAchievementSource &&
+          (!configPathValue || isManagedSchemaPath(configPathValue));
         if (canDeleteSchema && appid) {
           try {
             const schemaDir = resolveSchemaDirForPlatform(appid, platform);
@@ -11804,6 +12125,17 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
           appid: resolvedAppId,
         });
       }
+      const activeRetroPollName =
+        retroAchievementsActivePollState?.configName || "";
+      if (
+        activeRetroPollName &&
+        isRetroAchievementsConfigBlacklisted(activeRetroPollName)
+      ) {
+        stopRetroAchievementsActivePoll("blacklisted", {
+          configName: activeRetroPollName,
+          appid: resolvedAppId,
+        });
+      }
       if (selectedConfig) {
         const activeConfigName = sanitizeConfigName(selectedConfig);
         const activeConfig = activeConfigName
@@ -11835,7 +12167,7 @@ ipcMain.handle("config:blacklist", async (_event, payload = {}) => {
       } catch {}
     }
 
-    refreshBlacklistEffects();
+    await refreshBlacklistEffects();
     try {
       broadcastToAll("blacklist:updated", updatedList);
     } catch {}
@@ -11945,6 +12277,17 @@ ipcMain.handle("blacklist:add-manual", async (_event, payload = {}) => {
           appid: null,
         });
       }
+      const activeRetroPollName =
+        retroAchievementsActivePollState?.configName || "";
+      if (
+        activeRetroPollName &&
+        isRetroAchievementsConfigBlacklisted(activeRetroPollName)
+      ) {
+        stopRetroAchievementsActivePoll("blacklisted", {
+          configName: activeRetroPollName,
+          appid: null,
+        });
+      }
       if (selectedConfig) {
         const activeConfigName = sanitizeConfigName(selectedConfig);
         const activeConfig = activeConfigName
@@ -11963,7 +12306,7 @@ ipcMain.handle("blacklist:add-manual", async (_event, payload = {}) => {
         }
       }
 
-      refreshBlacklistEffects();
+      await refreshBlacklistEffects();
       try {
         broadcastToAll("blacklist:updated", blacklistPayload);
       } catch {}
@@ -12030,7 +12373,7 @@ ipcMain.handle("blacklist:reset", async () => {
         });
       } catch {}
     }
-    refreshBlacklistEffects();
+    await refreshBlacklistEffects();
     try {
       broadcastToAll("blacklist:updated", buildBlacklistPayload());
     } catch {}
@@ -12156,8 +12499,21 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
     if (platform === "xbox-pc") {
       return {
         success: false,
-        message:
+        message: tUi(
+          "main.message.schemaXboxPcImport",
+          {},
           "Xbox PC schemas are generated from Xbox Network. Use Import Xbox PC in Settings.",
+        ),
+      };
+    }
+    if (platform === "retroachievements") {
+      return {
+        success: false,
+        message: tUi(
+          "main.message.schemaRetroAchievementsImport",
+          {},
+          "RetroAchievements schemas are generated from the Web API. Use Import Library in the RetroAchievements account section in Settings.",
+        ),
       };
     }
     const appid = sanitizeAppIdForPlatform(rawAppId, platform);
@@ -12783,7 +13139,7 @@ function requestOverlayNotificationNavigation(route, options = {}) {
     });
     return false;
   }
-  const activeConfigName = sanitizeConfigName(selectedConfig || "");
+  const activeConfigName = sanitizeOptionalConfigName(selectedConfig);
   const resolvedConfigName = sanitizeConfigName(resolved.configName || "");
   const activeConfigMatches =
     !!activeConfigName &&
@@ -13961,7 +14317,7 @@ function markConfigPlatinumFlag(configName) {
     const data = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
     if (data.platinum === true) return false; // already flagged
     data.platinum = true;
-    fs.writeFileSync(cfgPath, JSON.stringify(data, null, 2));
+    writeJsonAtomicSync(cfgPath, data, { backup: true });
     return true;
   } catch {
     return false;
@@ -13971,6 +14327,7 @@ function markConfigPlatinumFlag(configName) {
 function handlePlatinumComplete({
   configName,
   appid,
+  platform,
   savePath,
   configPath,
   isActive = false,
@@ -14008,6 +14365,7 @@ function handlePlatinumComplete({
     save_path: savePath || null,
     configName: configName || null,
     appid: appid ? String(appid) : null,
+    platform: platform || null,
     __isPlatinum: true,
   };
 
@@ -14143,12 +14501,17 @@ function matchesPlatinumNotificationIdentity(notificationData, identity = {}) {
     notificationData?.configName || notificationData?.config_name || "",
   ).trim();
   const payloadName = rawPayloadName ? sanitizeConfigName(rawPayloadName) : "";
-  if (targetName && payloadName) return targetName === payloadName;
+  if (targetName) return !!payloadName && targetName === payloadName;
   const targetAppId = String(identity?.appid || "").trim();
   const payloadAppId = String(
     notificationData?.appid || notificationData?.appId || "",
   ).trim();
-  return !!targetAppId && !!payloadAppId && targetAppId === payloadAppId;
+  if (!targetAppId || !payloadAppId || targetAppId !== payloadAppId) {
+    return false;
+  }
+  const targetPlatform = normalizePlatform(identity?.platform) || "";
+  const payloadPlatform = normalizePlatform(notificationData?.platform) || "";
+  return !targetPlatform || !payloadPlatform || targetPlatform === payloadPlatform;
 }
 
 function resetMainPlatinumNotificationState(identity = {}) {
@@ -14158,14 +14521,20 @@ function resetMainPlatinumNotificationState(identity = {}) {
   const removedDedupByConfig = configName
     ? platinumDedup.delete(configName)
     : false;
-  const removedDedupByApp = appid ? platinumDedup.delete(appid) : false;
+  const removedDedupByApp = !configName && appid
+    ? platinumDedup.delete(appid)
+    : false;
 
   let removedPendingByConfig = 0;
   for (const [key, payload] of pendingPlatinumByConfig) {
     const safeKey = String(key || "").trim();
     if (
       (configName && sanitizeConfigName(safeKey) === configName) ||
-      matchesPlatinumNotificationIdentity(payload, { configName, appid })
+      matchesPlatinumNotificationIdentity(payload, {
+        configName,
+        appid,
+        platform: identity?.platform,
+      })
     ) {
       pendingPlatinumByConfig.delete(key);
       removedPendingByConfig += 1;
@@ -14174,7 +14543,7 @@ function resetMainPlatinumNotificationState(identity = {}) {
 
   const removedPendingNotification = matchesPlatinumNotificationIdentity(
     pendingPlatinumNotification,
-    { configName, appid },
+    { configName, appid, platform: identity?.platform },
   );
   if (removedPendingNotification) {
     pendingPlatinumNotification = null;
@@ -14191,6 +14560,7 @@ function resetMainPlatinumNotificationState(identity = {}) {
       matchesPlatinumNotificationIdentity(earnedNotificationQueue[index], {
         configName,
         appid,
+        platform: identity?.platform,
       })
     ) {
       earnedNotificationQueue.splice(index, 1);
@@ -15827,6 +16197,14 @@ function makeCacheKey(configName, platform = "steam", options = null) {
   if (shadPs4UserId) {
     parts.push(`user_${shadPs4UserId}`);
   }
+  const xLiveLessNessProfile = resolveXLiveLessNessAchievementCacheProfile(
+    configName,
+    safePlatform,
+    options,
+  );
+  if (xLiveLessNessProfile) {
+    parts.push(`profile_${xLiveLessNessProfile}`);
+  }
   return parts.join("_");
 }
 
@@ -15843,7 +16221,8 @@ function listScopedAchievementCachePaths(configName, platform = "steam") {
   if (
     normalizedPlatform !== "steam-official" &&
     normalizedPlatform !== "epic-official" &&
-    normalizedPlatform !== "shadps4"
+    normalizedPlatform !== "shadps4" &&
+    normalizedPlatform !== "xlivelessness"
   ) {
     const exactPath = getCachePath(configName, normalizedPlatform);
     return exactPath ? [exactPath] : [];
@@ -15855,7 +16234,7 @@ function listScopedAchievementCachePaths(configName, platform = "steam") {
   if (!cacheDir || !fs.existsSync(cacheDir)) return [];
   const escapedBaseKey = baseKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rx = new RegExp(
-    `^${escapedBaseKey}(?:_acct_[A-Za-z0-9-]+)?(?:_user_[A-Za-z0-9._-]+)?_achievements_cache\\.json$`,
+    `^${escapedBaseKey}(?:_acct_[A-Za-z0-9-]+)?(?:_user_[A-Za-z0-9._-]+)?(?:_profile_.+)?_achievements_cache\\.json$`,
     "i",
   );
   try {
@@ -15994,9 +16373,21 @@ function updateAchCacheMetaEntry(configName, platform, filePath, appid = "") {
 }
 
 function resolveBootSeedCandidatePath(config) {
+  const normalizedPlatform = normalizePlatform(config?.platform) || "steam";
+  if (isFf7AchievementDatConfig(config)) {
+    const stateFile = getFf7AchievementStateFile(config);
+    return stateFile && fs.existsSync(stateFile) ? stateFile : null;
+  }
+  if (
+    normalizedPlatform === "xlivelessness" ||
+    isXLiveLessNessConfig(config)
+  ) {
+    const configured = String(config?.xlln_active_state_file || "").trim();
+    if (configured && fs.existsSync(configured)) return configured;
+    return listAllXLiveLessNessStateFiles(config)[0]?.filePath || null;
+  }
   const savePathRaw = config?.save_path;
   if (!savePathRaw) return null;
-  const normalizedPlatform = normalizePlatform(config?.platform) || "steam";
   if (normalizedPlatform === "markerpatch" || isMarkerPatchConfig(config)) {
     const stateFile = getMarkerPatchStateFile(config);
     return stateFile && fs.existsSync(stateFile) ? stateFile : null;
@@ -16314,6 +16705,12 @@ async function loadPreviousAchievements(
     normalizedPlatform,
     resolvedOptions,
   );
+  const scopedXLiveLessNessProfile =
+    resolveXLiveLessNessAchievementCacheProfile(
+      configName,
+      normalizedPlatform,
+      resolvedOptions,
+    );
   const effectiveOptions = scopedAccountId
     ? { ...resolvedOptions, accountId: scopedAccountId }
     : resolvedOptions;
@@ -16339,7 +16736,11 @@ async function loadPreviousAchievements(
         normalizedPlatform === "epic-official") &&
       scopedAccountId
     ) &&
-    !(normalizedPlatform === "shadps4" && scopedShadPs4UserId)
+    !(normalizedPlatform === "shadps4" && scopedShadPs4UserId) &&
+    !(
+      normalizedPlatform === "xlivelessness" &&
+      scopedXLiveLessNessProfile
+    )
   ) {
     const legacyPath = path.join(
       cacheDir,
@@ -16498,6 +16899,14 @@ function savePreviousAchievements(
       shadps4UserId:
         normalizedPlatform === "shadps4"
           ? resolveShadPs4AchievementCacheUserId(
+              configName,
+              normalizedPlatform,
+              effectiveOptions,
+            ) || null
+          : null,
+      xLiveLessNessProfile:
+        normalizedPlatform === "xlivelessness"
+          ? resolveXLiveLessNessAchievementCacheProfile(
               configName,
               normalizedPlatform,
               effectiveOptions,
@@ -17734,9 +18143,6 @@ async function refreshSelectedSteamOfficialMonitoring() {
 }
 
 async function clearActiveConfigSelection(options = {}) {
-  if (options?.preserveUpdateGeneration !== true) {
-    activeConfigUpdateGeneration += 1;
-  }
   const reason =
     typeof options?.reason === "string" && options.reason
       ? options.reason
@@ -17750,6 +18156,37 @@ async function clearActiveConfigSelection(options = {}) {
   const matchedTarget =
     !!requestedConfig &&
     sanitizeConfigName(requestedConfig) === sanitizeConfigName(previousConfig);
+  const expectedRevision =
+    options?.expectedRevision != null &&
+    Number.isFinite(Number(options.expectedRevision))
+      ? Number(options.expectedRevision)
+      : null;
+  const requireMatch = options?.requireMatch === true;
+  const revisionMatches =
+    expectedRevision === null ||
+    expectedRevision === activeConfigSelectionRevision;
+
+  if (requireMatch && (!matchedTarget || !revisionMatches)) {
+    appLogger.info("active-config:clear:skipped-stale", {
+      reason,
+      requestedConfig: requestedConfig || null,
+      activeConfig: previousConfig || null,
+      expectedRevision,
+      activeRevision: activeConfigSelectionRevision,
+      matchedTarget,
+      revisionMatches,
+    });
+    return {
+      cleared: false,
+      previousConfig: previousConfig || null,
+      monitorPath: previousMonitorPath,
+      reason: "stale-selection",
+    };
+  }
+
+  if (options?.preserveUpdateGeneration !== true) {
+    activeConfigUpdateGeneration += 1;
+  }
 
   appLogger.info("active-config:clear:start", {
     reason,
@@ -17768,6 +18205,10 @@ async function clearActiveConfigSelection(options = {}) {
       reason,
       activeConfig: previousConfig || null,
     });
+    stopRetroAchievementsActivePoll("clear-active-config", {
+      reason,
+      activeConfig: previousConfig || null,
+    });
     await monitorAchievementsFile(null);
   } catch (err) {
     appLogger.warn("active-config:clear:monitor-stop-failed", {
@@ -17783,6 +18224,8 @@ async function clearActiveConfigSelection(options = {}) {
   selectedConfig = null;
   selectedPlatform = null;
   selectedConfigMode = "none";
+  selectedConfigSelectionSource = "none";
+  activeConfigSelectionRevision += 1;
   currentAppId = null;
   clearPendingMissingAchievementFile(previousConfig);
   void syncAchievementRecorderState(`active-config:clear:${reason}`);
@@ -17799,9 +18242,11 @@ async function clearActiveConfigSelection(options = {}) {
     reason,
     previousConfig: previousConfig || null,
     monitorPath: previousMonitorPath,
+    selectionRevision: activeConfigSelectionRevision,
   });
 
   return {
+    cleared: true,
     previousConfig: previousConfig || null,
     monitorPath: previousMonitorPath,
   };
@@ -17832,14 +18277,21 @@ ipcMain.handle("config:get-active-selection", () => ({
   platform: normalizePlatform(selectedPlatform) || null,
   appid: currentAppId != null ? String(currentAppId) : null,
   mode: selectedConfigMode,
+  selectionSource: selectedConfigSelectionSource,
+  selectionRevision: activeConfigSelectionRevision,
 }));
 
-ipcMain.on(
-  "update-config",
-  async (
-    event,
-    { configName, preset, position, platform, allowBlacklistedSelection },
-  ) => {
+async function applyActiveConfigUpdate(
+  event,
+  {
+    configName,
+    preset,
+    position,
+    platform,
+    allowBlacklistedSelection,
+    selectionSource,
+  } = {},
+) {
     const updateGeneration = ++activeConfigUpdateGeneration;
     const safeName = configName ? sanitizeConfigName(configName) : null;
 
@@ -17880,7 +18332,35 @@ ipcMain.on(
     }
 
     const targetMode = isBlacklisted ? "view-only" : "active";
-    const currentSafeName = sanitizeConfigName(selectedConfig || "");
+    const currentSafeName = sanitizeOptionalConfigName(selectedConfig);
+    const requestedSelectionSource = [
+      "process-auto-select",
+      "watcher-auto-select",
+      "manual",
+    ].includes(String(selectionSource || ""))
+      ? String(selectionSource)
+      : "";
+    const targetSelectionSource =
+      requestedSelectionSource ||
+      (currentSafeName === safeName
+        ? selectedConfigSelectionSource || "manual"
+        : "manual");
+    if (
+      targetSelectionSource === "process-auto-select" &&
+      !activePlaytimeConfigs.has(safeName)
+    ) {
+      ipcLogger.info("update-config:ignored-stale-process-auto-select", {
+        configName: safeName,
+        platform: normalizedPlatform,
+      });
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("auto-deselect-config", {
+          configName: safeName,
+          reason: "process-no-longer-running",
+        });
+      }
+      return;
+    }
     const currentPlatform = normalizePlatform(selectedPlatform) || null;
     const requiresTransition =
       currentSafeName !== safeName ||
@@ -17901,6 +18381,9 @@ ipcMain.on(
     selectedConfig = safeName;
     selectedPlatform = normalizedPlatform;
     selectedConfigMode = targetMode;
+    selectedConfigSelectionSource = targetSelectionSource;
+    activeConfigSelectionRevision += 1;
+    bindProcessRuntimeSessionToActiveSelection(safeName);
     selectedConfigPath = isNonEmptyString(config.config_path)
       ? config.config_path
       : null;
@@ -17912,6 +18395,8 @@ ipcMain.on(
       platform: selectedPlatform,
       appid: appIdString || null,
       mode: selectedConfigMode,
+      selectionSource: selectedConfigSelectionSource,
+      selectionRevision: activeConfigSelectionRevision,
       transitioned: requiresTransition,
     });
     void syncAchievementRecorderState(
@@ -17933,6 +18418,10 @@ ipcMain.on(
         appid: appIdString,
       });
       stopXboxPcActivePoll("blacklisted-selection", {
+        configName: safeName,
+        appid: appIdString,
+      });
+      stopRetroAchievementsActivePoll("blacklisted-selection", {
         configName: safeName,
         appid: appIdString,
       });
@@ -17965,6 +18454,12 @@ ipcMain.on(
     }
     if (normalizedPlatform !== "xbox-pc") {
       stopXboxPcActivePoll("config-switch", {
+        nextConfig: safeName,
+        nextPlatform: normalizedPlatform || null,
+      });
+    }
+    if (normalizedPlatform !== "retroachievements") {
+      stopRetroAchievementsActivePoll("config-switch", {
         nextConfig: safeName,
         nextPlatform: normalizedPlatform || null,
       });
@@ -18015,6 +18510,24 @@ ipcMain.on(
         });
       }
       startXboxPcActivePoll(safeName, "update-config");
+      return;
+    }
+    if (normalizedPlatform === "retroachievements") {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      achievementsFilePath = null;
+      monitorAchievementsFile(null);
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      startRetroAchievementsActivePoll(safeName, "update-config");
       return;
     }
     if (normalizedPlatform === "xenia") {
@@ -18128,6 +18641,26 @@ ipcMain.on(
       return;
     }
 
+    if (isFf7AchievementDatConfig(config)) {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      // The adaptive watched-folder source owns achievement.dat, including
+      // creation after the config is selected. Avoid a duplicate main watcher.
+      achievementsFilePath = null;
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      monitorAchievementsFile(null);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      return;
+    }
+
     if (normalizedPlatform === "markerpatch" || isMarkerPatchConfig(config)) {
       const appid = String(config.appid || "");
       currentAppId = appid || null;
@@ -18150,6 +18683,27 @@ ipcMain.on(
     }
 
     if (normalizedPlatform === "madnesspatch" || isMadnessPatchConfig(config)) {
+      const appid = String(config.appid || "");
+      currentAppId = appid || null;
+      achievementsFilePath = null;
+      if (isNonEmptyString(configName)) {
+        pendingMissingAchievementFiles.delete(configName);
+      }
+      monitorAchievementsFile(null);
+      if (overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      return;
+    }
+
+    if (
+      normalizedPlatform === "xlivelessness" ||
+      isXLiveLessNessConfig(config)
+    ) {
       const appid = String(config.appid || "");
       currentAppId = appid || null;
       achievementsFilePath = null;
@@ -18535,8 +19089,49 @@ ipcMain.on(
         uiLanguage: selectedUiLanguage,
       });
     }
-  },
-);
+}
+
+ipcMain.on("update-config", (event, payload = {}) => {
+  void applyActiveConfigUpdate(event, payload).catch((error) => {
+    ipcLogger.error("update-config:failed", {
+      configName: payload?.configName || null,
+      error: error?.message || String(error),
+    });
+  });
+});
+
+ipcMain.handle("config:select-active", async (event, payload = {}) => {
+  try {
+    const revisionBefore = activeConfigSelectionRevision;
+    await applyActiveConfigUpdate(event, payload);
+    const safeName = sanitizeOptionalConfigName(payload?.configName);
+    const selectedSafeName = sanitizeOptionalConfigName(selectedConfig);
+    const success =
+      !!safeName &&
+      selectedSafeName === safeName &&
+      selectedConfigMode !== "none" &&
+      activeConfigSelectionRevision > revisionBefore;
+    return {
+      success,
+      configName: success ? selectedConfig : null,
+      platform: success ? selectedPlatform : null,
+      mode: selectedConfigMode,
+      selectionSource: selectedConfigSelectionSource,
+      selectionRevision: activeConfigSelectionRevision,
+      error: success ? null : "selection-not-applied",
+    };
+  } catch (error) {
+    ipcLogger.error("config:select-active:failed", {
+      configName: payload?.configName || null,
+      error: error?.message || String(error),
+    });
+    return {
+      success: false,
+      configName: null,
+      error: error?.message || String(error),
+    };
+  }
+});
 
 async function waitForPathExists(p, tries = 50, delay = 60) {
   return new Promise((resolve) => {
@@ -18923,7 +19518,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     nextPlatform = nextPlatform || "steam";
     payload.platform = nextPlatform;
     const oldCachePath = getCachePath(safeOld, prevPlatform || "steam");
-    const newCachePath = getCachePath(safeNew, nextPlatform);
+    let newCachePath = "";
     const oldScopedCachePaths = listScopedAchievementCachePaths(
       safeOld,
       prevPlatform || "steam",
@@ -19024,6 +19619,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     } catch {}
     fs.writeFileSync(newConfigPath, JSON.stringify(payload, null, 2));
 
+    newCachePath = getCachePath(safeNew, nextPlatform);
     if (fs.existsSync(oldCachePath)) {
       fs.renameSync(oldCachePath, newCachePath);
     }
@@ -19032,7 +19628,9 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     if (
       prevCachePlatform === nextCachePlatform &&
       (nextCachePlatform === "steam-official" ||
-        nextCachePlatform === "epic-official")
+        nextCachePlatform === "epic-official" ||
+        nextCachePlatform === "shadps4" ||
+        nextCachePlatform === "xlivelessness")
     ) {
       const oldPrefix = `${sanitizeConfigName(safeOld || "")}_${nextCachePlatform}`;
       const newPrefix = `${sanitizeConfigName(safeNew || "")}_${nextCachePlatform}`;
@@ -20759,17 +21357,46 @@ ipcMain.handle("selectExecutable", async (_event, currentPath) => {
 
 ipcMain.handle(
   "launchExecutable",
-  async (_event, exePath, argsString, workingDirectory) => {
+  async (_event, exeOrPayload, argsString, workingDirectory) => {
     try {
+      const launchPayload =
+        exeOrPayload && typeof exeOrPayload === "object"
+          ? exeOrPayload
+          : null;
+      const requestedConfigName = sanitizeOptionalConfigName(
+        launchPayload?.configName || selectedConfig,
+      );
+      let configData = null;
+      if (requestedConfigName) {
+        const configPath = resolveConfigJsonPath(
+          configsDir,
+          requestedConfigName,
+        );
+        if (configPath && fs.existsSync(configPath)) {
+          configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
+        }
+      }
+
+      const exePath = String(
+        launchPayload
+          ? launchPayload.executable || configData?.executable || ""
+          : exeOrPayload || configData?.executable || "",
+      ).trim();
+      const effectiveArgs = launchPayload
+        ? launchPayload.arguments ?? configData?.arguments ?? ""
+        : argsString ?? configData?.arguments ?? "";
+      const effectiveWorkingDirectory = launchPayload
+        ? launchPayload.workingDirectory ?? configData?.working_directory ?? ""
+        : workingDirectory ?? configData?.working_directory ?? "";
       if (!exePath) {
         notifyError(tUi("main.notify.executable.pathMissing"));
-        return;
+        return { success: false, error: "executable-path-missing" };
       }
-      const args = splitArgsString(argsString);
+      const args = splitArgsString(effectiveArgs);
       const isAppsFolderTarget = /^shell:AppsFolder\\/i.test(
         String(exePath || "").trim(),
       );
-      const requestedCwd = String(workingDirectory || "").trim();
+      const requestedCwd = String(effectiveWorkingDirectory || "").trim();
       const cwd =
         requestedCwd && fs.existsSync(requestedCwd)
           ? requestedCwd
@@ -20800,39 +21427,41 @@ ipcMain.handle(
       });
       child.unref();
 
-      if (selectedConfig) {
-        const configPath = path.join(configsDir, `${selectedConfig}.json`);
-        if (fs.existsSync(configPath)) {
-          const configData = JSON.parse(fs.readFileSync(configPath, "utf8"));
-          const safeConfigName = sanitizeConfigName(selectedConfig);
-          configData.__playtimeKey = safeConfigName;
-          if (child?.pid) {
-            configData.__launchPid = child.pid;
-            manualLaunchPidMap.set(child.pid, selectedConfig);
-            setTimeout(() => {
-              if (manualLaunchPidMap.get(child.pid) === selectedConfig) {
-                manualLaunchPidMap.delete(child.pid);
-              }
-            }, 120000);
-          }
-          manualLaunchInProgress = true;
-          detectedConfigName = configData.name;
-          activePlaytimeConfigs.add(configData.name);
-          startPlaytimeLogWatcher(configData);
-        } else {
-          notifyError(
-            tUi("main.notify.config.notFound", { config: selectedConfig }),
-          );
+      if (requestedConfigName && configData) {
+        configData.__playtimeKey = requestedConfigName;
+        if (child?.pid) {
+          configData.__launchPid = child.pid;
+          manualLaunchPidMap.set(child.pid, requestedConfigName);
+          setTimeout(() => {
+            if (manualLaunchPidMap.get(child.pid) === requestedConfigName) {
+              manualLaunchPidMap.delete(child.pid);
+            }
+          }, 120000);
         }
+        manualLaunchInProgress = true;
+        detectedConfigName = requestedConfigName;
+        activePlaytimeConfigs.add(requestedConfigName);
+        startPlaytimeLogWatcher(configData);
       } else {
         notifyError(
-          `❌ selectedConfig is null – cannot start playtime log watcher.`,
+          requestedConfigName
+            ? tUi("main.notify.config.notFound", {
+                config: requestedConfigName,
+              })
+            : `❌ selectedConfig is null – cannot start playtime log watcher.`,
         );
       }
+      return {
+        success: true,
+        pid: child?.pid || null,
+        configName: requestedConfigName || null,
+        playtimeTrackingStarted: Boolean(requestedConfigName && configData),
+      };
     } catch (err) {
       notifyError(
         tUi("main.notify.executable.launchFailed", { error: err.message }),
       );
+      return { success: false, error: err?.message || String(err) };
     }
   },
 );
@@ -20851,6 +21480,18 @@ let xboxPcActivePollTimer = null;
 let xboxPcActivePollState = null;
 let xboxPcActivePollInFlight = null;
 let xboxPcActivePollGeneration = 0;
+const RETROACHIEVEMENTS_ACTIVE_POLL_INITIAL_MS = Math.max(
+  5000,
+  Number(process.env.RETROACHIEVEMENTS_POLL_INITIAL_MS) || 30000,
+);
+const RETROACHIEVEMENTS_ACTIVE_POLL_INTERVAL_MS = Math.max(
+  10000,
+  Number(process.env.RETROACHIEVEMENTS_POLL_INTERVAL_MS) || 30000,
+);
+let retroAchievementsActivePollTimer = null;
+let retroAchievementsActivePollState = null;
+let retroAchievementsActivePollInFlight = null;
+let retroAchievementsActivePollGeneration = 0;
 
 function isEpicOfficialBackgroundWorkBootReady() {
   if (
@@ -20893,7 +21534,7 @@ function isEpicOfficialConfigActiveForPolling(configName) {
   if (isEpicOfficialConfigSelectedForPolling(safeName)) {
     return true;
   }
-  if (sanitizeConfigName(detectedConfigName || "") === safeName) return true;
+  if (sanitizeOptionalConfigName(detectedConfigName) === safeName) return true;
   for (const activeName of activePlaytimeConfigs) {
     if (sanitizeConfigName(activeName || "") === safeName) return true;
   }
@@ -20905,7 +21546,7 @@ function isEpicOfficialConfigSelectedForPolling(configName) {
   if (
     selectedConfigMode !== "active" ||
     !safeName ||
-    sanitizeConfigName(selectedConfig || "") !== safeName
+    sanitizeOptionalConfigName(selectedConfig) !== safeName
   ) {
     return false;
   }
@@ -21198,11 +21839,11 @@ function isXboxPcConfigActiveForPolling(configName) {
   if (isXboxPcConfigBlacklisted(safeName)) return false;
   if (
     selectedConfigMode === "active" &&
-    sanitizeConfigName(selectedConfig || "") === safeName
+    sanitizeOptionalConfigName(selectedConfig) === safeName
   ) {
     return true;
   }
-  if (sanitizeConfigName(detectedConfigName || "") === safeName) return true;
+  if (sanitizeOptionalConfigName(detectedConfigName) === safeName) return true;
   for (const activeName of activePlaytimeConfigs) {
     if (sanitizeConfigName(activeName || "") === safeName) return true;
   }
@@ -21380,7 +22021,7 @@ async function runXboxPcActivePoll(trigger = "manual") {
       if (
         overlayWindow &&
         !overlayWindow.isDestroyed() &&
-        sanitizeConfigName(selectedConfig || "") === safeName
+        sanitizeOptionalConfigName(selectedConfig) === safeName
       ) {
         overlayWindow.webContents.send("load-overlay-data", safeName);
         overlayWindow.webContents.send("set-language", {
@@ -23165,8 +23806,130 @@ function scheduleAutoSelectProcessPollerAfterBoot() {
 
 let detectedConfigName = null;
 const activePlaytimeConfigs = new Set();
+const processRuntimeSessions = new Map();
+let processRuntimeSessionSequence = 0;
 let autoSelectRunningGameConfigInFlight = false;
 let autoSelectPendingProcesses = null;
+
+function getProcessRuntimeSession(configName) {
+  const safeName = sanitizeOptionalConfigName(configName);
+  return safeName ? processRuntimeSessions.get(safeName) || null : null;
+}
+
+function isProcessRuntimeSessionRunning(session, processes) {
+  if (!session || typeof session !== "object") return false;
+  const list = Array.isArray(processes) ? processes : [];
+  if (!list.length) return false;
+  const configData = session.configData || {};
+  if (!hasProcessNameValue(configData.process_name)) return false;
+  return list.some((processInfo) =>
+    processMatchesConfig(processInfo, configData, session.configName),
+  );
+}
+
+function markProcessRuntimeObserved(configName, entry, processInfo = null) {
+  const safeName = sanitizeOptionalConfigName(configName || entry?.name);
+  const configData = entry?.data || entry || null;
+  if (!safeName || !hasProcessNameValue(configData?.process_name)) return null;
+  const previous = processRuntimeSessions.get(safeName) || null;
+  const session = {
+    sessionId:
+      previous?.sessionId ||
+      `${Date.now()}-${++processRuntimeSessionSequence}`,
+    configName: safeName,
+    configData: { ...configData },
+    observedAt: previous?.observedAt || Date.now(),
+    lastSeenAt: Date.now(),
+    lastPid:
+      Number.isFinite(Number(processInfo?.pid)) && Number(processInfo.pid) > 0
+        ? Number(processInfo.pid)
+        : previous?.lastPid || null,
+    selectionRevision: previous?.selectionRevision ?? null,
+  };
+  if (
+    selectedConfigMode === "active" &&
+    sanitizeOptionalConfigName(selectedConfig) === safeName
+  ) {
+    session.selectionRevision = activeConfigSelectionRevision;
+  }
+  processRuntimeSessions.set(safeName, session);
+  return session;
+}
+
+function bindProcessRuntimeSessionToActiveSelection(configName) {
+  const safeName = sanitizeOptionalConfigName(configName);
+  const session = getProcessRuntimeSession(safeName);
+  if (
+    !session ||
+    selectedConfigMode !== "active" ||
+    sanitizeOptionalConfigName(selectedConfig) !== safeName
+  ) {
+    return false;
+  }
+  let snapshot = [];
+  try {
+    snapshot = processPoller.getSnapshot();
+  } catch {}
+  if (!isProcessRuntimeSessionRunning(session, snapshot)) return false;
+  session.selectionRevision = activeConfigSelectionRevision;
+  session.lastSeenAt = Date.now();
+  processRuntimeSessions.set(safeName, session);
+  return true;
+}
+
+async function autoDeselectProcessSelectedConfig(
+  configName,
+  reason = "process-exit",
+  details = {},
+) {
+  const safeName = sanitizeOptionalConfigName(configName);
+  const runtimeSession = getProcessRuntimeSession(safeName);
+  if (safeName) processRuntimeSessions.delete(safeName);
+  const indexedConfig = safeName
+    ? autoSelectIndex.configEntries.get(safeName)?.data || null
+    : null;
+  const config =
+    indexedConfig ||
+    readConfigForAchievementCache(safeName) ||
+    runtimeSession?.configData ||
+    null;
+  if (
+    !safeName ||
+    !runtimeSession ||
+    runtimeSession.selectionRevision === null ||
+    runtimeSession.selectionRevision !== activeConfigSelectionRevision ||
+    selectedConfigMode !== "active" ||
+    !hasProcessNameValue(config?.process_name) ||
+    sanitizeOptionalConfigName(selectedConfig) !== safeName
+  ) {
+    return false;
+  }
+
+  appLogger.info("auto-deselect:process-config", {
+    configName: safeName,
+    reason,
+    processSessionId: runtimeSession.sessionId,
+    selectionRevision: runtimeSession.selectionRevision,
+    selectionSource: selectedConfigSelectionSource,
+    ...details,
+  });
+  const clearResult = await clearActiveConfigSelection({
+    reason: `auto-deselect:${reason}`,
+    configName: safeName,
+    expectedRevision: runtimeSession.selectionRevision,
+    requireMatch: true,
+  });
+  if (clearResult?.cleared !== true) return false;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("auto-deselect-config", {
+      configName: safeName,
+      reason,
+      selectionRevision: runtimeSession.selectionRevision,
+      mainAlreadyCleared: true,
+    });
+  }
+  return true;
+}
 
 function splitArgsString(input) {
   const argStr = String(input || "").trim();
@@ -23252,7 +24015,10 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
     if (!configNames?.size) continue;
     const requiresArguments = Array.from(configNames).some((configName) => {
       const entry = autoSelectIndex.configEntries.get(configName);
-      return getConfigProcessArgTokens(entry?.data).length > 0;
+      return (
+        getConfigProcessArgTokens(entry?.data).length > 0 ||
+        isXLiveLessNessConfig(entry?.data)
+      );
     });
     if (!requiresArguments) continue;
 
@@ -23341,6 +24107,433 @@ function processMatchesConfig(proc, configData, configName) {
   );
 }
 
+function resolveXLiveLessNessAchievementCacheProfile(
+  configName,
+  platform = "steam",
+  options = null,
+) {
+  const normalizedPlatform = normalizePlatform(platform) || "steam";
+  if (normalizedPlatform !== "xlivelessness") return "";
+  const resolved = normalizeAchievementCacheOptions(options);
+  const explicitProfile = String(
+    resolved.xllnProfile || resolved.xlln_profile || resolved.profile || "",
+  ).trim();
+  if (explicitProfile) {
+    return sanitizeConfigName(explicitProfile) || explicitProfile;
+  }
+  for (const candidate of [
+    resolved.filePath,
+    resolved.savePath,
+    resolved.save_path,
+  ]) {
+    const profile = getXLiveLessNessProfileFromStatePath(candidate);
+    if (profile) return sanitizeConfigName(profile) || profile;
+  }
+  const config = readConfigForAchievementCache(configName);
+  const configuredProfile = String(config?.xlln_active_profile || "").trim();
+  return configuredProfile
+    ? sanitizeConfigName(configuredProfile) || configuredProfile
+    : "";
+}
+
+async function applyXLiveLessNessRuntimeConfig(entry, proc) {
+  if (!entry?.name || !isXLiveLessNessConfig(entry.data)) return false;
+  const commandLine =
+    typeof proc?.cmd === "string"
+      ? proc.cmd
+      : Array.isArray(proc?.cmd)
+        ? proc.cmd
+        : proc?.command || "";
+  const configPath = resolveXLiveLessNessConfigArgument(commandLine, {
+    workingDirectory:
+      entry.data?.working_directory || entry.data?.workingDirectory || "",
+    executablePath: entry.data?.executable || "",
+    gamePath: entry.data?.xlln_game_path || entry.data?.game_path || "",
+  });
+  if (!configPath) return false;
+  const storageRoot = path.dirname(configPath);
+  const existingRoots = Array.isArray(entry.data.xlln_storage_roots)
+    ? entry.data.xlln_storage_roots.slice()
+    : [];
+  const rootKey = normalizeXLiveLessNessPath(storageRoot);
+  if (!rootKey) return false;
+  if (
+    normalizeXLiveLessNessPath(entry.data.xlln_config_path) ===
+      normalizeXLiveLessNessPath(configPath) &&
+    existingRoots.some(
+      (candidate) => normalizeXLiveLessNessPath(candidate) === rootKey,
+    )
+  ) {
+    return false;
+  }
+  if (
+    !existingRoots.some(
+      (candidate) => normalizeXLiveLessNessPath(candidate) === rootKey,
+    )
+  ) {
+    existingRoots.push(storageRoot);
+  }
+  const configFilePath = path.join(configsDir, `${entry.name}.json`);
+  let diskConfig = entry.data;
+  try {
+    diskConfig = JSON.parse(await fs.promises.readFile(configFilePath, "utf8"));
+  } catch {}
+  for (const candidate of Array.isArray(diskConfig?.xlln_storage_roots)
+    ? diskConfig.xlln_storage_roots
+    : []) {
+    const candidateKey = normalizeXLiveLessNessPath(candidate);
+    if (
+      candidateKey &&
+      !existingRoots.some(
+        (current) => normalizeXLiveLessNessPath(current) === candidateKey,
+      )
+    ) {
+      existingRoots.push(candidate);
+    }
+  }
+  const nextConfig = {
+    ...diskConfig,
+    xlln_config_path: configPath,
+    xlln_storage_roots: existingRoots,
+    achievement_source: {
+      ...(diskConfig?.achievement_source || {}),
+      storage_roots: existingRoots,
+    },
+  };
+  try {
+    writeJsonAtomicSync(configFilePath, nextConfig, { backup: true });
+  } catch (error) {
+    appLogger.warn("xlivelessness:runtime-config-save-failed", {
+      config: entry.name,
+      configPath,
+      error: error?.message || String(error),
+    });
+    return false;
+  }
+  entry.data = nextConfig;
+  appLogger.info("xlivelessness:runtime-config-detected", {
+    config: entry.name,
+    appid: entry.appid || null,
+    process: proc?.name || null,
+    configPath,
+    storageRoot,
+  });
+  queueAutoSelectIndexUpsertFromConfigPath(configFilePath);
+  const refreshRuntimeWatcher =
+    watchedFoldersApi?.refreshXLiveLessNessConfig ||
+    watchedFoldersApi?.refreshConfigState;
+  if (typeof refreshRuntimeWatcher === "function") {
+    try {
+      if (watchedFoldersApi?.refreshXLiveLessNessConfig) {
+        await refreshRuntimeWatcher(entry.name, {
+          suppressInitialNotify: true,
+        });
+      } else {
+        await refreshRuntimeWatcher({ suppressInitialNotify: true });
+      }
+    } catch (error) {
+      appLogger.warn("xlivelessness:runtime-watch-refresh-failed", {
+        config: entry.name,
+        error: error?.message || String(error),
+      });
+    }
+  }
+  return true;
+}
+
+function isRetroAchievementsConfigBlacklisted(configName, config = null) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  const resolvedConfig =
+    config && typeof config === "object"
+      ? config
+      : readConfigForAchievementCache(safeName);
+  if (
+    !resolvedConfig ||
+    normalizePlatform(resolvedConfig?.platform) !== "retroachievements"
+  ) {
+    return false;
+  }
+  const gameId = String(
+    resolvedConfig?.retroachievements_game_id || resolvedConfig?.appid || "",
+  ).trim();
+  return gameId
+    ? isAppIdBlacklisted(gameId, "retroachievements")
+    : false;
+}
+
+function isRetroAchievementsConfigActiveForPolling(configName) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName || selectedConfigMode !== "active") return false;
+  if (normalizePlatform(selectedPlatform) !== "retroachievements") return false;
+  if (sanitizeOptionalConfigName(selectedConfig) !== safeName) return false;
+  return !isRetroAchievementsConfigBlacklisted(safeName);
+}
+
+function stopRetroAchievementsActivePoll(reason = "manual", meta = {}) {
+  if (retroAchievementsActivePollTimer) {
+    clearTimeout(retroAchievementsActivePollTimer);
+    retroAchievementsActivePollTimer = null;
+  }
+  const previous = retroAchievementsActivePollState;
+  retroAchievementsActivePollGeneration += 1;
+  retroAchievementsActivePollState = null;
+  retroAchievementsActivePollInFlight = null;
+  if (previous) {
+    retroAchievementsLogger.info("retroachievements:poll-stopped", {
+      reason,
+      configName: previous.configName || null,
+      ...meta,
+    });
+  }
+}
+
+function scheduleRetroAchievementsActivePoll(delayMs, reason = "reschedule") {
+  if (!retroAchievementsActivePollState) return;
+  if (retroAchievementsActivePollTimer) {
+    clearTimeout(retroAchievementsActivePollTimer);
+  }
+  const safeDelay = Math.max(5000, Number(delayMs) || 0);
+  retroAchievementsActivePollTimer = setTimeout(() => {
+    retroAchievementsActivePollTimer = null;
+    void runRetroAchievementsActivePoll("timer");
+  }, safeDelay);
+  retroAchievementsLogger.debug?.("retroachievements:poll-scheduled", {
+    reason,
+    configName: retroAchievementsActivePollState.configName || null,
+    delayMs: safeDelay,
+  });
+}
+
+function notifyRetroAchievementsUnlocks(
+  config,
+  configName,
+  schemaAchievements,
+  unlockedKeys,
+) {
+  if (!Array.isArray(schemaAchievements) || !schemaAchievements.length) return 0;
+  if (!Array.isArray(unlockedKeys) || !unlockedKeys.length) return 0;
+  const schemaMap = new Map();
+  for (const entry of schemaAchievements) {
+    const key = String(entry?.name || entry?.api || "").trim();
+    if (key) schemaMap.set(key, entry);
+  }
+  let queued = 0;
+  for (const key of unlockedKeys) {
+    const achievementConfig = schemaMap.get(String(key || "").trim());
+    if (!achievementConfig) continue;
+    queueAchievementNotification({
+      name: achievementConfig.name || achievementConfig.api || key,
+      displayName: getSafeLocalizedText(
+        achievementConfig.displayName,
+        selectedLanguage,
+      ),
+      description: getSafeLocalizedText(
+        achievementConfig.description,
+        selectedLanguage,
+      ),
+      icon: achievementConfig.icon,
+      icon_gray: achievementConfig.icon_gray || achievementConfig.icongray,
+      appid: config?.appid || currentAppId || null,
+      platform: "retroachievements",
+      config_path: config?.config_path || selectedConfigPath || "",
+      configName,
+      points: Number(achievementConfig.points) || 0,
+      rarityPct: achievementConfig.rarityPct,
+      raritySource:
+        achievementConfig.raritySource || RETROACHIEVEMENTS_RARITY_SOURCE,
+      preset: selectedPreset,
+      position: selectedPosition,
+      sound: getUserPreferredSound() || "mute",
+    });
+    queued += 1;
+  }
+  return queued;
+}
+
+async function runRetroAchievementsActivePoll(trigger = "manual") {
+  const state = retroAchievementsActivePollState;
+  if (!state || retroAchievementsActivePollInFlight) return;
+  if (!isRetroAchievementsConfigActiveForPolling(state.configName)) {
+    stopRetroAchievementsActivePoll("inactive", { trigger });
+    return;
+  }
+  const safeName = sanitizeConfigName(state.configName || "");
+  const configPath = resolveConfigJsonPath(configsDir, safeName);
+  if (!safeName || !configPath || !fs.existsSync(configPath)) {
+    stopRetroAchievementsActivePoll("config-missing", { trigger });
+    return;
+  }
+  const generation = retroAchievementsActivePollGeneration;
+  const job = (async () => {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    if (normalizePlatform(config?.platform) !== "retroachievements") {
+      stopRetroAchievementsActivePoll("platform-changed", { trigger });
+      return;
+    }
+    if (isRetroAchievementsConfigBlacklisted(safeName, config)) {
+      stopRetroAchievementsActivePoll("blacklisted", {
+        trigger,
+        appid: config?.retroachievements_game_id || config?.appid || null,
+      });
+      return;
+    }
+    const cached =
+      (await loadPreviousAchievements(safeName, "retroachievements")) || {};
+    const synced = await syncRetroAchievements(config, {
+      userDataDir: app.getPath("userData"),
+      timeoutMs: 15000,
+    });
+    if (generation !== retroAchievementsActivePollGeneration) return;
+    const snapshot = preserveRetroAchievementsEarnedState(
+      synced.snapshot || {},
+      cached,
+    );
+    const delta = getRetroAchievementsSnapshotDelta(cached, snapshot);
+    const snapshotChanged = !deepEqual(cached || {}, snapshot || {});
+    const hadCachedSnapshot = Object.keys(cached || {}).length > 0;
+    savePreviousAchievements(safeName, snapshot, "retroachievements");
+    if (config.save_path) {
+      try {
+        writeJsonAtomicSync(
+          path.join(config.save_path, "achievements.json"),
+          snapshot,
+        );
+      } catch (error) {
+        retroAchievementsLogger.warn(
+          "retroachievements:poll-state-write-failed",
+          {
+            configName: safeName,
+            error: error?.message || String(error),
+          },
+        );
+      }
+    }
+    let notifiedCount = 0;
+    if (snapshotChanged) {
+      let schemaAchievements = [];
+      try {
+        const schemaPath = resolveAchievementsSchemaPath(config);
+        schemaAchievements = schemaPath
+          ? JSON.parse(fs.readFileSync(schemaPath, "utf8"))
+          : [];
+      } catch {}
+      if (hadCachedSnapshot && delta.unlockedKeys.length) {
+        notifiedCount = notifyRetroAchievementsUnlocks(
+          config,
+          safeName,
+          schemaAchievements,
+          delta.unlockedKeys,
+        );
+        retroAchievementsLogger.info(
+          "retroachievements:poll-unlocks-detected",
+          {
+            configName: safeName,
+            gameId: synced.gameId,
+            unlockedCount: delta.unlockedKeys.length,
+            notifiedCount,
+          },
+        );
+        const achievementStates = Object.values(snapshot || {});
+        if (
+          achievementStates.length > 0 &&
+          achievementStates.every((entry) => entry?.earned === true)
+        ) {
+          handlePlatinumComplete({
+            configName: safeName,
+            appid: config?.appid || synced.gameId || null,
+            platform: "retroachievements",
+            savePath: config?.save_path || "",
+            configPath: config?.config_path || "",
+            isActive: true,
+          });
+        }
+      }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send("refresh-achievements-table", safeName);
+      }
+      if (
+        overlayWindow &&
+        !overlayWindow.isDestroyed() &&
+        sanitizeOptionalConfigName(selectedConfig) === safeName
+      ) {
+        overlayWindow.webContents.send("load-overlay-data", safeName);
+        overlayWindow.webContents.send("set-language", {
+          language: selectedLanguage,
+          uiLanguage: selectedUiLanguage,
+        });
+      }
+      broadcastToAll("achievements:file-updated", {
+        appid: config.appid || null,
+        configName: safeName,
+      });
+    }
+    state.errorCount = 0;
+    retroAchievementsLogger.debug?.("retroachievements:poll-success", {
+      trigger,
+      configName: safeName,
+      changed: snapshotChanged,
+      unlockedCount: delta.unlockedKeys.length,
+      notifiedCount,
+    });
+    scheduleRetroAchievementsActivePoll(
+      RETROACHIEVEMENTS_ACTIVE_POLL_INTERVAL_MS,
+      "success",
+    );
+  })()
+    .catch((error) => {
+      if (
+        generation !== retroAchievementsActivePollGeneration ||
+        retroAchievementsActivePollState !== state
+      ) {
+        return;
+      }
+      state.errorCount = (state.errorCount || 0) + 1;
+      const retryMs = Math.min(
+        10 * 60 * 1000,
+        60000 * 2 ** Math.min(state.errorCount - 1, 3),
+      );
+      retroAchievementsLogger.warn("retroachievements:poll-failed", {
+        trigger,
+        configName: safeName,
+        statusCode: Number(error?.statusCode) || 0,
+        error: error?.message || String(error),
+        retryInMs: retryMs,
+      });
+      scheduleRetroAchievementsActivePoll(retryMs, "error-backoff");
+    })
+    .finally(() => {
+      if (retroAchievementsActivePollInFlight === job) {
+        retroAchievementsActivePollInFlight = null;
+      }
+    });
+  retroAchievementsActivePollInFlight = job;
+  await job;
+}
+
+function startRetroAchievementsActivePoll(
+  configName,
+  reason = "active-config",
+) {
+  const safeName = sanitizeConfigName(configName || "");
+  if (!safeName) return false;
+  if (!isRetroAchievementsConfigActiveForPolling(safeName)) return false;
+  if (retroAchievementsActivePollState?.configName === safeName) return true;
+  stopRetroAchievementsActivePoll("restart", { nextConfig: safeName });
+  retroAchievementsActivePollState = { configName: safeName, errorCount: 0 };
+  retroAchievementsLogger.info("retroachievements:poll-started", {
+    reason,
+    configName: safeName,
+    initialMs: RETROACHIEVEMENTS_ACTIVE_POLL_INITIAL_MS,
+    intervalMs: RETROACHIEVEMENTS_ACTIVE_POLL_INTERVAL_MS,
+  });
+  scheduleRetroAchievementsActivePoll(
+    RETROACHIEVEMENTS_ACTIVE_POLL_INITIAL_MS,
+    reason,
+  );
+  return true;
+}
+
 async function autoSelectRunningGameConfigOnce(processes) {
   try {
     const list = Array.isArray(processes) ? processes : [];
@@ -23397,16 +24590,30 @@ async function autoSelectRunningGameConfigOnce(processes) {
     if (manualLaunchInProgress) {
       const entry = getEntry(detectedConfigName);
       if (!entry) {
-        stopEpicOfficialActivePollIfMatches(
-          detectedConfigName,
-          "entry-missing",
-          {
-            configName: detectedConfigName || null,
-            source: "manual-launch",
-          },
-        );
-        manualLaunchInProgress = false;
-        detectedConfigName = null;
+        const runtimeSession = getProcessRuntimeSession(detectedConfigName);
+        if (isProcessRuntimeSessionRunning(runtimeSession, list)) {
+          markProcessRuntimeObserved(
+            detectedConfigName,
+            runtimeSession.configData,
+          );
+        } else {
+          await autoDeselectProcessSelectedConfig(
+            detectedConfigName,
+            "entry-missing",
+            { source: "manual-launch" },
+          );
+          stopEpicOfficialActivePollIfMatches(
+            detectedConfigName,
+            "entry-missing",
+            {
+              configName: detectedConfigName || null,
+              source: "manual-launch",
+            },
+          );
+          manualLaunchInProgress = false;
+          activePlaytimeConfigs.delete(detectedConfigName);
+          detectedConfigName = null;
+        }
       } else {
         const isRunning = isEntryRunning(entry, detectedConfigName);
         if (!isRunning) {
@@ -23423,9 +24630,19 @@ async function autoSelectRunningGameConfigOnce(processes) {
               source: "manual-launch",
             },
           );
+          await autoDeselectProcessSelectedConfig(
+            entry?.name || detectedConfigName,
+            "process-exit",
+            { source: "manual-launch" },
+          );
           manualLaunchInProgress = false;
-          activePlaytimeConfigs.delete(entry?.data?.name || detectedConfigName);
+          activePlaytimeConfigs.delete(entry?.name || detectedConfigName);
           detectedConfigName = null;
+        } else {
+          markProcessRuntimeObserved(
+            entry?.name || detectedConfigName,
+            entry,
+          );
         }
       }
     }
@@ -23433,15 +24650,29 @@ async function autoSelectRunningGameConfigOnce(processes) {
     if (detectedConfigName) {
       const entry = getEntry(detectedConfigName);
       if (!entry) {
-        stopEpicOfficialActivePollIfMatches(
-          detectedConfigName,
-          "entry-missing",
-          {
-            configName: detectedConfigName || null,
-            source: "detected-config",
-          },
-        );
-        detectedConfigName = null;
+        const runtimeSession = getProcessRuntimeSession(detectedConfigName);
+        if (isProcessRuntimeSessionRunning(runtimeSession, list)) {
+          markProcessRuntimeObserved(
+            detectedConfigName,
+            runtimeSession.configData,
+          );
+        } else {
+          await autoDeselectProcessSelectedConfig(
+            detectedConfigName,
+            "entry-missing",
+            { source: "detected-config" },
+          );
+          stopEpicOfficialActivePollIfMatches(
+            detectedConfigName,
+            "entry-missing",
+            {
+              configName: detectedConfigName || null,
+              source: "detected-config",
+            },
+          );
+          activePlaytimeConfigs.delete(detectedConfigName);
+          detectedConfigName = null;
+        }
       } else {
         const isStillRunning = isEntryRunning(entry, detectedConfigName);
         if (!isStillRunning) {
@@ -23458,9 +24689,19 @@ async function autoSelectRunningGameConfigOnce(processes) {
               source: "detected-config",
             },
           );
-          activePlaytimeConfigs.delete(entry?.data?.name || detectedConfigName);
-          if (detectedConfigName === entry?.data?.name)
+          await autoDeselectProcessSelectedConfig(
+            entry?.name || detectedConfigName,
+            "process-exit",
+            { source: "detected-config" },
+          );
+          activePlaytimeConfigs.delete(entry?.name || detectedConfigName);
+          if (detectedConfigName === entry?.name)
             detectedConfigName = null;
+        } else {
+          markProcessRuntimeObserved(
+            entry?.name || detectedConfigName,
+            entry,
+          );
         }
       }
     }
@@ -23468,6 +24709,14 @@ async function autoSelectRunningGameConfigOnce(processes) {
     for (const activeName of [...activePlaytimeConfigs]) {
       const entry = getEntry(activeName);
       if (!entry) {
+        const runtimeSession = getProcessRuntimeSession(activeName);
+        if (isProcessRuntimeSessionRunning(runtimeSession, list)) {
+          markProcessRuntimeObserved(activeName, runtimeSession.configData);
+          continue;
+        }
+        await autoDeselectProcessSelectedConfig(activeName, "entry-missing", {
+          source: "active-playtime-set",
+        });
         stopEpicOfficialActivePollIfMatches(activeName, "entry-missing", {
           configName: activeName || null,
           source: "active-playtime-set",
@@ -23491,8 +24740,15 @@ async function autoSelectRunningGameConfigOnce(processes) {
             source: "active-playtime-set",
           },
         );
+        await autoDeselectProcessSelectedConfig(
+          entry?.name || activeName,
+          "process-exit",
+          { source: "active-playtime-set" },
+        );
         activePlaytimeConfigs.delete(activeName);
         if (detectedConfigName === activeName) detectedConfigName = null;
+      } else {
+        markProcessRuntimeObserved(entry?.name || activeName, entry);
       }
     }
 
@@ -23505,8 +24761,11 @@ async function autoSelectRunningGameConfigOnce(processes) {
       if (activePlaytimeConfigs.has(entry.name)) continue;
       if (!processMatchesConfig(p, entry.data, entry.name)) continue;
 
+      await applyXLiveLessNessRuntimeConfig(entry, p);
+
       detectedConfigName = entry.name;
       activePlaytimeConfigs.add(entry.name);
+      markProcessRuntimeObserved(entry.name, entry, p);
       notifyInfo(
         tUi("main.notify.config.started", {
           name: entry?.data?.name || entry?.name || entry.name,
@@ -23515,7 +24774,10 @@ async function autoSelectRunningGameConfigOnce(processes) {
       entry.data.__playtimeKey = sanitizeConfigName(entry.name);
 
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("auto-select-config", entry.name);
+        mainWindow.webContents.send("auto-select-config", {
+          configName: entry.name,
+          source: "process",
+        });
         startPlaytimeLogWatcher(entry.data);
       }
       return;
@@ -23616,8 +24878,17 @@ async function autoSelectRunningGameConfigOnce(processes) {
       }
 
       const entry = selectedCandidate.entry;
+      await applyXLiveLessNessRuntimeConfig(
+        entry,
+        selectedCandidate.processInfo,
+      );
       detectedConfigName = entry.name;
       activePlaytimeConfigs.add(entry.name);
+      markProcessRuntimeObserved(
+        entry.name,
+        entry,
+        selectedCandidate.processInfo,
+      );
       notifyInfo(
         tUi("main.notify.config.started", {
           name: entry?.data?.name || entry?.name || entry.name,
@@ -23626,7 +24897,10 @@ async function autoSelectRunningGameConfigOnce(processes) {
       entry.data.__playtimeKey = sanitizeConfigName(entry.name);
 
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("auto-select-config", entry.name);
+        mainWindow.webContents.send("auto-select-config", {
+          configName: entry.name,
+          source: "process",
+        });
         startPlaytimeLogWatcher(entry.data);
       }
       return;
@@ -23747,6 +25021,17 @@ const {
   importXboxPcLibrary,
   syncXboxPcAchievements,
 } = require("./utils/xbox-pc");
+const {
+  RETROACHIEVEMENTS_RARITY_SOURCE,
+  clearRetroAchievementsAuth,
+  connectRetroAchievements,
+  fetchRetroAchievementsRarityPercentages,
+  getRetroAchievementsSnapshotDelta,
+  getRetroAchievementsStatus,
+  importRetroAchievementsLibrary,
+  preserveRetroAchievementsEarnedState,
+  syncRetroAchievements,
+} = require("./utils/retroachievements");
 
 async function seedManualConfigsAtBoot() {
   if (bootManualSeedRunning) return;
@@ -24001,15 +25286,13 @@ async function seedManualConfigsAtBoot() {
     try {
       schemaPath = resolveConfigSchemaPath(config, config?.config_path || null);
     } catch {}
-    const snapshot = loadAchievementsFromSaveFile(
-      path.dirname(candidatePath),
-      {},
-      {
-        configMeta: config,
-        selectedConfigPath: config?.config_path || null,
-        fullSchemaPath: schemaPath,
-      },
-    );
+    const snapshot = isFf7AchievementDatConfig(config)
+      ? readFf7AchievementSnapshot(candidatePath, {}).snapshot
+      : loadAchievementsFromSaveFile(path.dirname(candidatePath), {}, {
+          configMeta: config,
+          selectedConfigPath: config?.config_path || null,
+          fullSchemaPath: schemaPath,
+        });
     if (snapshot && Object.keys(snapshot).length) {
       seedCacheFromSnapshot(configFileName, snapshot, platform);
       if (seedKey) bootSeededCacheKeys.add(seedKey);
@@ -24271,29 +25554,6 @@ function loadRuntimeUplayMap() {
   }
   return uplayMappingStore.getRows();
 }
-function refreshRuntimeUplayMapping() {
-  try {
-    const script = path.join(__dirname, "utils", "match-uplay-steam.js");
-    execFileSync(
-      process.execPath,
-      ["--run-as-node", script, `--output=${runtimeUplaySteamMapPath}`],
-      {
-        windowsHide: true,
-        stdio: "ignore",
-        env: getRuntimeUplayMappingEnv(),
-      },
-    );
-    const rows = loadRuntimeUplayMap();
-    hydrateRuntimeMapping(rows);
-    ipcLogger.info("uplay-mapping:refresh-success", {
-      entries: uplaySteamMap.length,
-    });
-  } catch (err) {
-    ipcLogger.warn("uplay-mapping:refresh-failed", {
-      error: err?.message || String(err),
-    });
-  }
-}
 function hydrateRuntimeMapping(rows) {
   const result = uplayMappingStore.replaceSnapshot(
     Array.isArray(rows) ? rows : [],
@@ -24430,7 +25690,9 @@ function applyConfigPlatformDefaults(payload = {}) {
     normalizedPlatform === "gog-official" ||
     normalizedPlatform === "ubisoft-official" ||
     normalizedPlatform === "ea-official" ||
-    normalizedPlatform === "xbox-pc"
+    normalizedPlatform === "xbox-pc" ||
+    normalizedPlatform === "retroachievements" ||
+    normalizedPlatform === "xlivelessness"
   ) {
     const sanitizedSpecial = sanitizeAppIdForPlatform(
       payload.appid || payload.appId || payload.steamAppId,
@@ -24482,11 +25744,13 @@ const SCHEMA_PLATFORM_DIRS = [
   "epic",
   "epic-official",
   "xbox-pc",
+  "retroachievements",
   "xenia",
   "rpcs3",
   "shadps4",
   "markerpatch",
   "madnesspatch",
+  "xlivelessness",
 ];
 
 function normalizeStoragePlatform(platform) {
@@ -24500,11 +25764,13 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "epic") return "epic";
   if (normalized === "epic-official") return "epic-official";
   if (normalized === "xbox-pc") return "xbox-pc";
+  if (normalized === "retroachievements") return "retroachievements";
   if (normalized === "xenia") return "xenia";
   if (normalized === "rpcs3") return "rpcs3";
   if (normalized === "shadps4") return "shadps4";
   if (normalized === "markerpatch") return "markerpatch";
   if (normalized === "madnesspatch") return "madnesspatch";
+  if (normalized === "xlivelessness") return "xlivelessness";
   return "steam";
 }
 
@@ -24574,6 +25840,7 @@ function getPlatformForAppId(appid) {
           "shadps4",
           "markerpatch",
           "madnesspatch",
+          "xlivelessness",
         ]
       : [
           "epic-official",
@@ -24590,6 +25857,7 @@ function getPlatformForAppId(appid) {
           "shadps4",
           "markerpatch",
           "madnesspatch",
+          "xlivelessness",
         ];
     for (const p of order) {
       if (set.has(p)) return p;
@@ -25192,6 +26460,7 @@ ipcMain.handle(
       platform === "gog" ||
       platform === "gog-official" ||
       platform === "xbox-pc" ||
+      platform === "retroachievements" ||
       platform === "xenia" ||
       platform === "rpcs3" ||
       platform === "shadps4";
@@ -25200,7 +26469,11 @@ ipcMain.handle(
       return {
         success: false,
         code: "unsupported-platform",
-        message: `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG/Xbox PC/Xenia/RPCS3/ShadPS4 configs (current: ${platform}).`,
+        message: tUi(
+          "main.message.rarityRefreshUnsupportedPlatform",
+          { platform },
+          `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG/Xbox PC/RetroAchievements/Xenia/RPCS3/ShadPS4 configs (current: ${platform}).`,
+        ),
       };
     }
 
@@ -25283,7 +26556,91 @@ ipcMain.handle(
         return {
           success: false,
           code: "fetch-failed",
-          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+          message: tUi(
+            "main.message.rarityRefreshFailedWithError",
+            { error: err?.message || String(err) },
+            `Rarity refresh failed: ${err?.message || String(err)}`,
+          ),
+        };
+      }
+    }
+
+    if (platform === "retroachievements") {
+      const gameId = String(
+        config?.retroachievements_game_id || config?.appid || "",
+      ).trim();
+      if (!/^\d{1,12}$/.test(gameId)) {
+        return {
+          success: false,
+          code: "invalid-retroachievements-game-id",
+          message: tUi(
+            "main.message.rarityRetroAchievementsGameIdInvalid",
+            {},
+            "RetroAchievements Game ID for rarity refresh is invalid.",
+          ),
+        };
+      }
+      const source = RETROACHIEVEMENTS_RARITY_SOURCE;
+      rarityLogger.info("rarity:manual-refresh:start", {
+        configName: config?.name || safeName,
+        platform,
+        appid: gameId,
+        source,
+      });
+      try {
+        const fetchedMap = await fetchRetroAchievementsRarityPercentages(
+          gameId,
+          {
+            userDataDir: app.getPath("userData"),
+            timeoutMs: 15000,
+          },
+        );
+        const entries = buildRarityEntriesForSchema(
+          fetchedMap,
+          schemaAchievements,
+          { normalizeName: (name) => String(name || "").trim() },
+        );
+        const sidecarPath = writeAchievementPercentagesSidecar(
+          path.dirname(schemaPath),
+          gameId,
+          entries,
+          { source },
+        );
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config?.name || safeName,
+          platform,
+          appid: gameId,
+          source,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        });
+        broadcastToAll("refresh-achievements-table", config?.name || safeName);
+        return {
+          success: true,
+          configName: config?.name || safeName,
+          platform,
+          appid: gameId,
+          sidecarPath,
+          fetchedCount: fetchedMap.size,
+          matchedCount: entries.length,
+        };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config?.name || safeName,
+          platform,
+          appid: gameId,
+          source,
+          error: err?.message || String(err),
+        });
+        return {
+          success: false,
+          code: "fetch-failed",
+          message: tUi(
+            "main.message.rarityRefreshFailedWithError",
+            { error: err?.message || String(err) },
+            `Rarity refresh failed: ${err?.message || String(err)}`,
+          ),
         };
       }
     }
@@ -25360,7 +26717,11 @@ ipcMain.handle(
         return {
           success: false,
           code: "fetch-failed",
-          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+          message: tUi(
+            "main.message.rarityRefreshFailedWithError",
+            { error: err?.message || String(err) },
+            `Rarity refresh failed: ${err?.message || String(err)}`,
+          ),
         };
       }
     }
@@ -25424,7 +26785,11 @@ ipcMain.handle(
         return {
           success: false,
           code: "fetch-failed",
-          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+          message: tUi(
+            "main.message.rarityRefreshFailedWithError",
+            { error: err?.message || String(err) },
+            `Rarity refresh failed: ${err?.message || String(err)}`,
+          ),
         };
       }
     }
@@ -25513,7 +26878,11 @@ ipcMain.handle(
         return {
           success: false,
           code: "fetch-failed",
-          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+          message: tUi(
+            "main.message.rarityRefreshFailedWithError",
+            { error: err?.message || String(err) },
+            `Rarity refresh failed: ${err?.message || String(err)}`,
+          ),
         };
       }
     }
@@ -25612,7 +26981,11 @@ ipcMain.handle(
         return {
           success: false,
           code: "fetch-failed",
-          message: `Rarity refresh failed: ${err?.message || String(err)}`,
+          message: tUi(
+            "main.message.rarityRefreshFailedWithError",
+            { error: err?.message || String(err) },
+            `Rarity refresh failed: ${err?.message || String(err)}`,
+          ),
         };
       }
     }
@@ -25703,7 +27076,11 @@ ipcMain.handle(
       return {
         success: false,
         code: "fetch-failed",
-        message: `Rarity refresh failed: ${err?.message || String(err)}`,
+        message: tUi(
+          "main.message.rarityRefreshFailedWithError",
+          { error: err?.message || String(err) },
+          `Rarity refresh failed: ${err?.message || String(err)}`,
+        ),
       };
     }
   },
@@ -26568,7 +27945,8 @@ watchedFoldersApi = makeWatchedFolders({
   },
   isConfigActive: (name) =>
     selectedConfigMode === "active" &&
-    sanitizeConfigName(name) === sanitizeConfigName(selectedConfig),
+    sanitizeOptionalConfigName(name) ===
+      sanitizeOptionalConfigName(selectedConfig),
   onPlatinumComplete: handlePlatinumComplete,
 });
 
@@ -26607,6 +27985,7 @@ ipcMain.handle("platinum:manual", async (_event, payload = {}) => {
   const {
     configName = "",
     appid = null,
+    platform = null,
     savePath = null,
     configPath = null,
     suppressNotify = false,
@@ -26630,6 +28009,7 @@ ipcMain.handle("platinum:manual", async (_event, payload = {}) => {
     handlePlatinumComplete({
       configName,
       appid,
+      platform,
       savePath,
       configPath,
       isActive: false,
