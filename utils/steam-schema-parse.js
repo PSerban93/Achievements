@@ -528,11 +528,10 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
     runtimeDir,
   });
   const result = await new Promise((resolve, reject) => {
-    const cp = spawn(exePath, normalizedAppIds, {
+    const cp = execFile(exePath, normalizedAppIds, {
       cwd: runtimeDir,
       windowsHide: true,
       env: applySchemaParseEnvironment(process.env),
-      stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
     let stdoutLineBuffer = "";
