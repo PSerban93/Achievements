@@ -60,6 +60,65 @@ function resolveSchemaParseRuntimeDir(userDataDir = "") {
   return path.join(normalizeUserDataDir(userDataDir), "tools", SCHEMA_PARSE_DIRNAME);
 }
 
+function isPathWithinDirectory(parentDir, candidatePath) {
+  const relative = path.relative(parentDir, candidatePath);
+  return (
+    relative === "" ||
+    (relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+function resolveSchemaParseExecutable(runtimeDir = "") {
+  const runtimeInput = String(runtimeDir || "").trim();
+  if (!runtimeInput) {
+    throw new Error("schema_parse runtime directory is required");
+  }
+
+  const resolvedRuntimeDir = path.resolve(runtimeInput);
+  const candidatePath = path.join(
+    resolvedRuntimeDir,
+    "generate_emu_config.exe",
+  );
+  let realRuntimeDir;
+  let realExecutablePath;
+  try {
+    realRuntimeDir = fs.realpathSync(resolvedRuntimeDir);
+    realExecutablePath = fs.realpathSync(candidatePath);
+  } catch (error) {
+    const wrapped = new Error(
+      `schema_parse executable is unavailable: ${candidatePath}`,
+    );
+    wrapped.code = error?.code || "SCHEMA_PARSE_EXECUTABLE_UNAVAILABLE";
+    throw wrapped;
+  }
+
+  if (
+    !isPathWithinDirectory(realRuntimeDir, realExecutablePath) ||
+    path.basename(realExecutablePath).toLowerCase() !==
+      "generate_emu_config.exe"
+  ) {
+    throw new Error("schema_parse executable resolved outside its runtime");
+  }
+
+  let executableStat;
+  try {
+    executableStat = fs.statSync(realExecutablePath);
+  } catch (error) {
+    const wrapped = new Error(
+      `schema_parse executable cannot be inspected: ${realExecutablePath}`,
+    );
+    wrapped.code = error?.code || "SCHEMA_PARSE_EXECUTABLE_UNAVAILABLE";
+    throw wrapped;
+  }
+  if (!executableStat.isFile()) {
+    throw new Error("schema_parse executable path is not a file");
+  }
+
+  return realExecutablePath;
+}
+
 function resolveSchemaParseStatePath(runtimeDir = "") {
   return path.join(path.resolve(String(runtimeDir || "").trim()), SCHEMA_PARSE_STATE_FILENAME);
 }
@@ -418,7 +477,7 @@ async function ensureSchemaParseRuntimeReady(options = {}) {
 }
 
 async function runGenerateEmuConfig(runtimeDir, appid) {
-  const exePath = path.join(runtimeDir, "generate_emu_config.exe");
+  const exePath = resolveSchemaParseExecutable(runtimeDir);
   cleanupGeneratedAppArtifacts(runtimeDir, appid, { log: false });
   logger.info("schema-parse:run:start", { appid, runtimeDir });
   let result;
@@ -426,6 +485,7 @@ async function runGenerateEmuConfig(runtimeDir, appid) {
     result = await execFileAsync(exePath, [String(appid)], {
       cwd: runtimeDir,
       windowsHide: true,
+      shell: false,
       maxBuffer: 8 * 1024 * 1024,
       env: applySchemaParseEnvironment(process.env),
     });
@@ -512,7 +572,7 @@ async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
 }
 
 async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) {
-  const exePath = path.join(runtimeDir, "generate_emu_config.exe");
+  const exePath = resolveSchemaParseExecutable(runtimeDir);
   const normalizedAppIds = Array.from(
     new Set(
       (Array.isArray(appids) ? appids : [])
@@ -528,12 +588,19 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
     runtimeDir,
   });
   const result = await new Promise((resolve, reject) => {
-    const cp = spawn(exePath, normalizedAppIds, {
-      cwd: runtimeDir,
-      windowsHide: true,
-      env: applySchemaParseEnvironment(process.env),
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    // Security invariant: exePath is confined to the managed runtime, AppIDs
+    // are digits-only, and no command string or shell is used.
+    const cp = spawn( // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+      exePath,
+      normalizedAppIds,
+      {
+        cwd: runtimeDir,
+        windowsHide: true,
+        shell: false,
+        env: applySchemaParseEnvironment(process.env),
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
     let stdout = "";
     let stdoutLineBuffer = "";
     let stderr = "";
@@ -1007,6 +1074,7 @@ module.exports = {
   normalizeGeneratedAchievementsSchema,
   readSchemaParseGeneratedDisplayName,
   resolveSchemaParseAppOutputDir,
+  resolveSchemaParseExecutable,
   resolveSchemaParseRuntimeDir,
   resolveSchemaParseSeedArchive,
 };
