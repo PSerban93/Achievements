@@ -437,7 +437,6 @@ body {
   height: 100vh;
   min-height: 100vh;
   overflow: hidden;
-  -webkit-app-region: no-drag;
   user-select: none;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -450,7 +449,7 @@ html {
 
 /* Modern Titlebar Styles */
 .titlebar {
-  z-index: 10005;
+  z-index: 200001;
   position: fixed;
   top: 0;
   left: 0;
@@ -460,6 +459,7 @@ html {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  app-region: drag;
   -webkit-app-region: drag;
   box-shadow: none;
   border-bottom: none;
@@ -486,6 +486,7 @@ html {
 
 .titlebar-controls {
   display: flex;
+  app-region: no-drag;
   -webkit-app-region: no-drag;
   margin-right: 4px;
 }
@@ -542,6 +543,7 @@ html.fa-ready .fa-fallback {
   background: transparent;
   border: none;
   transition: background-color 0.2s;
+  app-region: no-drag;
   -webkit-app-region: no-drag;
   outline: none;
   padding: 0;
@@ -566,6 +568,7 @@ html.fa-ready .fa-fallback {
   display: flex;
   align-items: center;
   gap: 6px;
+  app-region: no-drag;
   -webkit-app-region: no-drag;
 }
 
@@ -605,12 +608,13 @@ h1 {
   position: fixed;
   z-index: 9999;
   left: 0;
-  top: 0;
+  top: var(--topbar-height);
   width: 100vw;
-  height: 100vh;
+  height: calc(100vh - var(--topbar-height));
   background-color: var(--app-backdrop);
   justify-content: center;
   align-items: center;
+  app-region: no-drag;
   -webkit-app-region: no-drag;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -1362,7 +1366,7 @@ select option:disabled {
 
 #bootLoading {
   position: fixed;
-  inset: 0;
+  inset: var(--topbar-height) 0 0;
   z-index: 10000;
   display: flex;
   align-items: center;
@@ -1538,10 +1542,10 @@ body::-webkit-scrollbar {
 /* Settings Menu Styles - Improved */
 .settings-menu {
   position: fixed;
-  top: 0;
+  top: var(--topbar-height);
   left: 0;
   width: 100%;
-  height: 100%;
+  height: calc(100% - var(--topbar-height));
   background-color: rgba(0, 0, 0, 0.5);
   z-index: 9998;
   display: flex;
@@ -1760,6 +1764,161 @@ body::-webkit-scrollbar {
   color: var(--dracula-red);
 }
 
+.settings-stats-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.settings-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.settings-stat-card {
+  min-height: 96px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-card-bg);
+  box-shadow: var(--app-shadow-control);
+}
+
+.settings-stat-card span {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.settings-stat-card strong {
+  color: var(--app-text);
+  font-size: 25px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-stats-completion {
+  padding: 16px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-panel-bg-strong);
+}
+
+.settings-stats-completion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+  color: var(--app-text);
+}
+
+.settings-stats-completion-header strong {
+  color: var(--dracula-cyan);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-stats-progress-track {
+  width: 100%;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--app-input-bg);
+  box-shadow: inset 0 0 0 1px var(--app-border-subtle);
+}
+
+.settings-stats-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--dracula-purple),
+    var(--dracula-cyan)
+  );
+  transition: width 180ms ease;
+}
+
+.settings-stats-coverage {
+  margin: 0;
+  text-align: center;
+}
+
+.settings-stats-breakdown {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-panel-bg-strong);
+}
+
+.settings-stats-breakdown h5 {
+  margin: 0 0 12px;
+  color: var(--app-text);
+  font-size: 14px;
+}
+
+.settings-stats-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--app-radius-md);
+  background: var(--app-card-bg);
+}
+
+.settings-stats-table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: collapse;
+  color: var(--app-text);
+  font-size: 12px;
+}
+
+.settings-stats-table th,
+.settings-stats-table td {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--app-border-subtle);
+  white-space: nowrap;
+}
+
+.settings-stats-table thead th {
+  color: var(--app-muted);
+  font-weight: 600;
+  text-align: left;
+  background: var(--app-input-bg);
+}
+
+.settings-stats-table tbody th {
+  font-weight: 600;
+  text-align: left;
+}
+
+.settings-stats-table tbody tr:last-child th,
+.settings-stats-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.settings-stats-table tbody tr:hover {
+  background: color-mix(in srgb, var(--dracula-cyan) 7%, transparent);
+}
+
+.settings-stats-table-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-stats-platform-empty {
+  margin: 12px 0 0;
+  text-align: center;
+}
+
 .changelog-list {
   display: grid;
   gap: 12px;
@@ -1876,6 +2035,10 @@ body::-webkit-scrollbar {
 
   .settings-logs-autoscroll {
     margin-left: 0;
+  }
+
+  .settings-stats-grid {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   }
 }
 
@@ -2018,25 +2181,46 @@ body::-webkit-scrollbar {
 }
 
 .settings-close-button {
+  --close-red: #ff3b3b;
   position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 24px;
-  height: 24px;
+  margin-top: 0px;
+  top: 0;
+  right: 0;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
   font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--dracula-foreground);
-  background-color: transparent;
-  border: none;
+  color: var(--close-red);
+  background: rgba(255, 59, 59, 0.15);
+  border: 1px solid rgba(255, 59, 59, 0.35);
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   padding: 0;
-  transition: color 0.2s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.05s ease;
 }
 
 .settings-close-button:hover {
-  color: var(--dracula-red);
+  background: var(--close-red);
+  color: #fff;
+  border-color: var(--close-red);
+}
+
+.settings-close-button:active {
+  transform: scale(0.96);
+}
+
+.settings-close-button:focus-visible {
+  outline: 2px solid var(--close-red);
+  outline-offset: 2px;
 }
 
 .settings-section {
@@ -2207,7 +2391,7 @@ body::-webkit-scrollbar {
 /* ========== DASHBOARD (Centered Overlay) ========== */
 #dashboardOverlay {
   position: fixed;
-  inset: 0;
+  inset: var(--topbar-height) 0 0;
   background: var(--app-backdrop);
   z-index: 9999;
   display: none;
@@ -2221,10 +2405,10 @@ body::-webkit-scrollbar {
 
 #dashboardPanel {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  left: 0;
+  top: 0;
   margin: 0;
+  box-sizing: border-box;
   background: var(--app-panel-bg);
   border-radius: var(--app-radius-panel);
   border: 1px solid var(--app-border-subtle);
@@ -2232,7 +2416,6 @@ body::-webkit-scrollbar {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  will-change: transform;
   pointer-events: auto;
 }
 

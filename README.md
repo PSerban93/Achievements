@@ -44,7 +44,9 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
     - Achievement unlocks
     - Progress updates
     - Playtime tracking (Now Playing / Session Ended)
-  - Animated presets and a native Windows notification preset
+  - Animated presets, a native Windows preset, and native Xbox Game Bar notifications through the optional Game Bar Widget [Achievements Overlay by JokerVerse]
+  - Game Bar delivery supports achievement unlock, rarity/platinum metadata, click navigation, and textual progress (`current / maximum • percentage`)
+  - The Game Bar companion is optional; when it is not installed or connected, the Electron application remains independent and uses the configured fallback
   - Customizable sounds and visual presets
   - Adjustable position, duration, and scaling (presets support up to 200%)
   - Non-intrusive overlay system

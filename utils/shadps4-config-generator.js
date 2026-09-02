@@ -372,20 +372,35 @@ async function enrichSchemaRarityFromExophase(schemaDir, parsed) {
   };
 }
 
-function writeSchemaAssets(schemaDir, parsed) {
-  fs.mkdirSync(schemaDir, { recursive: true });
+function syncNativeIconAssets(schemaDir, parsed) {
   const imgDir = path.join(schemaDir, "img");
   fs.mkdirSync(imgDir, { recursive: true });
+  let copied = 0;
 
-  // Copy ICON0 and TROP*.PNG
-  const iconFiles = fs.existsSync(parsed.iconsDir)
-    ? fs.readdirSync(parsed.iconsDir)
+  const iconFiles = fs.existsSync(parsed?.iconsDir)
+    ? fs
+        .readdirSync(parsed.iconsDir, { withFileTypes: true })
+        .filter(
+          (entry) =>
+            entry.isFile() &&
+            (entry.name.toLowerCase() === "icon0.png" ||
+              /^trop\d{3}\.png$/i.test(entry.name)),
+        )
+        .map((entry) => entry.name)
     : [];
   for (const f of iconFiles) {
     const src = path.join(parsed.iconsDir, f);
     const dst = path.join(imgDir, f);
-    if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
+    if (fs.existsSync(dst)) continue;
+    fs.copyFileSync(src, dst);
+    copied += 1;
   }
+  return copied;
+}
+
+function writeSchemaAssets(schemaDir, parsed) {
+  fs.mkdirSync(schemaDir, { recursive: true });
+  syncNativeIconAssets(schemaDir, parsed);
 
   const entries = buildSchemaFromPs4(parsed);
   fs.writeFileSync(
@@ -416,6 +431,7 @@ function updateSchemaFromPs4(schemaDir, parsed) {
   if (!Array.isArray(entries)) return { updated: false, added: 0, entries: [] };
 
   const incoming = buildSchemaFromPs4(parsed);
+  const copiedAssets = syncNativeIconAssets(schemaDir, parsed);
   const entryByName = new Map();
   for (const entry of entries) {
     entryByName.set(entry.name, entry);
@@ -461,7 +477,16 @@ function updateSchemaFromPs4(schemaDir, parsed) {
       updated = true;
       changed += 1;
     }
-    // icon/icon_gray not overwritten (icons already local)
+    if (!String(existing.icon || "").trim() && inc.icon) {
+      existing.icon = inc.icon;
+      updated = true;
+      changed += 1;
+    }
+    if (!String(existing.icon_gray || "").trim() && inc.icon_gray) {
+      existing.icon_gray = inc.icon_gray;
+      updated = true;
+      changed += 1;
+    }
   }
 
   if (updated) {
@@ -481,7 +506,13 @@ function updateSchemaFromPs4(schemaDir, parsed) {
     });
   }
 
-  return { updated, added, entries };
+  return {
+    updated,
+    added,
+    entries,
+    assetsUpdated: copiedAssets > 0,
+    copiedAssets,
+  };
 }
 
 function findExistingPs4Config(configsDir, appid, npcommid = "") {
@@ -619,7 +650,7 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
   }
   if (schemaReady) {
     const res = updateSchemaFromPs4(schemaDir, parsed);
-    schemaUpdated = !!res.updated;
+    schemaUpdated = !!res.updated || res.assetsUpdated === true;
     added = res.added || 0;
     currentEntries = res.entries || [];
   } else {

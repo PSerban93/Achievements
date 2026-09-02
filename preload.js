@@ -473,12 +473,25 @@ ipcRenderer.on("notification-navigation:disable", () => {
 contextBridge.exposeInMainWorld("api", {
   // Config management
   saveConfig: (config) => ipcRenderer.invoke("saveConfig", config),
+  setConfigAchievementLanguage: (configName, language = null) =>
+    ipcRenderer.invoke("config:set-achievement-language", {
+      configName,
+      language,
+    }),
   regenerateSchema: (payload) =>
     ipcRenderer.invoke("schema:regenerate", payload),
   getActiveGenerationProgress: () =>
     ipcRenderer.invoke("generation:progress:get-active"),
   loadConfigs: () => ipcRenderer.invoke("loadConfigs"),
   loadDashboardSummary: () => ipcRenderer.invoke("dashboard:summary"),
+  bootstrapDashboardSummary: (entries = {}) =>
+    ipcRenderer.invoke("dashboard:summary:bootstrap", { entries }),
+  saveDashboardSummaryEntries: (entries = {}) =>
+    ipcRenderer.invoke("dashboard:summary:upsert-many", { entries }),
+  validateDashboardSummary: (names = []) =>
+    ipcRenderer.invoke("dashboard:summary:validate", { names }),
+  invalidateDashboardSummaryPlatform: (platform) =>
+    ipcRenderer.invoke("dashboard:summary:invalidate-platform", { platform }),
   selectFolder: () => ipcRenderer.invoke("selectFolder"),
   selectScreenshotFolder: () => ipcRenderer.invoke("selectScreenshotFolder"),
   getDefaultScreenshotFolder: () =>

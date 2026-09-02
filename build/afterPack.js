@@ -9,17 +9,21 @@ module.exports = async (context) => {
     throw new Error("afterPack: appOutDir is missing");
   }
 
-  const xLiveLessNessWorkerPath = path.join(
-    appOutDir,
-    "resources",
-    "app.asar.unpacked",
-    "utils",
-    "xlivelessness-worker.js",
-  );
-  if (!fs.existsSync(xLiveLessNessWorkerPath)) {
-    throw new Error(
-      `afterPack: XLiveLessNess worker missing at ${xLiveLessNessWorkerPath}`,
+  const requiredUnpackedWorkers = [
+    ["XLiveLessNess", "xlivelessness-worker.js"],
+    ["Game Bar named pipe", "gamebar-widget-pipe-worker.js"],
+  ];
+  for (const [label, fileName] of requiredUnpackedWorkers) {
+    const workerPath = path.join(
+      appOutDir,
+      "resources",
+      "app.asar.unpacked",
+      "utils",
+      fileName,
     );
+    if (!fs.existsSync(workerPath)) {
+      throw new Error(`afterPack: ${label} worker missing at ${workerPath}`);
+    }
   }
 
   const exeName = context.packager?.appInfo?.productFilename

@@ -51,6 +51,26 @@ const {
   readJsonWithBackupSync,
   writeJsonAtomicSync,
 } = require("./utils/atomic-json-store");
+const {
+  createDashboardSummaryStore,
+  normalizeDashboardConfigName,
+} = require("./utils/dashboard-summary-store");
+const {
+  buildAchievementCacheMetaKey,
+  createAchievementCacheMetaStore,
+  normalizeAchievementCacheMetaPath,
+} = require("./utils/achievement-cache-meta-store");
+const {
+  mergeDashboardRefreshRequests,
+  normalizeDashboardRefreshRequest,
+} = require("./utils/dashboard-refresh");
+const {
+  fingerprintPartsEqual,
+  isPlatinumFlagEnabled,
+  isPlatinumSummarySynchronized,
+  isVerifiedSummaryComplete,
+  shouldResetPlatinumFromSummary,
+} = require("./utils/platinum-summary");
 const uplayMappingStore = require("./utils/uplay-mapping-store");
 const {
   assertWritableDirectory,
@@ -88,6 +108,12 @@ const {
 } = require("./utils/paths");
 const { normalizeAppTheme } = require("./utils/app-theme");
 const {
+  DEFAULT_MAIN_WINDOW_BOUNDS,
+  normalizeMainWindowBounds,
+  resolveMainWindowBounds,
+  resolveMainWindowStartupPresentation,
+} = require("./utils/main-window-state");
+const {
   configMatchesNavigationRoute,
   normalizeNavigationAppId,
   normalizeNavigationPlatform,
@@ -113,6 +139,10 @@ const {
   sanitizeOptionalConfigName,
 } = require("./utils/config-name");
 const {
+  normalizeAchievementLanguage,
+  resolveAchievementLanguage,
+} = require("./utils/achievement-language");
+const {
   ensureUserThemes,
   getThemeRegistryPayload,
 } = require("./utils/theme-manager");
@@ -133,6 +163,7 @@ const {
   listAllXLiveLessNessStateFiles,
   getXLiveLessNessProfileFromStatePath,
   normalizePathForComparison: normalizeXLiveLessNessPath,
+  readXLiveLessNessSnapshot,
   resolveXLiveLessNessConfigArgument,
 } = require("./utils/xlivelessness");
 const {
@@ -140,7 +171,10 @@ const {
   isFf7AchievementDatConfig,
   readFf7AchievementSnapshot,
 } = require("./utils/ff7-achievement-dat");
-const { ensureSchemaParseRuntimeReady } = require("./utils/steam-schema-parse");
+const {
+  ensureSchemaParseRuntimeReady,
+  startSchemaParseBootPreparation,
+} = require("./utils/steam-schema-parse");
 const { startPlaytimeLogWatcher } = require("./utils/playtime-log-watcher");
 const { parseGpdFile, buildSnapshotFromGpd } = require("./utils/xenia-gpd");
 const {
@@ -171,11 +205,17 @@ const {
   fetchGogGlobalAchievementPercentages,
   fetchSteamGlobalAchievementPercentages,
   buildRarityEntriesForSchema,
-  writeAchievementPercentagesSidecar,
+  writeAchievementPercentagesSidecar: writeAchievementPercentagesSidecarBase,
   readAchievementPercentagesMap,
   mergeRarityIntoAchievements,
   normalizeRarityPercent,
 } = require("./utils/achievement-rarity");
+
+function writeAchievementPercentagesSidecar(...args) {
+  const sidecarPath = writeAchievementPercentagesSidecarBase(...args);
+  markGameBarWidgetSnapshotDirty("rarity-sidecar-written");
+  return sidecarPath;
+}
 const { ensureGogAccessToken } = require("./utils/gog-auth");
 const {
   bindingsCanConflict: overlayBindingsCanConflict,
@@ -223,6 +263,10 @@ const {
 } = require("./utils/github-changelog-service");
 const { createLogViewerService } = require("./utils/log-viewer-service");
 const {
+  createGameBarWidgetBridge,
+  DEFAULT_WIDGET_PACKAGE_FAMILY_NAME,
+} = require("./utils/gamebar-widget-bridge");
+const {
   getProcessExecutableNames,
   hasProcessNameValue,
   normalizeProcessNameValue,
@@ -265,6 +309,19 @@ const controllerLogger = createLogger("controller", {
 });
 const recordLogger = createLogger("records", {
   level: process.env.RECORD_LOG_LEVEL || "info",
+});
+const gameBarWidgetLogger = createLogger("gamebar-widget", {
+  level: process.env.GAMEBAR_WIDGET_LOG_LEVEL || "info",
+});
+let gameBarWidgetBridge = null;
+const dashboardSummaryPath = path.join(
+  path.dirname(preferencesPath),
+  "dashboard-summary.json",
+);
+const dashboardSummaryStore = createDashboardSummaryStore({
+  filePath: dashboardSummaryPath,
+  logger: persistenceLogger,
+  writeDelayMs: 1500,
 });
 const changelogService = createGitHubChangelogService({
   httpClient: axios,
@@ -2101,6 +2158,7 @@ const DEFAULT_PREFERENCES = {
   disableProgress: false,
   progressMutedConfigs: [],
   windowZoomFactor: 1,
+  mainWindowBounds: null,
   disableAchievementScreenshot: false,
   disableAchievementRecords: true,
   enableHdrScreenshots: false,
@@ -2113,6 +2171,7 @@ const DEFAULT_PREFERENCES = {
   disablePlaytime: false,
   showNotificationRarityPercentage: true,
   progressPosition: "bottom-left",
+  progressNotificationMethod: "animated",
   useSanPreset: false,
   sanPreset: "",
   rareSanPreset: "",
@@ -2302,6 +2361,8 @@ let overlayControllerRuntimeStateCache = {
 };
 let mainWindowUserZoom = 1;
 let mainWindowZoomTimer = null;
+let mainWindowStateSaveTimer = null;
+const MAIN_WINDOW_STATE_SAVE_DELAY_MS = 500;
 let displayMetricsListenerAdded = false;
 const ZOOM_LOG_EPS = 0.001;
 let lastZoomLog = null;
@@ -3554,6 +3615,10 @@ function pushAchgen(level, message) {
 ipcMain.handle("achgen:get-backlog", () => achgenBuffer);
 
 function emitSchemaReady(data, senderWC = null) {
+  const configName = normalizeDashboardConfigName(data?.name);
+  if (configName) {
+    invalidateDashboardSummaryEntry(configName, "schema-ready").catch(() => {});
+  }
   try {
     if (senderWC && !senderWC.isDestroyed?.())
       senderWC.send("config:schema-ready", data);
@@ -6147,28 +6212,79 @@ function notifyConfigsChanged() {
 configsWatcher
   .on("add", (p) => {
     if (p.endsWith(".json")) {
+      markGameBarWidgetSnapshotDirty("config-added");
       notifyConfigsChanged();
       queueAutoSelectIndexUpsertFromConfigPath(p);
+      const configName = path.basename(p, ".json");
+      invalidateDashboardSummaryEntry(configName, "config-added").catch(
+        () => {},
+      );
     }
   })
   .on("unlink", (p) => {
     if (p.endsWith(".json")) {
+      markGameBarWidgetSnapshotDirty("config-removed");
       notifyConfigsChanged();
       queueAutoSelectIndexRemoveByConfigPath(p);
+      const configName = path.basename(p, ".json");
+      // Let reconciliation confirm that the file is still absent. Atomic
+      // config rewrites can briefly surface as unlink/add and must not erase a
+      // valid summary in that window.
+      queueDashboardSummaryReconcile(configName, "config-removed");
     }
   })
   .on("change", (p) => {
     if (p.endsWith(".json")) {
+      markGameBarWidgetSnapshotDirty("config-changed");
       notifyConfigsChanged();
       queueAutoSelectIndexUpsertFromConfigPath(p);
+      const configName = path.basename(p, ".json");
+      invalidateDashboardSummaryEntry(configName, "config-changed").catch(
+        () => {},
+      );
     }
   });
 
 let selectedLanguage = "english";
+let globalAchievementLanguage = "english";
 let selectedUiLanguage = getUiLanguage();
 const ACH_TABLE_STATUS_VALUES = new Set(["all", "locked", "unlocked"]);
 const ACH_TABLE_SORT_VALUES = new Set(["off", "asc", "desc"]);
 let sharedAchievementTableViewState = null;
+
+function getGlobalAchievementLanguage() {
+  return (
+    normalizeAchievementLanguage(globalAchievementLanguage, "english") ||
+    "english"
+  );
+}
+
+function resolveAchievementLanguageForConfig(configName, config = null) {
+  let resolvedConfig = config && typeof config === "object" ? config : null;
+  if (!resolvedConfig && isNonEmptyString(configName)) {
+    resolvedConfig = readConfigForAchievementCache(configName);
+  }
+  return resolveAchievementLanguage(
+    resolvedConfig,
+    getGlobalAchievementLanguage(),
+  );
+}
+
+function getActiveAchievementLanguage() {
+  return (
+    normalizeAchievementLanguage(
+      selectedLanguage,
+      getGlobalAchievementLanguage(),
+    ) || getGlobalAchievementLanguage()
+  );
+}
+
+function refreshActiveAchievementLanguage(config = null) {
+  selectedLanguage = selectedConfig
+    ? resolveAchievementLanguageForConfig(selectedConfig, config)
+    : getGlobalAchievementLanguage();
+  return selectedLanguage;
+}
 
 function normalizeAchievementTableViewState(payload) {
   if (!payload || typeof payload !== "object") return null;
@@ -6215,7 +6331,10 @@ if (typeof cachedPreferences.steamApiKey === "string") {
 }
 if (cachedPreferences && typeof cachedPreferences === "object") {
   if (typeof cachedPreferences.language === "string") {
-    selectedLanguage = cachedPreferences.language;
+    globalAchievementLanguage =
+      normalizeAchievementLanguage(cachedPreferences.language, "english") ||
+      "english";
+    selectedLanguage = getGlobalAchievementLanguage();
   }
   if (cachedPreferences.preset) {
     selectedPreset = cachedPreferences.preset;
@@ -6264,7 +6383,11 @@ function applyPreferenceSideEffects(
     } catch {}
   }
   if ("language" in patch && typeof prefsSnapshot.language === "string") {
-    selectedLanguage = prefsSnapshot.language;
+    globalAchievementLanguage =
+      normalizeAchievementLanguage(prefsSnapshot.language, "english") ||
+      "english";
+    refreshActiveAchievementLanguage();
+    markGameBarWidgetSnapshotDirty("achievement-language-changed");
   }
   if ("disableProgress" in patch) {
     global.disableProgress = prefsSnapshot.disableProgress === true;
@@ -6335,6 +6458,7 @@ function applyPreferenceSideEffects(
     );
   }
   if (Object.prototype.hasOwnProperty.call(patch, "showHiddenDescription")) {
+    markGameBarWidgetSnapshotDirty("hidden-description-preference-changed");
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.send("overlay-preferences-updated", {
         showHiddenDescription: prefsSnapshot.showHiddenDescription === true,
@@ -9054,22 +9178,48 @@ ipcMain.handle("ui:refocus", (e) => {
 
 // dashboard visibility & refresh
 let dashboardOpen = false;
-let pendingDashboardRefresh = false;
+let pendingDashboardRefresh = null;
+let queuedDashboardRefresh = null;
 let dashboardRefreshTimer = null;
 
 // Platinum tracking for pending delivery and dedupe
 const pendingPlatinumByConfig = new Map();
 
-function requestDashboardRefresh() {
+function requestDashboardRefresh(request = null) {
+  const normalized = normalizeDashboardRefreshRequest(request);
   if (!dashboardOpen) {
-    pendingDashboardRefresh = true;
+    pendingDashboardRefresh = mergeDashboardRefreshRequests(
+      pendingDashboardRefresh,
+      normalized,
+    );
     return;
   }
-  pendingDashboardRefresh = false;
+  pendingDashboardRefresh = null;
+  queuedDashboardRefresh = mergeDashboardRefreshRequests(
+    queuedDashboardRefresh,
+    normalized,
+  );
   clearTimeout(dashboardRefreshTimer);
   dashboardRefreshTimer = setTimeout(() => {
+    dashboardRefreshTimer = null;
+    const payload = queuedDashboardRefresh;
+    queuedDashboardRefresh = null;
+    if (!payload) return;
+    if (!dashboardOpen) {
+      pendingDashboardRefresh = mergeDashboardRefreshRequests(
+        pendingDashboardRefresh,
+        payload,
+      );
+      return;
+    }
     try {
-      broadcastToAll("dashboard:refresh");
+      persistenceLogger.info("dashboard-refresh:dispatch", {
+        mode: payload.mode,
+        reason: payload.reason || null,
+        configCount: payload.configNames.length,
+        configNames: payload.configNames.slice(0, 8),
+      });
+      broadcastToAll("dashboard:refresh", payload);
     } catch {}
   }, 350);
 }
@@ -9080,7 +9230,9 @@ ipcMain.handle("dashboard:set-open", (_e, state) => {
     global.dashboardOpen = dashboardOpen;
   } catch {}
   if (dashboardOpen && pendingDashboardRefresh) {
-    requestDashboardRefresh();
+    const pending = pendingDashboardRefresh;
+    pendingDashboardRefresh = null;
+    requestDashboardRefresh(pending);
   }
   return dashboardOpen;
 });
@@ -9088,6 +9240,205 @@ ipcMain.handle("dashboard:set-open", (_e, state) => {
 ipcMain.handle("dashboard:is-open", () => {
   return dashboardOpen;
 });
+
+ipcMain.handle("dashboard:summary", async () => {
+  try {
+    return { ok: true, ...(await dashboardSummaryStore.getSnapshot()) };
+  } catch (error) {
+    persistenceLogger.warn("dashboard-summary:snapshot-failed", {
+      error: error?.message || String(error),
+    });
+    return {
+      ok: false,
+      version: 1,
+      updatedAt: 0,
+      entries: {},
+      error: error?.message || String(error),
+    };
+  }
+});
+
+ipcMain.handle("dashboard:summary:bootstrap", async (_event, payload = {}) => {
+  try {
+    const allowedNames = await listDashboardConfigNames();
+    const changed = await dashboardSummaryStore.bootstrap(payload?.entries, {
+      allowedNames,
+    });
+    const removed = await dashboardSummaryStore.prune(allowedNames);
+    if (Object.keys(changed).length) queueDashboardSummaryBroadcast(changed);
+    if (removed.length) queueDashboardSummaryBroadcast({}, removed);
+
+    const snapshot = await dashboardSummaryStore.getSnapshot();
+    for (const name of allowedNames) {
+      const existing = snapshot.entries?.[name];
+      queueDashboardSummaryReconcile(
+        name,
+        existing?.verified === true && existing?.fingerprint
+          ? "bootstrap-validate"
+          : "bootstrap",
+      );
+    }
+    return {
+      ok: true,
+      imported: Object.keys(changed).length,
+      removed: removed.length,
+      ...snapshot,
+    };
+  } catch (error) {
+    persistenceLogger.warn("dashboard-summary:bootstrap-failed", {
+      error: error?.message || String(error),
+    });
+    return { ok: false, imported: 0, entries: {} };
+  }
+});
+
+ipcMain.handle("dashboard:summary:upsert-many", async (_event, payload = {}) => {
+  try {
+    const allowedNames = await listDashboardConfigNames();
+    const verifiedEntries = {};
+    for (const [name, entry] of Object.entries(payload?.entries || {})) {
+      if (!allowedNames.has(name)) continue;
+      verifiedEntries[name] = {
+        ...(entry || {}),
+        verified: true,
+        source: "dashboard-compute",
+      };
+    }
+    const previousEntries = new Map();
+    await Promise.all(
+      Object.keys(verifiedEntries).map(async (name) => {
+        previousEntries.set(name, await dashboardSummaryStore.getEntry(name));
+      }),
+    );
+    const changed = await dashboardSummaryStore.upsertMany(verifiedEntries, {
+      allowedNames,
+    });
+    if (Object.keys(changed).length) {
+      queueDashboardSummaryBroadcast(changed);
+      await Promise.all(
+        Object.entries(changed).map(([name, entry]) =>
+          reconcileConfigPlatinumFromSummary(name, entry, {
+            previousSummary: previousEntries.get(name) || null,
+            reason: "dashboard-compute",
+          }),
+        ),
+      );
+    }
+    const unchanged = {};
+    await Promise.all(
+      Object.keys(verifiedEntries).map(async (name) => {
+        if (Object.prototype.hasOwnProperty.call(changed, name)) return;
+        const current = await dashboardSummaryStore.getEntry(name);
+        if (current) unchanged[name] = current;
+      }),
+    );
+    return {
+      ok: true,
+      updated: Object.keys(changed).length,
+      // Let the renderer restore an authoritative entry when its local
+      // calculation was correctly rejected by source precedence.
+      entries: unchanged,
+    };
+  } catch (error) {
+    persistenceLogger.warn("dashboard-summary:upsert-failed", {
+      error: error?.message || String(error),
+    });
+    return { ok: false, updated: 0 };
+  }
+});
+
+ipcMain.handle("dashboard:summary:validate", async (_event, payload = {}) => {
+  try {
+    const allowedNames = await listDashboardConfigNames();
+    const requestedNames = Array.isArray(payload?.names)
+      ? payload.names
+          .slice(0, 5000)
+          .map((name) => normalizeDashboardConfigName(name))
+          .filter((name) => name && allowedNames.has(name))
+      : [];
+    const names = Array.from(new Set(requestedNames));
+    if (!names.length) {
+      return { ok: true, checked: 0, invalidated: 0, queued: 0 };
+    }
+
+    const snapshot = await dashboardSummaryStore.getSnapshot();
+    let cursor = 0;
+    let checked = 0;
+    let invalidated = 0;
+    let queued = 0;
+    const workerCount = Math.min(4, names.length);
+    const workers = Array.from({ length: workerCount }, async () => {
+      while (cursor < names.length) {
+        const index = cursor;
+        cursor += 1;
+        const name = names[index];
+        const existing = snapshot.entries?.[name] || null;
+        checked += 1;
+
+        if (existing?.verified === true && existing?.fingerprint) {
+          const expectedCachePath = existing?.platform
+            ? getCachePath(name, existing.platform)
+            : "";
+          if (
+            await isDashboardSummaryFingerprintCurrent(
+              existing.fingerprint,
+              expectedCachePath,
+            )
+          ) {
+            continue;
+          }
+          const latest = await dashboardSummaryStore.getEntry(name);
+          if (
+            latest?.verified === true &&
+            (Number(latest.observedAt || 0) !==
+              Number(existing.observedAt || 0) ||
+              JSON.stringify(latest.fingerprint || null) !==
+                JSON.stringify(existing.fingerprint || null))
+          ) {
+            continue;
+          }
+          await invalidateDashboardSummaryEntry(
+            name,
+            "safety-fingerprint-stale",
+          );
+          invalidated += 1;
+          continue;
+        }
+
+        queueDashboardSummaryReconcile(name, "safety-unverified");
+        queued += 1;
+      }
+    });
+    await Promise.all(workers);
+    return { ok: true, checked, invalidated, queued };
+  } catch (error) {
+    persistenceLogger.warn("dashboard-summary:safety-validate-failed", {
+      error: error?.message || String(error),
+    });
+    return { ok: false, checked: 0, invalidated: 0, queued: 0 };
+  }
+});
+
+ipcMain.handle(
+  "dashboard:summary:invalidate-platform",
+  async (_event, payload = {}) => {
+    try {
+      const platform = normalizePlatform(payload?.platform);
+      if (!platform) return { ok: false, removed: 0 };
+      const removed = await invalidateDashboardSummaryPlatform(
+        platform,
+        "platform-scope-changed",
+      );
+      return { ok: true, removed: removed.length };
+    } catch (error) {
+      persistenceLogger.warn("dashboard-summary:invalidate-platform-failed", {
+        platform: payload?.platform || null,
+        error: error?.message || String(error),
+      });
+      return { ok: false, removed: 0 };
+    }
+  },
+);
 
 ipcMain.on("app-navigation:ready", (event) => {
   if (
@@ -10616,6 +10967,7 @@ ipcMain.handle(
           job = syncXboxPcAchievements(config, {
             userDataDir: app.getPath("userData"),
             timeoutMs: 15000,
+            language: resolveAchievementLanguageForConfig(safeName, config),
           }).finally(() => {
             xboxPcLoadSyncInflight.delete(syncKey);
           });
@@ -11061,6 +11413,7 @@ ipcMain.handle(
                 productId,
                 schemaAchievements,
                 timeoutMs: 15000,
+                language: resolveAchievementLanguageForConfig(safeName, config),
               }),
             );
             const preservedSnapshot = preserveEpicOfficialEarnedStateFromCache(
@@ -11487,14 +11840,43 @@ ipcMain.handle(
 
       const hasAchievements =
         achievements && Object.keys(achievements).length > 0;
-      if (!hasAchievements && !effectiveSavePath && shouldUseCacheFallback()) {
+      if (!effectiveSavePath && shouldUseCacheFallback()) {
         const cached = await getCacheFallback();
         if (cached && Object.keys(cached).length) {
-          return {
-            achievements: cached,
-            save_path: effectiveSavePath || saveBase || "",
-            error: "save file missing (cached)",
-          };
+          let preferCache = !hasAchievements;
+          if (hasAchievements && schemaPath) {
+            try {
+              const schema = JSON.parse(
+                await fs.promises.readFile(schemaPath, "utf8"),
+              );
+              const schemaNames = new Set(
+                (Array.isArray(schema) ? schema : [])
+                  .map((entry) => String(entry?.name || "").trim())
+                  .filter(Boolean),
+              );
+              if (schemaNames.size) {
+                const countSchemaMatches = (snapshot) =>
+                  Object.keys(snapshot || {}).reduce(
+                    (count, name) => count + (schemaNames.has(name) ? 1 : 0),
+                    0,
+                  );
+                preferCache =
+                  countSchemaMatches(cached) >
+                  countSchemaMatches(achievements);
+              }
+            } catch {}
+          }
+          if (preferCache) {
+            return {
+              achievements: await applyManualOverridesForReturn(
+                cached,
+                null,
+                cached,
+              ),
+              save_path: saveBase || "",
+              error: "save file missing or unrelated (cached)",
+            };
+          }
         }
       }
 
@@ -11948,6 +12330,12 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         }
       }
       await refreshDeletedConfigState();
+      dashboardSummaryStore
+        .remove(configName)
+        .then((removed) => {
+          if (removed) queueDashboardSummaryBroadcast({}, [configName]);
+        })
+        .catch(() => {});
       logDeleteInfo("delete-config:success", {
         configName,
         configPath,
@@ -13296,6 +13684,59 @@ function scheduleMainWindowZoomUpdate() {
   }, 120);
 }
 
+function readCurrentMainWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  try {
+    const bounds = normalizeMainWindowBounds(mainWindow.getNormalBounds());
+    if (!bounds) return null;
+    return { bounds };
+  } catch (error) {
+    windowLogger.warn("main-window-state:read-failed", {
+      error: error?.message || String(error),
+    });
+    return null;
+  }
+}
+
+function persistMainWindowState(reason = "unknown") {
+  if (mainWindowStateSaveTimer) {
+    clearTimeout(mainWindowStateSaveTimer);
+    mainWindowStateSaveTimer = null;
+  }
+
+  const state = readCurrentMainWindowState();
+  if (!state) return false;
+  if (deepEqual(cachedPreferences?.mainWindowBounds, state.bounds)) {
+    return false;
+  }
+
+  try {
+    updatePreferences({
+      mainWindowBounds: state.bounds,
+    });
+    windowLogger.info("main-window-state:saved", {
+      reason,
+      bounds: state.bounds,
+    });
+    return true;
+  } catch (error) {
+    windowLogger.warn("main-window-state:save-failed", {
+      reason,
+      error: error?.message || String(error),
+    });
+    return false;
+  }
+}
+
+function scheduleMainWindowStateSave(reason = "window-change") {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindowStateSaveTimer) clearTimeout(mainWindowStateSaveTimer);
+  mainWindowStateSaveTimer = setTimeout(() => {
+    mainWindowStateSaveTimer = null;
+    persistMainWindowState(reason);
+  }, MAIN_WINDOW_STATE_SAVE_DELAY_MS);
+}
+
 function ensureDisplayMetricsListener() {
   if (displayMetricsListenerAdded) return;
   displayMetricsListenerAdded = true;
@@ -13527,11 +13968,22 @@ function createMainWindow(options = {}) {
     initialZoom = Number(initialPreferences.windowZoomFactor) || 1;
   } catch {}
   mainWindowUserZoom = initialZoom;
-  const initialScale = getDisplayScaleForBounds();
+  let initialWindowBounds = { ...DEFAULT_MAIN_WINDOW_BOUNDS };
+  try {
+    initialWindowBounds = resolveMainWindowBounds(
+      initialPreferences.mainWindowBounds,
+      screen.getAllDisplays(),
+      screen.getPrimaryDisplay(),
+    );
+  } catch (error) {
+    windowLogger.warn("main-window-state:restore-failed", {
+      error: error?.message || String(error),
+    });
+  }
+  const initialScale = getDisplayScaleForBounds(initialWindowBounds);
   const initialZoomFactor = initialZoom / (initialScale || 1);
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 1000,
+    ...initialWindowBounds,
     frame: false,
     show: false,
     transparent: false,
@@ -13548,8 +14000,7 @@ function createMainWindow(options = {}) {
     },
   });
   windowLogger.info("create-main-window:browserwindow-created", {
-    width: 1000,
-    height: 1000,
+    bounds: initialWindowBounds,
     zoom: initialZoom,
   });
 
@@ -13567,16 +14018,17 @@ function createMainWindow(options = {}) {
       const prefs = fs.existsSync(preferencesPath)
         ? JSON.parse(fs.readFileSync(preferencesPath, "utf-8"))
         : {};
-      const shouldStartInTray = !!prefs.startInTray;
-      const shouldStartMaximized = !!prefs.startMaximized;
+      const startupPresentation = resolveMainWindowStartupPresentation(prefs, {
+        forceShow: forceShowOnLoad,
+      });
       const zoom = Number(prefs.windowZoomFactor) || 1;
       setTimeout(() => {
         applyMainWindowZoomFactor(zoom);
       }, POST_BOOT_ZOOM_DELAY_MS);
-      if (forceShowOnLoad || !shouldStartInTray) {
-        if (shouldStartMaximized) {
-          mainWindow.maximize();
-        }
+      if (startupPresentation.shouldMaximize) {
+        mainWindow.maximize();
+      }
+      if (startupPresentation.shouldShow) {
         mainWindow.show();
       }
     } catch (e) {
@@ -13586,6 +14038,7 @@ function createMainWindow(options = {}) {
       mainWindow.show();
     }
     windowLogger.info("create-main-window:visible", {
+      visible: mainWindow.isVisible(),
       maximized: mainWindow.isMaximized(),
     });
     broadcastOverlayControllerRuntimeState(cachedPreferences);
@@ -13599,6 +14052,7 @@ function createMainWindow(options = {}) {
   // Track window state changes
   mainWindow.on("maximize", () => {
     windowLogger.info("create-main-window:maximize");
+    scheduleMainWindowStateSave("maximize");
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("window-state-change", true);
     }
@@ -13606,6 +14060,7 @@ function createMainWindow(options = {}) {
 
   mainWindow.on("unmaximize", () => {
     windowLogger.info("create-main-window:unmaximize");
+    scheduleMainWindowStateSave("unmaximize");
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("window-state-change", false);
     }
@@ -13643,11 +14098,18 @@ function createMainWindow(options = {}) {
     });
   });
 
-  mainWindow.on("move", () => scheduleMainWindowZoomUpdate());
-  mainWindow.on("resize", () => scheduleMainWindowZoomUpdate());
+  mainWindow.on("move", () => {
+    scheduleMainWindowZoomUpdate();
+    scheduleMainWindowStateSave("move");
+  });
+  mainWindow.on("resize", () => {
+    scheduleMainWindowZoomUpdate();
+    scheduleMainWindowStateSave("resize");
+  });
   ensureDisplayMetricsListener();
 
   mainWindow.on("close", (e) => {
+    persistMainWindowState("close");
     if (isQuitting) return;
     const shouldCloseToTray =
       cachedPreferences?.closeToTray === true || global.closeToTray === true;
@@ -13662,6 +14124,10 @@ function createMainWindow(options = {}) {
     if (mainWindowZoomTimer) {
       clearTimeout(mainWindowZoomTimer);
       mainWindowZoomTimer = null;
+    }
+    if (mainWindowStateSaveTimer) {
+      clearTimeout(mainWindowStateSaveTimer);
+      mainWindowStateSaveTimer = null;
     }
     if (trayMenuWindow && !trayMenuWindow.isDestroyed()) {
       trayMenuWindow.destroy();
@@ -14315,9 +14781,13 @@ function markConfigPlatinumFlag(configName) {
   if (!fs.existsSync(cfgPath)) return false;
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
-    if (data.platinum === true) return false; // already flagged
+    if (data.platinum === true) {
+      queueDashboardSummaryReconcile(safe, "platinum-already-flagged");
+      return false; // already flagged
+    }
     data.platinum = true;
     writeJsonAtomicSync(cfgPath, data, { backup: true });
+    queueDashboardSummaryReconcile(safe, "platinum-flag-written");
     return true;
   } catch {
     return false;
@@ -14389,9 +14859,15 @@ function handlePlatinumComplete({
 ipcMain.handle("load-presets", async () => {
   if (!fs.existsSync(userPresetsFolder)) {
     return {
-      defaultPresets: [NATIVE_WINDOWS_PRESET_NAME],
+      defaultPresets: [
+        NATIVE_WINDOWS_PRESET_NAME,
+        GAME_BAR_NOTIFICATIONS_PRESET_NAME,
+      ],
       userPresets: [],
-      scalable: [NATIVE_WINDOWS_PRESET_NAME],
+      scalable: [
+        NATIVE_WINDOWS_PRESET_NAME,
+        GAME_BAR_NOTIFICATIONS_PRESET_NAME,
+      ],
       nonScalable: [],
       isStructured: true,
     };
@@ -14441,6 +14917,9 @@ ipcMain.handle("load-presets", async () => {
       ) {
         defaultPresets.push(NATIVE_WINDOWS_PRESET_NAME);
       }
+      if (!defaultPresets.some((preset) => isGameBarNotificationPreset(preset))) {
+        defaultPresets.push(GAME_BAR_NOTIFICATIONS_PRESET_NAME);
+      }
       return {
         defaultPresets,
         userPresets,
@@ -14466,6 +14945,9 @@ ipcMain.handle("load-presets", async () => {
     if (!flatDirs.some((preset) => isNativeWindowsNotificationPreset(preset))) {
       flatDirs.push(NATIVE_WINDOWS_PRESET_NAME);
     }
+    if (!flatDirs.some((preset) => isGameBarNotificationPreset(preset))) {
+      flatDirs.push(GAME_BAR_NOTIFICATIONS_PRESET_NAME);
+    }
     return flatDirs;
   } catch (error) {
     notifyError(
@@ -14486,6 +14968,8 @@ const pendingNotificationScreenshots = new Map();
 const RECENT_ACHIEVEMENT_NOTIFICATION_DEDUPE_MS = 1500;
 const recentAchievementNotificationKeys = new Map();
 const NATIVE_WINDOWS_PRESET_NAME = "Native Windows";
+const GAME_BAR_NOTIFICATIONS_PRESET_NAME = "Game Bar Notifications";
+const GAME_BAR_NOTIFICATION_QUEUE_INTERVAL_MS = 1250;
 
 function matchesPlatinumNotificationIdentity(notificationData, identity = {}) {
   if (
@@ -14575,6 +15059,358 @@ function resetMainPlatinumNotificationState(identity = {}) {
     removedPendingNotification,
     removedQueued,
   };
+}
+
+const platinumSummaryMutationChains = new Map();
+
+function queuePlatinumSummaryMutation(configName, task) {
+  const safeName = normalizeDashboardConfigName(configName);
+  if (!safeName || typeof task !== "function") {
+    return Promise.resolve({ changed: false, reason: "invalid-config" });
+  }
+  const previous =
+    platinumSummaryMutationChains.get(safeName) || Promise.resolve();
+  const running = previous.catch(() => {}).then(task);
+  platinumSummaryMutationChains.set(safeName, running);
+  return running.finally(() => {
+    if (platinumSummaryMutationChains.get(safeName) === running) {
+      platinumSummaryMutationChains.delete(safeName);
+    }
+  });
+}
+
+async function recordPlatinumSummarySync(
+  configName,
+  currentSummary,
+  config,
+  options = {},
+) {
+  const safeName = normalizeDashboardConfigName(configName);
+  if (
+    !safeName ||
+    currentSummary?.verified !== true ||
+    !config ||
+    typeof config !== "object"
+  ) {
+    return false;
+  }
+  const total = Math.max(0, Math.floor(Number(currentSummary.total) || 0));
+  const unlocked = Math.max(
+    0,
+    Math.min(total, Math.floor(Number(currentSummary.unlocked) || 0)),
+  );
+  if (total <= 0) return false;
+
+  const configPath = resolveConfigJsonPath(configsDir, safeName);
+  if (!configPath) return false;
+  let confirmedConfig = config;
+  try {
+    confirmedConfig = JSON.parse(
+      await fs.promises.readFile(configPath, "utf8"),
+    );
+  } catch {
+    return false;
+  }
+  const configFingerprint = await getDashboardSummaryFingerprintPart(configPath);
+  if (!configFingerprint) return false;
+
+  const platinum = isPlatinumFlagEnabled(confirmedConfig.platinum);
+  const previousSummary = options.previousSummary || null;
+  let platinumCompletedTotal = 0;
+  if (platinum) {
+    if (unlocked === total) {
+      platinumCompletedTotal = total;
+    } else {
+      platinumCompletedTotal = Math.max(
+        0,
+        Math.floor(Number(currentSummary.platinumCompletedTotal) || 0),
+        Math.floor(Number(previousSummary?.platinumCompletedTotal) || 0),
+        isVerifiedSummaryComplete(previousSummary)
+          ? Math.floor(Number(previousSummary.total) || 0)
+          : 0,
+        total,
+      );
+    }
+  }
+
+  const updated = await dashboardSummaryStore.updatePlatinumState(safeName, {
+    platinum,
+    nativePlatinum: confirmedConfig.native_platinum === true,
+    basis: { unlocked, total },
+    configFingerprint,
+    platinumCompletedTotal,
+    expectedObservedAt: Number(currentSummary.observedAt) || 0,
+  });
+  return Boolean(updated);
+}
+
+async function reconcileConfigPlatinumFromSummary(
+  configName,
+  currentSummary,
+  options = {},
+) {
+  const safeName = normalizeDashboardConfigName(configName);
+  if (!safeName || currentSummary?.verified !== true) {
+    return { changed: false, reason: "summary-unverified" };
+  }
+  const total = Math.max(0, Math.floor(Number(currentSummary.total) || 0));
+  if (total <= 0) {
+    return { changed: false, reason: "summary-empty" };
+  }
+
+  const complete = isVerifiedSummaryComplete(currentSummary);
+  const runtimeCompletionOwned =
+    complete && options.allowCompleteMark !== true;
+  if (!complete && options.allowCompleteMark !== true) {
+    const previousTotal = Math.max(
+      0,
+      Math.floor(Number(options.previousSummary?.total) || 0),
+    );
+    const previousUnlocked = Math.max(
+      0,
+      Math.floor(Number(options.previousSummary?.unlocked) || 0),
+    );
+    if (previousTotal <= 0 || previousUnlocked !== previousTotal) {
+      if (
+        currentSummary.platinum === false &&
+        currentSummary.platinumSynced === true &&
+        fingerprintPartsEqual(
+          currentSummary.platinumConfigFingerprint,
+          currentSummary?.fingerprint?.config,
+        )
+      ) {
+        const advanced = await dashboardSummaryStore.updatePlatinumState(
+          safeName,
+          {
+            platinum: false,
+            nativePlatinum: currentSummary.nativePlatinum === true,
+            basis: {
+              unlocked: Math.max(
+                0,
+                Math.floor(Number(currentSummary.unlocked) || 0),
+              ),
+              total,
+            },
+            configFingerprint: currentSummary.fingerprint.config,
+            platinumCompletedTotal: 0,
+            expectedObservedAt: Number(currentSummary.observedAt) || 0,
+          },
+        );
+        if (advanced) {
+          return {
+            changed: false,
+            reason: "incomplete-platinum-basis-advanced",
+            platinum: false,
+            synced: true,
+          };
+        }
+      }
+      return { changed: false, reason: "no-complete-to-incomplete-transition" };
+    }
+  }
+
+  return queuePlatinumSummaryMutation(safeName, async () => {
+    const currentObservedAt = Math.max(
+      0,
+      Number(currentSummary?.observedAt) || 0,
+    );
+    if (currentObservedAt > 0) {
+      const latestSummary = await dashboardSummaryStore.getEntry(safeName);
+      if (
+        Number(latestSummary?.observedAt || 0) > currentObservedAt
+      ) {
+        return { changed: false, reason: "summary-superseded" };
+      }
+    }
+    const configPath = resolveConfigJsonPath(configsDir, safeName);
+    if (!configPath) return { changed: false, reason: "config-missing" };
+
+    let config =
+      options?.configHint && typeof options.configHint === "object"
+        ? options.configHint
+        : null;
+    if (!config) {
+      try {
+        config = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
+      } catch (error) {
+        return {
+          changed: false,
+          reason: "config-read-failed",
+          error: error?.message || String(error),
+        };
+      }
+    }
+
+    const platform =
+      normalizePlatform(config?.platform || currentSummary?.platform) ||
+      "steam";
+    const nativePlatinum = config?.native_platinum === true;
+    const shouldReset = shouldResetPlatinumFromSummary({
+      current: currentSummary,
+      previous: options.previousSummary || null,
+      platform,
+      nativePlatinum,
+      completedTotal: Math.max(
+        0,
+        Math.floor(Number(currentSummary?.platinumCompletedTotal) || 0),
+        Math.floor(
+          Number(options.previousSummary?.platinumCompletedTotal) || 0,
+        ),
+      ),
+    });
+    const initialFlag = isPlatinumFlagEnabled(config.platinum);
+    const target = complete
+      ? runtimeCompletionOwned && !initialFlag
+        ? null
+        : true
+      : shouldReset
+        ? false
+        : null;
+    if (target == null) {
+      if (runtimeCompletionOwned && !initialFlag) {
+        return {
+          changed: false,
+          reason: "runtime-completion-owned-by-watcher",
+        };
+      }
+      const synced = await recordPlatinumSummarySync(
+        safeName,
+        currentSummary,
+        config,
+        options,
+      );
+      return {
+        changed: false,
+        reason: nativePlatinum
+          ? "native-platinum-preserved"
+          : "account-scope-preserved",
+        platinum: initialFlag,
+        synced,
+      };
+    }
+    if (
+      (target === true && initialFlag) ||
+      (target === false && !initialFlag)
+    ) {
+      const synced = await recordPlatinumSummarySync(
+        safeName,
+        currentSummary,
+        config,
+        options,
+      );
+      return {
+        changed: false,
+        reason: "already-reconciled",
+        platinum: target,
+        synced,
+      };
+    }
+    try {
+      // Re-read immediately before the synchronous atomic replacement so a
+      // concurrent runtime completion cannot be overwritten by an older
+      // summary decision.
+      config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      if (target === false && config?.native_platinum === true) {
+        const synced = await recordPlatinumSummarySync(
+          safeName,
+          currentSummary,
+          config,
+          options,
+        );
+        return {
+          changed: false,
+          reason: "native-platinum-preserved",
+          platinum: isPlatinumFlagEnabled(config.platinum),
+          synced,
+        };
+      }
+      const currentFlag = isPlatinumFlagEnabled(config.platinum);
+      if (
+        (target === true && currentFlag) ||
+        (target === false && !currentFlag)
+      ) {
+        const synced = await recordPlatinumSummarySync(
+          safeName,
+          currentSummary,
+          config,
+          options,
+        );
+        return {
+          changed: false,
+          reason: "already-reconciled",
+          platinum: target,
+          synced,
+        };
+      }
+      config.platinum = target;
+      writeJsonAtomicSync(configPath, config, {
+        backup: true,
+        trailingNewline: true,
+      });
+    } catch (error) {
+      persistenceLogger.warn("platinum:summary-write-failed", {
+        config: safeName,
+        target,
+        reason: options.reason || null,
+        error: error?.message || String(error),
+      });
+      return {
+        changed: false,
+        reason: "config-write-failed",
+        error: error?.message || String(error),
+      };
+    }
+
+    const synced = await recordPlatinumSummarySync(
+      safeName,
+      currentSummary,
+      config,
+      options,
+    );
+
+    let mainReset = null;
+    let watcherReset = null;
+    if (target === false) {
+      const identity = {
+        configName: safeName,
+        appid: config?.appid != null ? String(config.appid) : "",
+        platform,
+      };
+      mainReset = resetMainPlatinumNotificationState(identity);
+      try {
+        watcherReset = watchedFoldersApi?.resetPlatinumState?.(identity) || null;
+      } catch {}
+    }
+
+    persistenceLogger.info("platinum:summary-reconciled", {
+      config: safeName,
+      platform,
+      platinum: target,
+      unlocked: Number(currentSummary.unlocked) || 0,
+      total,
+      reason: options.reason || null,
+      synced,
+      mainReset,
+      watcherReset,
+    });
+    return {
+      changed: true,
+      platinum: target,
+      synced,
+      reason: "summary-reconciled",
+    };
+  }).catch((error) => {
+    persistenceLogger.warn("platinum:summary-reconcile-failed", {
+      config: safeName,
+      reason: options.reason || null,
+      error: error?.message || String(error),
+    });
+    return {
+      changed: false,
+      reason: "summary-reconcile-failed",
+      error: error?.message || String(error),
+    };
+  });
 }
 
 function isNativeWindowsNotificationPreset(preset) {
@@ -14919,6 +15755,7 @@ function queueAchievementNotification(achievement) {
     sanPresetCandidate;
   const usesNativeWindowsPreset =
     isNativeWindowsNotificationPreset(resolvedPreset);
+  const usesGameBarPreset = isGameBarNotificationPreset(resolvedPreset);
   const resolvedSkipScreenshot =
     achievement.skipScreenshot === true
       ? true
@@ -14944,8 +15781,11 @@ function queueAchievementNotification(achievement) {
     position: resolvedPosition,
     sound: requestedSound,
     sanPreset:
-      !usesNativeWindowsPreset && useSanPreset ? sanPresetCandidate : "",
-    useSanPreset: !usesNativeWindowsPreset && !!useSanPreset,
+      !usesNativeWindowsPreset && !usesGameBarPreset && useSanPreset
+        ? sanPresetCandidate
+        : "",
+    useSanPreset:
+      !usesNativeWindowsPreset && !usesGameBarPreset && !!useSanPreset,
     scale: parseFloat(achievement.scale || 1),
     skipScreenshot: resolvedSkipScreenshot,
     isPlatinum,
@@ -15852,12 +16692,14 @@ function processNextNotification() {
     .trim()
     .toLowerCase();
   const isNativeWindowsPreset = isNativeWindowsNotificationPreset(preset);
-  const { presetFolder } = isNativeWindowsPreset
+  const isGameBarPreset = isGameBarNotificationPreset(preset);
+  const { presetFolder } = isNativeWindowsPreset || isGameBarPreset
     ? { presetFolder: null }
     : resolveNotificationPresetFolder(preset);
 
   if (
     !isNativeWindowsPreset &&
+    !isGameBarPreset &&
     notificationData.useSanPreset &&
     notificationData.sanPreset
   ) {
@@ -15886,6 +16728,7 @@ function processNextNotification() {
 
   if (
     !isNativeWindowsPreset &&
+    !isGameBarPreset &&
     notificationData.isPlatinum &&
     ["xbox series platinum - purple", "xbox series platinum"].includes(
       normalizedPreset,
@@ -15934,7 +16777,7 @@ function processNextNotification() {
       : 0;
   const duration =
     overrideDurationMs ||
-    (isNativeWindowsPreset
+    (isNativeWindowsPreset || isGameBarPreset
       ? 5000
       : notificationData.sanTheme
         ? Math.round(
@@ -15955,6 +16798,82 @@ function processNextNotification() {
     !notificationData.isTest &&
     !notificationData.skipScreenshot &&
     !disableByPrefs;
+
+  if (isGameBarPreset) {
+    const publishGameBarNotification = gameBarWidgetBridge?.publishNotification;
+    if (typeof publishGameBarNotification !== "function") {
+      achievement.preset = NATIVE_WINDOWS_PRESET_NAME;
+      achievement.__gameBarFallbackOnly = true;
+      earnedNotificationQueue.unshift(achievement);
+      finishCurrentNotification();
+      return;
+    }
+    void publishGameBarNotification({
+      type: "achievement",
+      title: notificationData.displayName || "Achievement",
+      content: notificationData.description || "",
+      achievementId: notificationData.name || "",
+      appid: notificationData.appid || "",
+      platform: notificationData.platform || "",
+      configName: notificationData.configName || "",
+      isRare: notificationData.isRare === true,
+      isPlatinum: notificationData.isPlatinum === true,
+    })
+      .then((result) => {
+        if (queueEntryFinished) return;
+        const status = normalizeGameBarNotificationResultStatus(result?.status);
+        notificationLogger.info("gamebar-notification:result", {
+          displayName: notificationData.displayName,
+          status: result?.status || null,
+          reason: result?.reason || null,
+          type: "achievement",
+        });
+        if (status === "success") {
+          playAchievementNotificationSound(achievement);
+          if (shouldScreenshot) {
+            notificationLogger.info("notification:screenshot-trigger", {
+              reason: "gamebar",
+            });
+            setImmediate(() => {
+              void captureAchievementUnlockScreenshot(notificationData);
+            });
+          }
+          const timer = setTimeout(
+            finishCurrentNotification,
+            GAME_BAR_NOTIFICATION_QUEUE_INTERVAL_MS,
+          );
+          timer.unref?.();
+          return;
+        }
+        if (isGameBarNotificationSuppressedStatus(status)) {
+          finishCurrentNotification();
+          return;
+        }
+        notificationLogger.warn("gamebar-notification:fallback", {
+          displayName: notificationData.displayName,
+          status: result?.status || "unavailable",
+          reason: result?.reason || null,
+          fallback: NATIVE_WINDOWS_PRESET_NAME,
+        });
+        achievement.preset = NATIVE_WINDOWS_PRESET_NAME;
+        achievement.__gameBarFallbackOnly = true;
+        earnedNotificationQueue.unshift(achievement);
+        finishCurrentNotification();
+      })
+      .catch((error) => {
+        if (queueEntryFinished) return;
+        notificationLogger.warn("gamebar-notification:fallback", {
+          displayName: notificationData.displayName,
+          error: error?.message || String(error),
+          fallback: NATIVE_WINDOWS_PRESET_NAME,
+        });
+        achievement.preset = NATIVE_WINDOWS_PRESET_NAME;
+        achievement.__gameBarFallbackOnly = true;
+        earnedNotificationQueue.unshift(achievement);
+        finishCurrentNotification();
+      });
+    return;
+  }
 
   if (isNativeWindowsPreset) {
     let nativeCompletionTimer = null;
@@ -15987,6 +16906,15 @@ function processNextNotification() {
       if (nativeFallbackStarted || queueEntryFinished) return;
       nativeFallbackStarted = true;
       clearNativeCompletionTimer();
+      if (achievement.__gameBarFallbackOnly === true) {
+        notificationLogger.warn("gamebar-notification:native-fallback-failed", {
+          displayName: notificationData.displayName,
+          reason,
+          error: error ? error?.message || String(error) : null,
+        });
+        finishCurrentNotification();
+        return;
+      }
       notificationData.preset = "Default";
       const { presetFolder: fallbackPresetFolder } =
         resolveNotificationPresetFolder(notificationData.preset);
@@ -16117,13 +17045,24 @@ function queueProgressNotification(data) {
       ? normalizeNotificationScale(data.scale).scale
       : normalizeNotificationScale(cachedPreferences?.notificationScale ?? 1)
           .scale;
-  data = { ...(data || {}), scale };
+  const notificationMethod =
+    String(
+      data?.notificationMethod ||
+        cachedPreferences?.progressNotificationMethod ||
+        "animated",
+    )
+      .trim()
+      .toLowerCase() === "gamebar"
+      ? "gamebar"
+      : "animated";
+  data = { ...(data || {}), scale, notificationMethod };
   notificationLogger.info("queue-progress", {
     displayName: data?.displayName || "",
     progress: data?.progress ?? null,
     max: data?.max_progress ?? null,
     config: data?.config_path || null,
     scale,
+    notificationMethod,
   });
   progressNotificationQueue.push(data);
   processNextProgressNotification();
@@ -16135,16 +17074,94 @@ function processNextProgressNotification() {
   const data = progressNotificationQueue.shift();
   isProgressShowing = true;
 
+  const finishProgressNotification = () => {
+    if (!isProgressShowing) return;
+    isProgressShowing = false;
+    processNextProgressNotification();
+  };
+
+  if (data?.notificationMethod === "gamebar") {
+    const current = Number(data?.progress);
+    const maximum = Number(data?.max_progress);
+    const percentage =
+      Number.isFinite(current) && Number.isFinite(maximum) && maximum > 0
+        ? Math.max(0, Math.min(100, (current / maximum) * 100))
+        : null;
+    const progressText =
+      Number.isFinite(current) && Number.isFinite(maximum) && maximum > 0
+        ? `${current} / ${maximum}${percentage == null ? "" : ` • ${percentage.toFixed(0)}%`}`
+        : "";
+    const publishGameBarNotification = gameBarWidgetBridge?.publishNotification;
+    if (typeof publishGameBarNotification !== "function") {
+      data.notificationMethod = "animated";
+    } else {
+      void publishGameBarNotification({
+        type: "progress",
+        title: data?.displayName || "Achievement Progress",
+        content: progressText,
+        achievementId: data?.name || "",
+        appid: data?.appid || data?.appId || "",
+        platform: normalizePlatform(data?.platform) || "",
+        configName: data?.configName || data?.config_name || "",
+        progress: current,
+        maxProgress: maximum,
+      })
+        .then((result) => {
+          const status = normalizeGameBarNotificationResultStatus(result?.status);
+          notificationLogger.info("gamebar-notification:result", {
+            displayName: data?.displayName || "",
+            status: result?.status || null,
+            reason: result?.reason || null,
+            type: "progress",
+          });
+          if (status === "success") {
+            const timer = setTimeout(
+              finishProgressNotification,
+              GAME_BAR_NOTIFICATION_QUEUE_INTERVAL_MS,
+            );
+            timer.unref?.();
+            return;
+          }
+          if (isGameBarNotificationSuppressedStatus(status)) {
+            finishProgressNotification();
+            return;
+          }
+          notificationLogger.warn("gamebar-notification:fallback", {
+            displayName: data?.displayName || "",
+            status: result?.status || "unavailable",
+            reason: result?.reason || null,
+            fallback: "animated-progress",
+          });
+          const fallbackWindow = showProgressNotification(data);
+          if (fallbackWindow) {
+            fallbackWindow.on("closed", finishProgressNotification);
+          } else {
+            finishProgressNotification();
+          }
+        })
+        .catch((error) => {
+          notificationLogger.warn("gamebar-notification:fallback", {
+            displayName: data?.displayName || "",
+            error: error?.message || String(error),
+            fallback: "animated-progress",
+          });
+          const fallbackWindow = showProgressNotification(data);
+          if (fallbackWindow) {
+            fallbackWindow.on("closed", finishProgressNotification);
+          } else {
+            finishProgressNotification();
+          }
+        });
+      return;
+    }
+  }
+
   const progressWindow = showProgressNotification(data);
 
   if (progressWindow) {
-    progressWindow.on("closed", () => {
-      isProgressShowing = false;
-      processNextProgressNotification();
-    });
+    progressWindow.on("closed", finishProgressNotification);
   } else {
-    isProgressShowing = false;
-    processNextProgressNotification();
+    finishProgressNotification();
   }
 }
 
@@ -16270,133 +17287,137 @@ const achCacheMetaPath = (() => {
   }
   return "";
 })();
-let achCacheMetaLoaded = false;
-const achCacheMeta = new Map();
-let achCacheMetaDirty = false;
-let achCacheMetaSaveTimer = null;
+const achievementCacheMetaStore = createAchievementCacheMetaStore({
+  filePath: achCacheMetaPath,
+  saveDelayMs: 500,
+});
 
 function normalizeAchCacheMetaPath(inputPath) {
-  if (!inputPath) return "";
-  try {
-    return fs.realpathSync(inputPath);
-  } catch {
-    return path.resolve(String(inputPath));
-  }
+  return normalizeAchievementCacheMetaPath(inputPath);
 }
 
 function loadAchCacheMetaOnce() {
-  if (achCacheMetaLoaded) return;
-  achCacheMetaLoaded = true;
-  if (!achCacheMetaPath || !fs.existsSync(achCacheMetaPath)) return;
-  try {
-    const raw = fs.readFileSync(achCacheMetaPath, "utf8");
-    const parsed = JSON.parse(raw);
-    const files =
-      parsed && typeof parsed === "object" && parsed.files
-        ? parsed.files
-        : parsed;
-    if (!files || typeof files !== "object") return;
-    for (const [key, entry] of Object.entries(files)) {
-      if (!entry || typeof entry !== "object") continue;
-      const mtimeMs = Number(entry.mtimeMs ?? entry.mtime ?? 0);
-      const size = Number(entry.size ?? 0);
-      if (!Number.isFinite(mtimeMs) || !Number.isFinite(size)) continue;
-      achCacheMeta.set(key, { mtimeMs, size });
-    }
-  } catch {}
+  achievementCacheMetaStore.loadOnce();
 }
 
 function getAchCacheMetaKey(configName, platform, filePath, appid = "") {
-  const normalizedPath = normalizeAchCacheMetaPath(filePath);
-  if (!normalizedPath) return "";
-  const safeName = sanitizeConfigName(configName || "") || String(appid || "");
-  const normalizedPlatform = normalizePlatform(platform) || "steam";
-  if (!safeName) return "";
-  return `${safeName}::${normalizedPlatform}::${normalizedPath}`;
+  return buildAchievementCacheMetaKey({
+    configName,
+    platform: normalizePlatform(platform) || "steam",
+    filePath,
+    appid,
+  });
 }
 
-function isAchCacheMetaMatch(configName, platform, filePath, appid = "") {
-  const key = getAchCacheMetaKey(configName, platform, filePath, appid);
-  if (!key) return false;
+function getAchCacheMetaParserRevision(filePath) {
+  const baseName = path.basename(String(filePath || "")).toLowerCase();
+  const parentName = path
+    .basename(path.dirname(String(filePath || "")))
+    .toLowerCase();
+  return parentName === "stats" &&
+    (baseName === "achievements.ini" || baseName === "stats.ini")
+    ? "online-fix-parser:2"
+    : "";
+}
+
+async function areAchCacheMetaMatches(
+  configName,
+  platform,
+  filePaths,
+  appid = "",
+) {
+  const sources = Array.isArray(filePaths) ? filePaths.filter(Boolean) : [];
+  if (!sources.length) return false;
   loadAchCacheMetaOnce();
-  const entry = achCacheMeta.get(key);
-  if (!entry || typeof entry !== "object") return false;
-  let stat = null;
-  try {
-    stat = fs.statSync(filePath);
-  } catch {
-    return false;
-  }
-  const expectedMtime = Number(entry.mtimeMs ?? 0);
-  const expectedSize = Number(entry.size ?? 0);
-  if (!Number.isFinite(expectedMtime) || !Number.isFinite(expectedSize)) {
-    return false;
-  }
-  return stat.mtimeMs === expectedMtime && stat.size === expectedSize;
-}
-
-function scheduleAchCacheMetaSave() {
-  if (!achCacheMetaPath) return;
-  achCacheMetaDirty = true;
-  if (achCacheMetaSaveTimer) {
-    clearTimeout(achCacheMetaSaveTimer);
-  }
-  achCacheMetaSaveTimer = setTimeout(() => {
-    if (!achCacheMetaDirty) return;
-    achCacheMetaDirty = false;
-    try {
-      const payload = {
-        version: 1,
-        files: Object.fromEntries(achCacheMeta),
-      };
-      fs.mkdirSync(path.dirname(achCacheMetaPath), { recursive: true });
-      writeJsonAtomicSync(achCacheMetaPath, payload);
-    } catch {}
-  }, 500);
+  const matches = await Promise.all(
+    sources.map((filePath) => {
+      const key = getAchCacheMetaKey(configName, platform, filePath, appid);
+      if (!key) return false;
+      return achievementCacheMetaStore.matchesFile(
+        key,
+        filePath,
+        getAchCacheMetaParserRevision(filePath),
+      );
+    }),
+  );
+  return matches.every(Boolean);
 }
 
 function updateAchCacheMetaEntry(configName, platform, filePath, appid = "") {
   const key = getAchCacheMetaKey(configName, platform, filePath, appid);
   if (!key || !filePath) return;
-  let stat = null;
-  try {
-    stat = fs.statSync(filePath);
-  } catch {
-    return;
-  }
-  const mtimeMs = Number(stat.mtimeMs ?? 0);
-  const size = Number(stat.size ?? 0);
-  if (!Number.isFinite(mtimeMs) || !Number.isFinite(size)) return;
   loadAchCacheMetaOnce();
-  achCacheMeta.set(key, { mtimeMs, size });
-  scheduleAchCacheMetaSave();
+  achievementCacheMetaStore.updateFileSync(
+    key,
+    filePath,
+    getAchCacheMetaParserRevision(filePath),
+  );
 }
 
-function resolveBootSeedCandidatePath(config) {
+function isGameBarNotificationPreset(preset) {
+  return (
+    String(preset || "")
+      .trim()
+      .toLowerCase() === GAME_BAR_NOTIFICATIONS_PRESET_NAME.toLowerCase()
+  );
+}
+
+function normalizeGameBarNotificationResultStatus(value) {
+  return String(value || "")
+    .trim()
+    .replace(/[\s_-]+/g, "")
+    .toLowerCase();
+}
+
+function isGameBarNotificationSuppressedStatus(value) {
+  return [
+    "accessdenied",
+    "suppressedforquiethours",
+    "suppressedforfullscreenexclusive",
+  ].includes(normalizeGameBarNotificationResultStatus(value));
+}
+
+function resolveBootSeedCandidatePaths(config) {
+  const addExisting = (target, values) => {
+    const seen = new Set();
+    for (const value of values || []) {
+      const sourcePath = String(value || "").trim();
+      if (!sourcePath || !fs.existsSync(sourcePath)) continue;
+      const normalized = normalizeAchCacheMetaPath(sourcePath);
+      const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      target.push(sourcePath);
+    }
+    return target;
+  };
+  const result = [];
   const normalizedPlatform = normalizePlatform(config?.platform) || "steam";
   if (isFf7AchievementDatConfig(config)) {
     const stateFile = getFf7AchievementStateFile(config);
-    return stateFile && fs.existsSync(stateFile) ? stateFile : null;
+    return addExisting(result, [stateFile]);
   }
   if (
     normalizedPlatform === "xlivelessness" ||
     isXLiveLessNessConfig(config)
   ) {
     const configured = String(config?.xlln_active_state_file || "").trim();
-    if (configured && fs.existsSync(configured)) return configured;
-    return listAllXLiveLessNessStateFiles(config)[0]?.filePath || null;
+    return addExisting(result, [
+      configured,
+      ...listAllXLiveLessNessStateFiles(config).map((entry) => entry?.filePath),
+    ]);
   }
   const savePathRaw = config?.save_path;
-  if (!savePathRaw) return null;
+  if (!savePathRaw) return result;
   if (normalizedPlatform === "markerpatch" || isMarkerPatchConfig(config)) {
     const stateFile = getMarkerPatchStateFile(config);
-    return stateFile && fs.existsSync(stateFile) ? stateFile : null;
+    return addExisting(result, [stateFile]);
   }
   if (normalizedPlatform === "madnesspatch" || isMadnessPatchConfig(config)) {
     const stateFile = getLatestMadnessPatchStateFile(
       getMadnessPatchCheckpointRoot(config),
     );
-    return stateFile && fs.existsSync(stateFile) ? stateFile : null;
+    return addExisting(result, [stateFile]);
   }
   let saveRoot = savePathRaw;
   let candidatePath = null;
@@ -16408,39 +17429,39 @@ function resolveBootSeedCandidatePath(config) {
     }
   } catch {}
   if (!candidatePath) {
-    if (!fs.existsSync(saveRoot)) return null;
+    if (!fs.existsSync(saveRoot)) return result;
     const appid = String(config?.appid || "").trim();
-    if (normalizedPlatform === "epic-official") return null;
+    if (normalizedPlatform === "epic-official") return result;
     if (normalizedPlatform === "gog-official") {
       const resolved = resolveGogOfficialGameplayDbForConfig(config);
       if (resolved?.gameplayDbPath && fs.existsSync(resolved.gameplayDbPath)) {
-        return resolved.gameplayDbPath;
+        return addExisting(result, [resolved.gameplayDbPath]);
       }
       const directGameplayDb = path.join(saveRoot, "gameplay.db");
       if (fs.existsSync(directGameplayDb)) {
-        return directGameplayDb;
+        return addExisting(result, [directGameplayDb]);
       }
     }
     if (normalizedPlatform === "ubisoft-official") {
       const resolved = resolveUbisoftOfficialSpoolFileForConfig(config);
       if (resolved?.spoolFilePath && fs.existsSync(resolved.spoolFilePath)) {
-        return resolved.spoolFilePath;
+        return addExisting(result, [resolved.spoolFilePath]);
       }
       const directSpoolFile = appid
         ? path.join(saveRoot, `${appid}.spool`)
         : "";
       if (directSpoolFile && fs.existsSync(directSpoolFile)) {
-        return directSpoolFile;
+        return addExisting(result, [directSpoolFile]);
       }
     }
     if (normalizedPlatform === "ea-official") {
       const resolved = resolveEaOfficialVerboseLogForConfig(config);
       if (resolved?.logFilePath && fs.existsSync(resolved.logFilePath)) {
-        return resolved.logFilePath;
+        return addExisting(result, [resolved.logFilePath]);
       }
       const directVerboseLog = path.join(saveRoot, EA_VERBOSE_LOG_NAME);
       if (fs.existsSync(directVerboseLog)) {
-        return directVerboseLog;
+        return addExisting(result, [directVerboseLog]);
       }
     }
     const saveJsonPath = resolveSaveFilePath(saveRoot, appid);
@@ -16453,9 +17474,9 @@ function resolveBootSeedCandidatePath(config) {
     } = resolveSaveSidecarPaths(saveRoot, appid);
     if (fs.existsSync(saveJsonPath)) candidatePath = saveJsonPath;
     else if (tenokeIniPath) candidatePath = tenokeIniPath;
-    else if (onlineFixIniPath) candidatePath = onlineFixIniPath;
-    else if (onlineFixStatsPath) candidatePath = onlineFixStatsPath;
-    else if (iniPath) candidatePath = iniPath;
+    else if (onlineFixIniPath || onlineFixStatsPath) {
+      return addExisting(result, [onlineFixIniPath, onlineFixStatsPath, binPath]);
+    } else if (iniPath) candidatePath = iniPath;
     else if (binPath) candidatePath = binPath;
     else if (appid) {
       candidatePath = findAchievementFileDeepForAppId(saveRoot, appid, 2);
@@ -16463,7 +17484,7 @@ function resolveBootSeedCandidatePath(config) {
       candidatePath = findAchievementFileDeep(saveRoot, 2);
     }
   }
-  return candidatePath || null;
+  return addExisting(result, [candidatePath]);
 }
 
 const bootSeededCacheKeys = new Set();
@@ -16473,10 +17494,12 @@ let bootManualSeedComplete = false;
 let bootManualSeedWaitWarned = false;
 let bootManualSeedCompletionResolve = null;
 let bootPostSeedLimiterActive = false;
-const BOOT_MANUAL_POST_SEED_DELAY_MS = 1000;
+const BOOT_PLATINUM_AUDIT_DELAY_MS = 4000;
 const BOOT_MANUAL_AFTER_OVERLAY_HIDE_DELAY_MS = 2000;
 const BOOT_MANUAL_OVERLAY_WAIT_MAX_MS = 20000;
 let bootOverlayWaitStartedAt = 0;
+let bootPlatinumAuditTimer = null;
+let bootPlatinumAuditRunning = false;
 const bootManualSeedCompletion = new Promise((resolve) => {
   bootManualSeedCompletionResolve = resolve;
 });
@@ -16559,6 +17582,15 @@ function markBootManualSeedComplete() {
     bootManualSeedCompletionResolve?.();
   } catch {}
   bootManualSeedCompletionResolve = null;
+  if (dashboardSummaryReconcileQueue.size) {
+    if (dashboardSummaryReconcileTimer) {
+      clearTimeout(dashboardSummaryReconcileTimer);
+      dashboardSummaryReconcileTimer = null;
+    }
+    // Let the first visible boot frame and dashboard controls settle before
+    // background validation starts competing for disk/JSON work.
+    scheduleDashboardSummaryReconcilePump(2000);
+  }
 }
 
 async function waitForBootManualSeedBeforeLoad(timeoutMs = 15000) {
@@ -16885,6 +17917,8 @@ function savePreviousAchievements(
       return false;
     }
     writeJsonAtomicSync(cachePath, ordered);
+    markGameBarWidgetSnapshotDirty("achievement-cache-saved");
+    queueDashboardSummaryReconcile(configName, "achievement-cache-saved");
     persistenceLogger.info("save-achievement-cache", {
       config: configName,
       path: cachePath,
@@ -18223,10 +19257,12 @@ async function clearActiveConfigSelection(options = {}) {
   selectedConfigPath = null;
   selectedConfig = null;
   selectedPlatform = null;
+  refreshActiveAchievementLanguage();
   selectedConfigMode = "none";
   selectedConfigSelectionSource = "none";
   activeConfigSelectionRevision += 1;
   currentAppId = null;
+  markGameBarWidgetSnapshotDirty(`active-config-cleared:${reason}`);
   clearPendingMissingAchievementFile(previousConfig);
   void syncAchievementRecorderState(`active-config:clear:${reason}`);
 
@@ -18280,6 +19316,45 @@ ipcMain.handle("config:get-active-selection", () => ({
   selectionSource: selectedConfigSelectionSource,
   selectionRevision: activeConfigSelectionRevision,
 }));
+
+ipcMain.handle(
+  "config:set-achievement-language",
+  async (_event, payload = {}) => {
+    try {
+      const safeName = sanitizeOptionalConfigName(payload?.configName);
+      if (!safeName) {
+        return { success: false, error: "configName required" };
+      }
+      const configPath = resolveConfigJsonPath(configsDir, safeName);
+      const config = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
+      const requested = normalizeAchievementLanguage(payload?.language, "");
+      if (requested) config.language = requested;
+      else delete config.language;
+      writeJsonAtomicSync(configPath, config, { backup: true });
+      const effectiveLanguage = resolveAchievementLanguage(
+        config,
+        getGlobalAchievementLanguage(),
+      );
+      watchedFoldersApi?.updateConfigLanguage?.(safeName, requested);
+      if (sanitizeOptionalConfigName(selectedConfig) === safeName) {
+        selectedLanguage = effectiveLanguage;
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.webContents.send("set-language", {
+            language: effectiveLanguage,
+            uiLanguage: selectedUiLanguage,
+          });
+        }
+      }
+      return {
+        success: true,
+        language: requested || null,
+        effectiveLanguage,
+      };
+    } catch (error) {
+      return { success: false, error: error?.message || String(error) };
+    }
+  },
+);
 
 async function applyActiveConfigUpdate(
   event,
@@ -18380,6 +19455,7 @@ async function applyActiveConfigUpdate(
     selectedPosition = position || "center-bottom";
     selectedConfig = safeName;
     selectedPlatform = normalizedPlatform;
+    refreshActiveAchievementLanguage(config);
     selectedConfigMode = targetMode;
     selectedConfigSelectionSource = targetSelectionSource;
     activeConfigSelectionRevision += 1;
@@ -18390,6 +19466,9 @@ async function applyActiveConfigUpdate(
     fullAchievementsConfigPath = isNonEmptyString(config.config_path)
       ? path.join(config.config_path, "achievements.json")
       : null;
+    markGameBarWidgetSnapshotDirty(
+      `active-config-selected:${targetSelectionSource}`,
+    );
     ipcLogger.info("update-config:selected", {
       configName: safeName,
       platform: selectedPlatform,
@@ -19168,6 +20247,7 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
         const matchName = (val) =>
           sanitizeConfigName(String(val || "")).toLowerCase() === target;
 
+        const matches = [];
         for (const f of files) {
           const full = path.join(configsDir, f);
           let obj;
@@ -19198,9 +20278,17 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
           });
 
           if (ok) {
-            configPath = full;
-            break;
+            matches.push(full);
           }
+        }
+
+        if (matches.length === 1) {
+          configPath = matches[0];
+        } else if (matches.length > 1) {
+          ipcLogger.warn("get-config-by-name:ambiguous-fallback", {
+            name: safe,
+            matches: matches.map((full) => path.basename(full, ".json")),
+          });
         }
       } catch {
         /* ignore */
@@ -21761,6 +22849,10 @@ function preserveEpicOfficialEarnedStateFromCache(
 function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
   if (!Array.isArray(schemaAchievements) || !schemaAchievements.length) return;
   if (!Array.isArray(unlockedKeys) || !unlockedKeys.length) return;
+  const language = resolveAchievementLanguage(
+    config,
+    getGlobalAchievementLanguage(),
+  );
   const schemaMap = new Map();
   for (const entry of schemaAchievements) {
     const key = String(entry?.name || entry?.api || "").trim();
@@ -21772,8 +22864,8 @@ function notifyEpicOfficialUnlocks(config, schemaAchievements, unlockedKeys) {
     if (!achievementConfig) continue;
     queueAchievementNotification({
       name: achievementConfig.name || achievementConfig.api || key,
-      displayName: achievementConfig.displayName,
-      description: achievementConfig.description,
+      displayName: getSafeLocalizedText(achievementConfig.displayName, language),
+      description: getSafeLocalizedText(achievementConfig.description, language),
       icon: achievementConfig.icon,
       icon_gray: achievementConfig.icon_gray || achievementConfig.icongray,
       appid: config?.appid || currentAppId || null,
@@ -21800,6 +22892,10 @@ function notifyXboxPcProgress(
   if (!Array.isArray(schemaAchievements) || !schemaAchievements.length)
     return 0;
   if (!Array.isArray(progressKeys) || !progressKeys.length) return 0;
+  const language = resolveAchievementLanguage(
+    config,
+    getGlobalAchievementLanguage(),
+  );
   const schemaMap = new Map();
   for (const entry of schemaAchievements) {
     const key = String(entry?.name || entry?.api || "").trim();
@@ -21950,6 +23046,7 @@ async function runXboxPcActivePoll(trigger = "manual") {
     const synced = await syncXboxPcAchievements(config, {
       userDataDir: app.getPath("userData"),
       timeoutMs: 15000,
+      language: resolveAchievementLanguageForConfig(safeName, config),
     });
     if (generation !== xboxPcActivePollGeneration) return;
     const preserved = preserveEpicOfficialEarnedStateFromCache(
@@ -22312,6 +23409,7 @@ async function runEpicOfficialActivePoll(trigger = "manual") {
         productId,
         schemaAchievements,
         timeoutMs: 15000,
+        language: resolveAchievementLanguageForConfig(safeName, config),
       }),
     );
     if (generation !== epicOfficialActivePollGeneration) return;
@@ -22548,7 +23646,7 @@ ipcMain.on("ach-table:view-state", (_event, payload) => {
 
 ipcMain.on(
   "refresh-ui-after-language-change",
-  (event, { language, configName, uiLanguage }) => {
+  (event, { language, languageScope, configName, uiLanguage }) => {
     const effectiveUiLang = normalizeUiLanguage(
       uiLanguage ||
         (cachedPreferences && cachedPreferences.uiLanguage) ||
@@ -22557,14 +23655,22 @@ ipcMain.on(
         "english",
     );
 
-    if (language) {
-      selectedLanguage = language;
+    if (languageScope === "global" && language) {
+      globalAchievementLanguage =
+        normalizeAchievementLanguage(language, "english") || "english";
+      refreshActiveAchievementLanguage();
+    } else if (languageScope === "config" && language) {
+      selectedLanguage =
+        normalizeAchievementLanguage(language, getGlobalAchievementLanguage()) ||
+        getGlobalAchievementLanguage();
     }
     selectedUiLanguage = effectiveUiLang;
     // keep in-memory prefs aligned so tUi() uses the right locale
     if (cachedPreferences && typeof cachedPreferences === "object") {
       cachedPreferences.uiLanguage = effectiveUiLang;
-      if (language) cachedPreferences.language = language;
+      if (languageScope === "global" && language) {
+        cachedPreferences.language = getGlobalAchievementLanguage();
+      }
     }
 
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -22713,24 +23819,33 @@ app.whenReady().then(async () => {
     platform: process.platform,
     arch: process.arch,
   });
-  initializeNativeWindowsActivationHandler();
-  try {
-    await ensureSchemaParseRuntimeReady({
-      userDataDir: app.getPath("userData"),
-      refreshTopOwners: true,
-      reason: "boot",
-    });
-  } catch (err) {
-    appLogger.warn("schema-parse:boot-init-failed", {
-      error: err?.message || String(err),
-    });
+  if (process.platform === "win32") {
+    try {
+      gameBarWidgetBridge = createGameBarWidgetBridge({
+        getSnapshot: buildGameBarWidgetBridgeResponse,
+        prepareNotification: prepareGameBarWidgetNotification,
+        logger: gameBarWidgetLogger,
+        // The Store PFN is the production default. Developers can still target
+        // a sideloaded package identity without changing application code.
+        widgetPackageFamilyName:
+          process.env.ACHIEVEMENTS_GAMEBAR_WIDGET_PFN || undefined,
+      });
+      gameBarWidgetBridge.start();
+    } catch (error) {
+      gameBarWidgetLogger.error("gamebar-widget:bridge-start-failed", {
+        error: error?.message || String(error),
+      });
+    }
   }
+  initializeNativeWindowsActivationHandler();
   // Load preferences
   try {
     const prefs = mergeWithDefaultPreferences(readPrefsSafe());
     cachedPreferences = prefs;
 
-    selectedLanguage = prefs.language || selectedLanguage;
+    globalAchievementLanguage =
+      normalizeAchievementLanguage(prefs.language, "english") || "english";
+    refreshActiveAchievementLanguage();
     let overlayShortcut = prefs.overlayShortcut || null;
     if (
       typeof overlayShortcut === "string" &&
@@ -22806,6 +23921,9 @@ app.whenReady().then(async () => {
   } else if (pendingAppNavigationRoute) {
     showMainWindowForNavigation();
   }
+  // Network-backed generator prerequisites are required before processing a
+  // newly discovered AppID, but must never delay creation of the Electron UI.
+  void startGenerationPrerequisites().catch(() => {});
   syncOverlayControllerSupportState("app-ready", cachedPreferences);
   scheduleAutoSelectProcessPollerAfterBoot();
   mainWindow.hide();
@@ -24288,6 +25406,457 @@ function stopRetroAchievementsActivePoll(reason = "manual", meta = {}) {
   }
 }
 
+const dashboardSummaryPendingBroadcast = new Map();
+const dashboardSummaryPendingRemovals = new Set();
+let dashboardSummaryBroadcastTimer = null;
+const dashboardSummaryReconcileQueue = new Map();
+let dashboardSummaryReconcileRunning = 0;
+let dashboardSummaryReconcileTimer = null;
+const DASHBOARD_SUMMARY_RECONCILE_CONCURRENCY = 2;
+const DASHBOARD_SUMMARY_RECONCILE_DELAY_MS = 150;
+
+function queueDashboardSummaryBroadcast(entries = {}, removed = []) {
+  for (const [name, entry] of Object.entries(entries || {})) {
+    const safeName = normalizeDashboardConfigName(name);
+    if (!safeName || !entry || typeof entry !== "object") continue;
+    dashboardSummaryPendingRemovals.delete(safeName);
+    dashboardSummaryPendingBroadcast.set(safeName, entry);
+  }
+  for (const rawName of Array.isArray(removed) ? removed : []) {
+    const safeName = normalizeDashboardConfigName(rawName);
+    if (!safeName) continue;
+    dashboardSummaryPendingBroadcast.delete(safeName);
+    dashboardSummaryPendingRemovals.add(safeName);
+  }
+  if (dashboardSummaryBroadcastTimer) return;
+  dashboardSummaryBroadcastTimer = setTimeout(() => {
+    dashboardSummaryBroadcastTimer = null;
+    const changed = Object.fromEntries(dashboardSummaryPendingBroadcast);
+    const removedNames = Array.from(dashboardSummaryPendingRemovals);
+    dashboardSummaryPendingBroadcast.clear();
+    dashboardSummaryPendingRemovals.clear();
+    if (!Object.keys(changed).length && !removedNames.length) return;
+    broadcastToAll("dashboard:summary-updated", {
+      entries: changed,
+      removed: removedNames,
+    });
+  }, 100);
+  dashboardSummaryBroadcastTimer.unref?.();
+}
+
+async function listDashboardConfigNames() {
+  try {
+    const files = await fs.promises.readdir(configsDir);
+    return new Set(
+      files
+        .filter((file) => String(file || "").toLowerCase().endsWith(".json"))
+        .map((file) => path.basename(file, ".json")),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+async function resolveDashboardSchemaFile(config = {}) {
+  const cfgDir =
+    typeof config?.config_path === "string" ? config.config_path.trim() : "";
+  if (!cfgDir) return "";
+  const candidates = [
+    path.join(cfgDir, "steam_settings", "achievements.json"),
+    path.join(cfgDir, "achievements.json"),
+  ];
+  if (config?.appid != null && String(config.appid).trim()) {
+    candidates.push(
+      path.join(cfgDir, String(config.appid).trim(), "achievements.json"),
+    );
+  }
+  for (const candidate of candidates) {
+    try {
+      await fs.promises.access(candidate, fs.constants.R_OK);
+      return candidate;
+    } catch {}
+  }
+  return "";
+}
+
+async function getDashboardSummaryFingerprintPart(filePath) {
+  const resolvedPath = String(filePath || "").trim();
+  if (!resolvedPath) return null;
+  try {
+    const stat = await fs.promises.stat(resolvedPath);
+    return {
+      path: resolvedPath,
+      mtimeMs: Number(stat.mtimeMs) || 0,
+      size: Number(stat.size) || 0,
+    };
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { path: resolvedPath, mtimeMs: 0, size: 0 };
+    }
+    return null;
+  }
+}
+
+function dashboardSummaryPathsEqual(left, right) {
+  const normalize = (value) => {
+    const resolved = path.resolve(String(value || ""));
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  };
+  return normalize(left) === normalize(right);
+}
+
+async function isDashboardSummaryFingerprintCurrent(
+  fingerprint,
+  expectedCachePath = "",
+) {
+  if (!fingerprint?.config || !fingerprint?.schema) return false;
+  if (
+    expectedCachePath &&
+    (!fingerprint?.cache?.path ||
+      !dashboardSummaryPathsEqual(
+        fingerprint.cache.path,
+        expectedCachePath,
+      ))
+  ) {
+    return false;
+  }
+  const keys = ["config", "schema", "cache"].filter((key) =>
+    Boolean(fingerprint?.[key]?.path),
+  );
+  if (!keys.includes("config") || !keys.includes("schema")) return false;
+  const currentParts = await Promise.all(
+    keys.map((key) =>
+      getDashboardSummaryFingerprintPart(fingerprint[key].path),
+    ),
+  );
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    const expected = fingerprint[key];
+    const current = currentParts[index];
+    if (!current) return false;
+    if (
+      Number(current.mtimeMs) !== Number(expected.mtimeMs) ||
+      Number(current.size) !== Number(expected.size)
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+async function loadDashboardAchievementSnapshot(configName, platform) {
+  const cachePath = getCachePath(configName, platform);
+  try {
+    const raw = await fs.promises.readFile(cachePath, "utf8");
+    return { cacheAvailable: true, cachePath, snapshot: JSON.parse(raw) };
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      persistenceLogger.warn("dashboard-summary:cache-read-failed", {
+        config: configName,
+        path: cachePath,
+        error: error?.message || String(error),
+      });
+    }
+  }
+  // Preserve the existing scoped/legacy/alias fallback behavior on a miss.
+  // The common canonical-cache path above stays fully asynchronous.
+  const snapshot = (await loadPreviousAchievements(configName, platform)) || {};
+  if (Object.keys(snapshot).length > 0 && !fs.existsSync(cachePath)) {
+    const migrated = savePreviousAchievements(configName, snapshot, platform, {
+      skipManualMerge: true,
+    });
+    if (migrated) {
+      persistenceLogger.info("dashboard-summary:legacy-cache-migrated", {
+        config: configName,
+        platform,
+        path: cachePath,
+      });
+    }
+  }
+  return {
+    cacheAvailable:
+      fs.existsSync(cachePath) || Object.keys(snapshot || {}).length > 0,
+    cachePath,
+    snapshot,
+  };
+}
+
+async function invalidateDashboardSummaryEntry(
+  configName,
+  source = "invalidated",
+) {
+  const safeName = normalizeDashboardConfigName(configName);
+  if (!safeName) return false;
+  const invalidated = await dashboardSummaryStore.invalidate(safeName, source);
+  if (invalidated) {
+    queueDashboardSummaryBroadcast({ [safeName]: invalidated });
+  }
+  queueDashboardSummaryReconcile(safeName, source);
+  return Boolean(invalidated);
+}
+
+async function listDashboardConfigNamesByPlatform(platform) {
+  const normalizedPlatform = normalizePlatform(platform);
+  if (!normalizedPlatform) return [];
+  const names = await listDashboardConfigNames();
+  const matches = [];
+  await Promise.all(
+    Array.from(names, async (name) => {
+      try {
+        const configPath = resolveConfigJsonPath(configsDir, name);
+        const config = JSON.parse(
+          await fs.promises.readFile(configPath, "utf8"),
+        );
+        if (normalizePlatform(config?.platform) === normalizedPlatform) {
+          matches.push(name);
+        }
+      } catch {}
+    }),
+  );
+  return matches;
+}
+
+async function invalidateDashboardSummaryPlatform(
+  platform,
+  reason = "platform-invalidated",
+) {
+  const normalizedPlatform = normalizePlatform(platform);
+  if (!normalizedPlatform) return [];
+  const removed = new Set(
+    await dashboardSummaryStore.removeByPlatform(normalizedPlatform),
+  );
+  const configNames = await listDashboardConfigNamesByPlatform(
+    normalizedPlatform,
+  );
+  for (const name of configNames) {
+    if (await dashboardSummaryStore.remove(name)) removed.add(name);
+    const cachePath = getCachePath(name, normalizedPlatform);
+    if (!cachePath || !fs.existsSync(cachePath)) continue;
+    queueDashboardSummaryReconcile(name, reason);
+  }
+  const removedNames = Array.from(removed);
+  if (removedNames.length) {
+    queueDashboardSummaryBroadcast({}, removedNames);
+  }
+  return removedNames;
+}
+
+async function reconcileDashboardSummaryEntry(
+  configName,
+  reason = "cache-update",
+) {
+  const safeName = normalizeDashboardConfigName(configName);
+  if (!safeName) return false;
+  const previousSummary = await dashboardSummaryStore.getEntry(safeName);
+  if (reason === "bootstrap-validate") {
+    const expectedCachePath = previousSummary?.platform
+      ? getCachePath(safeName, previousSummary.platform)
+      : "";
+    if (
+      previousSummary?.source === "achievement-cache" &&
+      previousSummary?.verified === true &&
+      (await isDashboardSummaryFingerprintCurrent(
+        previousSummary.fingerprint,
+        expectedCachePath,
+      ))
+    ) {
+      return false;
+    }
+  }
+  const configPath = resolveConfigJsonPath(configsDir, safeName);
+  let config = null;
+  try {
+    config = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      if (await dashboardSummaryStore.remove(safeName)) {
+        queueDashboardSummaryBroadcast({}, [safeName]);
+      }
+    } else {
+      const invalidated = await dashboardSummaryStore.invalidate(
+        safeName,
+        "config-read-failed",
+      );
+      if (invalidated) {
+        queueDashboardSummaryBroadcast({ [safeName]: invalidated });
+      }
+    }
+    return false;
+  }
+
+  const schemaFile = await resolveDashboardSchemaFile(config);
+  if (!schemaFile) {
+    const invalidated = await dashboardSummaryStore.invalidate(
+      safeName,
+      "schema-missing",
+    );
+    if (invalidated) {
+      queueDashboardSummaryBroadcast({ [safeName]: invalidated });
+    }
+    return false;
+  }
+  let schema = null;
+  try {
+    schema = JSON.parse(await fs.promises.readFile(schemaFile, "utf8"));
+  } catch {
+    const invalidated = await dashboardSummaryStore.invalidate(
+      safeName,
+      "schema-read-failed",
+    );
+    if (invalidated) {
+      queueDashboardSummaryBroadcast({ [safeName]: invalidated });
+    }
+    return false;
+  }
+  const achievements = Array.isArray(schema) ? schema : [];
+  if (!achievements.length) {
+    const invalidated = await dashboardSummaryStore.invalidate(
+      safeName,
+      "schema-empty",
+    );
+    if (invalidated) {
+      queueDashboardSummaryBroadcast({ [safeName]: invalidated });
+    }
+    return false;
+  }
+
+  const platform = normalizePlatform(config?.platform) || "steam";
+  const { snapshot, cachePath, cacheAvailable } =
+    await loadDashboardAchievementSnapshot(safeName, platform);
+  if (!cacheAvailable) {
+    const existing = await dashboardSummaryStore.getEntry(safeName);
+    if (existing?.source === "achievement-cache") {
+      const invalidated = await dashboardSummaryStore.invalidate(
+        safeName,
+        "cache-missing",
+      );
+      if (invalidated) {
+        queueDashboardSummaryBroadcast({ [safeName]: invalidated });
+      }
+    }
+    return false;
+  }
+  let unlocked = 0;
+  let updated = 0;
+  for (const achievement of achievements) {
+    const achievementName =
+      achievement?.name != null ? String(achievement.name) : "";
+    if (!achievementName) continue;
+    const saved = snapshot?.[achievementName];
+    if (saved?.earned) unlocked += 1;
+    const rawTime = Number(saved?.earned_time || 0);
+    if (rawTime > 0) {
+      const timestampMs = String(Math.trunc(rawTime)).length === 10
+        ? rawTime * 1000
+        : rawTime;
+      if (timestampMs > updated) updated = timestampMs;
+    }
+  }
+  const total = achievements.length;
+  const [configFingerprint, schemaFingerprint, cacheFingerprint] =
+    await Promise.all([
+      getDashboardSummaryFingerprintPart(configPath),
+      getDashboardSummaryFingerprintPart(schemaFile),
+      getDashboardSummaryFingerprintPart(cachePath),
+    ]);
+  const entry = {
+    platform,
+    appid: config?.appid != null ? String(config.appid) : null,
+    pct: total > 0 ? Math.round((unlocked / total) * 100) : 0,
+    unlocked,
+    total,
+    updated,
+    observedAt: Date.now(),
+    verified: true,
+    source: "achievement-cache",
+    fingerprint: {
+      config: configFingerprint,
+      schema: schemaFingerprint,
+      cache: cacheFingerprint,
+    },
+  };
+  const changed = await dashboardSummaryStore.upsertMany({
+    [safeName]: entry,
+  });
+  const storedEntry =
+    changed[safeName] || (await dashboardSummaryStore.getEntry(safeName));
+  if (Object.keys(changed).length) {
+    queueDashboardSummaryBroadcast(changed);
+  }
+  if (
+    storedEntry?.verified === true &&
+    (Object.keys(changed).length ||
+      !isPlatinumSummarySynchronized(storedEntry))
+  ) {
+    await reconcileConfigPlatinumFromSummary(safeName, storedEntry, {
+      previousSummary,
+      reason,
+    });
+  }
+  if (Object.keys(changed).length) {
+    return true;
+  }
+  return false;
+}
+
+function scheduleDashboardSummaryReconcilePump(delayMs) {
+  if (dashboardSummaryReconcileTimer) return;
+  dashboardSummaryReconcileTimer = setTimeout(() => {
+    dashboardSummaryReconcileTimer = null;
+    pumpDashboardSummaryReconcileQueue();
+  }, Math.max(0, Number(delayMs) || 0));
+  dashboardSummaryReconcileTimer.unref?.();
+}
+
+function pumpDashboardSummaryReconcileQueue() {
+  if (global.bootManualSeedComplete !== true) {
+    scheduleDashboardSummaryReconcilePump(500);
+    return;
+  }
+  while (
+    dashboardSummaryReconcileRunning <
+      DASHBOARD_SUMMARY_RECONCILE_CONCURRENCY &&
+    dashboardSummaryReconcileQueue.size
+  ) {
+    const next = dashboardSummaryReconcileQueue.entries().next().value;
+    if (!next) break;
+    const [configName, reason] = next;
+    dashboardSummaryReconcileQueue.delete(configName);
+    dashboardSummaryReconcileRunning += 1;
+    reconcileDashboardSummaryEntry(configName, reason)
+      .catch((error) => {
+        persistenceLogger.warn("dashboard-summary:reconcile-failed", {
+          config: configName,
+          reason,
+          error: error?.message || String(error),
+        });
+      })
+      .finally(() => {
+        dashboardSummaryReconcileRunning -= 1;
+        if (dashboardSummaryReconcileQueue.size) {
+          scheduleDashboardSummaryReconcilePump(25);
+        } else if (dashboardSummaryReconcileRunning === 0) {
+          // Persist the completed reconcile wave once, instead of relying on
+          // many intermediate full-file writes.
+          dashboardSummaryStore.flush().catch(() => {});
+        }
+      });
+  }
+}
+
+function queueDashboardSummaryReconcile(configName, reason = "cache-update") {
+  const safeName = normalizeDashboardConfigName(configName);
+  if (!safeName) return;
+  const normalizedReason = String(reason || "cache-update");
+  const pendingReason = dashboardSummaryReconcileQueue.get(safeName);
+  if (!(pendingReason && normalizedReason === "bootstrap-validate")) {
+    dashboardSummaryReconcileQueue.set(safeName, normalizedReason);
+  }
+  scheduleDashboardSummaryReconcilePump(
+    DASHBOARD_SUMMARY_RECONCILE_DELAY_MS,
+  );
+}
+
 function scheduleRetroAchievementsActivePoll(delayMs, reason = "reschedule") {
   if (!retroAchievementsActivePollState) return;
   if (retroAchievementsActivePollTimer) {
@@ -24313,6 +25882,10 @@ function notifyRetroAchievementsUnlocks(
 ) {
   if (!Array.isArray(schemaAchievements) || !schemaAchievements.length) return 0;
   if (!Array.isArray(unlockedKeys) || !unlockedKeys.length) return 0;
+  const language = resolveAchievementLanguage(
+    config,
+    getGlobalAchievementLanguage(),
+  );
   const schemaMap = new Map();
   for (const entry of schemaAchievements) {
     const key = String(entry?.name || entry?.api || "").trim();
@@ -24326,11 +25899,11 @@ function notifyRetroAchievementsUnlocks(
       name: achievementConfig.name || achievementConfig.api || key,
       displayName: getSafeLocalizedText(
         achievementConfig.displayName,
-        selectedLanguage,
+        language,
       ),
       description: getSafeLocalizedText(
         achievementConfig.description,
-        selectedLanguage,
+        language,
       ),
       icon: achievementConfig.icon,
       icon_gray: achievementConfig.icon_gray || achievementConfig.icongray,
@@ -24963,6 +26536,653 @@ const {
   buildCrcNameMap,
   resolveConfigSchemaPath,
 } = require("./utils/achievement-data");
+
+let gameBarWidgetSnapshotGeneration = 0;
+let gameBarWidgetSnapshotCache = null;
+let gameBarWidgetSnapshotBuildQueue = Promise.resolve();
+let gameBarWidgetRetainedImageSets = [];
+const GAMEBAR_WIDGET_INLINE_IMAGE_MAX_BYTES = 512 * 1024;
+const GAMEBAR_WIDGET_INLINE_GAME_IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const GAMEBAR_WIDGET_INLINE_PAYLOAD_MAX_BASE64_CHARS = 8 * 1024 * 1024;
+
+function markGameBarWidgetSnapshotDirty(reason = "unknown") {
+  gameBarWidgetSnapshotGeneration += 1;
+  gameBarWidgetSnapshotCache = null;
+  gameBarWidgetBridge?.publishSnapshot?.(reason);
+  gameBarWidgetLogger.debug?.("gamebar-widget:snapshot-dirty", {
+    reason,
+    generation: gameBarWidgetSnapshotGeneration,
+  });
+}
+
+async function getOptionalFileMtimeMs(filePath) {
+  const target = String(filePath || "").trim();
+  if (!target) return 0;
+  try {
+    const stat = await fs.promises.stat(target);
+    return Number(stat.mtimeMs) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function resolveGameBarWidgetGameImagePath(config = {}) {
+  const customCover = String(config?.custom_cover_path || "").trim();
+  if (customCover) {
+    try {
+      if (fs.existsSync(customCover)) return customCover;
+    } catch {}
+  }
+
+  const appid = String(config?.appid || config?.appId || "").trim();
+  const platform = normalizePlatform(config?.platform) || "steam";
+  if (!appid) return ICON_PNG_PATH;
+  const imagesRoot = path.join(app.getPath("userData"), "images");
+  for (const candidatePlatform of getImagePlatformCandidates(appid, platform)) {
+    const candidateDir = path.join(imagesRoot, candidatePlatform, appid);
+    const coverPath = pickExistingCoverImagePath(candidateDir, appid);
+    if (coverPath) return coverPath;
+  }
+  return ICON_PNG_PATH;
+}
+
+function resolveGameBarWidgetRarity(achievement = {}) {
+  const rarity = achievement?.rarity;
+  const candidates = [
+    rarity && typeof rarity === "object" ? rarity.pct : null,
+    rarity && typeof rarity === "object" ? rarity.percent : null,
+    rarity && typeof rarity === "object" ? rarity.value : null,
+    achievement?.rarityPct,
+    achievement?.rarity_percent,
+    achievement?.unlockRate,
+    achievement?.unlock_rate,
+    achievement?.globalPercent,
+    achievement?.global_percent,
+    achievement?.percent,
+    typeof rarity === "number" || typeof rarity === "string" ? rarity : null,
+  ];
+  for (const value of candidates) {
+    const normalized = normalizeRarityPercent(value);
+    if (normalized !== null) return normalized;
+  }
+  return null;
+}
+
+function normalizeGameBarWidgetEarnedTime(raw) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return null;
+  const milliseconds = value < 100000000000 ? value * 1000 : value;
+  return milliseconds >= 946684800000 ? Math.round(milliseconds) : null;
+}
+
+async function readGameBarWidgetImage(filePath, maxBytes = 4 * 1024 * 1024) {
+  const target = String(filePath || "").trim();
+  if (!target) return null;
+  try {
+    const stat = await fs.promises.stat(target);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > maxBytes) return null;
+    const buffer = await fs.promises.readFile(target);
+    const extension = path.extname(target).toLowerCase();
+    const mimeType =
+      detectImageMimeFromBuffer(buffer) ||
+      LOCAL_COVER_MIME_BY_EXTENSION[extension] ||
+      (extension === ".svg" ? "image/svg+xml" : "application/octet-stream");
+    return {
+      mimeType,
+      dataBase64: buffer.toString("base64"),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function normalizeGameBarWidgetImageCacheDirectory(directory) {
+  const requested = String(directory || "").trim();
+  if (!requested) return "";
+  try {
+    const packageFamilyName = String(
+      process.env.ACHIEVEMENTS_GAMEBAR_WIDGET_PFN ||
+        DEFAULT_WIDGET_PACKAGE_FAMILY_NAME,
+    ).trim();
+    if (!packageFamilyName || /[\\/]/.test(packageFamilyName)) return "";
+    const expected = path.resolve(
+      app.getPath("appData"),
+      "..",
+      "Local",
+      "Packages",
+      packageFamilyName,
+      "LocalState",
+    );
+    const resolved = path.resolve(requested);
+    return resolved.toLowerCase() === expected.toLowerCase() ? expected : "";
+  } catch {
+    return "";
+  }
+}
+
+function limitGameBarNotificationText(value, maxLength) {
+  const text = String(value || "").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function prepareGameBarWidgetNotification(notification = {}) {
+  const type = notification?.type === "progress" ? "progress" : "achievement";
+  return {
+    notificationId: String(
+      notification?.notificationId || crypto.randomUUID(),
+    ).slice(0, 128),
+    type,
+    title: limitGameBarNotificationText(notification?.title, 160) ||
+      "Achievement",
+    content: limitGameBarNotificationText(notification?.content, 240),
+    achievementId: String(notification?.achievementId || "").slice(0, 256),
+    appid: String(notification?.appid || "").slice(0, 128),
+    platform: String(notification?.platform || "").slice(0, 64),
+    configName: String(notification?.configName || "").slice(0, 256),
+    progress: Number.isFinite(Number(notification?.progress))
+      ? Number(notification.progress)
+      : null,
+    maxProgress: Number.isFinite(Number(notification?.maxProgress))
+      ? Number(notification.maxProgress)
+      : null,
+    isRare: notification?.isRare === true,
+    isPlatinum: notification?.isPlatinum === true,
+  };
+}
+
+async function stageGameBarWidgetGameImage(
+  filePath,
+  imageCacheDirectory,
+  mtimeMs = 0,
+) {
+  const source = String(filePath || "").trim();
+  const localStateDirectory = normalizeGameBarWidgetImageCacheDirectory(
+    imageCacheDirectory,
+  );
+  if (!source || !localStateDirectory) return null;
+  try {
+    const sourceStat = await fs.promises.stat(source);
+    if (!sourceStat.isFile() || sourceStat.size <= 0) return null;
+    const extension = normalizeCoverExtension(path.extname(source)) || ".png";
+    const identity = crypto
+      .createHash("sha256")
+      .update(`${path.resolve(source)}|${Number(mtimeMs) || sourceStat.mtimeMs}`)
+      .digest("hex")
+      .slice(0, 20);
+    const cacheDirectory = path.join(
+      localStateDirectory,
+      "gamebar-widget-cache",
+    );
+    const fileName = `game-cover-${identity}${extension}`;
+    const destination = path.join(cacheDirectory, fileName);
+    await fs.promises.mkdir(cacheDirectory, { recursive: true });
+    let destinationMatches = false;
+    try {
+      const destinationStat = await fs.promises.stat(destination);
+      destinationMatches =
+        destinationStat.isFile() && destinationStat.size === sourceStat.size;
+    } catch {}
+    if (!destinationMatches) {
+      const temporary = `${destination}.${process.pid}.${Date.now()}.tmp`;
+      try {
+        await fs.promises.copyFile(source, temporary);
+        try {
+          await fs.promises.unlink(destination);
+        } catch {}
+        await fs.promises.rename(temporary, destination);
+      } finally {
+        try {
+          await fs.promises.unlink(temporary);
+        } catch {}
+      }
+    }
+    return {
+      fileName,
+      uri: `ms-appdata:///local/gamebar-widget-cache/${fileName}`,
+      filePath: destination,
+    };
+  } catch (error) {
+    gameBarWidgetLogger.warn("gamebar-widget:image-stage-failed", {
+      error: error?.message || String(error),
+    });
+    return null;
+  }
+}
+
+async function stageGameBarWidgetAchievementImage(
+  filePath,
+  imageCacheDirectory,
+) {
+  const source = String(filePath || "").trim();
+  const localStateDirectory = normalizeGameBarWidgetImageCacheDirectory(
+    imageCacheDirectory,
+  );
+  if (!source || !localStateDirectory) return null;
+  try {
+    const sourceStat = await fs.promises.stat(source);
+    if (
+      !sourceStat.isFile() ||
+      sourceStat.size <= 0 ||
+      sourceStat.size > 4 * 1024 * 1024
+    ) {
+      return null;
+    }
+    const extension = normalizeCoverExtension(path.extname(source)) || ".png";
+    const identity = crypto
+      .createHash("sha256")
+      .update(`${path.resolve(source)}|${sourceStat.mtimeMs}|${sourceStat.size}`)
+      .digest("hex")
+      .slice(0, 20);
+    const cacheDirectory = path.join(
+      localStateDirectory,
+      "gamebar-widget-cache",
+    );
+    const fileName = `achievement-icon-${identity}${extension}`;
+    const destination = path.join(cacheDirectory, fileName);
+    await fs.promises.mkdir(cacheDirectory, { recursive: true });
+    let destinationMatches = false;
+    try {
+      const destinationStat = await fs.promises.stat(destination);
+      destinationMatches =
+        destinationStat.isFile() && destinationStat.size === sourceStat.size;
+    } catch {}
+    if (!destinationMatches) {
+      const temporary = `${destination}.${process.pid}.${Date.now()}.tmp`;
+      try {
+        await fs.promises.copyFile(source, temporary);
+        try {
+          await fs.promises.unlink(destination);
+        } catch {}
+        await fs.promises.rename(temporary, destination);
+      } finally {
+        try {
+          await fs.promises.unlink(temporary);
+        } catch {}
+      }
+    }
+    return {
+      fileName,
+      filePath: destination,
+      uri: `ms-appdata:///local/gamebar-widget-cache/${fileName}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function cleanupGameBarWidgetAchievementImages(
+  imageCacheDirectory,
+  retainedFileNames = new Set(),
+) {
+  const localStateDirectory = normalizeGameBarWidgetImageCacheDirectory(
+    imageCacheDirectory,
+  );
+  if (!localStateDirectory) return;
+  const cacheDirectory = path.join(
+    localStateDirectory,
+    "gamebar-widget-cache",
+  );
+  try {
+    const entries = await fs.promises.readdir(cacheDirectory);
+    await Promise.all(
+      entries
+        .filter(
+          (entry) =>
+            (entry.startsWith("achievement-icon-") ||
+              entry.startsWith("game-cover-")) &&
+            !retainedFileNames.has(entry),
+        )
+        .map((entry) =>
+          fs.promises.unlink(path.join(cacheDirectory, entry)).catch(() => {}),
+        ),
+    );
+  } catch {}
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const input = Array.isArray(items) ? items : [];
+  const output = new Array(input.length);
+  let nextIndex = 0;
+  const runners = Array.from(
+    { length: Math.min(Math.max(1, concurrency), input.length) },
+    async () => {
+      while (nextIndex < input.length) {
+        const index = nextIndex++;
+        output[index] = await worker(input[index], index);
+      }
+    },
+  );
+  await Promise.all(runners);
+  return output;
+}
+
+async function buildGameBarWidgetSnapshotInternal({
+  imageCacheDirectory = "",
+  expectedGeneration = gameBarWidgetSnapshotGeneration,
+} = {}) {
+  const configName = sanitizeOptionalConfigName(selectedConfig);
+  if (!configName) {
+    await cleanupGameBarWidgetAchievementImages(imageCacheDirectory);
+    gameBarWidgetRetainedImageSets = [];
+    return {
+      protocolVersion: 1,
+      status: "idle",
+      revision: `idle:${gameBarWidgetSnapshotGeneration}`,
+      snapshot: null,
+    };
+  }
+
+  const configPath = resolveConfigJsonPath(configsDir, configName);
+  let config;
+  try {
+    config = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
+  } catch (error) {
+    return {
+      protocolVersion: 1,
+      status: "idle",
+      revision: `missing:${configName}:${gameBarWidgetSnapshotGeneration}`,
+      reason: "active-config-unavailable",
+      snapshot: null,
+    };
+  }
+
+  const platform = normalizePlatform(config?.platform) || "steam";
+  const appid = String(config?.appid || config?.appId || "").trim();
+  const schemaPath = resolveConfigSchemaPath(config);
+  const gameImagePath = resolveGameBarWidgetGameImagePath(config);
+  const rarityPath = schemaPath
+    ? path.join(path.dirname(schemaPath), "achievementpercentages.json")
+    : "";
+  const [
+    configMtimeMs,
+    schemaMtimeMs,
+    gameImageMtimeMs,
+    rarityMtimeMs,
+  ] = await Promise.all([
+    getOptionalFileMtimeMs(configPath),
+    getOptionalFileMtimeMs(schemaPath),
+    getOptionalFileMtimeMs(gameImagePath),
+    getOptionalFileMtimeMs(rarityPath),
+  ]);
+  const semanticFingerprint = [
+    configName,
+    platform,
+    appid,
+    expectedGeneration,
+    configMtimeMs,
+    schemaMtimeMs,
+    gameImageMtimeMs,
+    rarityMtimeMs,
+  ].join("|");
+  const normalizedImageCacheDirectory =
+    normalizeGameBarWidgetImageCacheDirectory(imageCacheDirectory);
+  const cacheFingerprint = [
+    semanticFingerprint,
+    normalizedImageCacheDirectory,
+  ].join("|transport:");
+
+  if (gameBarWidgetSnapshotCache?.fingerprint === cacheFingerprint) {
+    const stagedImagePaths = Array.isArray(
+      gameBarWidgetSnapshotCache.stagedImagePaths,
+    )
+      ? gameBarWidgetSnapshotCache.stagedImagePaths
+      : [];
+    const stagedImagesAvailable = (
+      await Promise.all(
+        stagedImagePaths.map((stagedPath) =>
+          getOptionalFileMtimeMs(stagedPath),
+        ),
+      )
+    ).every((mtimeMs) => mtimeMs > 0);
+    if (!stagedImagePaths.length || stagedImagesAvailable) {
+      return gameBarWidgetSnapshotCache.response;
+    }
+  }
+
+  let schema = [];
+  if (schemaPath) {
+    try {
+      const parsed = JSON.parse(await fs.promises.readFile(schemaPath, "utf8"));
+      schema = Array.isArray(parsed) ? parsed : [];
+    } catch {}
+  }
+
+  const schemaDir = schemaPath ? path.dirname(schemaPath) : "";
+  if (schema.length && schemaDir) {
+    try {
+      const rarityInfo = readAchievementPercentagesMap(
+        rarityPath,
+      );
+      schema = mergeRarityIntoAchievements(schema, rarityInfo?.map, {
+        source: rarityInfo?.source || RARITY_SOURCES.steamGlobal,
+      })?.achievements || schema;
+    } catch {}
+  }
+
+  const saved = (await loadPreviousAchievements(configName, platform)) || {};
+  const language = resolveAchievementLanguageForConfig(configName, config);
+  const showHiddenDescription = cachedPreferences?.showHiddenDescription === true;
+  const seen = new Set();
+  const records = [];
+  for (const achievement of schema) {
+    const id = String(achievement?.name || "").trim();
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const state = saved?.[id] && typeof saved[id] === "object" ? saved[id] : {};
+    const unlocked = state?.earned === true || state?.earned === 1;
+    const hidden = Number(achievement?.hidden) === 1;
+    const iconGray = achievement?.icon_gray || achievement?.icongray;
+    const iconRelative = unlocked
+      ? achievement?.icon || iconGray
+      : iconGray || achievement?.icon;
+    records.push({
+      id,
+      name: getSafeLocalizedText(achievement?.displayName, language) || id,
+      description:
+        hidden && !unlocked && !showHiddenDescription
+          ? "Hidden"
+          : getSafeLocalizedText(achievement?.description, language),
+      unlocked,
+      earnedTimeMs: normalizeGameBarWidgetEarnedTime(state?.earned_time),
+      rarityPercent: resolveGameBarWidgetRarity(achievement),
+      progress: Number.isFinite(Number(state?.progress))
+        ? Number(state.progress)
+        : null,
+      maxProgress: Number.isFinite(Number(state?.max_progress))
+        ? Number(state.max_progress)
+        : null,
+      iconPath: resolveIconAbsolutePath(schemaDir, iconRelative),
+    });
+  }
+
+  const imagePromises = new Map();
+  const loadAchievementImage = (iconPath) => {
+    const key = String(iconPath || "");
+    if (!imagePromises.has(key)) {
+      imagePromises.set(
+        key,
+        readGameBarWidgetImage(key, GAMEBAR_WIDGET_INLINE_IMAGE_MAX_BYTES),
+      );
+    }
+    return imagePromises.get(key);
+  };
+  const stagedAchievementFileNames = new Set();
+  const achievementPayload = await mapWithConcurrency(
+    records,
+    8,
+    async (record) => {
+      const stagedImage = await stageGameBarWidgetAchievementImage(
+        record.iconPath,
+        imageCacheDirectory,
+      );
+      if (stagedImage?.fileName) {
+        stagedAchievementFileNames.add(stagedImage.fileName);
+      }
+      const image = stagedImage
+        ? null
+        : await loadAchievementImage(record.iconPath);
+      const { iconPath: _iconPath, ...payload } = record;
+      return {
+        ...payload,
+        imageUri: stagedImage?.uri || null,
+        imageMimeType: image?.mimeType || null,
+        imageBase64: image?.dataBase64 || null,
+      };
+    },
+  );
+  const stagedGameImage = await stageGameBarWidgetGameImage(
+    gameImagePath,
+    imageCacheDirectory,
+    gameImageMtimeMs,
+  );
+  const gameImageUri = stagedGameImage?.uri || "";
+  const gameImage = gameImageUri
+    ? null
+    : await readGameBarWidgetImage(
+        gameImagePath,
+        GAMEBAR_WIDGET_INLINE_GAME_IMAGE_MAX_BYTES,
+      );
+  let inlinePayloadChars = gameImage?.dataBase64?.length || 0;
+  let inlineImagesOmitted = 0;
+  for (const achievement of achievementPayload) {
+    const imageLength = achievement?.imageBase64?.length || 0;
+    if (!imageLength) continue;
+    if (
+      inlinePayloadChars + imageLength >
+      GAMEBAR_WIDGET_INLINE_PAYLOAD_MAX_BASE64_CHARS
+    ) {
+      achievement.imageBase64 = null;
+      achievement.imageMimeType = null;
+      inlineImagesOmitted += 1;
+      continue;
+    }
+    inlinePayloadChars += imageLength;
+  }
+  const unlockedCount = achievementPayload.reduce(
+    (count, achievement) => count + (achievement.unlocked ? 1 : 0),
+    0,
+  );
+  const revision = crypto
+    .createHash("sha256")
+    .update(
+      `${semanticFingerprint}|${achievementPayload.length}|${unlockedCount}|${language}`,
+    )
+    .digest("hex")
+    .slice(0, 24);
+  const response = {
+    protocolVersion: 1,
+    status: "ok",
+    revision,
+    snapshot: {
+      configName,
+      appid,
+      platform,
+      gameName: String(
+        config?.displayName || config?.name || configName,
+      ).trim(),
+      gameImageUri: gameImageUri || null,
+      gameImageMimeType: gameImage?.mimeType || null,
+      gameImageBase64: gameImage?.dataBase64 || null,
+      unlockedCount,
+      totalCount: achievementPayload.length,
+      achievements: achievementPayload,
+    },
+  };
+  const stagedFileNames = new Set(stagedAchievementFileNames);
+  if (stagedGameImage?.fileName) stagedFileNames.add(stagedGameImage.fileName);
+  const stagedImagePaths = [
+    ...achievementPayload
+      .map((achievement) => achievement?.imageUri)
+      .filter(Boolean)
+      .map((uri) =>
+        path.join(
+          normalizedImageCacheDirectory,
+          "gamebar-widget-cache",
+          path.basename(String(uri)),
+        ),
+      ),
+    ...(stagedGameImage?.filePath ? [stagedGameImage.filePath] : []),
+  ];
+  if (gameBarWidgetSnapshotGeneration === expectedGeneration) {
+    gameBarWidgetSnapshotCache = {
+      fingerprint: cacheFingerprint,
+      response,
+      stagedImagePaths,
+    };
+  }
+  if (normalizedImageCacheDirectory) {
+    gameBarWidgetRetainedImageSets = [
+      { directory: normalizedImageCacheDirectory, fileNames: stagedFileNames },
+      ...gameBarWidgetRetainedImageSets.filter(
+        (entry) => entry.directory === normalizedImageCacheDirectory,
+      ),
+    ].slice(0, 2);
+    const retained = new Set();
+    for (const entry of gameBarWidgetRetainedImageSets) {
+      for (const fileName of entry.fileNames) retained.add(fileName);
+    }
+    await cleanupGameBarWidgetAchievementImages(
+      normalizedImageCacheDirectory,
+      retained,
+    );
+  }
+  gameBarWidgetLogger.info("gamebar-widget:snapshot-built", {
+    configName,
+    appid: appid || null,
+    platform,
+    unlocked: unlockedCount,
+    total: achievementPayload.length,
+    language,
+    gameImage: !!(gameImageUri || gameImage),
+    gameImageTransport: gameImageUri ? "local-state" : "inline",
+    achievementImagesLocal: stagedAchievementFileNames.size,
+    achievementImagesInline: achievementPayload.reduce(
+      (count, achievement) => count + (achievement.imageBase64 ? 1 : 0),
+      0,
+    ),
+    inlineImagesOmitted,
+    inlinePayloadChars,
+  });
+  return response;
+}
+
+function buildGameBarWidgetSnapshot(options = {}) {
+  const run = async () => {
+    let response = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const expectedGeneration = gameBarWidgetSnapshotGeneration;
+      response = await buildGameBarWidgetSnapshotInternal({
+        ...options,
+        expectedGeneration,
+      });
+      if (gameBarWidgetSnapshotGeneration === expectedGeneration) break;
+    }
+    return response;
+  };
+  const queued = gameBarWidgetSnapshotBuildQueue.catch(() => {}).then(run);
+  gameBarWidgetSnapshotBuildQueue = queued.catch(() => {});
+  return queued;
+}
+
+async function buildGameBarWidgetBridgeResponse({
+  knownRevision = "",
+  imageCacheDirectory = "",
+} = {}) {
+  const response = await buildGameBarWidgetSnapshot({ imageCacheDirectory });
+  if (
+    knownRevision &&
+    response?.revision === knownRevision &&
+    (response?.status === "ok" || response?.status === "idle")
+  ) {
+    return {
+      protocolVersion: 1,
+      status: "not-modified",
+      revision: response.revision,
+    };
+  }
+  return response;
+}
 const {
   EXOPHASE_LANG_MAP,
   EXOPHASE_RARITY_SOURCE,
@@ -25036,16 +27256,18 @@ const {
 async function seedManualConfigsAtBoot() {
   if (bootManualSeedRunning) return;
   bootManualSeedRunning = true;
+  const startedAt = Date.now();
   let files = [];
+  let metaSkipped = 0;
+  let sourceReconciled = 0;
   const BOOT_MANUAL_SEED_CONCURRENCY = 10;
-  const BOOT_MANUAL_SEED_SLICE_MS = 500;
+  const BOOT_MANUAL_SEED_SLICE_MS = 25;
   try {
     if (!fs.existsSync(configsDir)) {
       bootManualSeedRunning = false;
       return;
     }
-    files = fs
-      .readdirSync(configsDir)
+    files = (await fs.promises.readdir(configsDir))
       .filter((f) => f.toLowerCase().endsWith(".json"));
   } catch {
     bootManualSeedRunning = false;
@@ -25094,7 +27316,7 @@ async function seedManualConfigsAtBoot() {
     const full = path.join(configsDir, file);
     let config;
     try {
-      config = JSON.parse(fs.readFileSync(full, "utf8"));
+      config = JSON.parse(await fs.promises.readFile(full, "utf8"));
     } catch {
       bumpCacheBatchStat("errors");
       return;
@@ -25227,11 +27449,69 @@ async function seedManualConfigsAtBoot() {
       return;
     }
 
-    const cachePath = getCachePath(configFileName, platform);
-    if (fs.existsSync(cachePath)) {
-      if (seedKey) bootSeededCacheKeys.add(seedKey);
+    if (platform === "xlivelessness" || isXLiveLessNessConfig(config)) {
+      try {
+        const stateFiles = listAllXLiveLessNessStateFiles(config);
+        let reconciledAnyProfile = false;
+        for (const state of stateFiles) {
+          const stateFile = String(state?.filePath || "").trim();
+          if (!stateFile || !fs.existsSync(stateFile)) continue;
+          const cacheOptions = {
+            appid: String(config?.appid || ""),
+            filePath: stateFile,
+            savePath: path.dirname(stateFile),
+            xllnProfile: state?.profile || "",
+          };
+          const scopedCachePath = getCachePath(
+            configFileName,
+            platform,
+            cacheOptions,
+          );
+          if (
+            fs.existsSync(scopedCachePath) &&
+            (await areAchCacheMetaMatches(
+              configFileName,
+              platform,
+              [stateFile],
+              String(config?.appid || ""),
+            ))
+          ) {
+            reconciledAnyProfile = true;
+            metaSkipped += 1;
+            continue;
+          }
+          const previous = await loadPreviousAchievements(
+            configFileName,
+            platform,
+            cacheOptions,
+          );
+          const parsed = readXLiveLessNessSnapshot(stateFile, previous || {});
+          if (!parsed?.valid || !parsed.snapshot) continue;
+          seedCacheFromSnapshot(
+            configFileName,
+            parsed.snapshot,
+            platform,
+            cacheOptions,
+          );
+          updateAchCacheMetaEntry(
+            configFileName,
+            platform,
+            stateFile,
+            String(config?.appid || ""),
+          );
+          reconciledAnyProfile = true;
+          sourceReconciled += 1;
+          bumpCacheBatchStat("seeded");
+        }
+        if (reconciledAnyProfile && seedKey) bootSeededCacheKeys.add(seedKey);
+      } catch {
+        bumpCacheBatchStat("errors");
+      }
       return;
     }
+
+    const cachePath = getCachePath(configFileName, platform);
+    let cacheAvailable = fs.existsSync(cachePath);
 
     // If cache exists under an older alias key, copy it to the canonical key to avoid re-parsing.
     try {
@@ -25251,51 +27531,72 @@ async function seedManualConfigsAtBoot() {
         if (!fs.existsSync(altPath)) continue;
         try {
           fs.copyFileSync(altPath, cachePath);
-          if (seedKey) bootSeededCacheKeys.add(seedKey);
-          return;
+          cacheAvailable = true;
+          break;
         } catch {}
       }
     } catch {}
 
-    const candidatePath = resolveBootSeedCandidatePath(config);
-    if (!candidatePath) return;
+    const candidatePaths = resolveBootSeedCandidatePaths(config);
+    const candidatePath = candidatePaths[0] || null;
+    if (!candidatePath) {
+      if (cacheAvailable && seedKey) bootSeededCacheKeys.add(seedKey);
+      return;
+    }
 
     if (
-      isAchCacheMetaMatch(
+      (await areAchCacheMetaMatches(
         configFileName,
         platform,
-        candidatePath,
+        candidatePaths,
         String(config?.appid || ""),
-      )
+      )) &&
+      cacheAvailable
     ) {
-      const cachedSnapshot =
-        (await loadPreviousAchievements(configFileName, platform)) || {};
-      if (Object.keys(cachedSnapshot).length) {
-        seedCacheFromSnapshot(configFileName, cachedSnapshot, platform);
-        if (seedKey) bootSeededCacheKeys.add(seedKey);
-        persistenceLogger.info("boot-cache:manual-meta-skip", {
-          config: configFileName,
-          platform,
-          file: candidatePath,
-        });
-        return;
-      }
+      if (seedKey) bootSeededCacheKeys.add(seedKey);
+      metaSkipped += 1;
+      return;
     }
 
     let schemaPath = null;
     try {
       schemaPath = resolveConfigSchemaPath(config, config?.config_path || null);
     } catch {}
-    const snapshot = isFf7AchievementDatConfig(config)
-      ? readFf7AchievementSnapshot(candidatePath, {}).snapshot
-      : loadAchievementsFromSaveFile(path.dirname(candidatePath), {}, {
+    const cacheOptions = {
+      appid: String(config?.appid || ""),
+      filePath: candidatePath,
+      savePath: candidatePath,
+    };
+    const previous = cacheAvailable
+      ? await loadPreviousAchievements(
+          configFileName,
+          platform,
+          cacheOptions,
+        )
+      : {};
+    const parsedSnapshot = isFf7AchievementDatConfig(config)
+      ? readFf7AchievementSnapshot(candidatePath, previous || {}).snapshot
+      : loadAchievementsFromSaveFile(path.dirname(candidatePath), previous || {}, {
           configMeta: config,
           selectedConfigPath: config?.config_path || null,
           fullSchemaPath: schemaPath,
         });
+    const snapshot = mergeEarnedTimeFromCached(
+      parsedSnapshot || {},
+      previous || {},
+    );
     if (snapshot && Object.keys(snapshot).length) {
-      seedCacheFromSnapshot(configFileName, snapshot, platform);
+      seedCacheFromSnapshot(configFileName, snapshot, platform, cacheOptions);
+      for (const sourcePath of candidatePaths) {
+        updateAchCacheMetaEntry(
+          configFileName,
+          platform,
+          sourcePath,
+          String(config?.appid || ""),
+        );
+      }
       if (seedKey) bootSeededCacheKeys.add(seedKey);
+      sourceReconciled += 1;
       bumpCacheBatchStat("seeded");
     }
   };
@@ -25317,34 +27618,45 @@ async function seedManualConfigsAtBoot() {
     );
   };
 
-  await runWithConcurrency(
-    files,
-    BOOT_MANUAL_SEED_CONCURRENCY,
-    async (file) => {
+  try {
+    await runWithConcurrency(
+      files,
+      BOOT_MANUAL_SEED_CONCURRENCY,
+      async (file) => {
+        try {
+          await processFile(file);
+        } finally {
+          processedBootCacheFiles++;
+          emitBootCacheSeedProgress(processedBootCacheFiles >= files.length);
+        }
+      },
+    );
+  } finally {
+    bootManualSeedRunning = false;
+    if (files.length > 0) {
       try {
-        await processFile(file);
-      } finally {
-        processedBootCacheFiles++;
-        emitBootCacheSeedProgress(processedBootCacheFiles >= files.length);
-      }
-    },
-  );
-  if (files.length > 0) {
-    broadcastBootCacheProgress("generation:progress:end", {
-      phase: "completed",
-      current: files.length,
+        broadcastBootCacheProgress("generation:progress:end", {
+          phase: "completed",
+          current: files.length,
+          total: files.length,
+          percent: 100,
+        });
+      } catch {}
+    }
+    persistenceLogger.info("boot-cache:manual-complete", {
       total: files.length,
-      percent: 100,
+      metaSkipped,
+      sourceReconciled,
+      durationMs: Date.now() - startedAt,
     });
   }
-  persistenceLogger.info("boot-cache:manual-complete", { total: files.length });
-  bootManualSeedRunning = false;
 }
 
 function scheduleManualCacheSeedAfterBoot() {
   if (bootManualSeedScheduled) return;
   bootManualSeedScheduled = true;
-  // Keep cache reads throttled until post-boot seed/platinum pass completes.
+  // Keep cache reads throttled only until the cache seed completes. The
+  // Platinum audit is intentionally post-boot background work.
   bootPostSeedLimiterActive = true;
   const tick = async () => {
     if (global.bootDone === true) {
@@ -25385,15 +27697,10 @@ function scheduleManualCacheSeedAfterBoot() {
       }
       try {
         await seedManualConfigsAtBoot();
-        if (BOOT_MANUAL_POST_SEED_DELAY_MS > 0) {
-          await sleep(BOOT_MANUAL_POST_SEED_DELAY_MS);
-        }
-        try {
-          await flagPlatinumFromCacheOnBoot();
-        } catch {}
       } finally {
         bootPostSeedLimiterActive = false;
         markBootManualSeedComplete();
+        schedulePlatinumAuditAfterBoot();
       }
       return;
     }
@@ -25659,6 +27966,140 @@ function refreshRuntimeUplayMappingAsync() {
 
 refreshRuntimeUplayMappingAsync.inflight = null;
 
+let generationPrerequisitesPromise = null;
+let generationPrerequisitesState = {
+  status: "idle",
+  startedAt: 0,
+  completedAt: 0,
+  schema: null,
+  uplay: null,
+};
+
+function startGenerationPrerequisites() {
+  if (generationPrerequisitesPromise) return generationPrerequisitesPromise;
+  const startedAt = Date.now();
+  generationPrerequisitesState = {
+    status: "preparing",
+    startedAt,
+    completedAt: 0,
+    schema: null,
+    uplay: null,
+  };
+  appLogger.info("boot:generation-prerequisites:start");
+
+  const schemaPromise = startSchemaParseBootPreparation({
+    userDataDir: app.getPath("userData"),
+    reason: "boot",
+  });
+  const uplayPromise = refreshRuntimeUplayMappingAsync();
+  const tracked = Promise.allSettled([
+    schemaPromise,
+    uplayPromise,
+  ]).then(([schemaResult, uplayResult]) => {
+    const schemaReady = schemaResult.status === "fulfilled";
+    const uplayValue =
+      uplayResult.status === "fulfilled" ? uplayResult.value : null;
+    const uplayReady =
+      uplayResult.status === "fulfilled" &&
+      (uplayValue?.ok !== false || uplayValue?.preserved === true);
+    const uplayFresh =
+      uplayReady && uplayValue?.refreshResult?.ok !== false && uplayValue?.ok !== false;
+    const completedAt = Date.now();
+    generationPrerequisitesState = {
+      status:
+        schemaReady &&
+        uplayReady &&
+        schemaResult.value?.fallback !== true &&
+        uplayFresh
+          ? "ready"
+          : "ready-with-fallback",
+      startedAt,
+      completedAt,
+      schema:
+        schemaResult.status === "fulfilled"
+          ? {
+              ok: true,
+              fallback: schemaResult.value?.fallback === true,
+              status: schemaResult.value?.status || "ready",
+            }
+          : {
+              ok: false,
+              error:
+                schemaResult.reason?.message || String(schemaResult.reason),
+            },
+      uplay:
+        uplayResult.status === "fulfilled"
+          ? {
+              ok: uplayReady,
+              fresh: uplayFresh,
+              preserved: uplayValue?.preserved === true,
+              entries: uplayValue?.entries ?? null,
+              error:
+                uplayReady
+                  ? null
+                  : uplayValue?.refreshResult?.error?.message ||
+                    uplayValue?.error?.message ||
+                    "Uplay mapping refresh failed without a valid fallback",
+            }
+          : {
+              ok: false,
+              error: uplayResult.reason?.message || String(uplayResult.reason),
+            },
+    };
+    const metadata = {
+      durationMs: completedAt - startedAt,
+      status: generationPrerequisitesState.status,
+      schema: generationPrerequisitesState.schema,
+      uplay: generationPrerequisitesState.uplay,
+    };
+    if (!schemaReady) {
+      appLogger.error("boot:generation-prerequisites:failed", metadata);
+    } else if (
+      !uplayReady ||
+      !uplayFresh ||
+      schemaResult.value?.fallback === true
+    ) {
+      appLogger.warn("boot:generation-prerequisites:fallback", metadata);
+    } else {
+      appLogger.info("boot:generation-prerequisites:ready", metadata);
+    }
+    return generationPrerequisitesState;
+  });
+  generationPrerequisitesPromise = tracked;
+  tracked.then((state) => {
+    if (
+      generationPrerequisitesPromise === tracked &&
+      (state?.schema?.ok !== true || state?.uplay?.ok !== true)
+    ) {
+      // Do not permanently poison generation after a transient boot failure.
+      // A later file event/rescan can retry the prerequisites.
+      generationPrerequisitesPromise = null;
+    }
+  });
+  return tracked;
+}
+
+async function waitForGenerationPrerequisites(reason = "generation") {
+  const state = await startGenerationPrerequisites();
+  if (state?.schema?.ok !== true) {
+    const error = new Error(
+      state?.schema?.error || "Schema Parse boot preparation failed",
+    );
+    error.code = "GENERATION_PREREQUISITES_UNAVAILABLE";
+    error.reason = reason;
+    throw error;
+  }
+  if (state?.uplay?.ok !== true) {
+    const error = new Error(
+      state?.uplay?.error || "Uplay mapping boot refresh failed without fallback",
+    );
+    error.code = "UPLAY_MAPPING_PREREQUISITE_UNAVAILABLE";
+    error.reason = reason;
+    throw error;
+  }
+  return state;
+}
+
 ensureRuntimeSteamDb();
 
 process.env.STEAM_DB_PATH = runtimeSteamDbPath;
@@ -25675,8 +28116,6 @@ let uplaySteamMap = loadRuntimeUplayMap();
 const uplayToSteam = uplayMappingStore.getMap();
 
 hydrateRuntimeMapping(uplaySteamMap);
-
-refreshRuntimeUplayMappingAsync();
 
 function applyConfigPlatformDefaults(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
@@ -26275,6 +28714,7 @@ ipcMain.handle("generate-auto-configs", async (event, folderPath) => {
   });
   try {
     ensureSteamApiKeyFileFromPrefs();
+    await waitForGenerationPrerequisites("manual-auto-config-generation");
     const result = await generateGameConfigs(folderPath, outputDir, {
       onSeedCache: ({ appid, configName, snapshot, platform, savePath }) => {
         try {
@@ -27875,12 +30315,32 @@ watchedFoldersApi = makeWatchedFolders({
   preferencesPath,
   updatePreferences,
   configsDir,
-  generateGameConfigs,
-  generateConfigsForAppIds,
-  generateConfigForAppId,
+  generateGameConfigs: async (...args) => {
+    await waitForGenerationPrerequisites("watcher-generate-game-configs");
+    return await generateGameConfigs(...args);
+  },
+  generateConfigsForAppIds: async (...args) => {
+    await waitForGenerationPrerequisites("watcher-generate-configs-batch");
+    return await generateConfigsForAppIds(...args);
+  },
+  generateConfigForAppId: async (...args) => {
+    await waitForGenerationPrerequisites("watcher-generate-config-single");
+    return await generateConfigForAppId(...args);
+  },
+  waitForGenerationPrerequisites,
+  achievementCacheMetaStore,
   notifyWarn: (m) => console.warn(m),
   requestDashboardRefresh,
-  onSeedCache: ({ appid, configName, snapshot, platform, savePath }) => {
+  onDashboardSummaryInvalidate: (configName, reason) =>
+    invalidateDashboardSummaryEntry(configName, reason),
+  onSeedCache: ({
+    appid,
+    configName,
+    snapshot,
+    platform,
+    savePath,
+    filePath,
+  }) => {
     try {
       let plat = normalizePlatform(platform) || "steam";
       if (!platform) {
@@ -27897,6 +30357,7 @@ watchedFoldersApi = makeWatchedFolders({
       seedCacheFromSnapshot(configName, snapshot, plat, {
         appid,
         savePath: savePath || null,
+        filePath: filePath || null,
       });
     } catch (e) {
       console.warn(
@@ -27948,6 +30409,12 @@ watchedFoldersApi = makeWatchedFolders({
     sanitizeOptionalConfigName(name) ===
       sanitizeOptionalConfigName(selectedConfig),
   onPlatinumComplete: handlePlatinumComplete,
+  onPlatinumStatePersisted: ({ configName }) => {
+    queueDashboardSummaryReconcile(
+      configName,
+      "watcher-platinum-state-persisted",
+    );
+  },
 });
 
 scheduleManualCacheSeedAfterBoot();
@@ -28148,7 +30615,11 @@ ipcMain.handle("achievement:manual-state", async (_event, payload = {}) => {
       skipPlatinumCheck: true,
       reason: "manual-achievement-state",
     });
-    requestDashboardRefresh("manual-achievement-state");
+    requestDashboardRefresh({
+      mode: "targeted",
+      reason: "manual-achievement-state",
+      configNames: [context.safeName],
+    });
     return {
       success: true,
       changed: changed !== false,
@@ -28168,7 +30639,44 @@ ipcMain.handle("achievement:manual-state", async (_event, payload = {}) => {
     };
   }
 });
-// Flag already-complete configs at boot to avoid retroactive platinum popups
+function schedulePlatinumAuditAfterBoot(
+  delayMs = BOOT_PLATINUM_AUDIT_DELAY_MS,
+) {
+  if (bootPlatinumAuditTimer || bootPlatinumAuditRunning) return;
+  bootPlatinumAuditTimer = setTimeout(async () => {
+    bootPlatinumAuditTimer = null;
+    if (isQuitting || bootPlatinumAuditRunning) return;
+    if (
+      global.bootWatcherPipelineComplete !== true ||
+      dashboardSummaryReconcileQueue.size > 0 ||
+      dashboardSummaryReconcileRunning > 0 ||
+      dashboardSummaryReconcileTimer
+    ) {
+      schedulePlatinumAuditAfterBoot(1000);
+      return;
+    }
+    bootPlatinumAuditRunning = true;
+    const startedAt = Date.now();
+    persistenceLogger.info("platinum:boot-audit-started");
+    try {
+      await flagPlatinumFromCacheOnBoot();
+    } catch (error) {
+      persistenceLogger.warn("platinum:boot-audit-failed", {
+        error: error?.message || String(error),
+      });
+    } finally {
+      await dashboardSummaryStore.flush().catch(() => {});
+      bootPlatinumAuditRunning = false;
+      persistenceLogger.info("platinum:boot-audit-finished", {
+        durationMs: Date.now() - startedAt,
+      });
+    }
+  }, Math.max(0, Number(delayMs) || 0));
+  bootPlatinumAuditTimer.unref?.();
+}
+
+// Flag already-complete configs after the boot gate opens. This avoids
+// retroactive Platinum popups without delaying process watcher/auto-select.
 async function flagPlatinumFromCacheOnBoot() {
   try {
     if (!configsDir || !fs.existsSync(configsDir)) return;
@@ -28176,8 +30684,36 @@ async function flagPlatinumFromCacheOnBoot() {
     const files = entries.filter((f) => f.toLowerCase().endsWith(".json"));
     if (!files.length) return;
 
+    const initialSummarySnapshot = await dashboardSummaryStore
+      .getSnapshot()
+      .catch(() => ({ entries: {} }));
+    const initialSummaryEntries = initialSummarySnapshot?.entries || {};
+    const candidates = files.filter((file) => {
+      const name = path.basename(file, ".json");
+      return !isPlatinumSummarySynchronized(initialSummaryEntries[name]);
+    });
+    const metrics = {
+      candidates: candidates.length,
+      skippedSynced: files.length - candidates.length,
+      skippedAfterRefresh: 0,
+      summaryHits: 0,
+      summaryRefreshes: 0,
+      legacyFallbacks: 0,
+      synchronized: 0,
+      marked: 0,
+      reset: 0,
+    };
+
+    if (!candidates.length) {
+      persistenceLogger.info("platinum:boot-summary-complete", {
+        total: files.length,
+        ...metrics,
+      });
+      return;
+    }
+
     const BATCH_SIZE = 20;
-    const CONCURRENCY = 4;
+    const CONCURRENCY = 2;
     const runWithConcurrency = async (items, limit, worker) => {
       if (!Array.isArray(items) || items.length === 0) return;
       const max = Math.max(1, Number(limit) || 1);
@@ -28208,6 +30744,43 @@ async function flagPlatinumFromCacheOnBoot() {
 
     const processFile = async (file) => {
       const name = path.basename(file, ".json");
+      // This pass validates or rebuilds the same entry directly. Drop the
+      // bootstrap copy so it is not repeated when the boot gate opens.
+      dashboardSummaryReconcileQueue.delete(name);
+      const previousSummary = initialSummaryEntries[name] || null;
+      let summary = previousSummary;
+      let summaryCurrent = false;
+
+      if (
+        summary?.verified === true &&
+        summary?.source === "achievement-cache" &&
+        summary?.fingerprint
+      ) {
+        // The bootstrap reconcile queue owns fingerprint validation. Trust the
+        // persisted authoritative entry here so the Platinum audit does not
+        // repeat three filesystem stats for every config on every boot.
+        summaryCurrent = true;
+      }
+
+      if (!summaryCurrent) {
+        const refreshed = await reconcileDashboardSummaryEntry(
+          name,
+          "platinum-boot-refresh",
+        );
+        summary = await dashboardSummaryStore.getEntry(name);
+        summaryCurrent = Boolean(
+          summary?.verified === true &&
+            summary?.source === "achievement-cache" &&
+            summary?.fingerprint,
+        );
+        if (refreshed || summaryCurrent) metrics.summaryRefreshes += 1;
+      }
+
+      if (isPlatinumSummarySynchronized(summary)) {
+        metrics.skippedAfterRefresh += 1;
+        return;
+      }
+
       const configPath = path.join(configsDir, file);
       let config = null;
       try {
@@ -28217,16 +30790,22 @@ async function flagPlatinumFromCacheOnBoot() {
         return;
       }
       const platform = normalizePlatform(config?.platform) || "steam";
-      const seedCandidatePath = resolveBootSeedCandidatePath(config);
-      const unchangedByMeta = seedCandidatePath
-        ? isAchCacheMetaMatch(
-            name,
-            platform,
-            seedCandidatePath,
-            String(config?.appid || ""),
-          )
-        : false;
-      if (unchangedByMeta && config?.platinum === true) return;
+
+      if (summaryCurrent) {
+        metrics.summaryHits += 1;
+        const result = await reconcileConfigPlatinumFromSummary(name, summary, {
+          allowCompleteMark: true,
+          configHint: config,
+          previousSummary,
+          reason: "platinum-boot-summary",
+        });
+        if (result?.synced) metrics.synchronized += 1;
+        if (result?.changed && result?.platinum === true) metrics.marked += 1;
+        if (result?.changed && result?.platinum === false) metrics.reset += 1;
+        return;
+      }
+
+      metrics.legacyFallbacks += 1;
       const schemaPath = resolveConfigSchemaPath(config);
       if (!schemaPath) return;
       let schema = null;
@@ -28244,6 +30823,7 @@ async function flagPlatinumFromCacheOnBoot() {
       if (!schemaNames.length) return;
 
       const snapshot = (await loadPreviousAchievements(name, platform)) || {};
+      if (!Object.keys(snapshot).length) return;
       const isEarnedByName = (achName) => {
         const main = snapshot?.[achName];
         if (main?.earned) return true;
@@ -28257,21 +30837,52 @@ async function flagPlatinumFromCacheOnBoot() {
 
       const total = schemaNames.length;
       const earned = schemaNames.filter(isEarnedByName).length;
-      if (total > 0 && earned === total) {
-        markConfigPlatinumFlag(name);
-      }
+      const result = await reconcileConfigPlatinumFromSummary(
+        name,
+        {
+          platform,
+          appid: config?.appid != null ? String(config.appid) : null,
+          unlocked: earned,
+          total,
+          observedAt: Date.now(),
+          verified: true,
+          source: "platinum-boot-fallback",
+        },
+        {
+          allowCompleteMark: true,
+          configHint: config,
+          previousSummary,
+          reason: "platinum-boot-fallback",
+        },
+      );
+      if (result?.synced) metrics.synchronized += 1;
+      if (result?.changed && result?.platinum === true) metrics.marked += 1;
+      if (result?.changed && result?.platinum === false) metrics.reset += 1;
     };
 
-    for (let i = 0; i < files.length; i += BATCH_SIZE) {
-      const batch = files.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < candidates.length; i += BATCH_SIZE) {
+      const batch = candidates.slice(i, i + BATCH_SIZE);
       await runWithConcurrency(batch, CONCURRENCY, processFile);
       await sleep(0);
     }
+    persistenceLogger.info("platinum:boot-summary-complete", {
+      total: files.length,
+      ...metrics,
+    });
   } catch {}
 }
 
 app.on("before-quit", () => {
+  persistMainWindowState("before-quit");
+  if (bootPlatinumAuditTimer) {
+    clearTimeout(bootPlatinumAuditTimer);
+    bootPlatinumAuditTimer = null;
+  }
   stopActiveLumaPlayRegistryWatcher();
+  gameBarWidgetBridge?.stop?.();
+  gameBarWidgetBridge = null;
+  achievementCacheMetaStore.flushSync();
+  dashboardSummaryStore.flush().catch(() => {});
   pendingAchievementRecordQueue.clear("app-before-quit");
   achievementRecorderController?.forceStop("app-before-quit");
   stopAutoSelectProcessPoller();

@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.2.9",
+  "version": "1.3.0",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -11,7 +11,10 @@
     "test:uplay-mapping": "node tests/uplay-mapping-refresh.test.js",
     "test:screenshot-paths": "node tests/screenshot-paths.test.js",
     "test:record-paths": "node tests/record-paths.test.js",
+    "test:boot-cache": "node tests/achievement-cache-meta-store.test.js && node tests/dashboard-summary-store.test.js && node tests/uplay-mapping-refresh.test.js",
     "test:achievement-recorder": "node tests/achievement-recorder.test.js",
+    "test:dashboard-refresh": "node tests/dashboard-refresh.test.js",
+    "test:gamebar-widget": "node tests/gamebar-widget-bridge.test.js",
     "build:recorder": "cargo build --release --locked --manifest-path native/achievement-recorder/Cargo.toml",
     "copy:recorder": "node -e \"require('fs').copyFileSync('native/achievement-recorder/target/release/achievements-recorder.exe','utils/native/achievements-recorder.exe')\"",
     "build:hdr-screenshot": "cargo build --release --locked --manifest-path native/hdr-screenshot/Cargo.toml",
@@ -151,7 +154,7 @@
     "@vscode/windows-process-tree": ">=0.8.0",
     "@xboxreplay/xboxlive-auth": "^5.1.0",
     "adm-zip": "^0.6.0",
-    "axios": "^1.19.0",
+    "axios": "1.20.0",
     "cheerio": "^1.1.2",
     "chokidar": "5.0.0",
     "crc-32": "^1.2.2",
@@ -169,7 +172,7 @@
   },
   "devDependencies": {
     "cross-env": "^10.0.0",
-    "electron": "43.4.1",
+    "electron": "44.1.0",
     "electron-builder": "^26.8.1",
     "eslint": "10.9.1",
     "rcedit": "^5.0.2"

@@ -780,6 +780,130 @@ function detectXLiveLessNessRootAsync(rootPath, options = {}) {
   return pending;
 }
 
+async function detectXLiveLessNessKnownExecutablesAsync(
+  rootPath,
+  executableEntries = [],
+) {
+  const startedAt = Date.now();
+  let root = "";
+  try {
+    root = path.resolve(String(rootPath || ""));
+  } catch {
+    return { detected: false, partial: false, root: "", games: [] };
+  }
+  if (!(await isDirectoryAsync(root))) {
+    return { detected: false, partial: false, root, games: [] };
+  }
+
+  const candidateDirectories = [];
+  const directoryKeys = new Set();
+  const addDirectory = (candidatePath) => {
+    const value = String(candidatePath || "").trim();
+    if (!value) return;
+    let directoryPath = "";
+    try {
+      const resolved = path.resolve(value);
+      directoryPath = path.extname(resolved)
+        ? path.dirname(resolved)
+        : resolved;
+    } catch {
+      return;
+    }
+    if (!isPathInsideRoot(root, directoryPath)) return;
+    const key = normalizePathForComparison(directoryPath);
+    if (!key || directoryKeys.has(key)) return;
+    directoryKeys.add(key);
+    candidateDirectories.push(directoryPath);
+  };
+
+  for (const entry of Array.isArray(executableEntries)
+    ? executableEntries
+    : []) {
+    if (typeof entry === "string") {
+      addDirectory(entry);
+      continue;
+    }
+    addDirectory(entry?.path || entry?.executable);
+    addDirectory(entry?.title_config_path || entry?.configPath);
+  }
+
+  const found = [];
+  const rejected = [];
+  let partial = false;
+  for (const directoryPath of candidateDirectories) {
+    const index = await readDirectoryIndexAsync(directoryPath);
+    const hasXlive = index.get("xlive.dll")?.isFile() === true;
+    const cfgEntries = Array.from(index.values()).filter(
+      (entry) => entry.isFile() && /\.exe\.cfg$/i.test(entry.name),
+    );
+    if (hasXlive || cfgEntries.length) partial = true;
+    if (!hasXlive || !cfgEntries.length) continue;
+    for (const cfgEntry of cfgEntries) {
+      const inspected = await inspectExecutablePairAsync(
+        directoryPath,
+        cfgEntry,
+        index,
+      );
+      if (inspected.valid) found.push(inspected);
+      else if (rejected.length < 50) {
+        rejected.push({
+          directoryPath,
+          configPath: path.join(directoryPath, cfgEntry.name),
+          reason: inspected.reason || "invalid",
+          error: inspected.error || "",
+        });
+      }
+    }
+  }
+
+  const gamesByTitleId = new Map();
+  for (const match of found) {
+    const gameRoot = resolveDetectedGameRoot(root, match.executablePath);
+    const gameKey = `${match.titleId}::${normalizePathForComparison(gameRoot)}`;
+    let game = gamesByTitleId.get(gameKey);
+    if (!game) {
+      game = {
+        titleId: match.titleId,
+        titleVersion: match.titleVersion,
+        root: gameRoot,
+        executableDirectory: path.dirname(match.executablePath),
+        primaryExecutable: match.executablePath,
+        titleConfigPath: match.configPath,
+        resourceFingerprint: match.resourceFingerprint,
+        spa: match.spa,
+        executables: [],
+      };
+      gamesByTitleId.set(gameKey, game);
+    }
+    if (
+      !game.executables.some(
+        (entry) =>
+          normalizePathForComparison(entry.path) ===
+          normalizePathForComparison(match.executablePath),
+      )
+    ) {
+      game.executables.push({
+        path: match.executablePath,
+        process_name: match.processName,
+        title_config_path: match.configPath,
+      });
+    }
+  }
+
+  const games = Array.from(gamesByTitleId.values());
+  return {
+    detected: games.length > 0,
+    partial: partial && games.length === 0,
+    root,
+    games,
+    scannedDirectories: candidateDirectories.length,
+    limitReached: false,
+    rejected,
+    fastPath: true,
+    scanDurationMs: Date.now() - startedAt,
+  };
+}
+
 function addUniquePath(target, value) {
   if (!value) return;
   let resolved = "";
@@ -1539,6 +1663,7 @@ module.exports = {
   XLIVELESSNESS_RECORD_SIZE,
   detectXLiveLessNessRoot,
   detectXLiveLessNessRootAsync,
+  detectXLiveLessNessKnownExecutablesAsync,
   ensureXLiveLessNessConfig,
   filetimeToUnixMs,
   findXLiveLessNessConfig,

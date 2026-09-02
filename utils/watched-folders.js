@@ -9,6 +9,10 @@ const {
   writeJsonAtomic,
   writeJsonAtomicSync,
 } = require("./atomic-json-store");
+const {
+  buildAchievementCacheMetaKey,
+  createAchievementCacheMetaStore,
+} = require("./achievement-cache-meta-store");
 const { normalizePlatform } = require("./config-platform-migrator");
 const {
   buildBlacklistConfigKey,
@@ -47,6 +51,13 @@ const {
 const { steamId64ToAccountId } = require("./steam-local-users");
 const { parsePs4TrophySetDir } = require("./shadps4-trophy");
 const { sanitizeConfigName } = require("./config-name");
+const { resolveAchievementLanguage } = require("./achievement-language");
+const {
+  normalizeDashboardRefreshRequest,
+} = require("./dashboard-refresh");
+const {
+  shouldSuppressPlatinumNotification,
+} = require("./platinum-summary");
 const {
   clearLumaPlayReadCache,
   readLumaPlayAchievementsSnapshot,
@@ -105,6 +116,7 @@ const {
 } = require("./madnesspatch");
 const {
   XLIVELESSNESS_PLATFORM,
+  detectXLiveLessNessKnownExecutablesAsync,
   detectXLiveLessNessRootAsync,
   ensureXLiveLessNessConfig,
   findXLiveLessNessStorageRoot,
@@ -131,6 +143,9 @@ const {
   readFf7AchievementSnapshot,
 } = require("./ff7-achievement-dat");
 const { createAdaptivePathWatcher } = require("./adaptive-path-watcher");
+const {
+  createTrophyDiscoveryWatchPolicy,
+} = require("./trophy-discovery-watch-policy");
 const GAMEPLAY_DB_WAL_NAME = `${GAMEPLAY_DB_NAME}-wal`;
 const GAMEPLAY_DB_SHM_NAME = `${GAMEPLAY_DB_NAME}-shm`;
 
@@ -163,6 +178,22 @@ const STRICT_ROOT_PROFILES = [
     suffix: ["steam", "rld!"],
   },
   {
+    key: "steam-rune",
+    suffix: ["steam", "rune"],
+  },
+  {
+    key: "onlinefix",
+    suffix: ["onlinefix"],
+  },
+  {
+    key: "smart-steam-emu",
+    suffix: ["smartsteamemu"],
+  },
+  {
+    key: "skidrow",
+    suffix: ["skidrow"],
+  },
+  {
     key: "empress",
     suffix: ["empress"],
   },
@@ -189,6 +220,54 @@ const STRICT_ROOT_PROFILES = [
     suffix: ["anadius", "lsx emu", "achievement_watcher"],
   },
 ];
+// These roots have dedicated discovery/event handlers. They are strict in the
+// sense that their layout identifies one provider, but they must never enter
+// the generic strict-root rule where the first child folder is treated as an
+// AppID.
+const SPECIALIZED_STRICT_ROOT_PROFILES = [
+  {
+    key: "steam-official",
+    suffix: ["steam", "appcache", "stats"],
+    platform: "steam-official",
+    // UserGameStatsSchema/UserGameStats files are stored directly in stats.
+    watchDepth: 0,
+  },
+  {
+    key: "nemirtingas-epic",
+    suffix: ["nemirtingasepicemu"],
+    platform: "epic",
+    // <root>/<user>/<appid>; save-file monitoring is attached separately.
+    watchDepth: 2,
+  },
+  {
+    key: "nemirtingas-galaxy",
+    suffix: ["nemirtingasgalaxyemu"],
+    platform: "gog",
+    // <root>/<user>/<appid>; save-file monitoring is attached separately.
+    watchDepth: 2,
+  },
+  {
+    key: "gog-official",
+    suffix: ["gog.com", "galaxy", "applications"],
+    platform: "gog-official",
+    // <clientId>/Gameplay/<userId>/galaxy-2.0.db
+    watchDepth: 3,
+  },
+  {
+    key: "ubisoft-official",
+    suffix: ["ubisoft game launcher", "spool"],
+    platform: "ubisoft-official",
+    // <userId>/<appid>.spool
+    watchDepth: 1,
+  },
+  {
+    key: "ea-official",
+    suffix: ["electronic arts", "ea desktop", "logs"],
+    platform: "ea-official",
+    // EADesktopVerbose.log is stored directly in the Logs root.
+    watchDepth: 0,
+  },
+];
 function splitPathLower(inputPath) {
   return String(inputPath || "")
     .replace(/[\\/]+/g, path.sep)
@@ -212,6 +291,15 @@ function matchesPathSuffix(pathParts, suffixParts) {
 function getStrictRootProfile(rootPath) {
   const parts = splitPathLower(rootPath);
   for (const profile of STRICT_ROOT_PROFILES) {
+    if (matchesPathSuffix(parts, profile.suffix)) {
+      return profile;
+    }
+  }
+  return null;
+}
+function getSpecializedStrictRootProfile(rootPath) {
+  const parts = splitPathLower(rootPath);
+  for (const profile of SPECIALIZED_STRICT_ROOT_PROFILES) {
     if (matchesPathSuffix(parts, profile.suffix)) {
       return profile;
     }
@@ -411,6 +499,7 @@ const DEFAULT_WATCH_ROOTS = (() => {
     ["APPDATA", ["R1 UplayEmu Saves"]],
     ["APPDATA", ["GSE Saves"]],
     ["APPDATA", ["EMPRESS"]],
+    ["APPDATA", ["NemirtingasEpicEmu"]],
     ["LOCALAPPDATA", ["anadius", "LSX emu", "achievement_watcher"]],
     ["APPDATA", ["Steam", "CODEX"]],
     ["APPDATA", ["SmartSteamEmu"]],
@@ -476,6 +565,8 @@ module.exports = function makeWatchedFolders({
   generateGameConfigs,
   generateConfigForAppId = null,
   generateConfigsForAppIds = null,
+  waitForGenerationPrerequisites = null,
+  achievementCacheMetaStore = null,
   notifyWarn = (m) => console.warn(m),
   onEarned = null,
   onProgress = null,
@@ -484,10 +575,13 @@ module.exports = function makeWatchedFolders({
   isConfigActive = null,
   getCachedSnapshot = null,
   requestDashboardRefresh = null,
+  onDashboardSummaryInvalidate = null,
   onPlatinumComplete = null,
+  onPlatinumStatePersisted = null,
 }) {
   // --- state ---
   const folderWatchers = new Map();
+  const folderWatcherStartPromises = new Map();
   const knownAppIds = new Set();
   const existingConfigIds = new Set();
   const activeRoots = new Set();
@@ -504,6 +598,7 @@ module.exports = function makeWatchedFolders({
   const appidSaveWatchers = new Map(); // appid -> Map(configName, watcher)
   const pendingInitialNotify = new Set(); // config names needing one-shot notify after seed
   const missingRoots = new Set(); // watched folders missing on disk
+  const xLiveLessNessMetadataFallbackRoots = new Set();
   const pendingSteamOfficial = new Map(); // appid -> { statsDir, firstSeen }
   let missingRootTimer = null;
   let blockedFoldersCache = null;
@@ -577,6 +672,22 @@ module.exports = function makeWatchedFolders({
     const removedApp = appid
       ? platinumNotifiedByApp.delete(identityKey)
       : false;
+    if (
+      configName &&
+      typeof appidSaveWatchers !== "undefined" &&
+      typeof appidSaveWatchers?.values === "function"
+    ) {
+      for (const bucket of appidSaveWatchers.values()) {
+        if (typeof bucket?.values !== "function") continue;
+        for (const watcher of bucket.values()) {
+          const watcherName = String(watcher?.meta?.name || "").trim();
+          if (!watcherName || sanitizeConfigName(watcherName) !== configName) {
+            continue;
+          }
+          watcher.meta.platinum = false;
+        }
+      }
+    }
     watcherLogger.info("platinum-state:reset", {
       config: configName || null,
       appid: appid || null,
@@ -607,48 +718,16 @@ module.exports = function makeWatchedFolders({
     }
     return "";
   })();
-  const cacheMeta = new Map(); // key -> { mtimeMs, size }
-  let cacheMetaLoaded = false;
-  let cacheMetaDirty = false;
-  let cacheMetaSaveTimer = null;
+  const ownsCacheMetaStore = !achievementCacheMetaStore;
+  const cacheMetaStore =
+    achievementCacheMetaStore ||
+    createAchievementCacheMetaStore({
+      filePath: cacheMetaPath,
+      saveDelayMs: 500,
+    });
 
   function loadCacheMetaOnce() {
-    if (cacheMetaLoaded) return;
-    cacheMetaLoaded = true;
-    if (!cacheMetaPath || !fs.existsSync(cacheMetaPath)) return;
-    try {
-      const raw = fs.readFileSync(cacheMetaPath, "utf8");
-      const parsed = JSON.parse(raw);
-      const files =
-        parsed && typeof parsed === "object" && parsed.files
-          ? parsed.files
-          : parsed;
-      if (!files || typeof files !== "object") return;
-      for (const [key, entry] of Object.entries(files)) {
-        if (!entry || typeof entry !== "object") continue;
-        const mtimeMs = Number(entry.mtimeMs ?? entry.mtime ?? 0);
-        const size = Number(entry.size ?? 0);
-        if (!Number.isFinite(mtimeMs) || !Number.isFinite(size)) continue;
-        cacheMeta.set(key, { mtimeMs, size });
-      }
-    } catch {}
-  }
-
-  function scheduleCacheMetaSave() {
-    if (!cacheMetaPath) return;
-    cacheMetaDirty = true;
-    if (cacheMetaSaveTimer) clearTimeout(cacheMetaSaveTimer);
-    cacheMetaSaveTimer = setTimeout(async () => {
-      if (!cacheMetaDirty) return;
-      cacheMetaDirty = false;
-      try {
-        const payload = {
-          version: 1,
-          files: Object.fromEntries(cacheMeta),
-        };
-        writeJsonAtomicSync(cacheMetaPath, payload);
-      } catch {}
-    }, 500);
+    cacheMetaStore.loadOnce();
   }
 
   function cancelAutoSelectForMeta(meta) {
@@ -1446,16 +1525,34 @@ module.exports = function makeWatchedFolders({
   const BOOT_ATTACH_SLICE_MS = 5;
   const BOOT_ATTACH_ITEM_DELAY_MS = 250;
   const STRICT_ROOT_ATTACH_ITEM_DELAY_MS = 150;
+  // Keep the existing watcher topology, but yield according to the actual
+  // synchronous cost of each registration so a slow disk cannot starve the
+  // Electron event loop during a large boot rebuild.
+  const SAVE_WATCHER_ATTACH_BUDGET_MS = 8;
+  const SAVE_WATCHER_ATTACH_SLOW_MS = 250;
+  const SAVE_WATCHER_ATTACH_MAX_YIELD_MS = 25;
+  const SAVE_WATCHER_READY_TIMEOUT_MS = Math.max(
+    1000,
+    Number(process.env.SAVE_WATCHER_READY_TIMEOUT_MS) || 30000,
+  );
   const ROOT_WATCH_START_ITEM_DELAY_MS = 150;
   const ROOT_WATCH_START_BATCH = 2;
   const STRICT_ROOT_WATCH_DEPTH = 3;
+  // A known cold mechanical-drive root can legitimately need more than one
+  // minute to enumerate. Keep the safety limit above that range, but never let
+  // one unavailable custom root block every subsequent root indefinitely.
+  const BOOT_ROOT_WATCH_READY_TIMEOUT_MS = Math.max(
+    5000,
+    Number(process.env.BOOT_ROOT_WATCH_READY_TIMEOUT_MS) || 120000,
+  );
+  const BOOT_ROOT_WATCH_RETRY_DELAY_MS = Math.max(
+    1000,
+    Number(process.env.BOOT_ROOT_WATCH_RETRY_DELAY_MS) || 5000,
+  );
   const ROOT_WATCH_SETTLE_DELAY_MS = 250;
   const BOOT_PHASE_SETTLE_DELAY_MS = 200;
   const RESCAN_PHASE_SETTLE_DELAY_MS = 150;
   const BOOT_WATCH_FOLDER_DELAY_MS = 250;
-  const BOOT_STRICT_SCAN_STAGGER_BASE_MS = 250;
-  const BOOT_STRICT_SCAN_STAGGER_STEP_MS = 50;
-  const BOOT_STRICT_SCAN_STAGGER_SLOTS = 4; // 100..250ms
   const DEFERRED_SEED_ITEM_DELAY_MS = 30;
   const BOOT_DEFERRED_SEED_AFTER_OVERLAY_HIDE_DELAY_MS = 1500;
   const BOOT_DEFERRED_SEED_OVERLAY_POLL_MS = 250;
@@ -1584,6 +1681,28 @@ module.exports = function makeWatchedFolders({
     return new Promise((r) => setTimeout(r, ms));
   }
 
+  function waitForPromiseWithTimeout(promise, timeoutMs) {
+    const boundedTimeoutMs = Math.max(1, Number(timeoutMs) || 1);
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer = null;
+      const finish = (result) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        resolve(result);
+      };
+      timer = setTimeout(
+        () => finish({ timedOut: true, value: false, error: null }),
+        boundedTimeoutMs,
+      );
+      Promise.resolve(promise).then(
+        (value) => finish({ timedOut: false, value, error: null }),
+        (error) => finish({ timedOut: false, value: false, error }),
+      );
+    });
+  }
+
   function createTimeSlicer(sliceMs = 0) {
     const slice = Math.max(0, Number(sliceMs) || 0);
     let last = Date.now();
@@ -1593,6 +1712,41 @@ module.exports = function makeWatchedFolders({
       if (now - last < slice) return;
       last = now;
       await sleep(0);
+    };
+  }
+
+  function createAdaptiveTimeSlicer(options = {}) {
+    const budgetMs = Math.max(
+      1,
+      Number(options.budgetMs ?? SAVE_WATCHER_ATTACH_BUDGET_MS) || 1,
+    );
+    const slowMs = Math.max(
+      budgetMs,
+      Number(options.slowMs ?? SAVE_WATCHER_ATTACH_SLOW_MS) || budgetMs,
+    );
+    const maxYieldMs = Math.max(
+      0,
+      Number(options.maxYieldMs ?? SAVE_WATCHER_ATTACH_MAX_YIELD_MS) || 0,
+    );
+    let sliceStartedAt = Date.now();
+
+    return async (workDurationMs = 0) => {
+      const now = Date.now();
+      const elapsedMs = now - sliceStartedAt;
+      const workMs = Math.max(0, Number(workDurationMs) || 0);
+      if (elapsedMs < budgetMs && workMs < budgetMs) return;
+
+      let delayMs = 0;
+      if (workMs >= slowMs) {
+        delayMs = maxYieldMs;
+      } else if (workMs >= budgetMs * 4 || elapsedMs >= budgetMs * 8) {
+        delayMs = Math.min(maxYieldMs, 10);
+      } else if (workMs >= budgetMs * 2 || elapsedMs >= budgetMs * 4) {
+        delayMs = Math.min(maxYieldMs, 4);
+      }
+
+      await sleep(delayMs);
+      sliceStartedAt = Date.now();
     };
   }
 
@@ -2105,7 +2259,11 @@ module.exports = function makeWatchedFolders({
     }
     let count = 0;
     for (const id of list) {
-      attachSaveWatcherForAppId(id, attachOptions);
+      const attachedCount = attachSaveWatcherForAppId(id, attachOptions);
+      // Root discovery frequently returns configs whose save watchers were
+      // already created by rebuildSaveWatchers(). Do not charge the boot I/O
+      // throttle for those no-op attempts; retain it for every real attach.
+      if (attachedCount <= 0) continue;
       count += 1;
       if (yieldIfNeeded) await yieldIfNeeded();
       if (itemDelayMs) {
@@ -2153,7 +2311,9 @@ module.exports = function makeWatchedFolders({
         await sleep(0);
       }
       try {
-        startFolderWatcher(dir, startOpts);
+        Promise.resolve(startFolderWatcher(dir, startOpts)).catch((err) => {
+          if (typeof onError === "function") onError(err, dir);
+        });
       } catch (err) {
         if (typeof onError === "function") onError(err, dir);
       }
@@ -2370,7 +2530,10 @@ module.exports = function makeWatchedFolders({
         await rebuildSaveWatchers({ suppressInitialNotify: true });
       } catch {}
       try {
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "full",
+          reason: "onboarding-dirty-rescan-complete",
+        });
       } catch {}
       watcherLogger.info("boot:onboarding:dirty-rescan-complete", {
         roots: roots.length,
@@ -2435,7 +2598,9 @@ module.exports = function makeWatchedFolders({
       else blocked.add(root);
     }
     saveBlockedFolders([...blocked]);
-    const watcherState = await syncFolderWatchersWithCurrentPrefs();
+    const watcherState = await syncFolderWatchersWithCurrentPrefs({
+      deferStarts: bootMode,
+    });
     const savedState = saveAutoConfigOnboardingCompletion();
     bootOnboardingRequired = false;
     openBootOnboardingGate({ reason });
@@ -2443,7 +2608,9 @@ module.exports = function makeWatchedFolders({
       ok: true,
       selectedCount: selectedSet.size,
       mutedCount: Math.max(0, candidateRoots.size - selectedSet.size),
-      restartedWatchers: watcherState.running,
+      restartedWatchers: watcherState.startsDeferred
+        ? watcherState.allowed
+        : watcherState.running,
       required: savedState.required,
       completed: savedState.completed,
       reason,
@@ -2816,7 +2983,9 @@ module.exports = function makeWatchedFolders({
         );
       }
       stopFolderWatcher(oldNorm);
-      startFolderWatcher(newNorm, { initialScan: false });
+      Promise.resolve(
+        startFolderWatcher(newNorm, { initialScan: false }),
+      ).catch(() => {});
       return true;
     } catch {
       return false;
@@ -2886,9 +3055,7 @@ module.exports = function makeWatchedFolders({
   function startMissingRootPoller() {
     if (missingRootTimer) return;
     missingRootTimer = setInterval(() => {
-      try {
-        pollMissingRoots();
-      } catch {}
+      Promise.resolve(pollMissingRoots()).catch(() => {});
     }, 4000);
   }
 
@@ -2901,7 +3068,7 @@ module.exports = function makeWatchedFolders({
     startMissingRootPoller();
   }
 
-  function pollMissingRoots() {
+  async function pollMissingRoots() {
     const entries = collectWatchedFolderEntries();
     const nextMissing = new Set();
     const newlyAvailable = [];
@@ -2922,10 +3089,8 @@ module.exports = function makeWatchedFolders({
 
     for (const root of newlyAvailable) {
       try {
-        startFolderWatcher(root, { initialScan: false });
-      } catch {}
-      try {
-        scanRootOnce(root, { suppressInitialNotify: true });
+        await startFolderWatcher(root, { initialScan: false });
+        await scanRootOnce(root, { suppressInitialNotify: true });
       } catch {}
     }
   }
@@ -3879,6 +4044,10 @@ module.exports = function makeWatchedFolders({
     await indexExistingConfigsSync();
     knownAppIds.add(appid);
     attachSaveWatcherForAppId(appid, { suppressInitialNotify: false });
+    await invalidateDashboardSummaryForSchemaResults(
+      result,
+      "steam-official-schema-updated",
+    );
     broadcastAll("configs:changed");
     broadcastAll("refresh-achievements-table");
     return result;
@@ -3921,11 +4090,31 @@ module.exports = function makeWatchedFolders({
     shouldSkipPath = null,
   ) {
     const results = [];
+    async function hasStandardTrophyPair(dir) {
+      try {
+        const [schemaStat, progressStat] = await Promise.all([
+          fsp.stat(path.join(dir, "TROPCONF.SFM")),
+          fsp.stat(path.join(dir, "TROPUSR.DAT")),
+        ]);
+        return schemaStat.isFile() && progressStat.isFile();
+      } catch {
+        // Keep the existing case-insensitive directory scan as a fallback for
+        // non-standard casing and layouts.
+        return false;
+      }
+    }
     async function walk(dir, depth = 0) {
       if (depth > maxDepth) return;
       if (typeof shouldSkipPath === "function" && shouldSkipPath(dir)) return;
       const baseName = path.basename(dir || "").toLowerCase();
       if (isRpcs3TempFolderName(baseName)) return;
+      if (
+        /^npwr[0-9a-z_]+$/i.test(baseName) &&
+        (await hasStandardTrophyPair(dir))
+      ) {
+        results.push(dir);
+        return;
+      }
       let entries;
       try {
         entries = await fsp.readdir(dir, { withFileTypes: true });
@@ -4476,14 +4665,44 @@ module.exports = function makeWatchedFolders({
     } catch {}
   }, 2600);
 
-  function emitDashboardRefresh() {
+  function emitDashboardRefresh(request = null) {
+    const payload = normalizeDashboardRefreshRequest(request);
     if (typeof requestDashboardRefresh === "function") {
-      requestDashboardRefresh();
+      requestDashboardRefresh(payload);
       return;
     }
     try {
-      broadcastAll("dashboard:refresh");
+      broadcastAll("dashboard:refresh", payload);
     } catch {}
+  }
+
+  async function invalidateDashboardSummaryForSchemaResults(
+    results,
+    reason = "watcher-schema-updated",
+  ) {
+    if (typeof onDashboardSummaryInvalidate !== "function") return [];
+    const names = Array.from(
+      new Set(
+        (Array.isArray(results) ? results : [results])
+          .filter((result) => result?.schemaUpdated === true)
+          .map((result) => String(result?.name || "").trim())
+          .filter(Boolean),
+      ),
+    );
+    await Promise.all(
+      names.map(async (configName) => {
+        try {
+          await onDashboardSummaryInvalidate(configName, reason);
+        } catch (error) {
+          watcherLogger.warn("dashboard-summary:schema-invalidate-failed", {
+            config: configName,
+            reason,
+            error: error?.message || String(error),
+          });
+        }
+      }),
+    );
+    return names;
   }
 
   function pauseDashboardPoll(state = true) {
@@ -4545,10 +4764,14 @@ module.exports = function makeWatchedFolders({
         name: path.basename(fileName, ".json"),
         appid,
         platform,
+        language:
+          typeof data?.language === "string" ? data.language.trim() : "",
         emu: normalizeEmuValue(data?.emu),
         save_path: data?.save_path || null,
         config_path: data?.config_path || null,
         game_path: typeof data?.game_path === "string" ? data.game_path : "",
+        executable:
+          typeof data?.executable === "string" ? data.executable : "",
         markerpatch_game_path:
           typeof data?.markerpatch_game_path === "string"
             ? data.markerpatch_game_path
@@ -4582,6 +4805,30 @@ module.exports = function makeWatchedFolders({
           typeof data?.xlln_config_path === "string"
             ? data.xlln_config_path
             : "",
+        xlln_title_config_path:
+          typeof data?.xlln_title_config_path === "string"
+            ? data.xlln_title_config_path
+            : "",
+        xlln_detected_executables: Array.isArray(
+          data?.xlln_detected_executables,
+        )
+          ? data.xlln_detected_executables
+              .filter(
+                (entry) =>
+                  entry &&
+                  typeof entry === "object" &&
+                  typeof (entry.path || entry.executable) === "string",
+              )
+              .map((entry) => ({
+                path: String(entry.path || entry.executable || "").trim(),
+                process_name: String(entry.process_name || "").trim(),
+                title_config_path: String(
+                  entry.title_config_path || "",
+                ).trim(),
+                game_path: String(entry.game_path || "").trim(),
+              }))
+              .filter((entry) => entry.path)
+          : [],
         xlln_storage_roots: Array.isArray(data?.xlln_storage_roots)
           ? data.xlln_storage_roots.filter(
               (value) => typeof value === "string" && value.trim(),
@@ -4858,18 +5105,66 @@ module.exports = function makeWatchedFolders({
   }
 
   function getCacheMetaKey(meta, appid, filePath) {
-    if (!filePath) return "";
-    const snapKey = makeSnapshotKey(meta, appid, { filePath });
-    const normPath = normalizePrefPath(filePath);
-    if (!snapKey || !normPath) return "";
+    return buildAchievementCacheMetaKey({
+      configName: meta?.name,
+      platform: normalizePlatform(meta?.platform) || "steam",
+      filePath,
+      appid,
+    });
+  }
+
+  function getCacheMetaParserRevision(filePath) {
     const baseName = path.basename(filePath).toLowerCase();
     const parentName = path.basename(path.dirname(filePath)).toLowerCase();
-    const parserRevision =
+    return parentName === "stats" &&
+      (baseName === "achievements.ini" || baseName === "stats.ini")
+        ? "online-fix-parser:2"
+        : "";
+  }
+
+  function getRelatedCacheMetaSourcePaths(filePath, candidates = []) {
+    const sourcePath = String(filePath || "").trim();
+    if (!sourcePath) return [];
+    const baseName = path.basename(sourcePath).toLowerCase();
+    const parentDir = path.dirname(sourcePath);
+    const parentName = path.basename(parentDir).toLowerCase();
+    const values = [sourcePath];
+    if (
       parentName === "stats" &&
       (baseName === "achievements.ini" || baseName === "stats.ini")
-        ? "::online-fix-parser:2"
-        : "";
-    return `${snapKey}::${normPath}${parserRevision}`;
+    ) {
+      values.push(
+        path.join(parentDir, "achievements.ini"),
+        path.join(parentDir, "stats.ini"),
+      );
+      for (const candidate of candidates || []) {
+        const candidateBase = path.basename(String(candidate || "")).toLowerCase();
+        if (
+          (candidateBase === "achievements.ini" || candidateBase === "stats.ini") &&
+          normalizePrefPath(path.dirname(candidate)).toLowerCase() ===
+            normalizePrefPath(parentDir).toLowerCase()
+        ) {
+          values.push(candidate);
+        }
+      }
+      try {
+        for (const entryName of fs.readdirSync(parentDir)) {
+          const entryBase = String(entryName || "").toLowerCase();
+          if (entryBase === "achievements.ini" || entryBase === "stats.ini") {
+            values.push(path.join(parentDir, entryName));
+          }
+        }
+      } catch {}
+    }
+    const seen = new Set();
+    return values.filter((candidate) => {
+      if (!candidate || !fs.existsSync(candidate)) return false;
+      const normalized = normalizePrefPath(candidate);
+      const key = process.platform === "win32" ? normalized.toLowerCase() : normalized;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   function readFileStatSyncSafe(fp) {
@@ -4888,14 +5183,14 @@ module.exports = function makeWatchedFolders({
     }
   }
 
-  function updateCacheMetaEntry(metaKey, stat) {
+  function updateCacheMetaEntry(metaKey, stat, filePath = "") {
     if (!metaKey || !stat) return;
-    const mtimeMs = Number(stat.mtimeMs ?? 0);
-    const size = Number(stat.size ?? 0);
-    if (!Number.isFinite(mtimeMs) || !Number.isFinite(size)) return;
     loadCacheMetaOnce();
-    cacheMeta.set(metaKey, { mtimeMs, size });
-    scheduleCacheMetaSave();
+    cacheMetaStore.updateFromStat(
+      metaKey,
+      stat,
+      getCacheMetaParserRevision(filePath),
+    );
   }
 
   function readJsonSafe(fp) {
@@ -5309,17 +5604,14 @@ module.exports = function makeWatchedFolders({
     let fileStat = null;
     if (!isLumaPlay && bootMode && !forceEmptyPrev) {
       loadCacheMetaOnce();
-      const cachedMeta = metaKey ? cacheMeta.get(metaKey) : null;
-      if (cachedMeta && typeof cachedMeta === "object") {
+      if (metaKey) {
         fileStat = await readFileStatSafe(filePath);
-        const mtimeMs = Number(cachedMeta.mtimeMs ?? 0);
-        const size = Number(cachedMeta.size ?? 0);
         if (
-          fileStat &&
-          Number.isFinite(mtimeMs) &&
-          Number.isFinite(size) &&
-          fileStat.mtimeMs === mtimeMs &&
-          fileStat.size === size
+          cacheMetaStore.matchesStat(
+            metaKey,
+            fileStat,
+            getCacheMetaParserRevision(filePath),
+          )
         ) {
           if (!lastSnapshot.has(snapKey)) {
             try {
@@ -5567,8 +5859,17 @@ module.exports = function makeWatchedFolders({
     }
     const updateMetaFromStat = async () => {
       if (!parseOk || !metaKey) return;
-      if (!fileStat) fileStat = await readFileStatSafe(filePath);
-      if (fileStat) updateCacheMetaEntry(metaKey, fileStat);
+      for (const sourcePath of getRelatedCacheMetaSourcePaths(filePath)) {
+        const sourceMetaKey = getCacheMetaKey(meta, appid, sourcePath);
+        const sourceStat =
+          sourcePath === filePath && fileStat
+            ? fileStat
+            : await readFileStatSafe(sourcePath);
+        if (sourceStat) {
+          updateCacheMetaEntry(sourceMetaKey, sourceStat, sourcePath);
+          if (sourcePath === filePath) fileStat = sourceStat;
+        }
+      }
     };
     if (!cur) return false;
     if (cur === prev) {
@@ -5612,6 +5913,7 @@ module.exports = function makeWatchedFolders({
             configName: meta.name,
             platform: meta?.platform || null,
             savePath: effectiveSnapshotSavePath,
+            filePath,
             snapshot: cur,
           });
         } catch {}
@@ -5659,6 +5961,11 @@ module.exports = function makeWatchedFolders({
       platinumNotified.has(meta.name) ||
       platinumNotifiedByApp.has(platinumKey);
     const completedPlatinumThisPass = isFull && !alreadyPlatinum;
+    const suppressPlatinumNotification = shouldSuppressPlatinumNotification({
+      initial,
+      shouldSeed,
+      bootMode,
+    });
     if (isFull && !alreadyPlatinum) {
       // persist flag once
       const cfgFile =
@@ -5671,6 +5978,16 @@ module.exports = function makeWatchedFolders({
           data.platinum = true;
           writeJsonAtomicSync(cfgFile, data, { backup: true });
           meta.platinum = true;
+          try {
+            onPlatinumStatePersisted?.({
+              appid: String(appid),
+              configName: meta.name,
+              platform: meta?.platform || null,
+              platinum: true,
+              unlocked: earnedCount,
+              total,
+            });
+          } catch {}
         } catch {}
       } else {
         meta.platinum = true;
@@ -5679,17 +5996,27 @@ module.exports = function makeWatchedFolders({
       platinumNotified.add(meta.name);
       platinumNotifiedByApp.add(platinumKey);
       if (meta?.native_platinum !== true) {
-        try {
-          onPlatinumComplete?.({
+        if (suppressPlatinumNotification) {
+          watcherLogger.info("platinum:initial-notification-suppressed", {
             appid: String(appid),
-            configName: meta.name,
-            platform: meta?.platform || null,
-            snapshot: cur,
-            savePath: meta.save_path || null,
-            configPath: meta.config_path || null,
-            isActive: isActiveConfig,
+            config: meta?.name || null,
+            initial,
+            seedOnly: shouldSeed,
+            bootMode,
           });
-        } catch {}
+        } else {
+          try {
+            onPlatinumComplete?.({
+              appid: String(appid),
+              configName: meta.name,
+              platform: meta?.platform || null,
+              snapshot: cur,
+              savePath: meta.save_path || null,
+              configPath: meta.config_path || null,
+              isActive: isActiveConfig,
+            });
+          } catch {}
+        }
       } else {
         watcherLogger.info("platinum:native-achievement", {
           appid: String(appid),
@@ -5724,6 +6051,7 @@ module.exports = function makeWatchedFolders({
           configName: meta.name,
           platform: meta?.platform || null,
           savePath: effectiveSnapshotSavePath,
+          filePath,
           snapshot: cur,
         });
       } catch {}
@@ -5733,7 +6061,10 @@ module.exports = function makeWatchedFolders({
         if (bootDashDebounce.pending) {
           bootDashDebounce.pending = false;
           try {
-            emitDashboardRefresh();
+            emitDashboardRefresh({
+              mode: "summary",
+              reason: "boot-cache-seed",
+            });
           } catch {}
         }
       }, 150);
@@ -5749,7 +6080,10 @@ module.exports = function makeWatchedFolders({
       retry,
     });
 
-    const lang = readPrefsSafe().language || "english";
+    const lang = resolveAchievementLanguage(
+      meta,
+      readPrefsSafe().language || "english",
+    );
     let touched = false;
     for (const [achKey, nowVal] of Object.entries(cur)) {
       const oldVal = prev[achKey];
@@ -5867,6 +6201,7 @@ module.exports = function makeWatchedFolders({
           platform: meta?.platform || "",
           config_path: meta.config_path || null,
           configName: meta?.name || null,
+          language: lang,
           rarityPct: cfgEntry?.rarityPct,
           raritySource: cfgEntry?.raritySource,
           trophyType: cfgEntry?.trophyType || cfgEntry?.trophy_type,
@@ -5904,6 +6239,7 @@ module.exports = function makeWatchedFolders({
           max_progress: nowVal.max_progress || 0,
           config_path: meta.config_path || null,
           configName: meta?.name || null,
+          language: lang,
         });
       }
     }
@@ -5915,6 +6251,7 @@ module.exports = function makeWatchedFolders({
           configName: meta.name,
           platform: meta?.platform || null,
           savePath: effectiveSnapshotSavePath,
+          filePath,
           snapshot: cur,
         });
       } catch {}
@@ -6355,7 +6692,10 @@ module.exports = function makeWatchedFolders({
     const deferLumaPlayPolling = options.deferLumaPlayPolling === true;
     appid = String(appid);
     const metas = getConfigMetas(appid);
-    if (!metas.length) return;
+    if (!metas.length) return 0;
+    const bucketBefore = appidSaveWatchers.get(appid);
+    const watcherCountBefore =
+      bucketBefore instanceof Map ? bucketBefore.size : 0;
     metas.forEach((meta) =>
       attachWatcherForMeta(meta, {
         suppressInitialNotify,
@@ -6363,6 +6703,9 @@ module.exports = function makeWatchedFolders({
         deferLumaPlayPolling,
       }),
     );
+    const bucketAfter = appidSaveWatchers.get(appid);
+    const watcherCountAfter = bucketAfter instanceof Map ? bucketAfter.size : 0;
+    return Math.max(0, watcherCountAfter - watcherCountBefore);
   }
 
   function attachWatcherForMeta(meta, options = {}) {
@@ -6522,7 +6865,11 @@ module.exports = function makeWatchedFolders({
         }
         if (!initial || !meta.xlln_active_state_file) persistActiveSource(filePath);
         broadcastAll("refresh-achievements-table");
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "targeted",
+          reason: "xlivelessness-state-file",
+          configNames: [meta?.name],
+        });
         if (result === true) {
           broadcastAll("achievements:file-updated", {
             appid,
@@ -6624,6 +6971,11 @@ module.exports = function makeWatchedFolders({
         adaptiveWatchers.push(adaptiveWatcher);
       }
       const compositeWatcher = {
+        readyPromise: Promise.all(
+          adaptiveWatchers
+            .map((watcher) => watcher?.readyPromise)
+            .filter((promise) => promise && typeof promise.then === "function"),
+        ).then((results) => results.every((ready) => ready === true)),
         async close() {
           if (closed) return;
           closed = true;
@@ -6712,7 +7064,11 @@ module.exports = function makeWatchedFolders({
           } catch {}
         }
         broadcastAll("refresh-achievements-table");
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "targeted",
+          reason: "ff7-achievement-dat-state-file",
+          configNames: [meta?.name],
+        });
         if (result === true) {
           broadcastAll("achievements:file-updated", {
             appid,
@@ -6845,7 +7201,13 @@ module.exports = function makeWatchedFolders({
           });
         }
         broadcastAll("refresh-achievements-table");
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "targeted",
+          reason: isMadnessPatch
+            ? "madnesspatch-state-file"
+            : "markerpatch-state-file",
+          configNames: [meta?.name],
+        });
         if (result === true) {
           broadcastAll("achievements:file-updated", {
             appid,
@@ -7262,6 +7624,19 @@ module.exports = function makeWatchedFolders({
         watcherOptions.binaryInterval = 1000;
       }
       const watcher = chokidar.watch(targets, watcherOptions);
+      let readySettled = false;
+      let resolveReady = null;
+      const readyPromise = new Promise((resolve) => {
+        resolveReady = resolve;
+      });
+      const settleReady = (ready) => {
+        if (readySettled) return;
+        readySettled = true;
+        const resolve = resolveReady;
+        resolveReady = null;
+        resolve?.(ready === true);
+      };
+      watcher.readyPromise = readyPromise;
 
       const onHit = async (ev, filePath, retryFlag = false) => {
         if (!filePath) return;
@@ -7496,11 +7871,13 @@ module.exports = function makeWatchedFolders({
       };
 
       watcher
+        .on("ready", () => settleReady(true))
         .on("add", (fp) => onHit("add", fp))
         .on("change", (fp) => onHit("change", fp))
-        .on("error", (err) =>
-          notifyWarn(`save watcher [${appid}] error: ${err.message}`),
-        );
+        .on("error", (err) => {
+          settleReady(false);
+          notifyWarn(`save watcher [${appid}] error: ${err.message}`);
+        });
 
       bucket.set(meta.name, watcher);
     }
@@ -7661,6 +8038,15 @@ module.exports = function makeWatchedFolders({
   }
 
   async function rebuildSaveWatchers(options = {}) {
+    const rebuildStartedAt = Date.now();
+    const countSaveWatchers = () => {
+      let count = 0;
+      for (const bucket of appidSaveWatchers.values()) {
+        if (bucket instanceof Map) count += bucket.size;
+      }
+      return count;
+    };
+    const watchersBefore = countSaveWatchers();
     const suppressInitialNotify = options.suppressInitialNotify === true;
     const fromBlacklist =
       options.fromBlacklist === true || options.appIdsFromBlacklist;
@@ -7669,12 +8055,10 @@ module.exports = function makeWatchedFolders({
       (bootMode && options.deferInitialSeed !== false);
     const deferLumaPlayPolling = options.deferLumaPlayPolling === true;
     const forceBatchAttach = options.forceBatchAttach === true;
-    const batchDelayMs = Math.max(0, Number(options.batchDelayMs) || 0);
+    const waitForReady = options.waitForReady === true;
     const yieldIfNeeded = createTimeSlicer(BOOT_ATTACH_SLICE_MS);
-    const itemDelayMs =
-      (bootMode || forceBatchAttach) && BOOT_ATTACH_ITEM_DELAY_MS > 0
-        ? BOOT_ATTACH_ITEM_DELAY_MS
-        : 0;
+    const useAdaptiveAttachSlicing = bootMode || forceBatchAttach;
+    const yieldAfterAttach = createAdaptiveTimeSlicer();
     const roots = getWatchedFolders().map(normalize);
     const blacklistState = getBlacklistState();
     const blockedFolders = getBlockedFoldersSet();
@@ -7786,46 +8170,91 @@ module.exports = function makeWatchedFolders({
       }
     }
     if (metasToAttach.length) {
-      if (
-        (bootMode || forceBatchAttach) &&
-        metasToAttach.length > BOOT_ATTACH_BATCH
-      ) {
-        let count = 0;
-        for (const meta of metasToAttach) {
-          attachWatcherForMeta(meta, {
-            suppressInitialNotify,
-            deferInitialSeed,
-            deferLumaPlayPolling,
-            blacklistState,
+      let attachedCount = 0;
+      const readyEntries = [];
+      for (const meta of metasToAttach) {
+        const attachStartedAt = Date.now();
+        attachWatcherForMeta(meta, {
+          suppressInitialNotify,
+          deferInitialSeed,
+          deferLumaPlayPolling,
+          blacklistState,
+        });
+        const attachedWatcher = appidSaveWatchers
+          .get(String(meta.appid))
+          ?.get(meta.name);
+        if (
+          attachedWatcher?.readyPromise &&
+          typeof attachedWatcher.readyPromise.then === "function"
+        ) {
+          readyEntries.push({
+            appid: String(meta.appid),
+            config: meta.name,
+            promise: attachedWatcher.readyPromise,
           });
-          count += 1;
-          if (yieldIfNeeded) await yieldIfNeeded();
-          const perMetaDelayMs = getStrictRootEventModeInfo(meta)
-            ? STRICT_ROOT_ATTACH_ITEM_DELAY_MS
-            : itemDelayMs;
-          if (perMetaDelayMs > 0) {
-            await sleep(perMetaDelayMs);
-          }
-          if (count % BOOT_ATTACH_BATCH === 0 && perMetaDelayMs === 0) {
-            await sleep(batchDelayMs || BOOT_ATTACH_DELAY_MS);
+        }
+        const attachDurationMs = Date.now() - attachStartedAt;
+        attachedCount += 1;
+        if (attachDurationMs >= SAVE_WATCHER_ATTACH_SLOW_MS) {
+          watcherLogger.info("watch-save:attach-slow", {
+            config: meta?.name || null,
+            appid: meta?.appid != null ? String(meta.appid) : null,
+            platform: normalizePlatform(meta?.platform) || null,
+            savePath: meta?.save_path || null,
+            durationMs: attachDurationMs,
+            position: attachedCount,
+            total: metasToAttach.length,
+            bootMode,
+          });
+        }
+        if (useAdaptiveAttachSlicing) {
+          await yieldAfterAttach(attachDurationMs);
+        } else if (yieldIfNeeded) {
+          await yieldIfNeeded();
+        }
+      }
+      if (waitForReady && readyEntries.length) {
+        const barrierStartedAt = Date.now();
+        const outcomes = await Promise.all(
+          readyEntries.map(async (entry) => ({
+            entry,
+            outcome: await waitForPromiseWithTimeout(
+              entry.promise,
+              SAVE_WATCHER_READY_TIMEOUT_MS,
+            ),
+          })),
+        );
+        let readyCount = 0;
+        let failedCount = 0;
+        let timedOutCount = 0;
+        for (const { entry, outcome } of outcomes) {
+          if (outcome.timedOut) {
+            timedOutCount += 1;
+            watcherLogger.warn("watch-save:ready-timeout", {
+              appid: entry.appid,
+              config: entry.config,
+              timeoutMs: SAVE_WATCHER_READY_TIMEOUT_MS,
+            });
+          } else if (outcome.error || outcome.value !== true) {
+            failedCount += 1;
+            watcherLogger.warn("watch-save:ready-failed", {
+              appid: entry.appid,
+              config: entry.config,
+              error: outcome.error?.message || null,
+            });
+          } else {
+            readyCount += 1;
           }
         }
-      } else {
-        for (const meta of metasToAttach) {
-          attachWatcherForMeta(meta, {
-            suppressInitialNotify,
-            deferInitialSeed,
-            deferLumaPlayPolling,
-            blacklistState,
-          });
-          if (yieldIfNeeded) await yieldIfNeeded();
-          const perMetaDelayMs = getStrictRootEventModeInfo(meta)
-            ? STRICT_ROOT_ATTACH_ITEM_DELAY_MS
-            : itemDelayMs;
-          if (perMetaDelayMs > 0) {
-            await sleep(perMetaDelayMs);
-          }
-        }
+        watcherLogger.info("watch-save:ready-barrier-timing", {
+          durationMs: Date.now() - barrierStartedAt,
+          total: readyEntries.length,
+          ready: readyCount,
+          failed: failedCount,
+          timedOut: timedOutCount,
+          timeoutMs: SAVE_WATCHER_READY_TIMEOUT_MS,
+          bootMode,
+        });
       }
     }
     if (getActiveLumaPlayWatcherEntries().length > 0) {
@@ -7835,6 +8264,32 @@ module.exports = function makeWatchedFolders({
     } else {
       stopLumaPlayDiscoveryPolling();
     }
+    watcherLogger.info("rebuild-save-watchers:timing", {
+      durationMs: Date.now() - rebuildStartedAt,
+      configsIndexed: Array.from(configIndex.values()).reduce(
+        (total, entries) =>
+          total +
+          (Array.isArray(entries)
+            ? entries.length
+            : Number(entries?.size) || 0),
+        0,
+      ),
+      eligible: Array.from(allowed.values()).reduce(
+        (total, names) => total + names.size,
+        0,
+      ),
+      queuedForAttach: metasToAttach.length,
+      watchersBefore,
+      watchersAfter: countSaveWatchers(),
+      deferInitialSeed,
+      bootMode,
+      attachScheduling: useAdaptiveAttachSlicing ? "adaptive" : "time-sliced",
+      attachBudgetMs: useAdaptiveAttachSlicing
+        ? SAVE_WATCHER_ATTACH_BUDGET_MS
+        : BOOT_ATTACH_SLICE_MS,
+      slowAttachThresholdMs: SAVE_WATCHER_ATTACH_SLOW_MS,
+      waitForReady,
+    });
   }
 
   async function closeSaveWatchersForConfigDeletion(
@@ -8040,6 +8495,9 @@ module.exports = function makeWatchedFolders({
     folderWatchers.delete(matchedKey);
     entry.stopped = true;
     entry.rescanQueued = false;
+    entry.bootScanPending = false;
+    entry.bootScanRunning = false;
+    entry.bootDirty = false;
     clearTimeout(entry.debounce);
     try {
       entry.resolveReady?.(false);
@@ -8260,15 +8718,35 @@ module.exports = function makeWatchedFolders({
     const normalized = String(inputRoot).replace(/[\\/]+/g, path.sep);
     const lower = normalized.toLowerCase();
     const parts = lower.split(path.sep);
-    const idx = parts.lastIndexOf("nemirtingasepicemu");
-    if (idx === -1) return null;
+    const providers = [
+      {
+        folder: "nemirtingasepicemu",
+        platform: "epic",
+        key: "nemirtingas-epic",
+      },
+      {
+        folder: "nemirtingasgalaxyemu",
+        platform: "gog",
+        key: "nemirtingas-galaxy",
+      },
+    ];
+    let matchedProvider = null;
+    let idx = -1;
+    for (const provider of providers) {
+      const candidateIndex = parts.lastIndexOf(provider.folder);
+      if (candidateIndex > idx) {
+        matchedProvider = provider;
+        idx = candidateIndex;
+      }
+    }
+    if (!matchedProvider || idx === -1) return null;
     const rawParts = normalized.split(path.sep);
     const base = rawParts.slice(0, idx + 1).join(path.sep);
     const sub = rawParts.slice(idx + 1);
-    return { base, sub };
+    return { base, sub, ...matchedProvider };
   }
 
-  async function discoverNemirtingasEpicAppIds(root, shouldSkipPath = null) {
+  async function discoverNemirtingasAppIds(root, shouldSkipPath = null) {
     const info = resolveNemirtingasBaseInfo(root);
     if (!info) return null;
     const { base, sub } = info;
@@ -8299,7 +8777,7 @@ module.exports = function makeWatchedFolders({
     };
 
     if (sub.length === 0) {
-      // Root selected at NemirtingasEpicEmu (container). Scan each user ID dir.
+      // Root selected at the provider container. Scan each user ID directory.
       let entries;
       try {
         entries = await fsp.readdir(base, { withFileTypes: true });
@@ -8313,10 +8791,80 @@ module.exports = function makeWatchedFolders({
       return out;
     }
 
-    // Root selected under NemirtingasEpicEmu (user ID or deeper).
+    // Root selected under the provider container (user ID or deeper).
     const userDir = path.join(base, sub[0]);
     await scanUserDir(userDir);
     return out;
+  }
+
+  async function detectGogTargetedRoot(root) {
+    if (!root) return null;
+    if (getStrictRootProfile(root) || getSpecializedStrictRootProfile(root)) {
+      return null;
+    }
+    const rootParts = splitPathLower(root);
+    if (
+      isShadPs4RuntimePath(root) ||
+      rootParts.includes("rpcs3") ||
+      rootParts.some((part) => part.includes("xenia"))
+    ) {
+      return null;
+    }
+    const targetPaths = new Set();
+    const gogInfoPattern = /^goggame-(\d+)\.info$/i;
+    let validGogInfo = false;
+    let validUniverseLan = false;
+
+    const hasUniverseLanAppId = async (filePath) => {
+      try {
+        const buf = await fsp.readFile(filePath);
+        for (const encoding of ["utf8", "utf16le"]) {
+          const text = buf.toString(encoding);
+          try {
+            const parsed = require("ini").parse(text.replace(/^\uFEFF/, ""));
+            if (/^\d+$/.test(String(parsed?.GameSettings?.AppID || "").trim())) {
+              return true;
+            }
+          } catch {}
+          if (/^\s*appid\s*=\s*\d+\s*$/im.test(text)) return true;
+        }
+      } catch {}
+      return false;
+    };
+
+    let entries;
+    try {
+      entries = await fsp.readdir(root, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const full = path.join(root, entry.name);
+      if (gogInfoPattern.test(entry.name)) {
+        validGogInfo = true;
+        targetPaths.add(full);
+        targetPaths.add(
+          path.join(root, "UniverseLANData", "Achievements.ini"),
+        );
+      } else if (entry.name.toLowerCase() === "universelan.ini") {
+        targetPaths.add(full);
+        targetPaths.add(
+          path.join(root, "UniverseLANData", "Achievements.ini"),
+        );
+        if (await hasUniverseLanAppId(full)) validUniverseLan = true;
+      }
+    }
+    if (!validGogInfo && !validUniverseLan) return null;
+    return {
+      detected: true,
+      source: validGogInfo
+        ? "detected-gog-info"
+        : "detected-universelan",
+      hasGogInfo: validGogInfo,
+      hasUniverseLan: validUniverseLan,
+      targetPaths: Array.from(targetPaths),
+    };
   }
 
   async function findGogInfoAppId(
@@ -9172,7 +9720,10 @@ module.exports = function makeWatchedFolders({
       }
       broadcastAll("configs:changed");
       broadcastAll("refresh-achievements-table");
-      emitDashboardRefresh();
+      emitDashboardRefresh({
+        mode: "summary",
+        reason: "lumaplay-configs-changed",
+      });
     }
 
     const created = createdIds.size;
@@ -9389,25 +9940,31 @@ module.exports = function makeWatchedFolders({
         ) {
           const stat = readFileStatSyncSafe(metaPath);
           if (stat) {
-            updateCacheMetaEntry(getCacheMetaKey(meta, appid, metaPath), stat);
+            updateCacheMetaEntry(
+              getCacheMetaKey(meta, appid, metaPath),
+              stat,
+              metaPath,
+            );
           }
           continue;
         }
         if (bootLikeSeed) {
           loadCacheMetaOnce();
-          const metaKey = getCacheMetaKey(meta, appid, metaPath);
-          const cachedMeta = metaKey ? cacheMeta.get(metaKey) : null;
-          if (cachedMeta && typeof cachedMeta === "object") {
-            const stat = readFileStatSyncSafe(metaPath);
-            const mtimeMs = Number(cachedMeta.mtimeMs ?? 0);
-            const size = Number(cachedMeta.size ?? 0);
-            if (
-              stat &&
-              Number.isFinite(mtimeMs) &&
-              Number.isFinite(size) &&
-              stat.mtimeMs === mtimeMs &&
-              stat.size === size
-            ) {
+          const relatedMetaPaths = getRelatedCacheMetaSourcePaths(
+            metaPath,
+            orderedCandidates,
+          );
+          if (relatedMetaPaths.length) {
+            const allSourcesUnchanged = relatedMetaPaths.every((sourcePath) => {
+              const sourceMetaKey = getCacheMetaKey(meta, appid, sourcePath);
+              const stat = readFileStatSyncSafe(sourcePath);
+              return cacheMetaStore.matchesStat(
+                sourceMetaKey,
+                stat,
+                getCacheMetaParserRevision(sourcePath),
+              );
+            });
+            if (allSourcesUnchanged) {
               if (!lastSnapshot.has(snapKey)) {
                 try {
                   const cached =
@@ -9417,6 +9974,7 @@ module.exports = function makeWatchedFolders({
                           meta?.platform || null,
                           {
                             savePath: cacheSavePathForFp,
+                            filePath: fp,
                             appid,
                           },
                         )
@@ -9436,6 +9994,30 @@ module.exports = function makeWatchedFolders({
               }
             }
           }
+        }
+        // A changed source must be parsed against the persisted snapshot, not
+        // an empty object. Several formats are append-only or omit the original
+        // unlock timestamp on later writes, so the cache is the authoritative
+        // baseline for fields that are no longer present in the source.
+        if (
+          bootLikeSeed &&
+          !lastSnapshot.has(snapKey) &&
+          typeof getCachedSnapshot === "function"
+        ) {
+          try {
+            const cached = getCachedSnapshot(
+              meta?.name || appid,
+              meta?.platform || null,
+              {
+                savePath: cacheSavePathForFp,
+                filePath: fp,
+                appid,
+              },
+            );
+            if (cached && typeof cached === "object") {
+              lastSnapshot.set(snapKey, cached);
+            }
+          } catch {}
         }
         if (isXeniaMeta(meta) && fp.toLowerCase().endsWith(".gpd")) {
           const parsed = parseGpdFile(fp);
@@ -9571,9 +10153,14 @@ module.exports = function makeWatchedFolders({
         }
         if (!snapshot) continue;
 
-        const metaKey = getCacheMetaKey(meta, appid, metaPath);
-        const stat = readFileStatSyncSafe(metaPath);
-        if (stat) updateCacheMetaEntry(metaKey, stat);
+        for (const sourcePath of getRelatedCacheMetaSourcePaths(
+          metaPath,
+          orderedCandidates,
+        )) {
+          const sourceMetaKey = getCacheMetaKey(meta, appid, sourcePath);
+          const stat = readFileStatSyncSafe(sourcePath);
+          if (stat) updateCacheMetaEntry(sourceMetaKey, stat, sourcePath);
+        }
 
         lastSnapshot.set(snapKey, snapshot);
         const configName = meta?.name || appid;
@@ -9583,7 +10170,11 @@ module.exports = function makeWatchedFolders({
               meta,
               appid,
               snapshot,
-              { bootLike: bootLikeSeed, savePath: cacheSavePathForFp },
+              {
+                bootLike: bootLikeSeed,
+                savePath: cacheSavePathForFp,
+                filePath: fp,
+              },
             );
             if (!skipBootSeed) {
               onSeedCache({
@@ -9591,6 +10182,7 @@ module.exports = function makeWatchedFolders({
                 configName,
                 platform: meta?.platform || null,
                 savePath: cacheSavePathForFp,
+                filePath: fp,
                 snapshot,
               });
             } else {
@@ -9794,13 +10386,17 @@ module.exports = function makeWatchedFolders({
   }
 
   function shouldSkipXLiveLessNessDiscovery(rootPath) {
-    if (getStrictRootProfile(rootPath) || isShadPs4RuntimePath(rootPath)) {
+    if (
+      getStrictRootProfile(rootPath) ||
+      getSpecializedStrictRootProfile(rootPath) ||
+      isShadPs4RuntimePath(rootPath)
+    ) {
       return true;
     }
     const parts = splitPathLower(rootPath);
     return (
       parts.includes("rpcs3") ||
-      parts.includes("xenia") ||
+      parts.some((part) => part.includes("xenia")) ||
       (parts.includes("steam") && parts.includes("appcache"))
     );
   }
@@ -9833,21 +10429,378 @@ module.exports = function makeWatchedFolders({
     return Array.from(owned).filter(Boolean);
   }
 
-  async function detectLocalPatchRootState(rootPath, options = {}) {
-    const madnessPatchDetection = detectMadnessPatchRoot(rootPath);
-    const markerPatchDetection = detectMarkerPatchRoot(rootPath);
-    const skipXLiveLessNess = shouldSkipXLiveLessNessDiscovery(rootPath);
-    const xLiveLessNessDetection = skipXLiveLessNess
-      ? {
-          detected: false,
-          partial: false,
-          root: normalizePrefPath(rootPath),
-          games: [],
-          skipped: true,
+  function getXLiveLessNessWatchMetadata(rootPath) {
+    const root = normalizePrefPath(rootPath);
+    const rootKey = normalizeXLiveLessNessPath(root);
+    if (!root || !rootKey) {
+      return {
+        valid: false,
+        entries: [],
+        ownedRoots: [],
+        ownsEntireRoot: false,
+      };
+    }
+    if (xLiveLessNessMetadataFallbackRoots.has(rootKey)) {
+      return {
+        valid: false,
+        entries: [],
+        ownedRoots: [],
+        ownsEntireRoot: false,
+        fallbackReason: "known-executable-validation-failed",
+      };
+    }
+
+    const entries = [];
+    const entryKeys = new Set();
+    const addEntry = (entry, meta) => {
+      const executablePath = String(
+        typeof entry === "string"
+          ? entry
+          : entry?.path || entry?.executable || "",
+      ).trim();
+      if (!executablePath || !isPathInsideRoot(root, executablePath)) return;
+      const executableKey = normalizeXLiveLessNessPath(executablePath);
+      if (!executableKey || entryKeys.has(executableKey)) return;
+      const configPath = String(
+        (typeof entry === "object" && entry?.title_config_path) ||
+          meta?.xlln_title_config_path ||
+          `${executablePath}.cfg`,
+      ).trim();
+      const executableDirectory = path.dirname(executablePath);
+      const xlivePath = path.join(executableDirectory, "xlive.dll");
+      if (
+        !fs.existsSync(executablePath) ||
+        !fs.existsSync(configPath) ||
+        !fs.existsSync(xlivePath)
+      ) {
+        return;
+      }
+      entryKeys.add(executableKey);
+      entries.push({
+        path: executablePath,
+        process_name: String(entry?.process_name || "").trim(),
+        title_config_path: configPath,
+        game_path: String(entry?.game_path || meta?.xlln_game_path || "").trim(),
+        xlive_path: xlivePath,
+        configName: meta?.name || "",
+      });
+    };
+
+    for (const metas of configIndex.values()) {
+      for (const meta of metas || []) {
+        if (!isXLiveLessNessConfig(meta)) continue;
+        const gamePaths = getXLiveLessNessGamePaths(meta);
+        const executableEntries = Array.isArray(
+          meta.xlln_detected_executables,
+        )
+          ? meta.xlln_detected_executables
+          : [];
+        const relevant =
+          gamePaths.some((candidate) => isPathInsideRoot(root, candidate)) ||
+          executableEntries.some((entry) =>
+            isPathInsideRoot(root, entry?.path || entry?.executable),
+          ) ||
+          isPathInsideRoot(root, meta.executable);
+        if (!relevant) continue;
+        executableEntries.forEach((entry) => addEntry(entry, meta));
+        addEntry(
+          {
+            path: meta.executable,
+            title_config_path: meta.xlln_title_config_path,
+            game_path: meta.xlln_game_path,
+          },
+          meta,
+        );
+      }
+    }
+
+    const syntheticDetection = {
+      detected: entries.length > 0,
+      games: entries.map((entry) => ({
+        primaryExecutable: entry.path,
+        executables: [entry],
+      })),
+    };
+    const ownedRoots = getXLiveLessNessOwnedRoots(
+      root,
+      syntheticDetection,
+    );
+    const ownsEntireRoot = ownedRoots.some(
+      (candidate) => normalizeXLiveLessNessPath(candidate) === rootKey,
+    );
+    return {
+      valid: entries.length > 0,
+      entries,
+      ownedRoots,
+      ownsEntireRoot,
+    };
+  }
+
+  function normalizeDiscoveryRelativePath(rootPath, candidatePath) {
+    let relative = "";
+    try {
+      relative = path.relative(rootPath, candidatePath);
+    } catch {
+      return null;
+    }
+    if (
+      relative === ".." ||
+      relative.startsWith(`..${path.sep}`) ||
+      path.isAbsolute(relative)
+    ) {
+      return null;
+    }
+    return relative
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .join("/")
+      .toLowerCase();
+  }
+
+  function createExactDiscoveryWatchPolicy(rootPath, options = {}) {
+    const targetPaths = Array.from(
+      new Set(
+        (Array.isArray(options.targetPaths) ? options.targetPaths : [])
+          .map((candidate) =>
+            normalizeDiscoveryRelativePath(rootPath, candidate),
+          )
+          .filter((candidate) => candidate !== null),
+      ),
+    );
+    const targetSubtrees = Array.from(
+      new Set(
+        (Array.isArray(options.targetSubtrees)
+          ? options.targetSubtrees
+          : []
+        )
+          .map((candidate) =>
+            normalizeDiscoveryRelativePath(rootPath, candidate),
+          )
+          // Never treat the watched root itself as a subtree target. Doing so
+          // would silently disable all pruning for a malformed/missing path.
+          .filter(Boolean),
+      ),
+    );
+    const allTargetPaths = Array.from(
+      new Set([...targetPaths, ...targetSubtrees]),
+    );
+    const targetDirectories = new Set(
+      (Array.isArray(options.targetDirectories)
+        ? options.targetDirectories
+        : []
+      )
+        .map((candidate) =>
+          normalizeDiscoveryRelativePath(rootPath, candidate),
+        )
+        .filter((candidate) => candidate !== null),
+    );
+    const maxSegments = allTargetPaths.reduce(
+      (max, candidate) =>
+        Math.max(max, candidate ? candidate.split("/").length : 0),
+      0,
+    );
+    const maxSubtreeSegments = targetSubtrees.reduce(
+      (max, candidate) =>
+        Math.max(max, candidate ? candidate.split("/").length + 1 : 0),
+      0,
+    );
+    const allowXLiveLessNessDirectoryFiles =
+      options.allowXLiveLessNessDirectoryFiles === true;
+
+    return {
+      mode: String(options.mode || "generic"),
+      source: String(options.source || "detected-signature"),
+      depth: Math.max(0, Math.min(7, Math.max(maxSegments, maxSubtreeSegments))),
+      targetCount: allTargetPaths.length,
+      preserveGenericDiscovery: false,
+      shouldIgnore(candidatePath) {
+        const relative = normalizeDiscoveryRelativePath(rootPath, candidatePath);
+        if (relative === null) return true;
+        if (!relative) return false;
+        for (const target of allTargetPaths) {
+          if (relative === target || target.startsWith(`${relative}/`)) {
+            return false;
+          }
         }
-      : await detectXLiveLessNessRootAsync(rootPath, {
+        for (const subtree of targetSubtrees) {
+          if (relative.startsWith(`${subtree}/`)) return false;
+        }
+        if (allowXLiveLessNessDirectoryFiles) {
+          const parent = relative.includes("/")
+            ? relative.slice(0, relative.lastIndexOf("/"))
+            : "";
+          const base = relative.slice(relative.lastIndexOf("/") + 1);
+          if (
+            targetDirectories.has(parent) &&
+            (base === "xlive.dll" ||
+              base.endsWith(".exe.cfg") ||
+              base.endsWith(".exe"))
+          ) {
+            return false;
+          }
+        }
+        return true;
+      },
+    };
+  }
+
+  function createRootDiscoveryWatchPolicy(
+    rootPath,
+    localPatchState,
+    xLiveLessNessMetadata,
+    fallbackDepth,
+    gogTargetEvidence = null,
+  ) {
+    if (gogTargetEvidence?.detected === true) {
+      return createExactDiscoveryWatchPolicy(rootPath, {
+        mode: "gog-targeted",
+        source: gogTargetEvidence.source || "detected-gog-marker",
+        targetPaths: gogTargetEvidence.targetPaths,
+      });
+    }
+    if (localPatchState?.type === "markerpatch") {
+      const paths = localPatchState.markerPatchDetection?.paths || {};
+      return createExactDiscoveryWatchPolicy(rootPath, {
+        mode: "markerpatch",
+        targetPaths: [
+          paths.executable,
+          paths.ini,
+          paths.achievementsDir,
+          paths.imagesDir,
+          paths.textDir,
+        ],
+        targetSubtrees: [paths.imagesDir, paths.textDir],
+      });
+    }
+    if (localPatchState?.type === "madnesspatch") {
+      const paths = localPatchState.madnessPatchDetection?.paths || {};
+      return createExactDiscoveryWatchPolicy(rootPath, {
+        mode: "madnesspatch",
+        targetPaths: [
+          paths.executable,
+          paths.ini,
+          paths.proxy,
+          paths.achievementsDir,
+          paths.imagesDir,
+          paths.textDir,
+        ],
+        targetSubtrees: [paths.imagesDir, paths.textDir],
+      });
+    }
+    if (
+      xLiveLessNessMetadata?.valid === true &&
+      xLiveLessNessMetadata.ownsEntireRoot === true
+    ) {
+      const targetDirectories = xLiveLessNessMetadata.entries.map((entry) =>
+        path.dirname(entry.path),
+      );
+      return createExactDiscoveryWatchPolicy(rootPath, {
+        mode: "xlivelessness-owned",
+        source: "config-metadata",
+        targetDirectories,
+        targetPaths: xLiveLessNessMetadata.entries.flatMap((entry) => [
+          path.dirname(entry.path),
+          entry.path,
+          entry.title_config_path,
+          entry.xlive_path,
+        ]),
+        allowXLiveLessNessDirectoryFiles: true,
+      });
+    }
+    const trophyDiscoveryPolicy = createTrophyDiscoveryWatchPolicy(rootPath, {
+      fallbackDepth,
+      metas: Array.from(configIndex.values()).flatMap((metas) => metas || []),
+    });
+    if (trophyDiscoveryPolicy) return trophyDiscoveryPolicy;
+    return {
+      mode:
+        xLiveLessNessMetadata?.valid === true
+          ? "xlivelessness-mixed"
+          : "generic",
+      source:
+        xLiveLessNessMetadata?.valid === true
+          ? "config-metadata"
+          : "generic-root",
+      depth: fallbackDepth,
+      targetCount: 0,
+      preserveGenericDiscovery: true,
+      shouldIgnore: () => false,
+    };
+  }
+
+  async function detectLocalPatchRootState(rootPath, options = {}) {
+    const startedAt = Date.now();
+    const madnessStartedAt = Date.now();
+    const madnessPatchDetection = detectMadnessPatchRoot(rootPath);
+    const madnessDetectionMs = Date.now() - madnessStartedAt;
+    const markerStartedAt = Date.now();
+    const markerPatchDetection = detectMarkerPatchRoot(rootPath);
+    const markerDetectionMs = Date.now() - markerStartedAt;
+    const gogTargetEvidence = Object.prototype.hasOwnProperty.call(
+      options,
+      "gogTargetEvidence",
+    )
+      ? options.gogTargetEvidence
+      : await detectGogTargetedRoot(rootPath);
+    const skipXLiveLessNessForRoot =
+      gogTargetEvidence?.detected === true ||
+      shouldSkipXLiveLessNessDiscovery(rootPath);
+    const excludedRootProfile =
+      getStrictRootProfile(rootPath) ||
+      getSpecializedStrictRootProfile(rootPath);
+    const detectedDedicatedPatch =
+      madnessPatchDetection.detected === true ||
+      markerPatchDetection.detected === true;
+    // A complete dedicated-patch signature already owns this root and
+    // scanRootOnce() will stop after its dedicated handler. Avoid traversing
+    // the same game tree for XLiveLessNess during normal discovery. Forced
+    // refreshes (manual rescan/signature changes) intentionally retain the
+    // broad XLiveLessNess check so mixed or newly changed roots can recover.
+    const skipXLiveLessNessForDedicatedPatch =
+      detectedDedicatedPatch &&
+      options.forceXLiveLessNessRefresh !== true;
+    const skipXLiveLessNess =
+      skipXLiveLessNessForRoot || skipXLiveLessNessForDedicatedPatch;
+    const xLiveLessNessStartedAt = Date.now();
+    let xLiveLessNessFastPathAttempted = false;
+    let xLiveLessNessFastPathFallback = false;
+    let xLiveLessNessDetection = null;
+    if (skipXLiveLessNess) {
+      xLiveLessNessDetection = {
+        detected: false,
+        partial: false,
+        root: normalizePrefPath(rootPath),
+        games: [],
+        skipped: true,
+      };
+    } else {
+      const knownExecutables = Array.isArray(
+        options.xLiveLessNessKnownExecutables,
+      )
+        ? options.xLiveLessNessKnownExecutables
+        : [];
+      if (
+        knownExecutables.length > 0 &&
+        options.forceXLiveLessNessRefresh !== true
+      ) {
+        xLiveLessNessFastPathAttempted = true;
+        xLiveLessNessDetection =
+          await detectXLiveLessNessKnownExecutablesAsync(
+            rootPath,
+            knownExecutables,
+          );
+        if (!xLiveLessNessDetection?.detected) {
+          xLiveLessNessFastPathFallback = true;
+          xLiveLessNessDetection = null;
+        }
+      }
+      if (!xLiveLessNessDetection) {
+        xLiveLessNessDetection = await detectXLiveLessNessRootAsync(rootPath, {
           forceRefresh: options.forceXLiveLessNessRefresh === true,
         });
+      }
+    }
+    const xLiveLessNessWallMs = Date.now() - xLiveLessNessStartedAt;
     const xLiveLessNessStorageRoot =
       skipXLiveLessNess || xLiveLessNessDetection.partial
         ? ""
@@ -9864,6 +10817,51 @@ module.exports = function makeWatchedFolders({
         : markerPatchDetection.detected
           ? "markerpatch"
           : "";
+    const durationMs = Date.now() - startedAt;
+    if (
+      bootMode ||
+      durationMs >= 250 ||
+      options.forceXLiveLessNessRefresh === true ||
+      !!type
+    ) {
+      watcherLogger.info("local-patch:detect-timing", {
+        root: normalizePrefPath(rootPath),
+        durationMs,
+        madnessDetectionMs,
+        markerDetectionMs,
+        xlivelessnessWallMs: xLiveLessNessWallMs,
+        xlivelessnessScanMs:
+          Number(xLiveLessNessDetection?.scanDurationMs) || 0,
+        xlivelessnessScannedDirectories:
+          Number(xLiveLessNessDetection?.scannedDirectories) || 0,
+        xlivelessnessDetected: xLiveLessNessDetection?.detected === true,
+        xlivelessnessPartial: xLiveLessNessDetection?.partial === true,
+        xlivelessnessSkipped: skipXLiveLessNess,
+        xlivelessnessFastPathAttempted: xLiveLessNessFastPathAttempted,
+        xlivelessnessFastPathUsed:
+          xLiveLessNessDetection?.fastPath === true,
+        xlivelessnessFastPathFallback: xLiveLessNessFastPathFallback,
+        xlivelessnessExcludedRootProfile: excludedRootProfile?.key || null,
+        xlivelessnessSkipReason: skipXLiveLessNessForRoot
+          ? gogTargetEvidence?.detected === true
+            ? "gog-targeted"
+            : "excluded-root"
+          : skipXLiveLessNessForDedicatedPatch
+            ? madnessPatchDetection.detected === true
+              ? "madnesspatch-detected"
+              : "markerpatch-detected"
+            : null,
+        detectedType: type || null,
+        forceRefresh: options.forceXLiveLessNessRefresh === true,
+        bootMode,
+      });
+    }
+    const rootKey = normalizeXLiveLessNessPath(rootPath);
+    if (xLiveLessNessFastPathFallback && rootKey) {
+      xLiveLessNessMetadataFallbackRoots.add(rootKey);
+    } else if (xLiveLessNessDetection?.fastPath === true && rootKey) {
+      xLiveLessNessMetadataFallbackRoots.delete(rootKey);
+    }
     return {
       type,
       active: !!type,
@@ -9875,14 +10873,20 @@ module.exports = function makeWatchedFolders({
     };
   }
 
-  function createPendingLocalPatchRootState(rootPath) {
+  function createPendingLocalPatchRootState(
+    rootPath,
+    xLiveLessNessMetadata = null,
+  ) {
     const madnessPatchDetection = detectMadnessPatchRoot(rootPath);
     const markerPatchDetection = detectMarkerPatchRoot(rootPath);
     const type = madnessPatchDetection.detected
       ? "madnesspatch"
       : markerPatchDetection.detected
         ? "markerpatch"
-        : "";
+        : xLiveLessNessMetadata?.valid === true &&
+            xLiveLessNessMetadata.ownsEntireRoot === true
+          ? XLIVELESSNESS_PLATFORM
+          : "";
     return {
       type,
       active: !!type,
@@ -9896,7 +10900,10 @@ module.exports = function makeWatchedFolders({
         pending: true,
       },
       xLiveLessNessStorageRoot: "",
-      xLiveLessNessOwnedRoots: [],
+      xLiveLessNessOwnedRoots:
+        type === XLIVELESSNESS_PLATFORM
+          ? xLiveLessNessMetadata.ownedRoots || []
+          : [],
     };
   }
 
@@ -10367,9 +11374,16 @@ module.exports = function makeWatchedFolders({
           (result) => result.created || result.updated || result.schemaUpdated,
         )
       ) {
+        await invalidateDashboardSummaryForSchemaResults(
+          results,
+          "xlivelessness-schema-updated",
+        );
         broadcastAll("configs:changed");
         broadcastAll("refresh-achievements-table");
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "summary",
+          reason: "xlivelessness-configs-changed",
+        });
       }
       generationProgress.finish(
         generationFailed ? "failed" : "success",
@@ -10489,9 +11503,16 @@ module.exports = function makeWatchedFolders({
         });
       }
       if (result.created || result.updated || result.schemaUpdated) {
+        await invalidateDashboardSummaryForSchemaResults(
+          result,
+          "ff7-achievement-dat-schema-updated",
+        );
         broadcastAll("configs:changed");
         broadcastAll("refresh-achievements-table");
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "summary",
+          reason: "ff7-achievement-dat-config-changed",
+        });
       }
       watcherLogger.info("ff7-achievement-dat:scan-complete", {
         root: detection.root,
@@ -10637,9 +11658,16 @@ module.exports = function makeWatchedFolders({
         });
       }
       if (result.created || result.updated || result.schemaUpdated) {
+        await invalidateDashboardSummaryForSchemaResults(
+          result,
+          "madnesspatch-schema-updated",
+        );
         broadcastAll("configs:changed");
         broadcastAll("refresh-achievements-table");
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "summary",
+          reason: "madnesspatch-config-changed",
+        });
       }
       const stateFiles = listMadnessPatchStateFiles(result.checkpointRoot);
       watcherLogger.info("madnesspatch:scan-complete", {
@@ -10788,9 +11816,16 @@ module.exports = function makeWatchedFolders({
       }
 
       if (result.created || result.updated || result.schemaUpdated) {
+        await invalidateDashboardSummaryForSchemaResults(
+          result,
+          "markerpatch-schema-updated",
+        );
         broadcastAll("configs:changed");
         broadcastAll("refresh-achievements-table");
-        emitDashboardRefresh();
+        emitDashboardRefresh({
+          mode: "summary",
+          reason: "markerpatch-config-changed",
+        });
       }
       watcherLogger.info("markerpatch:scan-complete", {
         root: detection.root,
@@ -10837,6 +11872,14 @@ module.exports = function makeWatchedFolders({
   }
 
   async function scanRootOnce(rootPath, opts = {}) {
+    const scanStartedAt = Date.now();
+    const scanTelemetry = {
+      outcome: "skipped",
+      handledBy: "standard",
+      discovered: 0,
+      generationTasks: 0,
+      localPatchStateSource: null,
+    };
     const suppressInitialNotify = opts.suppressInitialNotify === true;
     const promoteSingleGeneratedInitialNotify =
       opts.promoteSingleGeneratedInitialNotify === true;
@@ -10853,13 +11896,42 @@ module.exports = function makeWatchedFolders({
       if (!rootPath || !fs.existsSync(rootPath)) return;
       const blockedFolders = getBlockedFoldersSet();
       if (isPathBlocked(rootPath, blockedFolders)) return;
-      const localPatchState =
-        opts.localPatchState ||
-        await detectLocalPatchRootState(rootPath, {
-          forceXLiveLessNessRefresh:
-            opts.forceLocalPatchRefresh === true || rescanInProgress.value,
-        });
+      scanTelemetry.outcome = "completed";
       const watchedRootState = folderWatchers.get(normalizeRoot(rootPath));
+      const gogTargetEvidence = Object.prototype.hasOwnProperty.call(
+        opts,
+        "gogTargetEvidence",
+      )
+        ? opts.gogTargetEvidence
+        : watchedRootState
+          ? watchedRootState.gogTargetEvidence
+          : await detectGogTargetedRoot(rootPath);
+      const forceLocalPatchRefresh =
+        opts.forceLocalPatchRefresh === true || rescanInProgress.value;
+      let localPatchState = opts.localPatchState || null;
+      if (localPatchState) scanTelemetry.localPatchStateSource = "provided";
+      if (
+        !localPatchState &&
+        !forceLocalPatchRefresh &&
+        watchedRootState?.localPatchStatePromise
+      ) {
+        // startFolderWatcher() already began this potentially expensive
+        // discovery. Reuse it for boot and runtime folder additions instead
+        // of traversing the root twice.
+        localPatchState = await watchedRootState.localPatchStatePromise;
+        if (localPatchState) {
+          scanTelemetry.localPatchStateSource = "watcher-promise";
+        }
+      }
+      if (!localPatchState || forceLocalPatchRefresh) {
+        localPatchState = await detectLocalPatchRootState(rootPath, {
+          forceXLiveLessNessRefresh: forceLocalPatchRefresh,
+          gogTargetEvidence,
+        });
+        scanTelemetry.localPatchStateSource = forceLocalPatchRefresh
+          ? "forced-refresh"
+          : "fresh-detection";
+      }
       if (watchedRootState) watchedRootState.localPatchState = localPatchState;
       const xLiveLessNessResult = await handleXLiveLessNessRoot(rootPath, {
         ...opts,
@@ -10878,8 +11950,10 @@ module.exports = function makeWatchedFolders({
             normalizedRootPath.toLowerCase(),
         );
         if (xLiveLessNessResult.storageRoot || ownsEntireRoot) {
+          scanTelemetry.handledBy = "xlivelessness";
           return xLiveLessNessResult;
         }
+        scanTelemetry.handledBy = "xlivelessness-mixed";
         watcherLogger.info("xlivelessness:mixed-root-continue", {
           root: normalizedRootPath,
           excludedRoots: xLiveLessNessOwnedRoots,
@@ -10889,17 +11963,26 @@ module.exports = function makeWatchedFolders({
         rootPath,
         opts,
       );
-      if (ff7AchievementResult.handled) return ff7AchievementResult;
+      if (ff7AchievementResult.handled) {
+        scanTelemetry.handledBy = "ff7-achievement-dat";
+        return ff7AchievementResult;
+      }
       const madnessPatchResult = await handleMadnessPatchRoot(rootPath, {
         ...opts,
         madnessPatchDetection: localPatchState.madnessPatchDetection,
       });
-      if (madnessPatchResult.handled) return madnessPatchResult;
+      if (madnessPatchResult.handled) {
+        scanTelemetry.handledBy = "madnesspatch";
+        return madnessPatchResult;
+      }
       const markerPatchResult = await handleMarkerPatchRoot(rootPath, {
         ...opts,
         markerPatchDetection: localPatchState.markerPatchDetection,
       });
-      if (markerPatchResult.handled) return markerPatchResult;
+      if (markerPatchResult.handled) {
+        scanTelemetry.handledBy = "markerpatch";
+        return markerPatchResult;
+      }
       const scanScopeRoot = opts.scanScopeRoot
         ? normalizePrefPath(opts.scanScopeRoot)
         : null;
@@ -10939,6 +12022,7 @@ module.exports = function makeWatchedFolders({
       const blacklistState = getBlacklistState();
       const yieldIfNeeded = createTimeSlicer(BOOT_SCAN_SLICE_MS);
       const strictRootProfile = getStrictRootProfile(scanBase);
+      const specializedRootProfile = getSpecializedStrictRootProfile(scanBase);
       const strictRootPlatform =
         normalizePlatform(strictRootProfile?.platform) || null;
       const isShadPs4ScanRoot = isShadPs4RuntimePath(scanBase);
@@ -10949,13 +12033,65 @@ module.exports = function makeWatchedFolders({
       const generationTasks = [];
       const brandNewIds = [];
       const xeniaAppIds = new Set();
+      const xeniaSchemaResults = [];
       let gogInfoFound = null;
       let discoveredMap = null;
       let discovered = [];
       let tenokeFound = null;
-      let nemirtingasEpicDiscovery = false;
+      let nemirtingasDiscoveryPlatform = null;
+      const nemirtingasRootInfo = resolveNemirtingasBaseInfo(rootPath);
+      const isNemirtingasRoot = nemirtingasRootInfo !== null;
 
-      if (!strictRootProfile) {
+      if (gogTargetEvidence?.detected === true) {
+        scanTelemetry.handledBy = "gog-targeted";
+        gogInfoFound = gogTargetEvidence.hasGogInfo
+          ? await findGogInfoAppId(
+              scanBase,
+              6,
+              yieldIfNeeded,
+              shouldSkipPath,
+            ).catch(() => null)
+          : null;
+        const universeFound = gogTargetEvidence.hasUniverseLan
+          ? await findUniverseLanAppId(
+              scanBase,
+              6,
+              yieldIfNeeded,
+              shouldSkipPath,
+            ).catch(() => null)
+          : null;
+        const selected = gogInfoFound || universeFound;
+        const selectedId = String(selected?.appid || "").trim();
+        if (selectedId && !isAppIdBlacklisted(selectedId, "gog", blacklistState)) {
+          const shippingDir = await findShippingExeDir(
+            scanBase,
+            6,
+            shouldSkipPath,
+          );
+          const saveRoot = shippingDir || selected.baseDir || scanBase;
+          const normalizedPath = normalizeObservedPath(saveRoot, selectedId);
+          generationTasks.push({
+            appid: selectedId,
+            forcePlatform: "gog",
+            appDir: selected.baseDir || scanBase,
+            normalizedPath,
+            __savePathOverride: saveRoot,
+            __gogName: gogInfoFound?.name || null,
+            __gogLaunchMetadata: gogInfoFound?.launchMetadata || null,
+          });
+          if (normalizedPath) markPendingSavePath(selectedId, normalizedPath);
+        }
+      } else if (isNemirtingasRoot) {
+        // Nemirtingas has a provider-owned <user>/<appid> layout. Route it
+        // directly to its dedicated discovery instead of traversing the same
+        // root through every generic emulator detector first.
+        scanTelemetry.handledBy = nemirtingasRootInfo.key;
+        discoveredMap =
+          (await discoverNemirtingasAppIds(rootPath, shouldSkipPath)) ||
+          new Map();
+        discovered = Array.from(discoveredMap.keys()).map((id) => String(id));
+        nemirtingasDiscoveryPlatform = nemirtingasRootInfo.platform;
+      } else if (!strictRootProfile) {
         const gpdFiles = await discoverGpdFilesUnder(
           scanBase,
           6,
@@ -11044,6 +12180,7 @@ module.exports = function makeWatchedFolders({
               }
               xeniaAppIds.add(String(result.appid));
               knownAppIds.add(String(result.appid));
+              xeniaSchemaResults.push(result);
               const xeniaChanged =
                 result?.created === true ||
                 result?.schemaUpdated === true ||
@@ -11088,6 +12225,10 @@ module.exports = function makeWatchedFolders({
           }
           if (xeniaAppIds.size) {
             await indexExistingConfigsSync();
+            await invalidateDashboardSummaryForSchemaResults(
+              xeniaSchemaResults,
+              "xenia-schema-updated",
+            );
             if (bootMode) {
               await attachSaveWatchersBatched(xeniaAppIds, {
                 suppressInitialNotify,
@@ -11118,6 +12259,7 @@ module.exports = function makeWatchedFolders({
           const schemaRoot = path.join(configsDir, "schema");
           const rpcs3AppIds = new Set();
           let rpcs3Changed = false;
+          const rpcs3SchemaResults = [];
           const rpcs3Tasks = trophyDirs.map((trophyDir, taskIndex) => ({
             trophyDir,
             appid: path.basename(trophyDir),
@@ -11187,6 +12329,7 @@ module.exports = function makeWatchedFolders({
                 result?.schemaUpdated === true ||
                 result?.configUpdated === true;
               if (rpcs3ResultChanged) rpcs3Changed = true;
+              rpcs3SchemaResults.push(result);
               if (
                 (result.created || result.schemaUpdated) &&
                 bootMode &&
@@ -11249,6 +12392,10 @@ module.exports = function makeWatchedFolders({
           }
           if (rpcs3AppIds.size) {
             await indexExistingConfigsSync();
+            await invalidateDashboardSummaryForSchemaResults(
+              rpcs3SchemaResults,
+              "rpcs3-schema-updated",
+            );
             if (bootMode) {
               await attachSaveWatchersBatched(rpcs3AppIds, {
                 suppressInitialNotify,
@@ -11281,6 +12428,7 @@ module.exports = function makeWatchedFolders({
           const schemaRoot = path.join(configsDir, "schema");
           const ps4AppIds = new Set();
           let ps4Changed = false;
+          const ps4SchemaResults = [];
           const ps4Tasks = modernPs4Sets.map((entry, taskIndex) => ({
             ...entry,
             __taskIndex: taskIndex,
@@ -11356,6 +12504,7 @@ module.exports = function makeWatchedFolders({
                 result?.schemaUpdated === true ||
                 result?.configUpdated === true;
               if (ps4ResultChanged) ps4Changed = true;
+              ps4SchemaResults.push(result);
               if (bootMode && typeof onSeedCache === "function") {
                 const progressFiles = Array.isArray(task?.progressFiles)
                   ? task.progressFiles
@@ -11447,6 +12596,10 @@ module.exports = function makeWatchedFolders({
           }
           if (ps4AppIds.size) {
             await indexExistingConfigsSync();
+            await invalidateDashboardSummaryForSchemaResults(
+              ps4SchemaResults,
+              "shadps4-schema-updated",
+            );
             if (bootMode) {
               await attachSaveWatchersBatched(ps4AppIds, {
                 suppressInitialNotify,
@@ -11477,6 +12630,7 @@ module.exports = function makeWatchedFolders({
           const schemaRoot = path.join(configsDir, "schema");
           const ps4AppIds = new Set();
           let ps4Changed = false;
+          const ps4SchemaResults = [];
           const ps4Tasks = ps4Dirs.map((trophyDir, taskIndex) => ({
             trophyDir,
             appid:
@@ -11557,6 +12711,7 @@ module.exports = function makeWatchedFolders({
                 result?.schemaUpdated === true ||
                 result?.configUpdated === true;
               if (ps4ResultChanged) ps4Changed = true;
+              ps4SchemaResults.push(result);
               if (
                 (result.created || result.schemaUpdated) &&
                 bootMode &&
@@ -11619,6 +12774,10 @@ module.exports = function makeWatchedFolders({
           }
           if (ps4AppIds.size) {
             await indexExistingConfigsSync();
+            await invalidateDashboardSummaryForSchemaResults(
+              ps4SchemaResults,
+              "shadps4-schema-updated",
+            );
             if (bootMode) {
               await attachSaveWatchersBatched(ps4AppIds, {
                 suppressInitialNotify,
@@ -11653,7 +12812,9 @@ module.exports = function makeWatchedFolders({
             .toLowerCase();
           const steamStatsSuffix = `${path.sep}steam${path.sep}appcache${path.sep}stats`;
           const steamRootSuffix = `${path.sep}steam`;
-          const isSteamStatsRoot = normScanBase.endsWith(steamStatsSuffix);
+          const isSteamStatsRoot =
+            specializedRootProfile?.key === "steam-official" ||
+            normScanBase.endsWith(steamStatsSuffix);
           const isSteamRoot = normScanBase.endsWith(steamRootSuffix);
           const isSteamCacheRoot =
             isSteamRoot ||
@@ -11685,6 +12846,7 @@ module.exports = function makeWatchedFolders({
             const steamIds = new Set();
             let steamChanged = false;
             let steamBatchFailed = false;
+            const steamSchemaResults = [];
             const steamTasks = schemaBins.map((bin, index) => {
               const schemaBinPath = path.join(steamScanBase, bin);
               const schemaInfo = parseSteamOfficialBinInfo(schemaBinPath);
@@ -11791,6 +12953,7 @@ module.exports = function makeWatchedFolders({
               }
               steamIds.add(resultAppId);
               knownAppIds.add(resultAppId);
+              steamSchemaResults.push(result);
               if (
                 result.created ||
                 result.schemaUpdated ||
@@ -11833,6 +12996,10 @@ module.exports = function makeWatchedFolders({
             }
             if (steamIds.size) {
               await indexExistingConfigsSync();
+              await invalidateDashboardSummaryForSchemaResults(
+                steamSchemaResults,
+                "steam-official-schema-updated",
+              );
               if (bootMode) {
                 await attachSaveWatchersBatched(steamIds, {
                   suppressInitialNotify,
@@ -12138,16 +13305,22 @@ module.exports = function makeWatchedFolders({
             }
 
             // If no GOG .info, fall back to numeric discovery (with Epic container handling)
-            const epicDiscoveredMap =
+            const nemirtingasInfo = resolveNemirtingasBaseInfo(rootPath);
+            const nemirtingasDiscoveredMap =
               !gogInfoFound &&
-              (await discoverNemirtingasEpicAppIds(rootPath, shouldSkipPath));
-            const shouldFallbackEpic =
-              epicDiscoveredMap instanceof Map && epicDiscoveredMap.size === 0;
-            nemirtingasEpicDiscovery =
-              epicDiscoveredMap instanceof Map && epicDiscoveredMap.size > 0;
+              (await discoverNemirtingasAppIds(rootPath, shouldSkipPath));
+            const shouldFallbackNemirtingas =
+              nemirtingasDiscoveredMap instanceof Map &&
+              nemirtingasDiscoveredMap.size === 0;
+            nemirtingasDiscoveryPlatform =
+              nemirtingasDiscoveredMap instanceof Map &&
+              nemirtingasDiscoveredMap.size > 0
+                ? nemirtingasInfo?.platform || null
+                : null;
             discoveredMap =
-              epicDiscoveredMap !== null && !shouldFallbackEpic
-                ? epicDiscoveredMap
+              nemirtingasDiscoveredMap !== null &&
+              !shouldFallbackNemirtingas
+                ? nemirtingasDiscoveredMap
                 : !gogInfoFound
                   ? await discoverAppIdsUnder(
                       scanBase,
@@ -12176,9 +13349,12 @@ module.exports = function makeWatchedFolders({
       }
 
       if (gogInfoFound && generationTasks.length === 0) {
+        scanTelemetry.discovered = discovered.length;
         // GOG detected but blacklisted or invalid ID; skip further processing
         return;
       }
+
+      scanTelemetry.discovered = discovered.length;
 
       for (const id of discovered) {
         try {
@@ -12194,9 +13370,8 @@ module.exports = function makeWatchedFolders({
               (pendingSet && pendingSet.has(normalizedDir)));
 
           if (!existingConfigIds.has(id)) {
-            const discoveredPlatform = nemirtingasEpicDiscovery
-              ? "epic"
-              : strictRootPlatform;
+            const discoveredPlatform =
+              nemirtingasDiscoveryPlatform || strictRootPlatform;
             const autoInflightKey = `${String(id)}:${discoveredPlatform || "auto"}`;
             if (
               inflightAppIds.has(autoInflightKey) ||
@@ -12219,9 +13394,10 @@ module.exports = function makeWatchedFolders({
             continue;
           }
 
-          const targetPlatform = nemirtingasEpicDiscovery
-            ? "epic"
-            : strictRootPlatform || determineAlternatePlatform(id);
+          const targetPlatform =
+            nemirtingasDiscoveryPlatform ||
+            strictRootPlatform ||
+            determineAlternatePlatform(id);
           const targetPlatformAlreadyTracked = strictRootPlatform
             ? getConfigMetas(id).some(
                 (meta) =>
@@ -12262,9 +13438,28 @@ module.exports = function makeWatchedFolders({
         }
       }
 
+      if (isNemirtingasRoot && generationTasks.length === 0) {
+        for (const id of discovered) {
+          if (
+            !isAppIdBlacklisted(
+              id,
+              nemirtingasDiscoveryPlatform,
+              blacklistState,
+            )
+          ) {
+            knownAppIds.add(id);
+          }
+        }
+        return;
+      }
+
       // Tenoke/GOG info/UniverseLAN fallback: if nothing to generate, try to discover deeper
       tenokeFound = null;
-      if (!strictRootProfile && generationTasks.length === 0) {
+      if (
+        !strictRootProfile &&
+        !isNemirtingasRoot &&
+        generationTasks.length === 0
+      ) {
         tenokeFound = await findTenokeAppId(
           scanBase,
           6,
@@ -12378,7 +13573,18 @@ module.exports = function makeWatchedFolders({
         generationTasks.splice(index, 1);
       }
 
-      if (typeof generateConfigForAppId === "function") {
+      scanTelemetry.generationTasks = generationTasks.length;
+      if (opts.skipGenericGeneration === true) {
+        if (generationTasks.length > 0) {
+          watcherLogger.warn("watcher:scan-generation-deferred", {
+            root: normalizePrefPath(rootPath),
+            tasks: generationTasks.length,
+            reason: "generation-prerequisites-unavailable",
+            scanReason: String(opts.scanReason || "") || null,
+          });
+        }
+        clearPendingForTasks(generationTasks);
+      } else if (typeof generateConfigForAppId === "function") {
         for (let index = generationTasks.length - 1; index >= 0; index -= 1) {
           const task = generationTasks[index];
           if (
@@ -12667,16 +13873,68 @@ module.exports = function makeWatchedFolders({
         }
       }
     } catch (e) {
+      scanTelemetry.outcome = "failed";
       rootBatchProgress?.finish(
         "failed",
         e?.message || "Config generation failed",
       );
       notifyWarn(`Scan failed for "${rootPath}": ${e.message}`);
+    } finally {
+      const durationMs = Date.now() - scanStartedAt;
+      if (
+        bootMode ||
+        durationMs >= 500 ||
+        scanTelemetry.handledBy !== "standard" ||
+        scanTelemetry.outcome === "failed"
+      ) {
+        watcherLogger.info("scan-root:timing", {
+          root: normalizePrefPath(rootPath),
+          durationMs,
+          outcome: scanTelemetry.outcome,
+          handledBy: scanTelemetry.handledBy,
+          discovered: scanTelemetry.discovered,
+          generationTasks: scanTelemetry.generationTasks,
+          strictProfile: getStrictRootProfile(rootPath)?.key || null,
+          specializedProfile:
+            getSpecializedStrictRootProfile(rootPath)?.key || null,
+          localPatchStateSource: scanTelemetry.localPatchStateSource,
+          scanReason: String(opts.scanReason || "") || null,
+          bootMode,
+          rescan: rescanInProgress.value === true,
+        });
+      }
     }
   }
 
   // ——— WATCHER ———
-  function startFolderWatcher(inputRoot, opts = {}) {
+  async function startFolderWatcher(inputRoot, opts = {}) {
+    const root = normalizeRoot(coercePath(inputRoot));
+    const existing = folderWatchers.get(root);
+    if (existing) {
+      return await (existing.readyPromise || Promise.resolve(true));
+    }
+    const inFlight = folderWatcherStartPromises.get(root);
+    if (inFlight) return await inFlight;
+
+    const pending = (async () => {
+      const gogTargetEvidence = await detectGogTargetedRoot(root);
+      return await startFolderWatcherPrepared(root, opts, gogTargetEvidence);
+    })();
+    folderWatcherStartPromises.set(root, pending);
+    try {
+      return await pending;
+    } finally {
+      if (folderWatcherStartPromises.get(root) === pending) {
+        folderWatcherStartPromises.delete(root);
+      }
+    }
+  }
+
+  function startFolderWatcherPrepared(
+    inputRoot,
+    opts = {},
+    gogTargetEvidence = null,
+  ) {
     const { initialScan = true } = opts;
     const root = normalizeRoot(coercePath(inputRoot));
     if (folderWatchers.has(root)) {
@@ -12691,26 +13949,55 @@ module.exports = function makeWatchedFolders({
       return Promise.resolve(false);
     }
     const strictRootProfile = getStrictRootProfile(root);
+    const specializedRootProfile = getSpecializedStrictRootProfile(root);
+    const specializedNemirtingasPlatform =
+      specializedRootProfile?.key === "nemirtingas-epic" ||
+      specializedRootProfile?.key === "nemirtingas-galaxy"
+        ? normalizePlatform(specializedRootProfile.platform)
+        : null;
     const strictRootPlatform =
-      normalizePlatform(strictRootProfile?.platform) || null;
-    const initialLocalPatchState = createPendingLocalPatchRootState(root);
-    const markerPatchOwnedRoot = initialLocalPatchState.type === "markerpatch";
-    const madnessPatchOwnedRoot =
-      initialLocalPatchState.type === "madnesspatch";
+      normalizePlatform(strictRootProfile?.platform) ||
+      specializedNemirtingasPlatform ||
+      null;
+    const xLiveLessNessWatchMetadata =
+      getXLiveLessNessWatchMetadata(root);
+    const initialLocalPatchState = createPendingLocalPatchRootState(
+      root,
+      xLiveLessNessWatchMetadata,
+    );
+    const specializedWatchDepth = Number.isInteger(
+      specializedRootProfile?.watchDepth,
+    )
+      ? Math.max(0, specializedRootProfile.watchDepth)
+      : null;
+    const fallbackRootWatchDepth =
+      specializedWatchDepth != null
+        ? specializedWatchDepth
+        : strictRootProfile
+          ? STRICT_ROOT_WATCH_DEPTH
+          : 6;
+    const discoveryWatchPolicy = createRootDiscoveryWatchPolicy(
+      root,
+      initialLocalPatchState,
+      xLiveLessNessWatchMetadata,
+      fallbackRootWatchDepth,
+      gogTargetEvidence,
+    );
+    const rootWatchDepth = discoveryWatchPolicy.depth;
+    const watchStartedAt = Date.now();
+    let rootWatcherReady = false;
 
     const watcher = chokidar.watch(root, {
       persistent: true,
       ignoreInitial: true,
-      ignored: (candidatePath) =>
-        candidatePath !== root && isPathBlocked(candidatePath),
+      ignored: (candidatePath, stats) =>
+        candidatePath !== root &&
+        (isPathBlocked(candidatePath) ||
+          discoveryWatchPolicy.shouldIgnore(candidatePath, stats, {
+            allowRuntimeAuxiliaryFiles: rootWatcherReady,
+          })),
       awaitWriteFinish: { stabilityThreshold: 300, pollInterval: 100 },
-      depth: madnessPatchOwnedRoot
-        ? 7
-        : markerPatchOwnedRoot
-          ? 2
-          : strictRootProfile
-            ? STRICT_ROOT_WATCH_DEPTH
-            : 6,
+      depth: rootWatchDepth,
       ignorePermissionErrors: true,
     });
     let resolveReady = null;
@@ -12724,16 +14011,57 @@ module.exports = function makeWatchedFolders({
       resolveReady,
       localPatchState: initialLocalPatchState,
       localPatchStatePromise: null,
+      discoveryWatchPolicy,
+      gogTargetEvidence,
+      xLiveLessNessWatchMetadata,
       rescanQueued: false,
       stopped: false,
+      startedAt: watchStartedAt,
+      // Boot-only coordination. Runtime folder additions/rescans do not set
+      // this flag and continue through the existing live event flow.
+      bootScanPending: opts.bootQueue === true,
+      bootScanRunning: false,
+      bootDirty: false,
+      bootDirtyLogged: false,
+      policyRestartScheduled: false,
+      policyRestartRequested: false,
+      scheduleDiscoveryPolicyRestart: null,
+      scheduleRescan: null,
     };
     folderWatchers.set(root, state);
-    watcherLogger.info("watch-folder", { root, initialScan });
+    watcherLogger.info("watch-folder", {
+      root,
+      initialScan,
+      policy: discoveryWatchPolicy.mode,
+      policySource: discoveryWatchPolicy.source,
+      depth: rootWatchDepth,
+      targetCount: discoveryWatchPolicy.targetCount,
+      preserveGenericDiscovery:
+        discoveryWatchPolicy.preserveGenericDiscovery === true,
+    });
 
     const refreshLocalPatchState = (options = {}) => {
-      const pending = detectLocalPatchRootState(root, options)
+      const detectionOptions = {
+        ...options,
+        gogTargetEvidence: state.gogTargetEvidence,
+        xLiveLessNessKnownExecutables:
+          options.forceXLiveLessNessRefresh === true ||
+          xLiveLessNessWatchMetadata.ownsEntireRoot !== true
+            ? []
+            : xLiveLessNessWatchMetadata.entries,
+      };
+      const pending = detectLocalPatchRootState(root, detectionOptions)
         .then((nextState) => {
-          if (!state.stopped) state.localPatchState = nextState;
+          if (!state.stopped) {
+            state.localPatchState = nextState;
+            if (
+              discoveryWatchPolicy.mode === "xlivelessness-owned" &&
+              detectionOptions.xLiveLessNessKnownExecutables.length > 0 &&
+              nextState?.xLiveLessNessDetection?.fastPath !== true
+            ) {
+              state.policyRestartRequested = true;
+            }
+          }
           return nextState;
         })
         .catch((error) => {
@@ -12748,8 +14076,23 @@ module.exports = function makeWatchedFolders({
     };
     refreshLocalPatchState();
 
+    const deferRootEventForBootScan = (source = "watch:event") => {
+      if (!state.bootScanPending || state.stopped) return false;
+      state.bootDirty = true;
+      if (!state.bootDirtyLogged) {
+        state.bootDirtyLogged = true;
+        watcherLogger.info("boot:root-event-deferred", {
+          root,
+          source,
+          scanRunning: state.bootScanRunning === true,
+        });
+      }
+      return true;
+    };
+
     const schedule = () => {
       if (state.stopped) return;
+      if (deferRootEventForBootScan("debounced-scan")) return;
       clearTimeout(state.debounce);
       state.debounce = setTimeout(async () => {
         if (state.stopped) return;
@@ -12781,6 +14124,86 @@ module.exports = function makeWatchedFolders({
         }
       }, 300);
     };
+    state.scheduleRescan = schedule;
+
+    const scheduleDiscoveryPolicyRestart = (reason) => {
+      if (state.stopped || state.policyRestartScheduled) return;
+      state.policyRestartScheduled = true;
+      setTimeout(async () => {
+        if (state.stopped) return;
+        const previousPolicy = state.discoveryWatchPolicy?.mode || "generic";
+        watcherLogger.info("watch-folder:policy-transition", {
+          root,
+          previousPolicy,
+          reason: String(reason || "signature-state-changed"),
+        });
+        state.stopped = true;
+        state.rescanQueued = false;
+        clearTimeout(state.debounce);
+        try {
+          state.resolveReady?.(false);
+        } catch {}
+        state.resolveReady = null;
+        try {
+          await state.watcher.close();
+        } catch (error) {
+          watcherLogger.warn("watch-folder:policy-transition-close-failed", {
+            root,
+            previousPolicy,
+            error: error?.message || String(error),
+          });
+        }
+        if (folderWatchers.get(root) === state) folderWatchers.delete(root);
+
+        let ready = false;
+        try {
+          ready = (await startFolderWatcher(root, { initialScan: false })) === true;
+          const replacement = folderWatchers.get(root);
+          if (replacement?.localPatchStatePromise) {
+            await replacement.localPatchStatePromise;
+          }
+          if (activeRoots.has(root)) {
+            if (replacement) replacement.rescanQueued = true;
+          } else {
+            activeRoots.add(root);
+            try {
+              await scanRootOnce(root, {
+                suppressInitialNotify: true,
+                localPatchState: replacement?.localPatchState || null,
+                scanReason: "watch-policy-transition",
+              });
+            } finally {
+              activeRoots.delete(root);
+            }
+          }
+          watcherLogger.info("watch-folder:policy-transition-complete", {
+            root,
+            previousPolicy,
+            currentPolicy:
+              replacement?.discoveryWatchPolicy?.mode || "generic",
+            ready,
+          });
+        } catch (error) {
+          watcherLogger.warn("watch-folder:policy-transition-failed", {
+            root,
+            previousPolicy,
+            ready,
+            error: error?.message || String(error),
+          });
+          if (!folderWatchers.has(root) && fs.existsSync(root)) {
+            Promise.resolve(
+              startFolderWatcher(root, { initialScan: false }),
+            ).catch(() => {});
+          }
+        }
+      }, 0);
+    };
+    state.scheduleDiscoveryPolicyRestart = scheduleDiscoveryPolicyRestart;
+
+    const isGogDiscoveryMarkerEvent = (eventPath) => {
+      const base = path.basename(String(eventPath || "")).toLowerCase();
+      return base === "universelan.ini" || /^goggame-\d+\.info$/i.test(base);
+    };
 
     const routeLocalPatchEvent = async (eventPath) => {
       let signatureEvent = isLocalPatchSignatureEvent(root, eventPath);
@@ -12806,6 +14229,7 @@ module.exports = function makeWatchedFolders({
             currentType: state.localPatchState.type || null,
             active: state.localPatchState.active,
           });
+          scheduleDiscoveryPolicyRestart("signature-state-changed");
         }
       }
       if (
@@ -12934,6 +14358,10 @@ module.exports = function makeWatchedFolders({
             suppressInitialNotify: false,
           });
           if (result.created || result.schemaUpdated || result.configUpdated) {
+            await invalidateDashboardSummaryForSchemaResults(
+              result,
+              "shadps4-schema-updated",
+            );
             broadcastAll("configs:changed");
             broadcastAll("refresh-achievements-table");
           }
@@ -13023,16 +14451,52 @@ module.exports = function makeWatchedFolders({
       return true;
     };
 
+    const handleTrophyAuxiliaryFileEvent = (filePath) => {
+      if (
+        typeof discoveryWatchPolicy.isRuntimeAuxiliaryFile !== "function" ||
+        !discoveryWatchPolicy.isRuntimeAuxiliaryFile(filePath)
+      ) {
+        return false;
+      }
+      schedule();
+      return true;
+    };
+
     if (initialScan && !rescanInProgress.value) {
       // optional: schedule();
     }
 
     watcher
       .on("ready", () => {
+        rootWatcherReady = true;
+        watcherLogger.info("watch-folder:ready-timing", {
+          root,
+          durationMs: Date.now() - watchStartedAt,
+          initialScan,
+          depth: rootWatchDepth,
+          strictProfile: strictRootProfile?.key || null,
+          specializedProfile: specializedRootProfile?.key || null,
+          policy: discoveryWatchPolicy.mode,
+          policySource: discoveryWatchPolicy.source,
+          targetCount: discoveryWatchPolicy.targetCount,
+          preserveGenericDiscovery:
+            discoveryWatchPolicy.preserveGenericDiscovery === true,
+          bootMode,
+        });
         try {
           state.resolveReady?.(true);
         } catch {}
         state.resolveReady = null;
+        if (
+          state.policyRestartRequested &&
+          !state.bootScanPending &&
+          !state.stopped
+        ) {
+          state.policyRestartRequested = false;
+          scheduleDiscoveryPolicyRestart(
+            "known-executable-validation-failed",
+          );
+        }
         if (
           !rescanInProgress.value &&
           initialScan &&
@@ -13049,6 +14513,11 @@ module.exports = function makeWatchedFolders({
           markBootOnboardingDirtyRoot(root, "watch:add");
           return;
         }
+        if (deferRootEventForBootScan("watch:add")) return;
+        if (isGogDiscoveryMarkerEvent(filePath)) {
+          scheduleDiscoveryPolicyRestart("gog-marker-changed");
+          return;
+        }
         if (await routeLocalPatchEvent(filePath)) return;
         if (await handleUbisoftOfficialRootFileEvent(root, filePath)) {
           return;
@@ -13059,6 +14528,7 @@ module.exports = function makeWatchedFolders({
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
+        if (handleTrophyAuxiliaryFileEvent(filePath)) return;
         if (await handleModernPs4FileEvent(filePath)) {
           return;
         }
@@ -13296,7 +14766,11 @@ module.exports = function makeWatchedFolders({
         } finally {
           try {
             debounceRefreshAchievementsTable();
-            emitDashboardRefresh();
+            emitDashboardRefresh({
+              mode: "targeted",
+              reason: "watched-save-file-added",
+              configNames: [meta?.name],
+            });
           } catch {}
         }
       })
@@ -13306,6 +14780,11 @@ module.exports = function makeWatchedFolders({
         if (isPathBlocked(filePath)) return;
         if (!bootOnboardingGateOpen) {
           markBootOnboardingDirtyRoot(root, "watch:change");
+          return;
+        }
+        if (deferRootEventForBootScan("watch:change")) return;
+        if (isGogDiscoveryMarkerEvent(filePath)) {
+          scheduleDiscoveryPolicyRestart("gog-marker-changed");
           return;
         }
         if (await routeLocalPatchEvent(filePath)) return;
@@ -13318,6 +14797,7 @@ module.exports = function makeWatchedFolders({
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
+        if (handleTrophyAuxiliaryFileEvent(filePath)) return;
         if (await handleModernPs4FileEvent(filePath)) {
           return;
         }
@@ -13560,7 +15040,11 @@ module.exports = function makeWatchedFolders({
 
         try {
           debounceRefreshAchievementsTable();
-          emitDashboardRefresh();
+          emitDashboardRefresh({
+            mode: "targeted",
+            reason: "watched-save-file-changed",
+            configNames: [meta?.name],
+          });
         } catch {}
       })
 
@@ -13571,6 +15055,7 @@ module.exports = function makeWatchedFolders({
           markBootOnboardingDirtyRoot(root, "watch:addDir");
           return;
         }
+        if (deferRootEventForBootScan("watch:addDir")) return;
         if (await routeLocalPatchEvent(dir)) return;
         if (handleUbisoftOfficialRootDirEvent(root, dir, schedule)) {
           return;
@@ -13738,7 +15223,10 @@ module.exports = function makeWatchedFolders({
                 broadcastAll("refresh-achievements-table");
               } catch {}
               try {
-                emitDashboardRefresh();
+                emitDashboardRefresh({
+                  mode: "summary",
+                  reason: "watched-config-generated",
+                });
               } catch {}
               try {
                 broadcastAll("configs:changed");
@@ -13771,6 +15259,11 @@ module.exports = function makeWatchedFolders({
         schedule(); // fallback
       })
       .on("unlink", async (filePath) => {
+        if (deferRootEventForBootScan("watch:unlink")) return;
+        if (isGogDiscoveryMarkerEvent(filePath)) {
+          scheduleDiscoveryPolicyRestart("gog-marker-removed");
+          return;
+        }
         await routeLocalPatchEvent(filePath);
       })
       .on("unlinkDir", async (dirPath) => {
@@ -13778,6 +15271,7 @@ module.exports = function makeWatchedFolders({
           markBootOnboardingDirtyRoot(root, "watch:unlinkDir");
           return;
         }
+        if (deferRootEventForBootScan("watch:unlinkDir")) return;
         await routeLocalPatchEvent(dirPath);
         if (!rescanInProgress.value) schedule();
       })
@@ -13801,6 +15295,9 @@ module.exports = function makeWatchedFolders({
     if (!entry) return;
     entry.stopped = true;
     entry.rescanQueued = false;
+    entry.bootScanPending = false;
+    entry.bootScanRunning = false;
+    entry.bootDirty = false;
     clearTimeout(entry.debounce);
     try {
       entry.resolveReady?.(false);
@@ -13811,7 +15308,8 @@ module.exports = function makeWatchedFolders({
     folderWatchers.delete(root);
   }
 
-  async function syncFolderWatchersWithCurrentPrefs() {
+  async function syncFolderWatchersWithCurrentPrefs(options = {}) {
+    const deferStarts = options?.deferStarts === true;
     const allowedRoots = new Set(getWatchedFolders().map(normalizeRoot));
     const toStop = [];
     for (const watchedRoot of folderWatchers.keys()) {
@@ -13823,14 +15321,17 @@ module.exports = function makeWatchedFolders({
     for (const root of toStop) {
       stopFolderWatcher(root);
     }
-    await startFolderWatchersBatched(Array.from(allowedRoots), {
-      initialScan: false,
-      batchDelayMs: 0,
-    });
+    if (!deferStarts) {
+      await startFolderWatchersBatched(Array.from(allowedRoots), {
+        initialScan: false,
+        batchDelayMs: 0,
+      });
+    }
     return {
       running: folderWatchers.size,
       allowed: allowedRoots.size,
       stopped: toStop.length,
+      startsDeferred: deferStarts,
     };
   }
 
@@ -13934,6 +15435,15 @@ module.exports = function makeWatchedFolders({
           try {
             clearTimeout(e.debounce);
           } catch {}
+          e.stopped = true;
+          e.rescanQueued = false;
+          e.bootScanPending = false;
+          e.bootScanRunning = false;
+          e.bootDirty = false;
+          try {
+            e.resolveReady?.(false);
+          } catch {}
+          e.resolveReady = null;
           try {
             return e.watcher.close();
           } catch {
@@ -14065,7 +15575,7 @@ module.exports = function makeWatchedFolders({
         .map(normalizePrefPath)
         .filter(Boolean);
       if (!cur.includes(p)) saveWatchedFolders([...cur, p]);
-      startFolderWatcher(p);
+      await startFolderWatcher(p);
       await scanRootOnce(p, {
         suppressInitialNotify: true,
         promoteSingleGeneratedInitialNotify: true,
@@ -14200,7 +15710,7 @@ module.exports = function makeWatchedFolders({
         saveWatchedFolders([...cur, target]);
       }
       await indexExistingConfigsSync();
-      startFolderWatcher(target, { initialScan: false });
+      await startFolderWatcher(target, { initialScan: false });
       await scanRootOnce(target, { suppressInitialNotify: true });
       await rebuildSaveWatchers({ suppressInitialNotify: true });
       return {
@@ -14328,6 +15838,32 @@ module.exports = function makeWatchedFolders({
 
     // Background boot scan with bounded concurrency.
     (async () => {
+      try {
+        global.bootWatcherPipelineComplete = false;
+      } catch {}
+      const bootWatcherPipelineStartedAt = Date.now();
+      const bootPhaseDurations = {};
+      const timedOutRootWatchers = new Set();
+      let bootGenerationPrerequisitesAvailable = true;
+      const runTimedBootPhase = async (phase, task, meta = {}) => {
+        const startedAt = Date.now();
+        let status = "success";
+        try {
+          return await task();
+        } catch (error) {
+          status = "failed";
+          throw error;
+        } finally {
+          const durationMs = Date.now() - startedAt;
+          bootPhaseDurations[phase] = durationMs;
+          watcherLogger.info("boot:watcher-phase-timing", {
+            phase,
+            durationMs,
+            status,
+            ...meta,
+          });
+        }
+      };
       let bootProgressTotal = 8;
       const emitBootProgress = (patch = {}, options = {}) => {
         updateBootWatcherProgress(
@@ -14339,6 +15875,267 @@ module.exports = function makeWatchedFolders({
         );
       };
 
+      const runBootRootQueue = async (roots = []) => {
+        const list = Array.isArray(roots) ? roots.filter(Boolean) : [];
+        const totals = {
+          readyMs: 0,
+          scanMs: 0,
+          reconcileMs: 0,
+          reconciledRoots: 0,
+        };
+        try {
+          if (BOOT_WATCH_FOLDER_DELAY_MS > 0 && list.length > 0) {
+            await sleep(BOOT_WATCH_FOLDER_DELAY_MS);
+          }
+
+          for (let index = 0; index < list.length; index += 1) {
+          const root = list[index];
+          const normalizedRoot = normalizeRoot(root);
+          const rootStartedAt = Date.now();
+          let state = folderWatchers.get(normalizedRoot) || null;
+          if (state) {
+            state.bootDirty = state.bootDirty === true || state.rescanQueued === true;
+            state.rescanQueued = false;
+            state.bootDirtyLogged = false;
+            state.bootScanPending = true;
+          }
+
+          emitBootProgress(
+            {
+              phase: "attachingWatchers",
+              itemName: getBootProgressItemName(root),
+              current: Math.min(bootProgressTotal, 2 + index),
+              percent: getBootProgressPercent(
+                Math.min(bootProgressTotal, 2 + index),
+                bootProgressTotal,
+                18,
+              ),
+            },
+            { force: index === 0 },
+          );
+
+          const readyStartedAt = Date.now();
+          let ready = false;
+          try {
+            const readyOutcome = await waitForPromiseWithTimeout(
+              startFolderWatcher(root, {
+                initialScan: false,
+                bootQueue: true,
+              }),
+              BOOT_ROOT_WATCH_READY_TIMEOUT_MS,
+            );
+            if (readyOutcome.timedOut) {
+              timedOutRootWatchers.add(normalizedRoot);
+              watcherLogger.warn("boot:root-watcher-ready-timeout", {
+                root: normalizedRoot,
+                timeoutMs: BOOT_ROOT_WATCH_READY_TIMEOUT_MS,
+              });
+              const timedOutState = folderWatchers.get(normalizedRoot) || null;
+              if (timedOutState) {
+                timedOutState.stopped = true;
+                timedOutState.bootScanPending = false;
+                timedOutState.bootScanRunning = false;
+                timedOutState.bootDirty = false;
+                timedOutState.rescanQueued = false;
+                clearTimeout(timedOutState.debounce);
+                try {
+                  timedOutState.resolveReady?.(false);
+                } catch {}
+                timedOutState.resolveReady = null;
+                if (folderWatchers.get(normalizedRoot) === timedOutState) {
+                  folderWatchers.delete(normalizedRoot);
+                }
+                state = null;
+                let closeOutcome;
+                try {
+                  closeOutcome = await waitForPromiseWithTimeout(
+                    timedOutState.watcher.close(),
+                    5000,
+                  );
+                } catch (error) {
+                  closeOutcome = {
+                    timedOut: false,
+                    value: false,
+                    error,
+                  };
+                }
+                if (closeOutcome.timedOut || closeOutcome.error) {
+                  watcherLogger.warn("boot:root-watcher-timeout-close-failed", {
+                    root: normalizedRoot,
+                    timedOut: closeOutcome.timedOut,
+                    error: closeOutcome.error?.message || null,
+                  });
+                }
+              }
+              state = null;
+            } else if (readyOutcome.error) {
+              throw readyOutcome.error;
+            } else {
+              ready = readyOutcome.value === true;
+            }
+          } catch (error) {
+            watcherLogger.warn("boot:root-watcher-start-failed", {
+              root: normalizedRoot,
+              error: error?.message || String(error),
+            });
+          }
+          state = folderWatchers.get(normalizedRoot) || state;
+          if (state) {
+            state.bootScanPending = true;
+            state.bootScanRunning = false;
+            state.bootDirtyLogged = false;
+          }
+          const readyMs = Date.now() - readyStartedAt;
+          totals.readyMs += readyMs;
+
+          if (state?.localPatchStatePromise) {
+            try {
+              await state.localPatchStatePromise;
+            } catch {}
+          }
+
+          emitBootProgress(
+            {
+              phase: "scanningFolders",
+              itemName: getBootProgressItemName(root),
+              current: Math.min(bootProgressTotal, 3 + index),
+              percent: getBootProgressPercent(
+                Math.min(bootProgressTotal, 3 + index),
+                bootProgressTotal,
+                35,
+              ),
+            },
+            { force: index === 0 || index === list.length - 1 },
+          );
+
+          while (activeRoots.has(normalizedRoot) && !state?.stopped) {
+            await sleep(25);
+          }
+
+          const scanOptions = {
+            suppressInitialNotify: true,
+            localPatchState: state?.localPatchState || null,
+            skipGenericGeneration:
+              bootGenerationPrerequisitesAvailable !== true,
+            scanReason: "boot-root-initial",
+          };
+          const scanStartedAt = Date.now();
+          activeRoots.add(normalizedRoot);
+          if (state) state.bootScanRunning = true;
+          try {
+            await scanRootOnce(root, scanOptions);
+          } catch (error) {
+            watcherLogger.warn("boot:root-scan-failed", {
+              root: normalizedRoot,
+              error: error?.message || String(error),
+            });
+          } finally {
+            activeRoots.delete(normalizedRoot);
+            if (state) state.bootScanRunning = false;
+          }
+          const scanMs = Date.now() - scanStartedAt;
+          totals.scanMs += scanMs;
+
+          const shouldReconcile =
+            !!state && (state.bootDirty === true || state.rescanQueued === true);
+          if (state) {
+            state.bootDirty = false;
+            state.rescanQueued = false;
+            state.bootDirtyLogged = false;
+          }
+
+          let reconcileMs = 0;
+          if (shouldReconcile && state && !state.stopped) {
+            const reconcileStartedAt = Date.now();
+            try {
+              const refreshedLocalPatchState = await detectLocalPatchRootState(
+                root,
+                { forceXLiveLessNessRefresh: true },
+              );
+              state.localPatchState = refreshedLocalPatchState;
+              state.localPatchStatePromise = Promise.resolve(
+                refreshedLocalPatchState,
+              );
+            } catch {}
+            activeRoots.add(normalizedRoot);
+            state.bootScanRunning = true;
+            try {
+              await scanRootOnce(root, {
+                ...scanOptions,
+                localPatchState: state.localPatchState || null,
+                scanReason: "boot-root-dirty-reconcile",
+              });
+              totals.reconciledRoots += 1;
+            } catch (error) {
+              watcherLogger.warn("boot:root-reconcile-failed", {
+                root: normalizedRoot,
+                error: error?.message || String(error),
+              });
+            } finally {
+              activeRoots.delete(normalizedRoot);
+              state.bootScanRunning = false;
+            }
+            reconcileMs = Date.now() - reconcileStartedAt;
+            totals.reconcileMs += reconcileMs;
+          }
+
+          const trailingDirty =
+            !!state && (state.bootDirty === true || state.rescanQueued === true);
+          if (state) {
+            state.bootScanPending = false;
+            state.bootScanRunning = false;
+            state.bootDirty = false;
+            state.rescanQueued = false;
+            state.bootDirtyLogged = false;
+            if (trailingDirty && !state.stopped) {
+              state.scheduleRescan?.();
+            }
+            if (
+              state.policyRestartRequested &&
+              !state.stopped &&
+              typeof state.scheduleDiscoveryPolicyRestart === "function"
+            ) {
+              state.policyRestartRequested = false;
+              state.scheduleDiscoveryPolicyRestart(
+                "known-executable-validation-failed",
+              );
+            }
+          }
+
+          watcherLogger.info("boot:root-queue-timing", {
+            root: normalizedRoot,
+            index,
+            totalRoots: list.length,
+            ready: ready === true,
+            readyMs,
+            scanMs,
+            reconciled: shouldReconcile,
+            reconcileMs,
+            durationMs: Date.now() - rootStartedAt,
+          });
+
+          // Let renderer and IPC callbacks run between roots without starting
+          // another recursive filesystem enumeration concurrently.
+            await sleep(0);
+          }
+          return totals;
+        } finally {
+          for (const state of folderWatchers.values()) {
+            if (!state?.bootScanPending) continue;
+            const trailingDirty =
+              state.bootDirty === true || state.rescanQueued === true;
+            state.bootScanPending = false;
+            state.bootScanRunning = false;
+            state.bootDirty = false;
+            state.rescanQueued = false;
+            state.bootDirtyLogged = false;
+            if (trailingDirty && !state.stopped) {
+              state.scheduleRescan?.();
+            }
+          }
+        }
+      };
+
       try {
         startBootWatcherProgress({
           phase: "waitingForUi",
@@ -14347,10 +16144,14 @@ module.exports = function makeWatchedFolders({
           percent: 1,
         });
         try {
-          await waitForBootOverlayHiddenBeforeBackgroundScan();
-        } catch {}
-        try {
-          await waitForBootOnboardingGateOpen();
+          await runTimedBootPhase("waiting-for-gates", async () => {
+            try {
+              await waitForBootOverlayHiddenBeforeBackgroundScan();
+            } catch {}
+            try {
+              await waitForBootOnboardingGateOpen();
+            } catch {}
+          });
         } catch {}
 
         emitBootProgress(
@@ -14363,78 +16164,99 @@ module.exports = function makeWatchedFolders({
           { force: true },
         );
         try {
-          await rebuildKnownAppIds({
-            forceAsyncIndex: true,
-            forceAsyncRootScan: true,
-          });
+          await runTimedBootPhase("indexing-configs", () =>
+            rebuildKnownAppIds({
+              forceAsyncIndex: true,
+              forceAsyncRootScan: true,
+            }),
+          );
         } catch {}
         const rootsForBootScan = getWatchedFolders();
         bootProgressTotal = Math.max(7, rootsForBootScan.length + 7);
 
-        emitBootProgress(
-          {
-            phase: "attachingWatchers",
-            itemName: `${rootsForBootScan.length} folders`,
-            current: 2,
-            percent: getBootProgressPercent(2, bootProgressTotal, 18),
-          },
-          { force: true },
-        );
+        // Protect all existing configs first. Starting recursive root watchers
+        // before this rebuild makes both Chokidar waves enumerate the same
+        // disks concurrently and can stall Electron on large libraries.
         try {
-          if (BOOT_WATCH_FOLDER_DELAY_MS > 0) {
-            await sleep(BOOT_WATCH_FOLDER_DELAY_MS);
-          }
-          await startFolderWatchersBatched(rootsForBootScan, {
-            initialScan: false,
-            batchDelayMs: BOOT_ATTACH_DELAY_MS,
-          });
-          if (ROOT_WATCH_SETTLE_DELAY_MS > 0 && rootsForBootScan.length > 0) {
-            await sleep(ROOT_WATCH_SETTLE_DELAY_MS);
-          }
+          await runTimedBootPhase("rebuilding-existing-save-watchers", () =>
+            rebuildSaveWatchers({
+              deferInitialSeed: true,
+              deferLumaPlayPolling: true,
+              waitForReady: true,
+            }),
+          );
         } catch {}
+
         try {
           await flushBootOnboardingDirtyRoots({
             reason: "boot-scan-gate-open",
           });
         } catch {}
-        try {
-          const scanJobs = rootsForBootScan.map((root, index) => ({
-            root,
-            index,
-          }));
-          await runWithConcurrency(scanJobs, 1, async ({ root, index }) => {
-            emitBootProgress(
-              {
-                phase: "scanningFolders",
-                itemName: getBootProgressItemName(root),
-                current: Math.min(bootProgressTotal, 3 + index),
-                percent: getBootProgressPercent(
-                  Math.min(bootProgressTotal, 3 + index),
-                  bootProgressTotal,
-                  35,
-                ),
-              },
-              { force: index === 0 || index === rootsForBootScan.length - 1 },
+        if (typeof waitForGenerationPrerequisites === "function") {
+          emitBootProgress(
+            {
+              phase: "preparingGenerators",
+              itemName: "Schema Parse / Uplay",
+              percent: 30,
+            },
+            { force: true },
+          );
+          try {
+            await runTimedBootPhase("waiting-for-generation-prerequisites", () =>
+              waitForGenerationPrerequisites("boot-root-discovery"),
             );
-            try {
-              const normalizedRoot = normalizeRoot(root);
-              const strictProfile = getStrictRootProfile(normalizedRoot);
-              if (
-                strictProfile &&
-                BOOT_STRICT_SCAN_STAGGER_BASE_MS > 0 &&
-                BOOT_STRICT_SCAN_STAGGER_SLOTS > 0
-              ) {
-                const offset =
-                  (Math.max(0, Number(index) || 0) %
-                    BOOT_STRICT_SCAN_STAGGER_SLOTS) *
-                  BOOT_STRICT_SCAN_STAGGER_STEP_MS;
-                const delayMs = BOOT_STRICT_SCAN_STAGGER_BASE_MS + offset;
-                if (delayMs > 0) {
-                  await sleep(delayMs);
-                }
-              }
-              await scanRootOnce(root);
-            } catch {}
+          } catch (error) {
+            bootGenerationPrerequisitesAvailable = false;
+            // Existing configs and their save watchers remain usable even if
+            // generation prerequisites are temporarily unavailable. Root
+            // discovery must still start so a later event/rescan can retry.
+            watcherLogger.warn("boot:generation-prerequisites-degraded", {
+              error: error?.message || String(error),
+              code: error?.code || null,
+            });
+          }
+        }
+        try {
+          emitBootProgress(
+            {
+              phase: "attachingWatchers",
+              itemName: `${rootsForBootScan.length} folders`,
+              current: 2,
+              percent: getBootProgressPercent(2, bootProgressTotal, 18),
+            },
+            { force: true },
+          );
+          const rootQueueTotals = await runTimedBootPhase(
+            "root-watch-scan-queue",
+            () => runBootRootQueue(rootsForBootScan),
+            { roots: rootsForBootScan.length, concurrency: 1 },
+          );
+          bootPhaseDurations["attaching-root-watchers"] =
+            rootQueueTotals?.readyMs || 0;
+          bootPhaseDurations["scanning-roots"] = rootQueueTotals?.scanMs || 0;
+          bootPhaseDurations["reconciling-dirty-roots"] =
+            rootQueueTotals?.reconcileMs || 0;
+          watcherLogger.info("boot:watcher-phase-timing", {
+            phase: "attaching-root-watchers",
+            durationMs: rootQueueTotals?.readyMs || 0,
+            status: "success",
+            roots: rootsForBootScan.length,
+            mode: "serialized-ready",
+          });
+          watcherLogger.info("boot:watcher-phase-timing", {
+            phase: "scanning-roots",
+            durationMs: rootQueueTotals?.scanMs || 0,
+            status: "success",
+            roots: rootsForBootScan.length,
+            concurrency: 1,
+            mode: "serialized-after-ready",
+          });
+          watcherLogger.info("boot:watcher-phase-timing", {
+            phase: "reconciling-dirty-roots",
+            durationMs: rootQueueTotals?.reconcileMs || 0,
+            status: "success",
+            roots: rootQueueTotals?.reconciledRoots || 0,
+            concurrency: 1,
           });
         } catch {}
         if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
@@ -14459,10 +16281,12 @@ module.exports = function makeWatchedFolders({
           { force: true },
         );
         try {
-          await scanLumaPlayRegistryOnce({
-            suppressInitialNotify: true,
-            autoRebuild: false,
-          });
+          await runTimedBootPhase("scanning-lumaplay", () =>
+            scanLumaPlayRegistryOnce({
+              suppressInitialNotify: true,
+              autoRebuild: false,
+            }),
+          );
         } catch (err) {
           watcherLogger.warn("lumaplay:boot-scan-failed", {
             error: err?.message || String(err),
@@ -14490,17 +16314,95 @@ module.exports = function makeWatchedFolders({
           { force: true },
         );
         try {
-          await rebuildSaveWatchers({
-            deferLumaPlayPolling: true,
-          });
+          await runTimedBootPhase("reconciling-save-watchers", () =>
+            rebuildSaveWatchers({
+              deferInitialSeed: true,
+              deferLumaPlayPolling: true,
+              waitForReady: true,
+            }),
+          );
         } catch {}
         try {
-          emitDashboardRefresh();
+          emitDashboardRefresh({
+            mode: "summary",
+            reason: "boot-save-watchers-ready",
+          });
         } catch {}
         if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
           await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
         }
         bootMode = false;
+        if (timedOutRootWatchers.size > 0) {
+          watcherLogger.info("boot:root-watcher-retry-scheduled", {
+            roots: timedOutRootWatchers.size,
+            delayMs: BOOT_ROOT_WATCH_RETRY_DELAY_MS,
+          });
+          let retryIndex = 0;
+          for (const root of timedOutRootWatchers) {
+            const retryDelayMs =
+              BOOT_ROOT_WATCH_RETRY_DELAY_MS + retryIndex * 250;
+            retryIndex += 1;
+            const retryTimer = setTimeout(() => {
+              if (!root || folderWatchers.has(root)) return;
+              try {
+                if (!fs.existsSync(root) || isPathBlocked(root)) return;
+                Promise.resolve(
+                  startFolderWatcher(root, { initialScan: false }),
+                ).then(
+                  async (ready) => {
+                    watcherLogger.info("boot:root-watcher-retry-complete", {
+                      root,
+                      ready: ready === true,
+                    });
+                    if (ready !== true || rescanInProgress.value) return;
+                    if (activeRoots.has(root)) {
+                      const retryState = folderWatchers.get(root);
+                      if (retryState) retryState.rescanQueued = true;
+                      return;
+                    }
+                    activeRoots.add(root);
+                    try {
+                      const retryState = folderWatchers.get(root);
+                      if (retryState?.localPatchStatePromise) {
+                        await retryState.localPatchStatePromise;
+                      }
+                      await scanRootOnce(root, {
+                        suppressInitialNotify: true,
+                        forceLocalPatchRefresh: true,
+                        localPatchState: retryState?.localPatchState || null,
+                        scanReason: "boot-root-timeout-retry",
+                      });
+                    } catch (error) {
+                      watcherLogger.warn("boot:root-watcher-retry-scan-failed", {
+                        root,
+                        error: error?.message || String(error),
+                      });
+                    } finally {
+                      activeRoots.delete(root);
+                      const retryState = folderWatchers.get(root);
+                      if (retryState?.rescanQueued && !retryState.stopped) {
+                        retryState.rescanQueued = false;
+                        retryState.scheduleRescan?.();
+                      }
+                    }
+                  },
+                  (error) => {
+                    watcherLogger.warn("boot:root-watcher-retry-failed", {
+                      root,
+                      error: error?.message || String(error),
+                    });
+                  },
+                );
+              } catch (error) {
+                watcherLogger.warn("boot:root-watcher-retry-failed", {
+                  root,
+                  error: error?.message || String(error),
+                });
+              }
+            }, retryDelayMs);
+            retryTimer.unref?.();
+          }
+        }
         if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
           await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
         }
@@ -14522,12 +16424,14 @@ module.exports = function makeWatchedFolders({
           },
           { force: true },
         );
-        startLumaPlayDiscoveryPolling();
-        if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
-          await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
-        }
         try {
-          await runLumaPlayDiscoveryTick({ autoRebuild: true });
+          await runTimedBootPhase("starting-background-pollers", async () => {
+            startLumaPlayDiscoveryPolling();
+            if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
+              await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
+            }
+            await runLumaPlayDiscoveryTick({ autoRebuild: true });
+          });
         } catch {}
         if (BOOT_PHASE_SETTLE_DELAY_MS > 0) {
           await sleep(BOOT_PHASE_SETTLE_DELAY_MS);
@@ -14550,6 +16454,12 @@ module.exports = function makeWatchedFolders({
           total: bootProgressTotal,
           percent: 100,
         });
+        watcherLogger.info("boot:watcher-pipeline-timing", {
+          status: "success",
+          durationMs: Date.now() - bootWatcherPipelineStartedAt,
+          roots: rootsForBootScan.length,
+          phases: bootPhaseDurations,
+        });
       } catch (err) {
         finishBootWatcherProgress("failed", {
           phase: "failed",
@@ -14557,6 +16467,16 @@ module.exports = function makeWatchedFolders({
             err?.message || String(err || "Boot background startup failed"),
           percent: 0,
         });
+        watcherLogger.info("boot:watcher-pipeline-timing", {
+          status: "failed",
+          durationMs: Date.now() - bootWatcherPipelineStartedAt,
+          phases: bootPhaseDurations,
+          error: err?.message || String(err || ""),
+        });
+      } finally {
+        try {
+          global.bootWatcherPipelineComplete = true;
+        } catch {}
       }
     })().catch(() => {});
   });
@@ -14749,6 +16669,32 @@ module.exports = function makeWatchedFolders({
     return true;
   }
 
+  function updateConfigLanguage(configName, language = "") {
+    const rawName = String(configName || "").trim();
+    if (!rawName) return 0;
+    const safeName = sanitizeConfigName(rawName);
+    const normalizedLanguage =
+      typeof language === "string" ? language.trim() : "";
+    const updatedMetas = new Set();
+
+    const updateMeta = (meta) => {
+      if (!meta || typeof meta !== "object") return;
+      if (sanitizeConfigName(meta.name || "") !== safeName) return;
+      meta.language = normalizedLanguage;
+      updatedMetas.add(meta);
+    };
+
+    for (const metas of configIndex.values()) {
+      for (const meta of metas || []) updateMeta(meta);
+    }
+    for (const bucket of appidSaveWatchers.values()) {
+      if (typeof bucket?.values !== "function") continue;
+      for (const watcher of bucket.values()) updateMeta(watcher?.meta);
+    }
+
+    return updatedMetas.size;
+  }
+
   async function findShippingExeDir(root, maxDepth = 6, shouldSkipPath = null) {
     const matches = (name) => /shipping\.exe$/i.test(name || "");
     async function walk(dir, depth = 0) {
@@ -14825,6 +16771,7 @@ module.exports = function makeWatchedFolders({
       lumaPlayDiscoveryScheduledOptions = null;
       steamOfficialSeedOnlyLogged.clear();
       strictRootSeedOnlyLogged.clear();
+      if (ownsCacheMetaStore) cacheMetaStore.close();
     });
   }
 
@@ -14835,6 +16782,7 @@ module.exports = function makeWatchedFolders({
     rebuildKnownAppIds,
     refreshConfigState,
     refreshXLiveLessNessConfig,
+    updateConfigLanguage,
     isBootOnboardingPending,
     forceBootOnboardingSkipAll,
   };

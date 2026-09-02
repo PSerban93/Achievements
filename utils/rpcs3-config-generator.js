@@ -252,21 +252,39 @@ function writeExophaseRaritySidecar(schemaDir, appid, entries) {
 }
 
 function copyIfMissing(src, dst) {
-  if (!fs.existsSync(dst)) fs.copyFileSync(src, dst);
+  if (fs.existsSync(dst)) return false;
+  fs.copyFileSync(src, dst);
+  return true;
 }
 
-function writeSchemaAssets(schemaDir, parsed) {
+function syncNativeIconAssets(schemaDir, parsed, entries) {
   const imgDir = path.join(schemaDir, "img");
   fs.mkdirSync(imgDir, { recursive: true });
-
-  const entries = buildSchemaFromTrophy(parsed);
-  const fallbackIconPath = resolveFallbackIconPath(parsed);
+  let copied = 0;
 
   if (parsed?.fallbackIconName) {
     const src = path.join(parsed.trophyDir, parsed.fallbackIconName);
     const dst = path.join(imgDir, parsed.fallbackIconName);
-    if (fs.existsSync(src)) copyIfMissing(src, dst);
+    if (fs.existsSync(src) && copyIfMissing(src, dst)) copied += 1;
   }
+
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const trophyId = entry?.imageId;
+    if (trophyId === undefined || trophyId === null) continue;
+    const pad = String(trophyId).padStart(3, "0");
+    const iconName =
+      parsed?.iconFiles?.get(Number(trophyId)) || `TROP${pad}.PNG`;
+    const src = path.join(parsed.trophyDir, iconName);
+    const dst = path.join(imgDir, iconName);
+    if (fs.existsSync(src) && copyIfMissing(src, dst)) copied += 1;
+  }
+  return copied;
+}
+
+function writeSchemaAssets(schemaDir, parsed) {
+  const entries = buildSchemaFromTrophy(parsed);
+  const fallbackIconPath = resolveFallbackIconPath(parsed);
+  syncNativeIconAssets(schemaDir, parsed, entries);
 
   for (const entry of entries) {
     const trophyId = entry?.imageId;
@@ -278,9 +296,6 @@ function writeSchemaAssets(schemaDir, parsed) {
     const pad = String(trophyId).padStart(3, "0");
     const iconName =
       parsed?.iconFiles?.get(Number(trophyId)) || `TROP${pad}.PNG`;
-    const iconSrc = path.join(parsed.trophyDir, iconName);
-    const iconDst = path.join(imgDir, iconName);
-    if (fs.existsSync(iconSrc)) copyIfMissing(iconSrc, iconDst);
     entry.icon = `img/${iconName}`;
     entry.icon_gray = fallbackIconPath;
   }
@@ -441,21 +456,12 @@ function updateSchemaFromTrophy(schemaDir, parsed) {
   }
   if (!Array.isArray(entries)) return { updated: false, added: 0, entries: [] };
 
-  const imgDir = path.join(schemaDir, "img");
-  fs.mkdirSync(imgDir, { recursive: true });
-
-  const fallbackIconPath = resolveFallbackIconPath(parsed);
-  if (parsed?.fallbackIconName) {
-    const src = path.join(parsed.trophyDir, parsed.fallbackIconName);
-    const dst = path.join(imgDir, parsed.fallbackIconName);
-    if (fs.existsSync(src)) copyIfMissing(src, dst);
-  }
-
   let updated = false;
   let added = 0;
   let changed = 0;
 
   const incoming = buildSchemaFromTrophy(parsed);
+  const fallbackIconPath = resolveFallbackIconPath(parsed);
   const entryByName = new Map();
   for (const entry of entries) {
     const key = entry?.name != null ? String(entry.name) : "";
@@ -510,8 +516,32 @@ function updateSchemaFromTrophy(schemaDir, parsed) {
     if (trophyId === undefined || trophyId === null) {
       continue;
     }
-    // do not touch icon/icon_gray; keep the ones from the existing schema (or Exophase)
+    const pad = String(trophyId).padStart(3, "0");
+    const iconName =
+      parsed?.iconFiles?.get(Number(trophyId)) || `TROP${pad}.PNG`;
+    const nativeIconPath = `img/${iconName}`;
+    const currentIcon = String(entry.icon || "").trim();
+    const currentIconPath = currentIcon
+      ? path.resolve(schemaDir, currentIcon)
+      : "";
+    if (
+      !currentIcon ||
+      (/^img[\\/]trop\d{3}\.png$/i.test(currentIcon) &&
+        !fs.existsSync(currentIconPath) &&
+        fs.existsSync(path.join(parsed.trophyDir, iconName)))
+    ) {
+      entry.icon = nativeIconPath;
+      updated = true;
+      changed += 1;
+    }
+    if (!String(entry.icon_gray || "").trim() && fallbackIconPath) {
+      entry.icon_gray = fallbackIconPath;
+      updated = true;
+      changed += 1;
+    }
   }
+
+  const copiedAssets = syncNativeIconAssets(schemaDir, parsed, entries);
 
   if (updated) {
     fs.writeFileSync(schemaPath, JSON.stringify(entries, null, 2), "utf8");
@@ -530,7 +560,13 @@ function updateSchemaFromTrophy(schemaDir, parsed) {
     });
   }
 
-  return { updated, added, entries };
+  return {
+    updated,
+    added,
+    entries,
+    assetsUpdated: copiedAssets > 0,
+    copiedAssets,
+  };
 }
 
 async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) {
@@ -572,6 +608,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
   const schemaPath = path.join(schemaDir, "achievements.json");
   let schemaReady = false;
   let schemaChanged = false;
+  let schemaContentChanged = false;
   let added = 0;
   let currentEntries = [];
   if (fs.existsSync(schemaPath)) {
@@ -584,11 +621,13 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
   }
   if (schemaReady) {
     const res = updateSchemaFromTrophy(schemaDir, parsed);
-    schemaChanged = !!res.updated;
+    schemaContentChanged = !!res.updated;
+    schemaChanged = schemaContentChanged || res.assetsUpdated === true;
     added = res.added || 0;
     currentEntries = res.entries || [];
   } else {
     currentEntries = writeSchemaAssets(schemaDir, parsed);
+    schemaContentChanged = true;
     schemaChanged = true;
     added = currentEntries.length;
   }
@@ -596,7 +635,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
   // Enrich with Exophase (multilang trophies) – keep RPCS3 isolated from other platforms
   if (trophyCount > 0) {
     let skipExo = false;
-    if (bootMode && !schemaChanged) {
+    if (bootMode && !schemaContentChanged) {
       schemaLogger.info("rpcs3:exophase:skip", {
         appid: String(appid),
         reason: "schema-unchanged-boot",

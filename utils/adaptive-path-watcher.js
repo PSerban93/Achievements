@@ -59,6 +59,19 @@ function createAdaptivePathWatcher(options = {}) {
   let available = false;
   let availabilityCount = 0;
   let targetWatchReady = false;
+  let initialReadySettled = false;
+  let resolveInitialReady = null;
+  const readyPromise = new Promise((resolve) => {
+    resolveInitialReady = resolve;
+  });
+
+  const settleInitialReady = (ready) => {
+    if (initialReadySettled) return;
+    initialReadySettled = true;
+    const resolve = resolveInitialReady;
+    resolveInitialReady = null;
+    resolve?.(ready === true);
+  };
 
   const reportError = (error, phase) => {
     try {
@@ -144,6 +157,7 @@ function createAdaptivePathWatcher(options = {}) {
         if (closed || localGeneration !== generation) return;
         targetWatchReady = true;
         emitAvailable();
+        settleInitialReady(true);
       })
       .on("add", (eventPath) => emitEvent("add", eventPath))
       .on("change", (eventPath) => emitEvent("change", eventPath))
@@ -170,11 +184,17 @@ function createAdaptivePathWatcher(options = {}) {
           queueReconcile();
         }
       })
-      .on("error", (error) => reportError(error, "target-watch"));
+      .on("error", (error) => {
+        if (!closed && localGeneration === generation) {
+          settleInitialReady(false);
+        }
+        reportError(error, "target-watch");
+      });
 
   };
 
   const attachParentWatcher = () => {
+    const localGeneration = generation;
     const watcher = chokidarImpl.watch(parentPath, {
       ...watcherOptions,
       depth: 0,
@@ -187,6 +207,10 @@ function createAdaptivePathWatcher(options = {}) {
       if (eventKey === targetKey || eventKey === parentKey) queueReconcile();
     };
     watcher
+      .on("ready", () => {
+        if (closed || localGeneration !== generation) return;
+        settleInitialReady(true);
+      })
       .on("add", (eventPath) => maybeTargetChanged("add", eventPath))
       .on("change", (eventPath) => maybeTargetChanged("change", eventPath))
       .on("addDir", (eventPath) => maybeTargetChanged("addDir", eventPath))
@@ -194,7 +218,12 @@ function createAdaptivePathWatcher(options = {}) {
       .on("unlinkDir", (eventPath) =>
         maybeTargetChanged("unlinkDir", eventPath),
       )
-      .on("error", (error) => reportError(error, "parent-watch"));
+      .on("error", (error) => {
+        if (!closed && localGeneration === generation) {
+          settleInitialReady(false);
+        }
+        reportError(error, "parent-watch");
+      });
   };
 
   async function reconcile() {
@@ -234,6 +263,10 @@ function createAdaptivePathWatcher(options = {}) {
           }
         } else if (mode !== "none") {
           await closeCurrentWatcher();
+        } else {
+          // There is nothing to enumerate yet. The polling fallback remains
+          // active and will attach a real watcher when the path appears.
+          settleInitialReady(true);
         }
       } while (reconcileQueued && !closed);
     } finally {
@@ -248,6 +281,7 @@ function createAdaptivePathWatcher(options = {}) {
   return {
     targetPath,
     targetType,
+    readyPromise,
     get available() {
       return available;
     },
@@ -259,6 +293,7 @@ function createAdaptivePathWatcher(options = {}) {
       if (closed) return;
       closed = true;
       clearInterval(timer);
+      settleInitialReady(false);
       await closeCurrentWatcher();
     },
   };

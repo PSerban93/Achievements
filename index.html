@@ -118,10 +118,11 @@
         height: 100vh;
       }
 
-      button,
-      input,
-      textarea,
-      select {
+      .titlebar button,
+      .titlebar input,
+      .titlebar textarea,
+      .titlebar select {
+        app-region: no-drag;
         -webkit-app-region: no-drag;
       }
 
@@ -317,7 +318,8 @@
 
       .settings-links {
         display: flex;
-        align-items: center;
+        flex-direction: column;
+        align-items: flex-start;
         gap: 10px;
         margin-top: auto;
         margin-left: 10px;
@@ -366,6 +368,40 @@
         width: 22px;
         height: 22px;
         display: block;
+      }
+
+      .settings-store-link-btn {
+        width: 161px;
+        height: auto;
+        padding: 0;
+        border: 0;
+        border-radius: 5px;
+        background: transparent;
+        overflow: visible;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+      }
+
+      .settings-store-link-btn:hover {
+        border-color: transparent;
+        background: transparent;
+      }
+
+      .settings-store-link-btn img {
+        display: block;
+        width: 161px;
+        height: 44px;
+        max-width: none;
+      }
+
+      .settings-store-link-label {
+        width: 100%;
+        color: currentColor;
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.25;
+        text-align: left;
       }
 
       .settings-guide-link {
@@ -720,7 +756,15 @@
             data-tab="platformGuide"
             title="Platform & Emulator Guide"
           >
-            Platform Guide
+            Documentation
+          </button>
+          <button
+            id="tab-stats"
+            class="settings-tab"
+            data-tab="stats"
+            data-i18n="settings.stats.tab"
+          >
+            Stats
           </button>
           <button
             id="tab-changelogs"
@@ -754,6 +798,26 @@
             aria-label="Project links"
             id="settingsProjectLinks"
           >
+            <button
+              id="settingsGameBarStoreLink"
+              class="settings-link-btn settings-store-link-btn"
+              type="button"
+              aria-label="Open Achievements Overlay for Xbox Game Bar in Microsoft Store"
+              title="Open Achievements Overlay for Xbox Game Bar in Microsoft Store"
+            >
+              <span
+                id="settingsGameBarStoreLabel"
+                class="settings-store-link-label"
+                data-i18n="settings.gameBarStoreLabel"
+              >
+                Overlay for Xbox Game Bar
+              </span>
+              <img
+                src="assets/icons/store-link.svg"
+                alt=""
+                aria-hidden="true"
+              />
+            </button>
             <button
               id="settingsGithubLink"
               class="settings-link-btn"
@@ -1708,6 +1772,27 @@
                 >
                   Progress Notification
                 </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-progressNotificationMethodDropdown"
+                    data-i18n="label.settings-progressNotificationMethodDropdown"
+                    >Progress Notification Method:</label
+                  >
+                  <select id="settings-progressNotificationMethodDropdown">
+                    <option
+                      value="animated"
+                      data-i18n="option.settings-progressNotificationMethodDropdown.animated"
+                    >
+                      Animated Notification
+                    </option>
+                    <option
+                      value="gamebar"
+                      data-i18n="option.settings-progressNotificationMethodDropdown.gamebar"
+                    >
+                      Game Bar Notification
+                    </option>
+                  </select>
+                </div>
                 <div class="settings-control">
                   <label
                     for="settings-progressPositionDropdown"
@@ -4357,6 +4442,196 @@
             </div>
           </div>
           <div
+            id="statsTab"
+            class="tab-content settings-data-tab"
+            role="tabpanel"
+            aria-labelledby="tab-stats"
+          >
+            <div class="settings-data-tab-inner settings-stats-layout">
+              <div class="settings-data-tab-header">
+                <div>
+                  <h4 data-i18n="settings.stats.title">Library Stats</h4>
+                  <p
+                    class="hint settings-data-tab-description"
+                    data-i18n="settings.stats.description"
+                  >
+                    An overview calculated from your configs and achievement
+                    summary.
+                  </p>
+                </div>
+              </div>
+              <div
+                id="settingsStatsStatus"
+                class="settings-data-status"
+                role="status"
+                aria-live="polite"
+              ></div>
+              <div class="settings-stats-grid">
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.totalConfigs"
+                    >Total Configs</span
+                  >
+                  <strong id="settingsStatsTotalConfigs">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.activeGames"
+                    >Active Games</span
+                  >
+                  <strong id="settingsStatsActiveGames">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.ignoredGames"
+                    >Ignored Games</span
+                  >
+                  <strong id="settingsStatsIgnoredGames">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.perfectGames"
+                    >Perfect Games</span
+                  >
+                  <strong id="settingsStatsPerfectGames">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.notStartedGames"
+                    >Not Started Games</span
+                  >
+                  <strong id="settingsStatsNotStartedGames">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.inProgressGames"
+                    >Games in Progress</span
+                  >
+                  <strong id="settingsStatsInProgressGames">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.totalAchievements"
+                    >Total Achievements</span
+                  >
+                  <strong id="settingsStatsTotalAchievements">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.unlockedAchievements"
+                    >Unlocked Achievements</span
+                  >
+                  <strong id="settingsStatsUnlockedAchievements">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.lockedAchievements"
+                    >Locked Achievements</span
+                  >
+                  <strong id="settingsStatsLockedAchievements">0</strong>
+                </article>
+                <article class="settings-stat-card">
+                  <span data-i18n="settings.stats.activePlatforms"
+                    >Active Platforms</span
+                  >
+                  <strong id="settingsStatsActivePlatforms">0</strong>
+                </article>
+              </div>
+              <section class="settings-stats-completion">
+                <div class="settings-stats-completion-header">
+                  <span data-i18n="settings.stats.completionRate"
+                    >Overall Completion</span
+                  >
+                  <strong id="settingsStatsCompletionValue">0%</strong>
+                </div>
+                <div
+                  id="settingsStatsCompletionTrack"
+                  class="settings-stats-progress-track"
+                  role="progressbar"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="0"
+                >
+                  <div
+                    id="settingsStatsCompletionBar"
+                    class="settings-stats-progress-bar"
+                  ></div>
+                </div>
+              </section>
+              <p
+                id="settingsStatsCoverage"
+                class="hint settings-stats-coverage"
+              ></p>
+              <section class="settings-stats-breakdown">
+                <h5 data-i18n="settings.stats.platformBreakdown">
+                  Platform Breakdown
+                </h5>
+                <div class="settings-stats-table-wrap">
+                  <table class="settings-stats-table">
+                    <thead>
+                      <tr>
+                        <th scope="col" data-i18n="settings.stats.platform">
+                          Platform
+                        </th>
+                        <th scope="col" data-i18n="settings.stats.games">
+                          Games
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.ignoredGames"
+                        >
+                          Ignored Games
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.perfectGames"
+                        >
+                          Perfect Games
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.notStartedGames"
+                        >
+                          Not Started Games
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.inProgressGames"
+                        >
+                          Games in Progress
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.totalAchievements"
+                        >
+                          Total Achievements
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.unlockedAchievements"
+                        >
+                          Unlocked Achievements
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.lockedAchievements"
+                        >
+                          Locked Achievements
+                        </th>
+                        <th
+                          scope="col"
+                          data-i18n="settings.stats.completionRate"
+                        >
+                          Overall Completion
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody id="settingsStatsPlatformRows"></tbody>
+                  </table>
+                </div>
+                <p
+                  id="settingsStatsPlatformEmpty"
+                  class="hint settings-stats-platform-empty"
+                  data-i18n="settings.stats.noPlatformData"
+                  hidden
+                >
+                  No platform statistics are available.
+                </p>
+              </section>
+            </div>
+          </div>
+          <div
             id="changelogsTab"
             class="tab-content settings-data-tab"
             role="tabpanel"
@@ -5544,6 +5819,7 @@
     </div>
 
     <script src="utils/i18n-ui.js"></script>
+    <script src="utils/library-stats.js"></script>
     <script>
       window.__coverNameCache = window.__coverNameCache || {};
       function rememberCoverName(appid, displayName) {
@@ -8262,8 +8538,7 @@
             document.getElementById("configList")?.value || "",
           ).trim();
           if (activeConfig === configName) {
-            const lang =
-              document.getElementById("languageSelect")?.value || "english";
+            const lang = getCurrentAchievementLanguage();
             await buildMainAchievementsTable(configName, lang, {
               skipPlatinumCheck: true,
             });
@@ -8608,8 +8883,7 @@
             const activeConfig =
               document.getElementById("configList")?.value || "";
             if (activeConfig === target.configName) {
-              const lang =
-                document.getElementById("languageSelect")?.value || "english";
+              const lang = getCurrentAchievementLanguage();
               await buildMainAchievementsTable(target.configName, lang, {
                 skipPlatinumCheck: true,
               });
@@ -9043,8 +9317,7 @@
           const cfg =
             configName || document.getElementById("configList")?.value;
           if (cfg) {
-            const lang =
-              document.getElementById("languageSelect")?.value || "english";
+            const lang = getCurrentAchievementLanguage();
             try {
               await buildMainAchievementsTable(cfg, lang, refreshOptions);
             } catch {}
@@ -9210,6 +9483,11 @@
               return tUi(
                 "main.boot.progress.attachingWatchers",
                 "Attaching folder watchers",
+              );
+            case "preparingGenerators":
+              return tUi(
+                "main.boot.progress.preparingGenerators",
+                "Preparing game data",
               );
             case "scanningFolders":
               return tUi(
@@ -10356,8 +10634,7 @@
             }
             if (result?.success) {
               const targetName = editingConfigName || configName;
-              const lang =
-                document.getElementById("languageSelect")?.value || "english";
+              const lang = getCurrentAchievementLanguage();
               const list = document.getElementById("configList");
               if (list) {
                 list.value = targetName;
@@ -10435,8 +10712,7 @@
           );
         }
 
-        const lang =
-          document.getElementById("languageSelect")?.value || "english";
+        const lang = getCurrentAchievementLanguage();
         const selected =
           typeof window.selectConfigInDropdown === "function"
             ? window.selectConfigInDropdown(targetName)
@@ -10539,6 +10815,8 @@
       let uiLanguage = "english";
       let achievementLanguageManual = false;
       let syncingAchievementLanguage = false;
+      let globalAchievementLanguage = "english";
+      const ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE = "__global__";
 
       const normalizeLangValue = (value) => {
         const raw = String(value || "").trim();
@@ -10548,14 +10826,122 @@
 
       const syncAppLanguageOptions = () => {
         if (!languageSelect || !appLanguageSelect) return;
-        appLanguageSelect.innerHTML = languageSelect.innerHTML;
+        appLanguageSelect.replaceChildren(
+          ...Array.from(languageSelect.options || [])
+            .filter(
+              (option) =>
+                option.value !== ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE,
+            )
+            .map((option) => option.cloneNode(true)),
+        );
       };
+
+      function getGlobalAchievementLanguage() {
+        return normalizeLangValue(globalAchievementLanguage || "english");
+      }
+
+      function getAchievementLanguageOverride(config) {
+        const candidate = normalizeLangValue(config?.language || "");
+        if (!config?.language || candidate === ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE) {
+          return "";
+        }
+        return Array.from(languageSelect?.options || []).some(
+          (option) =>
+            option.value !== ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE &&
+            normalizeLangValue(option.value) === candidate,
+        )
+          ? candidate
+          : "";
+      }
+
+      function refreshGlobalAchievementLanguageOption(show) {
+        if (!languageSelect) return null;
+        let option = languageSelect.querySelector(
+          `option[value="${ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE}"]`,
+        );
+        if (!show) {
+          option?.remove();
+          return null;
+        }
+        if (!option) {
+          option = document.createElement("option");
+          option.value = ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE;
+          languageSelect.insertBefore(option, languageSelect.firstChild);
+        }
+        const globalLang = getGlobalAchievementLanguage();
+        const globalLanguageOption = Array.from(languageSelect.options).find(
+          (entry) => normalizeLangValue(entry.value) === globalLang,
+        );
+        const fallbackLabel = tUi(
+          "option.languageSelect.__global__",
+          "Use Global Default",
+        );
+        const languageLabel = String(
+          globalLanguageOption?.textContent || globalLang,
+        ).trim();
+        option.textContent = `${fallbackLabel} (${languageLabel})`;
+        return option;
+      }
+
+      function getCurrentAchievementLanguage() {
+        const selectedValue = languageSelect?.value || "";
+        if (
+          !selectedValue ||
+          selectedValue === ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE
+        ) {
+          return getGlobalAchievementLanguage();
+        }
+        return normalizeLangValue(selectedValue);
+      }
+
+      function resolveAchievementLanguageForConfigData(config) {
+        return (
+          getAchievementLanguageOverride(config) ||
+          getGlobalAchievementLanguage()
+        );
+      }
+
+      async function syncAchievementLanguageForConfig(
+        configName,
+        config = null,
+      ) {
+        const safeName = String(configName || "").trim();
+        if (!safeName) {
+          refreshGlobalAchievementLanguageOption(false);
+          syncingAchievementLanguage = true;
+          if (languageSelect) {
+            languageSelect.value = getGlobalAchievementLanguage();
+          }
+          syncingAchievementLanguage = false;
+          return getGlobalAchievementLanguage();
+        }
+
+        let resolvedConfig = config;
+        if (!resolvedConfig && window.api?.getConfigByName) {
+          resolvedConfig = await window.api.getConfigByName(safeName);
+        }
+        if (document.getElementById("configList")?.value !== safeName) {
+          return getCurrentAchievementLanguage();
+        }
+        const override = getAchievementLanguageOverride(resolvedConfig);
+        refreshGlobalAchievementLanguageOption(true);
+        syncingAchievementLanguage = true;
+        if (languageSelect) {
+          languageSelect.value =
+            override || ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE;
+        }
+        syncingAchievementLanguage = false;
+        return override || getGlobalAchievementLanguage();
+      }
 
       const SCHEMA_LANG_PREF_KEY = "schemaLanguages";
 
       function getSchemaLanguageCatalogFromLanguageSelect() {
         if (!languageSelect) return [];
         return Array.from(languageSelect.options || [])
+          .filter(
+            (opt) => opt?.value !== ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE,
+          )
           .map((opt) => ({
             value: normalizeLangValue(opt?.value || ""),
             label: String(opt?.textContent || opt?.value || "").trim(),
@@ -10749,6 +11135,8 @@
 
       let cachedAppVersion = "";
       const SETTINGS_GITHUB_URL = "https://github.com/PSerban93/Achievements";
+      const SETTINGS_GAME_BAR_STORE_URL =
+        "https://apps.microsoft.com/detail/9P78L5ZXH06D";
       const SETTINGS_DOCS_URL =
         "https://pserban93.github.io/Achievements-Docs/";
 
@@ -10792,6 +11180,27 @@
           githubBtn.setAttribute("aria-label", githubLabel);
         }
 
+        const gameBarStoreBtn = document.getElementById(
+          "settingsGameBarStoreLink",
+        );
+        if (gameBarStoreBtn) {
+          const gameBarStoreLabel = tUi(
+            "settings.gameBarStoreLink",
+            "Open Achievements Overlay for Xbox Game Bar in Microsoft Store",
+          );
+          gameBarStoreBtn.title = gameBarStoreLabel;
+          gameBarStoreBtn.setAttribute("aria-label", gameBarStoreLabel);
+          const visibleLabel = document.getElementById(
+            "settingsGameBarStoreLabel",
+          );
+          if (visibleLabel) {
+            visibleLabel.textContent = tUi(
+              "settings.gameBarStoreLabel",
+              "Overlay for Xbox Game Bar",
+            );
+          }
+        }
+
         const docsBtn = document.getElementById("settingsDocsLink");
         if (docsBtn) {
           const docsLabel = tUi("settings.docsLink", "Configs Setup Guide");
@@ -10806,6 +11215,16 @@
           githubBtn.dataset.bound = "1";
           githubBtn.addEventListener("click", () => {
             void openSettingsExternalUrl(SETTINGS_GITHUB_URL);
+          });
+        }
+
+        const gameBarStoreBtn = document.getElementById(
+          "settingsGameBarStoreLink",
+        );
+        if (gameBarStoreBtn && gameBarStoreBtn.dataset.bound !== "1") {
+          gameBarStoreBtn.dataset.bound = "1";
+          gameBarStoreBtn.addEventListener("click", () => {
+            void openSettingsExternalUrl(SETTINGS_GAME_BAR_STORE_URL);
           });
         }
 
@@ -10845,6 +11264,7 @@
 
       async function applyUiLanguage(lang) {
         const prevLang = uiLanguage;
+        const previousAchievementLanguageValue = languageSelect?.value || "";
         uiLanguage = normalizeLangValue(lang);
         if (
           window.i18nUi &&
@@ -10853,6 +11273,17 @@
           await window.i18nUi.setUiLanguage(uiLanguage);
         }
         syncAppLanguageOptions();
+        refreshGlobalAchievementLanguageOption(
+          !!document.getElementById("configList")?.value,
+        );
+        if (
+          languageSelect &&
+          Array.from(languageSelect.options || []).some(
+            (option) => option.value === previousAchievementLanguageValue,
+          )
+        ) {
+          languageSelect.value = previousAchievementLanguageValue;
+        }
         await syncSteamOfficialAccountDropdown(getCachedPreferences());
         await syncXboxPcStatus();
         await syncRetroAchievementsStatus();
@@ -10863,6 +11294,7 @@
         bindSettingsProjectLinks();
         renderSettingsChangelogs();
         refreshSettingsLogsText();
+        refreshSettingsStatsText();
         if (typeof updateSortIconsUI === "function") {
           updateSortIconsUI();
         }
@@ -10912,24 +11344,95 @@
       }
 
       async function applyAchievementLanguage(lang, opts = {}) {
+        const configName = document.getElementById("configList")?.value || "";
+        const forceGlobal = opts.scope === "global" || !configName;
+
+        if (!forceGlobal) {
+          const useGlobal = lang === ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE;
+          const normalized = useGlobal ? "" : normalizeLangValue(lang);
+          const result = await window.api.setConfigAchievementLanguage(
+            configName,
+            useGlobal ? null : normalized,
+          );
+          if (!result?.success) {
+            showNotification(
+              result?.error ||
+                tUi(
+                  "alert.configLoadFailed",
+                  "Something went wrong updating the config.",
+                ),
+              "#f44336",
+            );
+            const currentConfig = await window.api.getConfigByName(configName);
+            await syncAchievementLanguageForConfig(configName, currentConfig);
+            return;
+          }
+          if (document.getElementById("configList")?.value !== configName) {
+            return;
+          }
+
+          const cachedMeta = configMetaIndex.get(configName);
+          if (cachedMeta) {
+            if (useGlobal) delete cachedMeta.language;
+            else cachedMeta.language = normalized;
+          }
+          if (lastSelectedConfigMeta) {
+            if (useGlobal) delete lastSelectedConfigMeta.language;
+            else lastSelectedConfigMeta.language = normalized;
+          }
+
+          refreshGlobalAchievementLanguageOption(true);
+          syncingAchievementLanguage = true;
+          if (languageSelect) {
+            languageSelect.value = useGlobal
+              ? ACHIEVEMENT_GLOBAL_LANGUAGE_VALUE
+              : normalized;
+          }
+          syncingAchievementLanguage = false;
+          const effectiveLanguage = normalizeLangValue(
+            result.effectiveLanguage ||
+              (useGlobal ? getGlobalAchievementLanguage() : normalized),
+          );
+          window.api.refreshUILanguage({
+            language: effectiveLanguage,
+            languageScope: "config",
+            configName,
+            uiLanguage,
+          });
+          await buildMainAchievementsTable(configName, effectiveLanguage);
+          return;
+        }
+
         const normalized = normalizeLangValue(lang);
-        const configName = document.getElementById("configList").value;
         const payload = { language: normalized };
         if (opts.manual === true) {
           payload.achievementLanguageManual = true;
           achievementLanguageManual = true;
         }
-        syncingAchievementLanguage = true;
-        if (languageSelect) languageSelect.value = normalized;
-        syncingAchievementLanguage = false;
+        globalAchievementLanguage = normalized;
         await window.api.savePreferences(payload);
+
+        let effectiveLanguage = normalized;
+        if (configName) {
+          const currentConfig = await window.api.getConfigByName(configName);
+          effectiveLanguage = await syncAchievementLanguageForConfig(
+            configName,
+            currentConfig,
+          );
+        } else {
+          refreshGlobalAchievementLanguageOption(false);
+          syncingAchievementLanguage = true;
+          if (languageSelect) languageSelect.value = normalized;
+          syncingAchievementLanguage = false;
+        }
         window.api.refreshUILanguage({
           language: normalized,
+          languageScope: "global",
           configName,
           uiLanguage,
         });
         if (configName) {
-          await buildMainAchievementsTable(configName, normalized);
+          await buildMainAchievementsTable(configName, effectiveLanguage);
         }
         localStorage.setItem("preferredLanguage", normalized);
       }
@@ -10940,7 +11443,10 @@
           await window.api.savePreferences({ uiLanguage: selectedLang });
           await applyUiLanguage(selectedLang);
           if (!achievementLanguageManual) {
-            await applyAchievementLanguage(selectedLang, { manual: false });
+            await applyAchievementLanguage(selectedLang, {
+              manual: false,
+              scope: "global",
+            });
           }
         });
       }
@@ -10992,6 +11498,7 @@
         configKeys: new Set(),
         entries: [],
         showBlacklisted: false,
+        hydrated: false,
       };
       let lastSelectedConfigMeta = null;
       let configChangeRequestSeq = 0;
@@ -11156,6 +11663,107 @@
           : [];
       }
 
+      const GAME_SORT_IGNORED_ARTICLES = new Set(["a", "an", "the"]);
+
+      function shouldIgnoreLeadingArticlesInGameSort() {
+        const prefs =
+          typeof getCachedPreferences === "function"
+            ? getCachedPreferences()
+            : {};
+        if (
+          prefs &&
+          Object.prototype.hasOwnProperty.call(
+            prefs,
+            "ignoreLeadingArticlesSort",
+          )
+        ) {
+          return prefs.ignoreLeadingArticlesSort !== false;
+        }
+        const checkbox = document.getElementById(
+          "settings-ignoreLeadingArticlesSortCheckbox",
+        );
+        return checkbox ? checkbox.checked !== false : true;
+      }
+
+      function normalizeGameTitleForSort(
+        rawTitle,
+        { ignoreLeadingArticles = true } = {},
+      ) {
+        const title = String(rawTitle || "")
+          .trim()
+          .replace(/\s+/g, " ");
+        if (!title || !ignoreLeadingArticles) return title;
+        const match = title.match(/^(the|an|a)\s+(.+)$/i);
+        if (!match) return title;
+        const article = String(match[1] || "")
+          .trim()
+          .toLowerCase();
+        const body = String(match[2] || "").trim();
+        if (!body || !GAME_SORT_IGNORED_ARTICLES.has(article)) return title;
+        return `${body}, ${article}`;
+      }
+
+      function compareGameTitlesForSort(
+        leftTitle,
+        rightTitle,
+        ignoreLeadingArticles = shouldIgnoreLeadingArticlesInGameSort(),
+      ) {
+        const left = normalizeGameTitleForSort(leftTitle, {
+          ignoreLeadingArticles,
+        });
+        const right = normalizeGameTitleForSort(rightTitle, {
+          ignoreLeadingArticles,
+        });
+        const normalizedResult = left.localeCompare(right, undefined, {
+          sensitivity: "base",
+        });
+        if (normalizedResult !== 0) return normalizedResult;
+        return String(leftTitle || "").localeCompare(
+          String(rightTitle || ""),
+          undefined,
+          { sensitivity: "base" },
+        );
+      }
+
+      function sortConfigsForGameDropdown(configs) {
+        const ignoreLeadingArticles = shouldIgnoreLeadingArticlesInGameSort();
+        return [...(Array.isArray(configs) ? configs : [])].sort((a, b) => {
+          const titleA = a?.displayName || a?.name || "";
+          const titleB = b?.displayName || b?.name || "";
+          const titleResult = compareGameTitlesForSort(
+            titleA,
+            titleB,
+            ignoreLeadingArticles,
+          );
+          if (titleResult !== 0) return titleResult;
+          return String(a?.name || "").localeCompare(
+            String(b?.name || ""),
+            undefined,
+            { sensitivity: "base" },
+          );
+        });
+      }
+
+      function insertConfigOptionInSortOrder(dropdown, option, rawTitle) {
+        if (!dropdown || !option) return;
+        const title = String(rawTitle || option.textContent || "");
+        option.dataset.sortTitle = title;
+        const ignoreLeadingArticles = shouldIgnoreLeadingArticlesInGameSort();
+        const before = Array.from(dropdown.options || []).find((existing) => {
+          if (!existing?.value) return false;
+          const existingTitle =
+            existing.dataset.sortTitle || existing.textContent || "";
+          return (
+            compareGameTitlesForSort(
+              title,
+              existingTitle,
+              ignoreLeadingArticles,
+            ) < 0
+          );
+        });
+        dropdown.insertBefore(option, before || null);
+      }
+
       function cacheConfigMeta(list) {
         configMetaIndex.clear();
         list.forEach((cfg) => {
@@ -11179,12 +11787,13 @@
         return `${id}::${normalizeBlacklistPlatformValue(platform)}`;
       }
 
-      function applyBlacklistPayload(payload = {}) {
+      function applyBlacklistPayload(payload = {}, options = {}) {
         blacklistState.appids = new Set(payload?.appids || []);
         blacklistState.configKeys = new Set(payload?.configKeys || []);
         blacklistState.entries = Array.isArray(payload?.entries)
           ? payload.entries
           : [];
+        blacklistState.hydrated = options.hydrated !== false;
       }
 
       function isAppIdInBlacklist(appid, platform = null) {
@@ -11224,7 +11833,7 @@
             tUi("log.blacklistLoadFailed", "Failed to load blacklist:"),
             err,
           );
-          applyBlacklistPayload();
+          applyBlacklistPayload({}, { hydrated: false });
         }
       }
 
@@ -12476,15 +13085,19 @@
           if (configList) {
             configList.innerHTML =
               '<option value="" disabled selected>Select</option>';
-            const visibleConfigs = blacklistState.showBlacklisted
-              ? configs
-              : configs.filter(
-                  (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
-                );
+            const visibleConfigs = sortConfigsForGameDropdown(
+              blacklistState.showBlacklisted
+                ? configs
+                : configs.filter(
+                    (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
+                  ),
+            );
             visibleConfigs.forEach((config) => {
               const option = document.createElement("option");
               option.value = config.name;
-              option.textContent = config.displayName || config.name;
+              const displayTitle = config.displayName || config.name;
+              option.textContent = displayTitle;
+              option.dataset.sortTitle = displayTitle;
               if (isAppIdInBlacklist(config.appid, config.platform)) {
                 option.textContent += " (Ignored)";
               }
@@ -12534,6 +13147,7 @@
             setAchievementsHeaderVisible(false);
             window.__showFallbackLogo?.();
             window.__setEmbeddedPlatinumBadgeByConfig?.(null);
+            await syncAchievementLanguageForConfig(null);
             updateMuteProgressUI().catch(() => {});
             return;
           }
@@ -12564,6 +13178,11 @@
           if (isStaleSelection()) return;
           const currentConfig =
             await window.api.getConfigByName(selectedConfig);
+          if (isStaleSelection()) return;
+          const effectiveLanguage = await syncAchievementLanguageForConfig(
+            selectedConfig,
+            currentConfig,
+          );
           if (isStaleSelection()) return;
           const cacheOnlyEpicOfficial =
             blocked &&
@@ -12641,8 +13260,7 @@
             return;
           }
 
-          const lang = document.getElementById("languageSelect").value;
-          await buildMainAchievementsTable(selectedConfig, lang, {
+          await buildMainAchievementsTable(selectedConfig, effectiveLanguage, {
             skipPlatinumCheck: true,
           });
           if (isStaleSelection()) return;
@@ -12666,6 +13284,7 @@
 
       let presetOptionsLoadPromise = null;
       const NATIVE_WINDOWS_PRESET_VALUE = "native windows";
+      const GAME_BAR_NOTIFICATIONS_PRESET_VALUE = "game bar notifications";
       const NATIVE_WINDOWS_NOTIFICATION_CONTROL_MAP = Object.freeze([
         {
           presetId: "presetDropdown",
@@ -12717,10 +13336,12 @@
       ]);
 
       function isNativeWindowsPresetValue(value) {
+        const normalized = String(value || "")
+          .trim()
+          .toLowerCase();
         return (
-          String(value || "")
-            .trim()
-            .toLowerCase() === NATIVE_WINDOWS_PRESET_VALUE
+          normalized === NATIVE_WINDOWS_PRESET_VALUE ||
+          normalized === GAME_BAR_NOTIFICATIONS_PRESET_VALUE
         );
       }
 
@@ -12816,7 +13437,10 @@
               preset === "Neon Future" ||
               String(preset || "")
                 .trim()
-                .toLowerCase() === "native windows"
+                .toLowerCase() === "native windows" ||
+              String(preset || "")
+                .trim()
+                .toLowerCase() === "game bar notifications"
             ) {
               defaultPresetsGroup.appendChild(option);
             } else {
@@ -13611,6 +14235,7 @@
             updateBlacklistButtonState(selectedMeta || null);
             updateMainPlayButtonState(selectedMeta);
             renderBlacklistList();
+            if (settingsStatsActive) renderSettingsStats();
             window.__dashboardNeedsRebuild = true;
             if (
               window.__dashboardOpen &&
@@ -14289,6 +14914,30 @@
         }
       }
 
+      function applyProgressNotificationMethodPreferences(prefs = {}) {
+        const methodSelect = document.getElementById(
+          "settings-progressNotificationMethodDropdown",
+        );
+        const positionSelect = document.getElementById(
+          "settings-progressPositionDropdown",
+        );
+        const method =
+          String(prefs?.progressNotificationMethod || "animated")
+            .trim()
+            .toLowerCase() === "gamebar"
+            ? "gamebar"
+            : "animated";
+        if (methodSelect) methodSelect.value = method;
+        if (positionSelect) {
+          positionSelect.disabled = method === "gamebar";
+          if (positionSelect.disabled) {
+            positionSelect.setAttribute("aria-disabled", "true");
+          } else {
+            positionSelect.removeAttribute("aria-disabled");
+          }
+        }
+      }
+
       function applyNotificationClickRedirectPreferences(prefs = {}) {
         const checkbox = document.getElementById(
           "settings-notificationClickRedirectCheckbox",
@@ -14398,6 +15047,7 @@
           );
           if (el) el.value = prefs.progressPosition;
         }
+        applyProgressNotificationMethodPreferences(prefs);
         applyRareNotificationPreferences(prefs);
         applyEmulatorNotificationPreferences(prefs);
         applyNotificationTogglePreferences(prefs);
@@ -14575,9 +15225,15 @@
               "english",
           );
           if (!achievementLanguageManual) {
-            await applyAchievementLanguage(storedUiLang, { manual: false });
+            await applyAchievementLanguage(storedUiLang, {
+              manual: false,
+              scope: "global",
+            });
           } else {
-            await applyAchievementLanguage(storedAchLang, { manual: false });
+            await applyAchievementLanguage(storedAchLang, {
+              manual: false,
+              scope: "global",
+            });
           }
           renderSteamApiKeyStatusFromPrefs(prefs);
           applyShowBlacklistPreference(prefs?.showBlacklistedGames);
@@ -14644,6 +15300,7 @@
               );
               if (el) el.value = prefs.progressPosition;
             }
+            applyProgressNotificationMethodPreferences(prefs);
             applyRareNotificationPreferences(prefs);
             applyNotificationTogglePreferences(prefs);
             applyNotificationClickRedirectPreferences(prefs);
@@ -14947,10 +15604,16 @@
           ) {
             steamOfficialAccountSelect.dataset.bound = "1";
             steamOfficialAccountSelect.addEventListener("change", async (e) => {
+              bumpDashboardSummaryPlatformRevision("steam-official");
               const nextSteamId = String(e.target.value || "").trim();
               await window.api.savePreferences({
                 steamOfficialSteamId: nextSteamId,
               });
+              try {
+                await window.api.invalidateDashboardSummaryPlatform?.(
+                  "steam-official",
+                );
+              } catch {}
               await loadPreferencesCached().catch(() => {});
               await syncSteamOfficialAccountDropdown(getCachedPreferences());
               const selectedName =
@@ -14964,8 +15627,7 @@
                   "steam-official" &&
                 typeof buildMainAchievementsTable === "function"
               ) {
-                const lang =
-                  document.getElementById("languageSelect")?.value || "english";
+                const lang = getCurrentAchievementLanguage();
                 await buildMainAchievementsTable(selectedName, lang).catch(
                   () => {},
                 );
@@ -15470,6 +16132,9 @@
               ignoreLeadingArticlesSort: e.target.checked,
             });
             await loadPreferencesCached().catch(() => {});
+            if (typeof reloadConfigsDropdown === "function") {
+              await reloadConfigsDropdown().catch(() => {});
+            }
             if (typeof applyDashboardSortAndFilter === "function") {
               applyDashboardSortAndFilter();
             }
@@ -15550,8 +16215,7 @@
             });
             await loadPreferencesCached().catch(() => {});
             const cfg = document.getElementById("configList")?.value;
-            const lang =
-              document.getElementById("languageSelect")?.value || "english";
+            const lang = getCurrentAchievementLanguage();
             if (cfg) {
               try {
                 await buildMainAchievementsTable(cfg, lang);
@@ -15717,7 +16381,6 @@
         "positionDropdown",
         "presetDropdown",
         "soundSelect",
-        "languageSelect",
         "scaleSlider",
         "disableProgressCheckbox",
         "app-zoom-dropdown",
@@ -15732,7 +16395,7 @@
               position: document.getElementById("positionDropdown")?.value,
               preset: document.getElementById("presetDropdown")?.value,
               sound: document.getElementById("soundSelect")?.value,
-              language: document.getElementById("languageSelect")?.value,
+              language: getGlobalAchievementLanguage(),
               notificationScale: parseFloat(
                 document.getElementById("scaleSlider")?.value || 1,
               ),
@@ -16218,7 +16881,7 @@
         option.value = configName;
         option.textContent = meta.displayName;
         if (payload?.blacklisted === true) option.textContent += " (Ignored)";
-        configList.appendChild(option);
+        insertConfigOptionInSortOrder(configList, option, meta.displayName);
         return option;
       }
 
@@ -16323,8 +16986,7 @@
 
           let tableReady = true;
           if (alreadySelected && !selectionNeedsRefresh) {
-            const lang =
-              document.getElementById("languageSelect")?.value || "english";
+            const lang = getCurrentAchievementLanguage();
             await buildMainAchievementsTable(configName, lang, {
               skipPlatinumCheck: true,
             });
@@ -16388,16 +17050,20 @@
         defaultOption.selected = true;
         dropdown.appendChild(defaultOption);
 
-        const visibleConfigs = blacklistState.showBlacklisted
-          ? configs
-          : configs.filter(
-              (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
-            );
+        const visibleConfigs = sortConfigsForGameDropdown(
+          blacklistState.showBlacklisted
+            ? configs
+            : configs.filter(
+                (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
+              ),
+        );
 
         visibleConfigs.forEach((config) => {
           const option = document.createElement("option");
           option.value = config.name;
-          option.textContent = config.displayName || config.name;
+          const displayTitle = config.displayName || config.name;
+          option.textContent = displayTitle;
+          option.dataset.sortTitle = displayTitle;
           if (isAppIdInBlacklist(config.appid, config.platform)) {
             option.textContent += " (Ignored)";
           }
@@ -16795,12 +17461,248 @@
       let settingsLogsActive = false;
       let settingsLogsPaused = false;
       let settingsLogsSubscriptionSequence = 0;
+      let settingsStatsActive = false;
+      let settingsStatsLoadSequence = 0;
+      let settingsStatsConfigs = [];
+      let settingsStatsSnapshot = { entries: {} };
 
       function setSettingsDataStatus(elementId, message, isError = false) {
         const element = document.getElementById(elementId);
         if (!element) return;
         element.textContent = message || "";
         element.classList.toggle("settings-data-status-error", isError);
+      }
+
+      function formatSettingsStatsNumber(value, maximumFractionDigits = 0) {
+        const number = Number(value);
+        const safeValue = Number.isFinite(number) ? number : 0;
+        try {
+          return new Intl.NumberFormat(undefined, {
+            maximumFractionDigits,
+            minimumFractionDigits: 0,
+          }).format(safeValue);
+        } catch {
+          return maximumFractionDigits > 0
+            ? safeValue.toFixed(maximumFractionDigits)
+            : String(Math.round(safeValue));
+        }
+      }
+
+      function calculateSettingsStats(configs, snapshot = {}) {
+        const calculate =
+          window.AchievementsLibraryStats?.calculateLibraryStats;
+        if (typeof calculate !== "function") {
+          return {
+            totalConfigs: 0,
+            activeConfigs: 0,
+            ignoredConfigs: 0,
+            trackedConfigs: 0,
+            perfectGames: 0,
+            notStartedGames: 0,
+            inProgressGames: 0,
+            totalAchievements: 0,
+            unlockedAchievements: 0,
+            lockedAchievements: 0,
+            activePlatforms: 0,
+            completionRate: 0,
+            platformRows: [],
+          };
+        }
+        return calculate(configs, snapshot, {
+          isIgnored: (config) => {
+            if (!config?.appid || blacklistState.hydrated !== true) {
+              return config?.blacklisted === true;
+            }
+            return isAppIdInBlacklist(config.appid, config?.platform);
+          },
+        });
+      }
+
+      function getSettingsStatsPlatformLabel(platform) {
+        const normalized = String(platform || "unknown")
+          .trim()
+          .toLowerCase();
+        const knownLabels = {
+          steam: "Steam",
+          "steam-official": "Steam Official",
+          uplay: "Uplay",
+          "ubisoft-official": "Ubisoft Official",
+          "ea-official": "EA Official",
+          epic: "Epic",
+          "epic-official": "Epic Official",
+          gog: "GOG",
+          "gog-official": "GOG Official",
+          "xbox-pc": "Xbox PC",
+          retroachievements: "RetroAchievements",
+          xenia: "Xenia",
+          rpcs3: "RPCS3",
+          shadps4: "PS4",
+          markerpatch: "MarkerPatch",
+          madnesspatch: "MadnessPatch",
+          xlivelessness: "XLiveLessNess",
+        };
+        if (knownLabels[normalized]) return knownLabels[normalized];
+        if (!normalized || normalized === "unknown") {
+          return tUi("dashboard.platformFilter.unknown", "Unknown");
+        }
+        return normalized
+          .split("-")
+          .map((part) =>
+            part ? part.charAt(0).toUpperCase() + part.slice(1) : part,
+          )
+          .join(" ");
+      }
+
+      function renderSettingsStatsPlatformRows(platformRows = []) {
+        const body = document.getElementById("settingsStatsPlatformRows");
+        const empty = document.getElementById("settingsStatsPlatformEmpty");
+        if (!body) return;
+        body.replaceChildren();
+
+        const rows = (Array.isArray(platformRows) ? platformRows : [])
+          .map((row) => ({
+            ...row,
+            label: getSettingsStatsPlatformLabel(row?.platform),
+          }))
+          .sort((left, right) =>
+            left.label.localeCompare(right.label, undefined, {
+              sensitivity: "base",
+            }),
+          );
+
+        for (const row of rows) {
+          const tableRow = document.createElement("tr");
+          const values = [
+            row.label,
+            formatSettingsStatsNumber(row.activeConfigs),
+            formatSettingsStatsNumber(row.ignoredConfigs),
+            formatSettingsStatsNumber(row.perfectGames),
+            formatSettingsStatsNumber(row.notStartedGames),
+            formatSettingsStatsNumber(row.inProgressGames),
+            formatSettingsStatsNumber(row.totalAchievements),
+            formatSettingsStatsNumber(row.unlockedAchievements),
+            formatSettingsStatsNumber(row.lockedAchievements),
+            `${formatSettingsStatsNumber(row.completionRate, 1)}%`,
+          ];
+          values.forEach((value, index) => {
+            const cell = document.createElement(index === 0 ? "th" : "td");
+            if (index === 0) cell.scope = "row";
+            else cell.className = "settings-stats-table-number";
+            cell.textContent = value;
+            tableRow.appendChild(cell);
+          });
+          body.appendChild(tableRow);
+        }
+        if (empty) empty.hidden = rows.length > 0;
+      }
+
+      function renderSettingsStats() {
+        const metrics = calculateSettingsStats(
+          settingsStatsConfigs,
+          settingsStatsSnapshot,
+        );
+        const values = {
+          settingsStatsTotalConfigs: metrics.totalConfigs,
+          settingsStatsActiveGames: metrics.activeConfigs,
+          settingsStatsIgnoredGames: metrics.ignoredConfigs,
+          settingsStatsPerfectGames: metrics.perfectGames,
+          settingsStatsNotStartedGames: metrics.notStartedGames,
+          settingsStatsInProgressGames: metrics.inProgressGames,
+          settingsStatsTotalAchievements: metrics.totalAchievements,
+          settingsStatsUnlockedAchievements: metrics.unlockedAchievements,
+          settingsStatsLockedAchievements: metrics.lockedAchievements,
+          settingsStatsActivePlatforms: metrics.activePlatforms,
+        };
+        for (const [id, value] of Object.entries(values)) {
+          const element = document.getElementById(id);
+          if (element) element.textContent = formatSettingsStatsNumber(value);
+        }
+
+        const completion = Math.min(
+          100,
+          Math.max(0, Number(metrics.completionRate) || 0),
+        );
+        const completionText = `${formatSettingsStatsNumber(completion, 1)}%`;
+        const completionValue = document.getElementById(
+          "settingsStatsCompletionValue",
+        );
+        if (completionValue) completionValue.textContent = completionText;
+        const completionBar = document.getElementById(
+          "settingsStatsCompletionBar",
+        );
+        if (completionBar) completionBar.style.width = `${completion}%`;
+        const completionTrack = document.getElementById(
+          "settingsStatsCompletionTrack",
+        );
+        if (completionTrack) {
+          completionTrack.setAttribute("aria-valuenow", completion.toFixed(1));
+          completionTrack.setAttribute("aria-valuetext", completionText);
+        }
+
+        const coverage = document.getElementById("settingsStatsCoverage");
+        if (coverage) {
+          coverage.textContent = tUiFmt(
+            "settings.stats.coverageActive",
+            {
+              tracked: formatSettingsStatsNumber(metrics.trackedConfigs),
+              total: formatSettingsStatsNumber(metrics.activeConfigs),
+            },
+            "Achievement data is available for {tracked} of {total} active configs.",
+          );
+        }
+        renderSettingsStatsPlatformRows(metrics.platformRows);
+      }
+
+      function refreshSettingsStatsText() {
+        renderSettingsStats();
+      }
+
+      async function loadSettingsStats() {
+        const sequence = ++settingsStatsLoadSequence;
+        setSettingsDataStatus(
+          "settingsStatsStatus",
+          tUi("settings.stats.loading", "Loading library stats…"),
+        );
+        try {
+          let configs = Array.from(configMetaIndex.values()).filter(Boolean);
+          if (!configs.length) {
+            configs = normalizeConfigList(await window.api?.loadConfigs?.());
+            if (configs.length) cacheConfigMeta(configs);
+          }
+          const snapshot = await window.api?.loadDashboardSummary?.();
+          if (sequence !== settingsStatsLoadSequence || !settingsStatsActive) {
+            return;
+          }
+          if (snapshot?.ok === false) {
+            throw new Error(snapshot?.error || "stats-summary-load-failed");
+          }
+          settingsStatsConfigs = configs;
+          settingsStatsSnapshot = snapshot || { entries: {} };
+          renderSettingsStats();
+          setSettingsDataStatus("settingsStatsStatus", "");
+        } catch (error) {
+          if (sequence !== settingsStatsLoadSequence || !settingsStatsActive) {
+            return;
+          }
+          setSettingsDataStatus(
+            "settingsStatsStatus",
+            tUi(
+              "settings.stats.loadFailed",
+              "Library stats could not be loaded.",
+            ),
+            true,
+          );
+        }
+      }
+
+      function activateSettingsStats() {
+        settingsStatsActive = true;
+        void loadSettingsStats();
+      }
+
+      function deactivateSettingsStats() {
+        settingsStatsActive = false;
+        settingsStatsLoadSequence += 1;
       }
 
       function formatChangelogDate(value) {
@@ -17161,6 +18063,30 @@
               }
             });
         }
+
+        if (!window.__settingsStatsSummaryUnsubscribe) {
+          window.__settingsStatsSummaryUnsubscribe = window.api?.on?.(
+            "dashboard:summary-updated",
+            (payload = {}) => {
+              const nextEntries = {
+                ...(settingsStatsSnapshot?.entries || {}),
+              };
+              for (const [name, entry] of Object.entries(payload.entries || {})) {
+                nextEntries[name] = entry;
+              }
+              for (const name of Array.isArray(payload.removed)
+                ? payload.removed
+                : []) {
+                delete nextEntries[name];
+              }
+              settingsStatsSnapshot = {
+                ...settingsStatsSnapshot,
+                entries: nextEntries,
+              };
+              if (settingsStatsActive) renderSettingsStats();
+            },
+          );
+        }
       }
 
       bindSettingsDataTabs();
@@ -17228,6 +18154,8 @@
           void loadSettingsChangelogs();
         } else if (activeSettingsTab === "logs") {
           void activateSettingsLogs();
+        } else if (activeSettingsTab === "stats") {
+          activateSettingsStats();
         }
       }
 
@@ -17313,6 +18241,7 @@
       function closeSettingsModal() {
         window.__settingsMode = null;
         deactivateSettingsLogs();
+        deactivateSettingsStats();
 
         const settingsMenu = document.getElementById("settingsMenu");
         const content = document.querySelector(".settings-content");
@@ -17381,6 +18310,7 @@
           const tabId = tab.getAttribute("data-tab");
           if (tabId === "shortcuts") ensureShortcutsTabContent();
           if (tabId !== "logs") deactivateSettingsLogs();
+          if (tabId !== "stats") deactivateSettingsStats();
           const tabContent = document.getElementById(tabId + "Tab");
           if (tabContent) {
             tabContent.classList.add("active");
@@ -17398,6 +18328,8 @@
             void loadSettingsChangelogs();
           } else if (tabId === "logs") {
             void activateSettingsLogs();
+          } else if (tabId === "stats") {
+            activateSettingsStats();
           }
         });
       });
@@ -17788,6 +18720,17 @@
         );
 
       document
+        .getElementById("settings-progressNotificationMethodDropdown")
+        .addEventListener("change", async (e) => {
+          const progressNotificationMethod =
+            e.target.value === "gamebar" ? "gamebar" : "animated";
+          applyProgressNotificationMethodPreferences({
+            progressNotificationMethod,
+          });
+          await window.api.savePreferences({ progressNotificationMethod });
+        });
+
+      document
         .getElementById("settings-presetDropdown")
         .addEventListener("change", (e) =>
           window.api.savePreferences({ preset: e.target.value }),
@@ -18002,6 +18945,7 @@
             settingsProgressPositionDropdown.value ||
             "bottom-left";
         }
+        applyProgressNotificationMethodPreferences(prefs);
 
         // Sync scale slider
         const mainScaleSlider = document.getElementById("scaleSlider");
@@ -18283,7 +19227,7 @@
           windowZoomFactor: Number.isFinite(zoomValue)
             ? zoomValue
             : base.windowZoomFactor || 1,
-          language: pick(getVal("languageSelect"), base.language || undefined),
+          language: getGlobalAchievementLanguage(),
         };
 
         snapshot.rarePreset = pick(
@@ -18313,6 +19257,10 @@
         snapshot.progressPosition = pick(
           getVal("settings-progressPositionDropdown"),
           base.progressPosition || "bottom-left",
+        );
+        snapshot.progressNotificationMethod = pick(
+          getVal("settings-progressNotificationMethodDropdown"),
+          base.progressNotificationMethod || "animated",
         );
         snapshot.platinumSound = pick(
           getVal("settings-platinumSoundSelect") ||
@@ -19819,6 +20767,16 @@
         const DASH_PROGRESS_PREFIX = "dashboard:lastProgress:";
         const dashboardConfigCache = new Map();
         const dashboardImageCache = new Map();
+        const dashboardSummaryCache = new Map();
+        let dashboardSummaryLoadPromise = null;
+        let dashboardSummaryBootstrapPromise = null;
+        let dashboardSummaryBootstrapped = false;
+        const dashboardSummaryPendingWrites = new Map();
+        let dashboardSummaryWriteTimer = null;
+        const dashboardSummaryConfigRevisions = new Map();
+        const dashboardSummaryPlatformRevisions = new Map();
+        const dashboardSummaryValidationQueue = new Map();
+        let dashboardValidationKickTimer = null;
         let dashboardLazyObserver = null;
         const IMG_CACHE_PREFIX = "dashboard:lastImage:";
         const DASH_PLATFORM_FILTER_STORE = "dashFilter:platform";
@@ -19838,6 +20796,438 @@
         let detailJobsSeedReady = window.__bootManualSeedComplete === true;
         const detailJobsSeedWaiters = [];
 
+        const normalizeDashboardProgress = (raw = null) => {
+          if (!raw || typeof raw !== "object") return null;
+          const total = Math.max(0, Math.floor(Number(raw.total) || 0));
+          const unlocked = Math.max(
+            0,
+            Math.min(
+              total || Number.MAX_SAFE_INTEGER,
+              Math.floor(Number(raw.unlocked) || 0),
+            ),
+          );
+          const pct = Math.max(
+            0,
+            Math.min(
+              100,
+              Number.isFinite(Number(raw.pct))
+                ? Number(raw.pct)
+                : total > 0
+                  ? Math.round((unlocked / total) * 100)
+                  : 0,
+            ),
+          );
+          return {
+            pct,
+            unlocked,
+            total,
+            updated: Math.max(0, Number(raw.updated) || 0),
+            observedAt: Math.max(0, Number(raw.observedAt) || 0),
+          };
+        };
+
+        const normalizeDashboardSummaryEntry = (raw = null) => {
+          const progress = normalizeDashboardProgress(raw);
+          if (!progress) return null;
+          return {
+            ...progress,
+            platform: raw?.platform ? String(raw.platform) : null,
+            appid: raw?.appid != null ? String(raw.appid) : null,
+            verified: raw?.verified === true,
+            source: String(raw?.source || ""),
+          };
+        };
+
+        const getDashboardSummaryConfigRevision = (configName) =>
+          Number(
+            dashboardSummaryConfigRevisions.get(String(configName || "")),
+          ) || 0;
+
+        const bumpDashboardSummaryConfigRevision = (configName) => {
+          const name = String(configName || "").trim();
+          if (!name) return 0;
+          const next = getDashboardSummaryConfigRevision(name) + 1;
+          dashboardSummaryConfigRevisions.set(name, next);
+          return next;
+        };
+
+        const getDashboardSummaryPlatformRevision = (platform) =>
+          Number(
+            dashboardSummaryPlatformRevisions.get(
+              String(platform || "").trim().toLowerCase(),
+            ),
+          ) || 0;
+
+        const bumpDashboardSummaryPlatformRevision = (platform) => {
+          const key = String(platform || "").trim().toLowerCase();
+          if (!key) return 0;
+          const next = getDashboardSummaryPlatformRevision(key) + 1;
+          dashboardSummaryPlatformRevisions.set(key, next);
+          return next;
+        };
+
+        const beginDashboardSummaryObservation = (configName, platform) => ({
+          observedAt: Date.now(),
+          configRevision: getDashboardSummaryConfigRevision(configName),
+          platformRevision: getDashboardSummaryPlatformRevision(platform),
+        });
+
+        const queueDashboardSummaryValidation = (configName, options = {}) => {
+          const name = String(configName || "").trim();
+          if (!name) return false;
+          const previous = dashboardSummaryValidationQueue.get(name);
+          dashboardSummaryValidationQueue.set(name, {
+            clearSchema:
+              options?.clearSchema === true || previous?.clearSchema === true,
+            attempts: options?.resetAttempts === false
+              ? Math.max(0, Number(previous?.attempts) || 0)
+              : 0,
+            nextAttemptAt:
+              options?.resetAttempts === false
+                ? Math.max(0, Number(previous?.nextAttemptAt) || 0)
+                : 0,
+          });
+          return true;
+        };
+
+        const completeDashboardSummaryValidation = (configName) => {
+          const name = String(configName || "").trim();
+          if (!name) return false;
+          return dashboardSummaryValidationQueue.delete(name);
+        };
+
+        const applyDashboardSummarySnapshot = (payload = {}, replace = false) => {
+          const entries = payload?.entries;
+          if (!entries || typeof entries !== "object") return;
+          if (replace) dashboardSummaryCache.clear();
+          for (const [name, rawEntry] of Object.entries(entries)) {
+            const entry = normalizeDashboardSummaryEntry(rawEntry);
+            if (!entry) continue;
+            dashboardSummaryCache.set(name, entry);
+            if (entry.verified === true) {
+              completeDashboardSummaryValidation(name);
+            } else {
+              queueDashboardSummaryValidation(name, { clearSchema: true });
+            }
+          }
+          // A forced snapshot can race the small renderer write debounce. Keep
+          // newer in-flight calculations visible until the main process stores
+          // and broadcasts them.
+          for (const [name, pendingEntry] of dashboardSummaryPendingWrites) {
+            const storedEntry = dashboardSummaryCache.get(name);
+            if (
+              !storedEntry ||
+              Number(pendingEntry?.observedAt || 0) >
+                Number(storedEntry?.observedAt || 0)
+            ) {
+              dashboardSummaryCache.set(name, pendingEntry);
+            } else {
+              dashboardSummaryPendingWrites.delete(name);
+            }
+          }
+        };
+
+        const loadDashboardSummarySnapshot = async (force = false) => {
+          if (!force && dashboardSummaryLoadPromise) {
+            return dashboardSummaryLoadPromise;
+          }
+          dashboardSummaryLoadPromise = Promise.resolve()
+            .then(() => window.api?.loadDashboardSummary?.())
+            .then((payload) => {
+              if (payload?.ok !== false) {
+                applyDashboardSummarySnapshot(payload, true);
+              }
+              return payload || { entries: {} };
+            })
+            .catch(() => ({ ok: false, entries: {} }))
+            .finally(() => {
+              dashboardSummaryLoadPromise = null;
+            });
+          return dashboardSummaryLoadPromise;
+        };
+
+        const collectDashboardLocalStorageEntries = (items = []) => {
+          const entries = {};
+          for (const item of Array.isArray(items) ? items : []) {
+            const name = String(item?.name || "").trim();
+            if (!name) continue;
+            let stored = null;
+            try {
+              stored = JSON.parse(
+                localStorage.getItem(DASH_PROGRESS_PREFIX + name) || "null",
+              );
+            } catch {
+              stored = null;
+            }
+            const progress = normalizeDashboardProgress(stored);
+            if (!progress) continue;
+            entries[name] = {
+              ...progress,
+              platform: item?.platform || null,
+              appid: item?.appid != null ? String(item.appid) : null,
+              verified: false,
+              source: "localStorage-migration",
+            };
+          }
+          return entries;
+        };
+
+        const ensureDashboardSummaryReady = async (items = []) => {
+          await loadDashboardSummarySnapshot();
+          if (dashboardSummaryBootstrapped) return;
+          if (dashboardSummaryBootstrapPromise) {
+            await dashboardSummaryBootstrapPromise;
+            return;
+          }
+          const localEntries = collectDashboardLocalStorageEntries(items);
+          dashboardSummaryBootstrapPromise = Promise.resolve()
+            .then(() => window.api?.bootstrapDashboardSummary?.(localEntries))
+            .then((payload) => {
+              if (payload?.ok !== false) applyDashboardSummarySnapshot(payload);
+            })
+            .catch(() => {})
+            .finally(() => {
+              dashboardSummaryBootstrapped = true;
+              dashboardSummaryBootstrapPromise = null;
+            });
+          await dashboardSummaryBootstrapPromise;
+        };
+
+        const flushDashboardSummaryWrites = () => {
+          dashboardSummaryWriteTimer = null;
+          if (!dashboardSummaryPendingWrites.size) return;
+          const entries = Object.fromEntries(dashboardSummaryPendingWrites);
+          dashboardSummaryPendingWrites.clear();
+          window.api
+            ?.saveDashboardSummaryEntries?.(entries)
+            ?.then?.((payload) => {
+              if (payload?.ok !== false && payload?.entries) {
+                applyDashboardSummarySnapshot({ entries: payload.entries });
+              }
+            })
+            ?.catch?.(() => {});
+        };
+
+        const queueDashboardSummaryWrite = (configName, progress, meta = {}) => {
+          const name = String(configName || "").trim();
+          const normalized = normalizeDashboardProgress(progress);
+          // computeCardProgress intentionally falls back to an all-zero value
+          // on read errors. Do not persist that fallback as authoritative.
+          if (!name || !normalized || normalized.total <= 0) return false;
+          if (
+            meta?.configRevision != null &&
+            Number(meta.configRevision) !==
+              getDashboardSummaryConfigRevision(name)
+          ) {
+            return false;
+          }
+          if (
+            meta?.platformRevision != null &&
+            Number(meta.platformRevision) !==
+              getDashboardSummaryPlatformRevision(meta?.platform)
+          ) {
+            return false;
+          }
+          const entry = {
+            ...normalized,
+            platform: meta?.platform || null,
+            appid: meta?.appid != null ? String(meta.appid) : null,
+            observedAt: Math.max(0, Number(meta?.observedAt) || Date.now()),
+            verified: true,
+            source: "dashboard-compute",
+          };
+          dashboardSummaryCache.set(name, entry);
+          dashboardSummaryPendingWrites.set(name, entry);
+          if (dashboardSummaryWriteTimer) clearTimeout(dashboardSummaryWriteTimer);
+          dashboardSummaryWriteTimer = setTimeout(
+            flushDashboardSummaryWrites,
+            250,
+          );
+          return true;
+        };
+
+        const applyDashboardSummaryEntryToCard = (configName, rawEntry) => {
+          const entry = normalizeDashboardSummaryEntry(rawEntry);
+          if (!entry) return false;
+          const name = String(configName || "").trim();
+          if (!name) return false;
+          dashboardSummaryCache.set(name, entry);
+          if (entry.verified === true) {
+            completeDashboardSummaryValidation(name);
+          } else {
+            queueDashboardSummaryValidation(name, { clearSchema: true });
+          }
+          try {
+            localStorage.setItem(
+              DASH_PROGRESS_PREFIX + name,
+              JSON.stringify(normalizeDashboardProgress(entry)),
+            );
+          } catch {}
+          const card = gridEl?.querySelector(
+            `.dash-card[data-name="${CSS.escape(name)}"]`,
+          );
+          if (!card) return false;
+          const bar = card.querySelector(".dash-progressbar > span");
+          const pill = card.querySelector(".dash-progresspill");
+          if (bar) bar.style.width = `${entry.pct}%`;
+          if (pill) {
+            pill.textContent = tUiFmt(
+              "dashboardCompletePct",
+              { pct: entry.pct },
+              `${entry.pct}% Complete`,
+            );
+          }
+          card.dataset.pct = String(entry.pct);
+          card.dataset.unlocked = String(entry.unlocked);
+          card.dataset.total = String(entry.total);
+          card.dataset.updated = String(entry.updated || 0);
+          return true;
+        };
+
+        const refreshDashboardCardsFromSummary = async (
+          reason,
+          options = {},
+        ) => {
+          const snapshot = options?.skipLoad
+            ? options?.snapshot
+            : await loadDashboardSummarySnapshot(true);
+          if (snapshot?.ok === false) return false;
+          if (!window.__dashboardOpen) {
+            window.__dashboardNeedsRebuild = true;
+            return false;
+          }
+          let changedVisibleCard = false;
+          for (const [name, entry] of dashboardSummaryCache) {
+            if (entry?.verified !== true) continue;
+            if (applyDashboardSummaryEntryToCard(name, entry)) {
+              changedVisibleCard = true;
+            }
+          }
+          // A new or invalidated entry may not yet be represented by a verified
+          // summary row. Queue only those missing cards for the existing
+          // bounded poller instead of forcing one synchronous full pass.
+          for (const card of Array.from(
+            gridEl?.querySelectorAll(".dash-card") || [],
+          )) {
+            const name = String(card.getAttribute("data-name") || "").trim();
+            if (!name) continue;
+            const entry = dashboardSummaryCache.get(name);
+            if (entry?.verified === true) continue;
+            queueDashboardSummaryValidation(name, {
+              resetAttempts: false,
+            });
+          }
+          if (dashboardSummaryValidationQueue.size) {
+            scheduleDashboardValidationPoll(0);
+          }
+          if (changedVisibleCard) {
+            requestDashboardSortAndFilter({
+              reason: reason || "dashboard-summary-refresh",
+            });
+          }
+          return changedVisibleCard;
+        };
+
+        const refreshDashboardCardsTargeted = async (
+          configNames,
+          reason,
+        ) => {
+          const names = Array.from(
+            new Set(
+              (Array.isArray(configNames) ? configNames : [configNames])
+                .map((name) => String(name || "").trim())
+                .filter(Boolean),
+            ),
+          );
+          if (!names.length) return false;
+          if (!window.__dashboardOpen) {
+            window.__dashboardNeedsRebuild = true;
+            return false;
+          }
+          let changedVisibleCard = false;
+          let processed = 0;
+          for (const name of names) {
+            try {
+              const refreshed = await refreshDashboardCardProgress(name, {
+                skipSort: true,
+                reason: reason || "dashboard-targeted-refresh",
+              });
+              if (refreshed) {
+                completeDashboardSummaryValidation(name);
+                changedVisibleCard = true;
+              } else {
+                queueDashboardSummaryValidation(name, {
+                  resetAttempts: false,
+                });
+              }
+            } catch {
+              queueDashboardSummaryValidation(name, {
+                resetAttempts: false,
+              });
+            }
+            processed += 1;
+            if (processed % 20 === 0) {
+              await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+          }
+          if (dashboardSummaryValidationQueue.size) {
+            scheduleDashboardValidationPoll(0);
+          }
+          if (changedVisibleCard) {
+            requestDashboardSortAndFilter({
+              reason: reason || "dashboard-targeted-refresh",
+            });
+          }
+          return changedVisibleCard;
+        };
+
+        window.api?.on?.("dashboard:summary-updated", (payload = {}) => {
+          let changedVisibleCard = false;
+          let hasInvalidatedNames = false;
+          for (const [name, rawEntry] of Object.entries(
+            payload?.entries || {},
+          )) {
+            const entry = normalizeDashboardSummaryEntry(rawEntry);
+            if (!entry) continue;
+            if (entry.verified !== true) {
+              bumpDashboardSummaryConfigRevision(name);
+            }
+            const pendingEntry = dashboardSummaryPendingWrites.get(name);
+            if (
+              pendingEntry &&
+              Number(pendingEntry.observedAt || 0) >
+                Number(entry.observedAt || 0)
+            ) {
+              continue;
+            }
+            dashboardSummaryPendingWrites.delete(name);
+            if (applyDashboardSummaryEntryToCard(name, entry)) {
+              changedVisibleCard = true;
+            }
+            if (entry.verified !== true) hasInvalidatedNames = true;
+          }
+          for (const rawName of Array.isArray(payload?.removed)
+            ? payload.removed
+            : []) {
+            const name = String(rawName || "").trim();
+            bumpDashboardSummaryConfigRevision(name);
+            dashboardSummaryCache.delete(name);
+            dashboardSummaryPendingWrites.delete(name);
+            completeDashboardSummaryValidation(name);
+            try {
+              localStorage.removeItem(DASH_PROGRESS_PREFIX + name);
+            } catch {}
+          }
+          if (changedVisibleCard && window.__dashboardOpen) {
+            requestDashboardSortAndFilter({
+              reason: "dashboard-summary-updated",
+            });
+          }
+          if (hasInvalidatedNames && window.__dashboardOpen) {
+            scheduleDashboardValidationPoll(0);
+          }
+        });
+
         const resolveDetailJobsSeedWaiters = () => {
           while (detailJobsSeedWaiters.length) {
             const resolve = detailJobsSeedWaiters.shift();
@@ -19853,23 +21243,20 @@
           resolveDetailJobsSeedWaiters();
         };
 
-        const waitForDetailJobsSeedReady = async (timeoutMs = 20000) => {
+        const waitForDetailJobsSeedReady = async () => {
           if (detailJobsSeedReady || window.__bootManualSeedComplete === true) {
             detailJobsSeedReady = true;
             return;
           }
-          const ms = Math.max(0, Number(timeoutMs) || 0);
           await new Promise((resolve) => {
             let done = false;
             const finish = () => {
               if (done) return;
               done = true;
-              if (timer) clearTimeout(timer);
               const idx = detailJobsSeedWaiters.indexOf(finish);
               if (idx >= 0) detailJobsSeedWaiters.splice(idx, 1);
               resolve();
             };
-            const timer = setTimeout(finish, ms);
             detailJobsSeedWaiters.push(finish);
           });
           if (window.__bootManualSeedComplete === true) {
@@ -21121,6 +22508,7 @@
             return;
           }
           dashboard.classList.add("open");
+          scheduleDashSize();
           document.body.style.overflow = "hidden";
           window.__dashboardOpen = true;
           try {
@@ -21232,11 +22620,15 @@
         const DASH_POLL_SLOW_MS = 12000;
         const DASH_POLL_BATCH_SIZE = 20;
         const DASH_POLL_YIELD_MS = 0;
+        const DASH_POLL_SAFETY_MS = 60000;
+        const DASH_POLL_SAFETY_BATCH_SIZE = 40;
         let __dashboardPollId = null;
         let __dashboardPollActive = false;
         let __dashboardPollPaused = false;
         let __dashboardPollInterval = DASH_POLL_DEFAULT_MS;
         let __dashboardPollSkipped = false;
+        let __dashboardSafetyValidationAt = Date.now();
+        let __dashboardSafetyCursor = 0;
         window.__notificationBusy = false;
         async function yieldDashboardPoll() {
           if (DASH_POLL_YIELD_MS > 0) {
@@ -21247,70 +22639,156 @@
           }
           await new Promise((resolve) => setTimeout(resolve, 0));
         }
+        async function runDashboardPollCycle() {
+          if (__dashboardPollActive) return;
+          __dashboardPollActive = true;
+          try {
+            if (!window.__dashboardOpen || window.__notificationBusy) {
+              __dashboardPollSkipped = true;
+              return;
+            }
+
+            let anyChange = false;
+            let processed = 0;
+            const now = Date.now();
+            const pendingEntries = Array.from(
+              dashboardSummaryValidationQueue.entries(),
+            );
+            for (const [cfgName, state] of pendingEntries) {
+              if (processed >= DASH_POLL_BATCH_SIZE) break;
+              if (!window.__dashboardOpen || window.__notificationBusy) {
+                __dashboardPollSkipped = true;
+                break;
+              }
+              if (Number(state?.nextAttemptAt || 0) > now) continue;
+              const card = gridEl?.querySelector(
+                `.dash-card[data-name="${CSS.escape(cfgName)}"]`,
+              );
+              if (!card) {
+                completeDashboardSummaryValidation(cfgName);
+                continue;
+              }
+
+              try {
+                const refreshed = await refreshDashboardCardProgress(cfgName, {
+                  clearSchema: state?.clearSchema === true,
+                  skipSort: true,
+                  reason: "dashboard-summary-invalidated",
+                });
+                const verified =
+                  dashboardSummaryCache.get(cfgName)?.verified === true;
+                const currentValidation =
+                  dashboardSummaryValidationQueue.get(cfgName);
+                if (refreshed && verified) {
+                  if (currentValidation === state) {
+                    completeDashboardSummaryValidation(cfgName);
+                  }
+                  anyChange = true;
+                } else if (currentValidation === state) {
+                  const attempts = Math.max(0, Number(state?.attempts) || 0) + 1;
+                  dashboardSummaryValidationQueue.set(cfgName, {
+                    clearSchema: state?.clearSchema === true,
+                    attempts,
+                    nextAttemptAt:
+                      Date.now() +
+                      Math.min(60000, 4000 * 2 ** (attempts - 1)),
+                  });
+                }
+              } catch {
+                if (dashboardSummaryValidationQueue.get(cfgName) === state) {
+                  const attempts =
+                    Math.max(0, Number(state?.attempts) || 0) + 1;
+                  dashboardSummaryValidationQueue.set(cfgName, {
+                    clearSchema: state?.clearSchema === true,
+                    attempts,
+                    nextAttemptAt:
+                      Date.now() +
+                      Math.min(60000, 4000 * 2 ** (attempts - 1)),
+                  });
+                }
+              }
+              processed += 1;
+              await yieldDashboardPoll();
+            }
+
+            if (anyChange) {
+              try {
+                window.applyDashboardSortAndFilter?.();
+              } catch {}
+            }
+
+            if (
+              now - __dashboardSafetyValidationAt >= DASH_POLL_SAFETY_MS &&
+              typeof window.api?.validateDashboardSummary === "function"
+            ) {
+              __dashboardSafetyValidationAt = now;
+              const names = Array.from(
+                gridEl?.querySelectorAll(".dash-card") || [],
+                (card) => String(card.getAttribute("data-name") || "").trim(),
+              ).filter(Boolean);
+              if (names.length) {
+                const count = Math.min(
+                  DASH_POLL_SAFETY_BATCH_SIZE,
+                  names.length,
+                );
+                const start = __dashboardSafetyCursor % names.length;
+                const batch = Array.from(
+                  { length: count },
+                  (_unused, offset) => names[(start + offset) % names.length],
+                );
+                __dashboardSafetyCursor = (start + count) % names.length;
+                await window.api
+                  .validateDashboardSummary(batch)
+                  .catch(() => {});
+              }
+            }
+
+            // after a slow cycle, return to default cadence
+            if (
+              __dashboardPollInterval !== DASH_POLL_DEFAULT_MS &&
+              !__dashboardPollPaused
+            ) {
+              stopDashboardPoll();
+              __dashboardPollInterval = DASH_POLL_DEFAULT_MS;
+              startDashboardPoll();
+            }
+          } catch (e) {
+            console.error(
+              tUi("log.dashboardPollError", "Dashboard poll error:"),
+              e,
+            );
+          } finally {
+            __dashboardPollActive = false;
+          }
+        }
+        function scheduleDashboardValidationPoll(delayMs = 0) {
+          if (
+            dashboardValidationKickTimer ||
+            __dashboardPollPaused ||
+            !window.__dashboardOpen
+          ) {
+            return;
+          }
+          dashboardValidationKickTimer = setTimeout(() => {
+            dashboardValidationKickTimer = null;
+            runDashboardPollCycle().catch(() => {});
+          }, Math.max(0, Number(delayMs) || 0));
+        }
         function startDashboardPoll() {
           if (__dashboardPollPaused) return;
           if (__dashboardPollId) return;
-          __dashboardPollId = setInterval(async () => {
-            if (__dashboardPollActive) return;
-            __dashboardPollActive = true;
-            try {
-              if (!window.__dashboardOpen || window.__notificationBusy) {
-                __dashboardPollSkipped = true;
-                return;
-              }
-              let anyChange = false;
-              const cards = Array.from(gridEl.querySelectorAll(".dash-card"));
-              let processed = 0;
-              for (const card of cards) {
-                if (!window.__dashboardOpen || window.__notificationBusy) {
-                  __dashboardPollSkipped = true;
-                  break;
-                }
-                const cfgName = card.getAttribute("data-name");
-                if (!cfgName) continue;
-                try {
-                  const { pct } = await computeCardProgress(cfgName);
-                  const key = `dashboard:lastProgress:${cfgName}`;
-                  const prev = JSON.parse(localStorage.getItem(key) || "null");
-                  const prevPct =
-                    prev && typeof prev.pct === "number" ? prev.pct : null;
-                  if (prevPct === null || prevPct !== pct) {
-                    await updateCardProgressUI(card, cfgName);
-                    anyChange = true;
-                  }
-                } catch (e) {
-                  // ignore per-card errors
-                }
-                processed += 1;
-                if (processed % DASH_POLL_BATCH_SIZE === 0) {
-                  await yieldDashboardPoll();
-                }
-              }
-              if (anyChange) {
-                try {
-                  window.applyDashboardSortAndFilter?.();
-                } catch (e) {}
-              }
-              // after a slow cycle, return to default cadence
-              if (
-                __dashboardPollInterval !== DASH_POLL_DEFAULT_MS &&
-                !__dashboardPollPaused
-              ) {
-                stopDashboardPoll();
-                __dashboardPollInterval = DASH_POLL_DEFAULT_MS;
-                startDashboardPoll();
-              }
-            } catch (e) {
-              console.error(
-                tUi("log.dashboardPollError", "Dashboard poll error:"),
-                e,
-              );
-            } finally {
-              __dashboardPollActive = false;
-            }
+          __dashboardPollId = setInterval(() => {
+            runDashboardPollCycle().catch(() => {});
           }, __dashboardPollInterval);
+          if (dashboardSummaryValidationQueue.size) {
+            scheduleDashboardValidationPoll(0);
+          }
         }
         function stopDashboardPoll() {
+          if (dashboardValidationKickTimer) {
+            clearTimeout(dashboardValidationKickTimer);
+            dashboardValidationKickTimer = null;
+          }
           if (!__dashboardPollId) return;
           clearInterval(__dashboardPollId);
           __dashboardPollId = null;
@@ -22530,6 +24008,7 @@
             // load configs and enrich with basic metadata
             let items = normalizeConfigList(await window.api.loadConfigs());
             cacheConfigMeta(items);
+            await ensureDashboardSummaryReady(items);
             if (!blacklistState.showBlacklisted) {
               items = items.filter(
                 (cfg) => !isAppIdInBlacklist(cfg.appid, cfg.platform),
@@ -22544,11 +24023,13 @@
               } catch {
                 stored = null;
               }
+              const summary = dashboardSummaryCache.get(it.name) || null;
+              const preferredProgress = summary || stored;
               const normalized = {
-                pct: Number(stored?.pct) || 0,
-                unlocked: Number(stored?.unlocked) || 0,
-                total: Number(stored?.total) || 0,
-                updated: Number(stored?.updated) || 0,
+                pct: Number(preferredProgress?.pct) || 0,
+                unlocked: Number(preferredProgress?.unlocked) || 0,
+                total: Number(preferredProgress?.total) || 0,
+                updated: Number(preferredProgress?.updated) || 0,
               };
               const customCoverPath = String(it.custom_cover_path || "").trim();
               const imgCacheKey = IMG_CACHE_PREFIX + it.name;
@@ -22707,7 +24188,7 @@
             restoreDashboardScrollAnchor(scrollAnchor);
 
             (async () => {
-              await waitForDetailJobsSeedReady(20000);
+              await waitForDetailJobsSeedReady();
               const resolved = await runWithBatching(
                 items,
                 DASH_DETAIL_BATCH_SIZE,
@@ -22857,11 +24338,31 @@
                     );
                   }
 
-                  const progress = await computeCardProgress(it.name);
+                  const cachedSummary = dashboardSummaryCache.get(it.name);
+                  const summaryObservation = cachedSummary?.verified
+                    ? null
+                    : beginDashboardSummaryObservation(it.name, platform);
+                  const progress = cachedSummary?.verified
+                    ? normalizeDashboardProgress(cachedSummary)
+                    : await computeCardProgress(it.name);
+                  if (progress?.valid === false) {
+                    queueDashboardSummaryValidation(it.name, {
+                      resetAttempts: false,
+                    });
+                    scheduleDashboardValidationPoll(0);
+                    return meta.data;
+                  }
                   localStorage.setItem(
                     DASH_PROGRESS_PREFIX + it.name,
                     JSON.stringify(progress),
                   );
+                  if (!cachedSummary?.verified) {
+                    queueDashboardSummaryWrite(it.name, progress, {
+                      platform,
+                      appid,
+                      ...summaryObservation,
+                    });
+                  }
 
                   meta.bar.style.width = `${progress.pct}%`;
                   meta.pill.textContent = tUiFmt(
@@ -23355,9 +24856,7 @@
                   result?.success ? "#4CAF50" : "#f44336",
                 );
                 if (result?.success && configList?.value === target.name) {
-                  const lang =
-                    document.getElementById("languageSelect")?.value ||
-                    "english";
+                  const lang = getCurrentAchievementLanguage();
                   try {
                     await buildMainAchievementsTable(target.name, lang);
                   } catch (err) {
@@ -23427,6 +24926,9 @@
           const achData = await window.api.loadAchievementData(cfgName, {
             includeRarity: false,
           });
+          if (achData?.error) {
+            throw new Error(String(achData.error));
+          }
           const list = Array.isArray(achData?.achievements)
             ? achData.achievements
             : [];
@@ -23447,7 +24949,16 @@
             cfgName,
             useCacheOnly ? { cacheOnly: true } : {},
           );
-          const savedMap = saved?.achievements || {};
+          const savedMap =
+            saved?.achievements && typeof saved.achievements === "object"
+              ? saved.achievements
+              : {};
+          // Several platforms intentionally return a usable persisted cache
+          // together with a source-unavailable warning. Reject only an empty
+          // error fallback; otherwise the cached achievements remain valid.
+          if (saved?.error && Object.keys(savedMap).length === 0) {
+            throw new Error(String(saved.error));
+          }
           dashboardSavedCache.set(cfgName, savedMap);
           return savedMap;
         }
@@ -23458,8 +24969,15 @@
               getSchemaCached(cfgName),
               getSavedCached(cfgName),
             ]);
-            if (!list.length)
-              return { pct: 0, unlocked: 0, total: 0, updated: 0 };
+            if (!list.length) {
+              return {
+                pct: 0,
+                unlocked: 0,
+                total: 0,
+                updated: 0,
+                valid: false,
+              };
+            }
 
             let unlocked = 0;
             let maxTs = 0;
@@ -23477,17 +24995,29 @@
               unlocked,
               total: list.length,
               updated: maxTs,
+              valid: true,
             };
           } catch {
-            return { pct: 0, unlocked: 0, total: 0, updated: 0 };
+            return {
+              pct: 0,
+              unlocked: 0,
+              total: 0,
+              updated: 0,
+              valid: false,
+            };
           }
         }
 
         async function updateCardProgressUI(cardEl, cfgName, options = {}) {
+          const summaryObservation = beginDashboardSummaryObservation(
+            cfgName,
+            cardEl?.dataset?.platform,
+          );
           const progress =
             options?.progress && typeof options.progress === "object"
               ? options.progress
               : await computeCardProgress(cfgName);
+          if (progress?.valid === false) return progress;
           const { pct, unlocked, total, updated } = progress;
           const bar = cardEl.querySelector(".dash-progressbar > span");
           const pill = cardEl.querySelector(".dash-progresspill");
@@ -23513,6 +25043,15 @@
               JSON.stringify({ pct, unlocked, total, updated }),
             );
           } catch {}
+          const summaryQueued = queueDashboardSummaryWrite(
+            cfgName,
+            { pct, unlocked, total, updated },
+            {
+              platform: cardEl?.dataset?.platform || null,
+              appid: cardEl?.dataset?.appid || null,
+              ...summaryObservation,
+            },
+          );
 
           const st =
             typeof getMultiSortState === "function"
@@ -23527,6 +25066,7 @@
               reason: options?.reason || "card-progress-update",
             });
           }
+          return { ...progress, summaryQueued };
         }
 
         try {
@@ -23551,8 +25091,15 @@
             window.__dashboardNeedsRebuild = true;
             return false;
           }
-          await updateCardProgressUI(card, safeName);
-          return true;
+          const progress = await updateCardProgressUI(card, safeName, {
+            skipSort: options?.skipSort === true,
+            reason: options?.reason || "dashboard-card-refresh",
+          });
+          return (
+            progress?.valid !== false &&
+            Number(progress?.total) > 0 &&
+            progress?.summaryQueued === true
+          );
         }
 
         function clearDashboardSavedCache(cfgName) {
@@ -23609,6 +25156,9 @@
         function clearDashboardProgressSnapshot(cfgName) {
           if (!cfgName) return;
           clearDashboardSavedCache(cfgName);
+          dashboardSummaryCache.delete(cfgName);
+          dashboardSummaryPendingWrites.delete(cfgName);
+          completeDashboardSummaryValidation(cfgName);
           try {
             localStorage.removeItem(`${DASH_PROGRESS_PREFIX}${cfgName}`);
           } catch {}
@@ -23676,11 +25226,17 @@
                 if (!cfgName) continue;
                 try {
                   const progress = await computeCardProgress(cfgName);
-                  await updateCardProgressUI(card, cfgName, {
+                  const refreshed = await updateCardProgressUI(card, cfgName, {
                     progress,
                     skipSort: true,
                   });
-                  anyChange = true;
+                  if (refreshed?.valid === false) {
+                    queueDashboardSummaryValidation(cfgName, {
+                      resetAttempts: false,
+                    });
+                  } else {
+                    anyChange = true;
+                  }
                 } catch {}
                 processed += 1;
                 if (processed % DASH_POLL_BATCH_SIZE === 0) {
@@ -23694,6 +25250,9 @@
                   });
                 } catch {}
               }
+              if (dashboardSummaryValidationQueue.size) {
+                scheduleDashboardValidationPoll(0);
+              }
             }
           })().finally(() => {
             dashboardProgressRefreshPromise = null;
@@ -23706,6 +25265,8 @@
           window.__clearDashboardCachesFor = clearDashboardCachesFor;
           window.refreshDashboardCardProgress = refreshDashboardCardProgress;
           window.refreshDashboardProgress = refreshDashboardProgress;
+          window.refreshDashboardCardsFromSummary =
+            refreshDashboardCardsFromSummary;
           window.refreshSteamOfficialDashboardAfterAccountChange =
             refreshSteamOfficialDashboardAfterAccountChange;
         } catch {}
@@ -23714,9 +25275,14 @@
           const sel = document.getElementById("configList");
           if (!sel) return false;
 
-          const opt = Array.from(sel.options).find(
-            (o) => o.value === name || o.text.trim() === name,
-          );
+          const options = Array.from(sel.options);
+          let opt = options.find((o) => o.value === name);
+          if (!opt) {
+            const displayMatches = options.filter(
+              (o) => o.text.trim() === name,
+            );
+            if (displayMatches.length === 1) opt = displayMatches[0];
+          }
           if (opt) {
             sel.value = opt.value;
             sel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -23745,9 +25311,14 @@
               : function (name) {
                   const sel = document.getElementById("configList");
                   if (!sel) return false;
-                  const opt = Array.from(sel.options).find(
-                    (o) => o.value === name || o.text.trim() === name,
-                  );
+                  const options = Array.from(sel.options);
+                  let opt = options.find((o) => o.value === name);
+                  if (!opt) {
+                    const displayMatches = options.filter(
+                      (o) => o.text.trim() === name,
+                    );
+                    if (displayMatches.length === 1) opt = displayMatches[0];
+                  }
                   if (opt) {
                     sel.value = opt.value;
                     sel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -23770,8 +25341,7 @@
               configName: safeName,
               allowBlacklistedSelection: blocked,
             });
-            const lang =
-              document.getElementById("languageSelect")?.value || "english";
+            const lang = getCurrentAchievementLanguage();
             await buildMainAchievementsTable(safeName, lang).catch(() => {});
           }
 
@@ -23900,28 +25470,6 @@
           );
         }
 
-        const DASH_SORT_IGNORED_ARTICLES = new Set(["a", "an", "the"]);
-
-        function shouldIgnoreLeadingArticlesInDashboardSort() {
-          const prefs =
-            typeof getCachedPreferences === "function"
-              ? getCachedPreferences()
-              : {};
-          if (
-            prefs &&
-            Object.prototype.hasOwnProperty.call(
-              prefs,
-              "ignoreLeadingArticlesSort",
-            )
-          ) {
-            return prefs.ignoreLeadingArticlesSort !== false;
-          }
-          const checkbox = document.getElementById(
-            "settings-ignoreLeadingArticlesSortCheckbox",
-          );
-          return checkbox ? checkbox.checked !== false : true;
-        }
-
         function shouldHideZeroCompletionGamesInDashboard() {
           const prefs =
             typeof getCachedPreferences === "function"
@@ -23940,26 +25488,6 @@
             "settings-hideZeroCompletionGamesCheckbox",
           );
           return checkbox ? checkbox.checked === true : false;
-        }
-
-        function normalizeDashboardTitleForSort(
-          rawTitle,
-          { ignoreLeadingArticles = true } = {},
-        ) {
-          const title = String(rawTitle || "")
-            .trim()
-            .replace(/\s+/g, " ");
-          if (!title || !ignoreLeadingArticles) return title;
-          const match = title.match(/^(the|an|a)\s+(.+)$/i);
-          if (!match) return title;
-          const article = String(match[1] || "")
-            .trim()
-            .toLowerCase();
-          const body = String(match[2] || "").trim();
-          if (!body || !DASH_SORT_IGNORED_ARTICLES.has(article)) {
-            return title;
-          }
-          return `${body}, ${article}`;
         }
 
         function applyDashboardSortAndFilter(options = {}) {
@@ -24015,7 +25543,7 @@
           const pri = ["updated", "progress", "name"];
           const mult = (k) => (st[k] === "asc" ? 1 : st[k] === "desc" ? -1 : 0);
           const ignoreLeadingArticles =
-            shouldIgnoreLeadingArticlesInDashboardSort();
+            shouldIgnoreLeadingArticlesInGameSort();
           const sortTitleCache = new WeakMap();
           const getRawTitle = (card) =>
             card.getAttribute("data-display") ||
@@ -24025,7 +25553,7 @@
             if (sortTitleCache.has(card)) {
               return sortTitleCache.get(card);
             }
-            const normalized = normalizeDashboardTitleForSort(
+            const normalized = normalizeGameTitleForSort(
               getRawTitle(card),
               {
                 ignoreLeadingArticles,
@@ -25121,12 +26649,12 @@
             window.__dashboardNeedsRebuild = true;
           } else if (
             window.__dashboardReady === true &&
-            typeof refreshDashboardProgress === "function"
+            typeof refreshDashboardCardsFromSummary === "function"
           ) {
             scheduleIdle(() => {
-              refreshDashboardProgress({
-                reason: "boot-manual-seed-complete",
-              }).catch(() => {});
+              refreshDashboardCardsFromSummary(
+                "boot-manual-seed-complete",
+              ).catch(() => {});
             });
           }
         });
@@ -25149,7 +26677,7 @@
                 ) {
                   await buildMainAchievementsTable(
                     selectedName,
-                    selectedLanguage || "english",
+                    getCurrentAchievementLanguage(),
                   );
                 }
               } catch {}
@@ -25160,12 +26688,12 @@
             }
             if (
               window.__dashboardReady === true &&
-              typeof refreshDashboardProgress === "function"
+              typeof refreshDashboardCardsFromSummary === "function"
             ) {
               scheduleIdle(() => {
-                refreshDashboardProgress({
-                  reason: "epic-official-background-ready",
-                }).catch(() => {});
+                refreshDashboardCardsFromSummary(
+                  "epic-official-background-ready",
+                ).catch(() => {});
               });
               return;
             }
@@ -25195,6 +26723,8 @@
           const cfg = payload?.configName;
           if (cfg) {
             clearDashboardSavedCache(cfg);
+            queueDashboardSummaryValidation(cfg);
+            if (window.__dashboardOpen) scheduleDashboardValidationPoll(0);
           }
         });
         window.api?.on?.("configs:changed", () => {
@@ -25203,17 +26733,72 @@
           dashboardSchemaCache.clear();
           dashboardSavedCache.clear();
         });
-        window.api?.on?.("dashboard:refresh", () => {
-          if (typeof refreshDashboardProgress === "function") {
-            scheduleIdle(() => {
-              refreshDashboardProgress({ reason: "dashboard-refresh" }).catch(
-                () => {},
-              );
-            });
-          } else {
-            dashboardSavedCache.clear();
-            window.__dashboardNeedsRebuild = true;
-          }
+        window.api?.on?.("dashboard:refresh", (payload = {}) => {
+          const requestedMode = String(payload?.mode || "full")
+            .trim()
+            .toLowerCase();
+          const mode = ["summary", "targeted", "full"].includes(requestedMode)
+            ? requestedMode
+            : "full";
+          const reason = String(payload?.reason || "dashboard-refresh");
+          const configNames = Array.from(
+            new Set(
+              (Array.isArray(payload?.configNames)
+                ? payload.configNames
+                : payload?.configName != null
+                  ? [payload.configName]
+                  : []
+              )
+                .map((name) => String(name || "").trim())
+                .filter(Boolean),
+            ),
+          );
+          scheduleIdle(() => {
+            const runRefresh = async () => {
+              if (mode === "full") {
+                if (typeof refreshDashboardProgress === "function") {
+                  await refreshDashboardProgress({ reason });
+                  return;
+                }
+                dashboardSavedCache.clear();
+                window.__dashboardNeedsRebuild = true;
+                return;
+              }
+
+              if (mode === "summary") {
+                const snapshot = await loadDashboardSummarySnapshot(true);
+                if (snapshot?.ok === false) {
+                  // Keep the previous behavior as a recovery path when the
+                  // persisted summary is unavailable or cannot be parsed.
+                  if (typeof refreshDashboardProgress === "function") {
+                    await refreshDashboardProgress({
+                      reason: `${reason}:summary-fallback`,
+                    });
+                  } else {
+                    dashboardSavedCache.clear();
+                    window.__dashboardNeedsRebuild = true;
+                  }
+                  return;
+                }
+                await refreshDashboardCardsFromSummary(reason, {
+                  skipLoad: true,
+                  snapshot,
+                });
+              }
+
+              if (configNames.length) {
+                await refreshDashboardCardsTargeted(configNames, reason);
+              } else if (mode === "targeted") {
+                // Invalid targeted payloads retain the safe legacy behavior.
+                if (typeof refreshDashboardProgress === "function") {
+                  await refreshDashboardProgress({
+                    reason: `${reason}:target-missing`,
+                  });
+                }
+              }
+            };
+            runRefresh().catch(() => {});
+          });
         });
       })();
 
@@ -25279,25 +26864,6 @@
 
         return viewport;
       };
-      function throttle(fn, wait = 100) {
-        let timeout = null;
-        let last = 0;
-        const invoke = (...args) => {
-          last = performance.now();
-          timeout = null;
-          fn(...args);
-        };
-        return (...args) => {
-          const elapsed = performance.now() - last;
-          if (elapsed >= wait) {
-            if (timeout) clearTimeout(timeout);
-            invoke(...args);
-            return;
-          }
-          if (timeout) clearTimeout(timeout);
-          timeout = setTimeout(() => invoke(...args), wait - elapsed);
-        };
-      }
       function computeDashSize() {
         const { width: vw, height: vh } = getViewportDimensions();
         const baseW = Math.min(
@@ -25335,15 +26901,14 @@
         const panel = document.getElementById("dashboardPanel");
         if (!panel) return;
 
-        const applyDashSizeThrottled = throttle(applyDashSize, 120);
         const { width: vw, height: vh } = getViewportDimensions();
 
         const baseW = __isMaximized
           ? vw
-          : Math.min(1200, Math.max(820, 0.94 * vw));
+          : Math.max(820, 0.94 * vw);
         const baseH = __isMaximized
           ? vh
-          : Math.min(980, Math.max(520, 0.86 * vh));
+          : Math.max(520, 0.86 * vh);
         let factor = 1;
         const zoom = Math.max(__userZoom || 1, 0.01);
         if (Math.abs(zoom - 1) > 0.001) {
@@ -25367,8 +26932,8 @@
           ? Math.max(85, vh * 0.04)
           : Math.max(12, vh * 0.02);
 
-        const availableW = Math.max(0, vw - padX);
-        const availableH = Math.max(0, vh - padY);
+        const availableW = Math.max(0, Math.floor(vw - padX));
+        const availableH = Math.max(0, Math.floor(vh - padY));
 
         let width = Math.min(Math.round(baseW * factor), availableW);
         let height = Math.min(Math.round(baseH * factor), availableH);
@@ -25384,16 +26949,59 @@
           height = Math.min(height, maxNormalHeight);
         }
 
+        width = Math.max(0, Math.floor(width));
+        height = Math.max(0, Math.floor(height));
+
+        const overlay = document.getElementById("dashboardOverlay");
+        const root = document.documentElement;
+        const topbarHeight =
+          Number.parseFloat(
+            getComputedStyle(root).getPropertyValue("--topbar-height"),
+          ) || 0;
+        const hostWidth = Math.max(
+          0,
+          Math.floor(overlay?.clientWidth || root?.clientWidth || vw),
+        );
+        const hostHeight = Math.max(
+          0,
+          Math.floor(
+            overlay?.clientHeight ||
+              Math.max(0, (root?.clientHeight || vh) - topbarHeight),
+          ),
+        );
+
+        width = Math.min(width, hostWidth);
+        height = Math.min(height, hostHeight);
+
         panel.style.width = `${width}px`;
         panel.style.height = `${height}px`;
+        panel.style.left = `${Math.max(
+          0,
+          Math.round((hostWidth - width) / 2),
+        )}px`;
+        panel.style.top = `${Math.max(
+          0,
+          Math.round((hostHeight - height) / 2),
+        )}px`;
       }
-      const applyDashSizeThrottled = throttle(applyDashSize, 120);
+      let dashboardLayoutFrame = 0;
+      function scheduleDashSize() {
+        if (dashboardLayoutFrame) {
+          cancelAnimationFrame(dashboardLayoutFrame);
+        }
+        dashboardLayoutFrame = requestAnimationFrame(() => {
+          dashboardLayoutFrame = 0;
+          applyDashSize();
+        });
+      }
       (window.electron?.ipcRenderer?.on || window.api?.on)?.(
         "configs:changed",
         async () => {
           try {
             const cfgs = await window.api.loadConfigs();
             const normalizedCfgs = normalizeConfigList(cfgs);
+            settingsStatsConfigs = normalizedCfgs;
+            if (settingsStatsActive) renderSettingsStats();
             rememberCoverNamesFromList(normalizedCfgs);
             if (typeof renderConfigs === "function")
               renderConfigs(normalizedCfgs);
@@ -25446,9 +27054,7 @@
           __lastZoomLog = next;
           console.info("zoom:ui", next);
         }
-        refreshDisplayWorkArea();
-        applyDashSize();
-        applyDashSizeThrottled();
+        refreshDisplayWorkArea().finally(scheduleDashSize);
         try {
           __updateAchStatsResponsive?.();
         } catch {}
@@ -25457,9 +27063,7 @@
       window.electron?.ipcRenderer?.on?.("window-state-change", (isMax) => {
         __isMaximized = !!isMax;
         document.body.classList.toggle("window-maximized", __isMaximized);
-        refreshDisplayWorkArea();
-        applyDashSize();
-        applyDashSizeThrottled();
+        refreshDisplayWorkArea().finally(scheduleDashSize);
       });
 
       window.electron?.ipcRenderer?.on?.(
@@ -25467,9 +27071,7 @@
         (isFullscreen) => {
           __isMaximized = !!isFullscreen;
           document.body.classList.toggle("window-maximized", __isMaximized);
-          refreshDisplayWorkArea();
-          applyDashSize();
-          applyDashSizeThrottled();
+          refreshDisplayWorkArea().finally(scheduleDashSize);
         },
       );
 
@@ -25484,20 +27086,18 @@
           document.body.dataset.effectiveZoom = String(
             Math.round((__userZoom || 1) * 100),
           );
-          applyDashSize();
-          applyDashSizeThrottled();
+          scheduleDashSize();
           window.api.setZoom(z);
         });
       }
 
       window.addEventListener("resize", () => {
-        refreshDisplayWorkArea();
-        applyDashSizeThrottled();
+        refreshDisplayWorkArea().finally(scheduleDashSize);
         try {
           __updateAchStatsResponsive?.();
         } catch {}
       });
-      refreshDisplayWorkArea().then(applyDashSize);
+      refreshDisplayWorkArea().finally(scheduleDashSize);
       const dashboard = document.getElementById("dashboardOverlay");
       const dashboardBody = document.getElementById("dashboardBody");
       let dashboardScrollTop = 0;
@@ -25534,8 +27134,7 @@
             __userZoom = Number(prefs?.windowZoomFactor || 1) || 1;
             __effectiveZoom = __userZoom;
           } catch {}
-          applyDashSize();
-          applyDashSizeThrottled();
+          scheduleDashSize();
           try {
             __updateAchStatsResponsive?.();
           } catch {}
@@ -25735,7 +27334,12 @@
                 document.getElementById("scaleSlider")?.value ||
                 1,
             );
-            const lang = prefs.language || window.currentLang || "english";
+            const notificationConfig =
+              configMetaIndex.get(cfg) ||
+              (await window.api.getConfigByName(cfg).catch(() => null));
+            const lang = resolveAchievementLanguageForConfigData(
+              notificationConfig,
+            );
             const newlyEarned = list.filter((achievement) => {
               const state = savedMap?.[achievement.name];
               return state?.earned && !prevNames.includes(achievement.name);
@@ -25786,6 +27390,7 @@
                     progress_is_float: state.progress_is_float || undefined,
                     config_path: achData.config_path,
                     configName: cfg,
+                    language: lang,
                     source: "renderer-file-updated",
                   });
                 }

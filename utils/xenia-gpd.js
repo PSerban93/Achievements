@@ -9,6 +9,8 @@ const STRING_NAMESPACE = 5;
 const IMAGE_NAMESPACE = 2;
 const TITLE_STRING_ID = 0x8000;
 const ACHIEVEMENT_EARNED_FLAG = 0x20000;
+const GPD_ACHIEVEMENT_STRUCT_SIZE = 0x1c;
+const GPD_SYNC_ENTRY_IDS = new Set(["4294967296", "8589934592"]);
 
 const FILETIME_EPOCH_DIFF_MS = 11644473600000n; // 1601 -> 1970
 const DOTNET_EPOCH_DIFF_MS = 62135596800000n; // 0001 -> 1970
@@ -25,23 +27,6 @@ function readUInt64BE(buf, offset) {
   return (BigInt(high) << 32n) | BigInt(low);
 }
 
-function readInt64LE(buf, offset) {
-  const value = buf.readBigInt64LE
-    ? buf.readBigInt64LE(offset)
-    : readUInt64LE(buf, offset);
-  return value;
-}
-
-function readInt64BE(buf, offset) {
-  if (buf.readBigInt64BE) {
-    return buf.readBigInt64BE(offset);
-  }
-  const unsigned = readUInt64BE(buf, offset);
-  return unsigned >= 0x8000000000000000n
-    ? unsigned - 0x10000000000000000n
-    : unsigned;
-}
-
 function decodeUtf16Be(buffer) {
   if (!buffer || buffer.length === 0) return "";
   const swapped = Buffer.from(buffer);
@@ -55,18 +40,22 @@ function decodeUtf16Be(buffer) {
 
 function readUtf16BeNullTerminated(buffer, offset) {
   if (!buffer || offset >= buffer.length) {
-    return { text: "", nextOffset: offset };
+    return { text: "", nextOffset: offset, terminated: false };
   }
   const bytes = [];
   let cursor = offset;
+  let terminated = false;
   while (cursor + 1 < buffer.length) {
     const code = buffer.readUInt16BE(cursor);
     cursor += 2;
-    if (code === 0) break;
+    if (code === 0) {
+      terminated = true;
+      break;
+    }
     bytes.push((code >> 8) & 0xff, code & 0xff);
   }
   const text = decodeUtf16Be(Buffer.from(bytes));
-  return { text, nextOffset: cursor };
+  return { text, nextOffset: cursor, terminated };
 }
 
 function normalizeUnlockTime(raw) {
@@ -205,27 +194,29 @@ function parseXdbfEntries(buffer) {
   return entries;
 }
 
-function parseAchievementPayload(buffer, endian = "le") {
-  if (!buffer || buffer.length < 0x1c) return null;
+function parseAchievementPayload(buffer, endian = "be", entryId = null) {
+  if (!buffer || buffer.length < GPD_ACHIEVEMENT_STRUCT_SIZE) return null;
   const readU32 = endian === "be" ? "readUInt32BE" : "readUInt32LE";
-  const readI32 = endian === "be" ? "readInt32BE" : "readInt32LE";
   const structSize = buffer[readU32](0x00);
-  const startOffset = structSize >= 0x1c ? structSize : 0x1c;
+  const startOffset = GPD_ACHIEVEMENT_STRUCT_SIZE;
   const achievementId = buffer[readU32](0x04);
   const imageId = buffer[readU32](0x08);
-  const gamerscore = buffer[readI32](0x0c);
+  const gamerscore = buffer[readU32](0x0c);
   const flags = buffer[readU32](0x10);
   const unlockRaw =
-    endian === "be" ? readInt64BE(buffer, 0x14) : readInt64LE(buffer, 0x14);
+    endian === "be" ? readUInt64BE(buffer, 0x14) : readUInt64LE(buffer, 0x14);
 
   const nameRes = readUtf16BeNullTerminated(buffer, startOffset);
-  const lockedRes = readUtf16BeNullTerminated(buffer, nameRes.nextOffset);
-  const unlockedRes = readUtf16BeNullTerminated(
+  const unlockedRes = readUtf16BeNullTerminated(buffer, nameRes.nextOffset);
+  const lockedRes = readUtf16BeNullTerminated(
     buffer,
-    lockedRes.nextOffset
+    unlockedRes.nextOffset
   );
 
   return {
+    structSize,
+    payloadLength: buffer.length,
+    entryId: entryId === null || entryId === undefined ? null : String(entryId),
     achievementId,
     imageId,
     gamerscore,
@@ -234,6 +225,8 @@ function parseAchievementPayload(buffer, endian = "le") {
     name: nameRes.text,
     lockedDescription: lockedRes.text,
     unlockedDescription: unlockedRes.text,
+    stringsTerminated:
+      nameRes.terminated && unlockedRes.terminated && lockedRes.terminated,
   };
 }
 
@@ -258,7 +251,8 @@ function parseGpdFile(filePath) {
   for (const entry of entries) {
     const payload = raw.slice(entry.offset, entry.offset + entry.length);
     if (entry.namespace === ACHIEVEMENT_NAMESPACE) {
-      const parsed = parseAchievementPayload(payload, endian);
+      if (GPD_SYNC_ENTRY_IDS.has(String(entry.id))) continue;
+      const parsed = parseAchievementPayload(payload, endian, entry.id);
       if (parsed) achievements.push(parsed);
       continue;
     }
@@ -284,24 +278,40 @@ function normalizeAchievementText(value) {
   return String(value || "").trim();
 }
 
-function isPositiveNumber(value) {
+function isUInt32(value) {
   const n = Number(value);
-  return Number.isFinite(n) && n > 0;
+  return Number.isInteger(n) && n >= 0 && n <= 0xffffffff;
 }
 
 function isValidAchievementPayloadForSchema(achievement) {
   if (!achievement || typeof achievement !== "object") return false;
-  const name = normalizeAchievementText(achievement.name);
-  const lockedDescription = normalizeAchievementText(
-    achievement.lockedDescription
-  );
-  const unlockedDescription = normalizeAchievementText(
-    achievement.unlockedDescription
-  );
-  if (!name || !lockedDescription || !unlockedDescription) return false;
-  if (!isPositiveNumber(achievement.flags)) return false;
-  if (!isPositiveNumber(achievement.imageId)) return false;
-  if (!isPositiveNumber(achievement.achievementId)) return false;
+  if (!isUInt32(achievement.achievementId)) return false;
+  if (!isUInt32(achievement.imageId)) return false;
+  if (!isUInt32(achievement.gamerscore)) return false;
+  if (!isUInt32(achievement.flags)) return false;
+  if (achievement.stringsTerminated === false) return false;
+
+  if (achievement.structSize !== undefined) {
+    const structSize = Number(achievement.structSize);
+    const payloadLength = Number(achievement.payloadLength);
+    if (
+      !Number.isInteger(structSize) ||
+      structSize !== GPD_ACHIEVEMENT_STRUCT_SIZE ||
+      (Number.isFinite(payloadLength) && structSize > payloadLength)
+    ) {
+      return false;
+    }
+  }
+
+  if (achievement.entryId !== null && achievement.entryId !== undefined) {
+    try {
+      if (BigInt(achievement.entryId) !== BigInt(achievement.achievementId)) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -329,7 +339,7 @@ function getValidAchievements(parsed) {
   const byId = new Map();
   for (const achievement of parsed?.achievements || []) {
     if (!isValidAchievementPayloadForSchema(achievement)) continue;
-    const key = String(achievement.achievementId || "").trim();
+    const key = String(achievement.achievementId ?? "").trim();
     if (!key) continue;
     const existing = byId.get(key);
     if (!existing) {
@@ -362,12 +372,14 @@ function buildSchemaFromGpd(parsed, options = {}) {
 
   for (const ach of getValidAchievements(parsed)) {
     const name = String(ach.achievementId);
-    const displayName = normalizeAchievementText(ach.name);
+    const displayName = normalizeAchievementText(ach.name) || name;
     const locked = (ach.lockedDescription || "").trim();
     const unlocked = (ach.unlockedDescription || locked || "").trim();
     const hidden = (ach.flags & 0x8) === 0 ? 1 : 0;
     const description =
-      preferLocked && !hidden ? locked : unlocked || locked || "";
+      preferLocked && !hidden
+        ? locked || unlocked
+        : unlocked || locked || "";
 
     entries.push({
       name,

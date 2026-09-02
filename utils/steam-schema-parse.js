@@ -29,6 +29,10 @@ const SCHEMA_PARSE_MUTABLE_NAMES = [
   "_OUTPUT",
 ];
 
+let bootPreparationPromise = null;
+let bootPreparationResult = null;
+let bootPreparationStatus = "idle";
+
 function normalizeUserDataDir(userDataDir = "") {
   return path.resolve(String(userDataDir || process.cwd()).trim());
 }
@@ -476,6 +480,86 @@ async function ensureSchemaParseRuntimeReady(options = {}) {
   };
 }
 
+function startSchemaParseBootPreparation(options = {}) {
+  if (bootPreparationPromise) return bootPreparationPromise;
+  const startedAt = Date.now();
+  bootPreparationStatus = "preparing";
+  logger.info("schema-parse:boot-preparation:start", {
+    reason: String(options.reason || "boot"),
+  });
+  // Let Electron create/present its first frame before any archive hashing or
+  // runtime migration work begins in the main process.
+  bootPreparationPromise = new Promise((resolve) => setImmediate(resolve))
+    .then(() =>
+      ensureSchemaParseRuntimeReady({
+        ...options,
+        refreshTopOwners: true,
+        reason: options.reason || "boot",
+      }),
+    )
+    .then((runtime) => {
+      bootPreparationResult = {
+        ...runtime,
+        status: "ready",
+        fallback: false,
+      };
+      bootPreparationStatus = "ready";
+      logger.info("schema-parse:boot-preparation:ready", {
+        durationMs: Date.now() - startedAt,
+        fallback: false,
+        topOwnersRefreshed: runtime?.topOwnersRefreshed === true,
+      });
+      return bootPreparationResult;
+    })
+    .catch(async (error) => {
+      // Network refresh failure must not discard a previously valid runtime.
+      // Revalidate the local copy without requesting another forced refresh.
+      try {
+        const runtime = await ensureSchemaParseRuntimeReady({
+          ...options,
+          refreshTopOwners: false,
+          reason: "boot-fallback",
+        });
+        bootPreparationResult = {
+          ...runtime,
+          status: "ready-with-fallback",
+          fallback: true,
+          refreshError: error,
+        };
+        bootPreparationStatus = "ready-with-fallback";
+        logger.warn("schema-parse:boot-preparation:fallback", {
+          durationMs: Date.now() - startedAt,
+          error: error?.message || String(error),
+          topOwnersPath: runtime?.topOwnersPath || null,
+        });
+        return bootPreparationResult;
+      } catch (fallbackError) {
+        bootPreparationStatus = "failed";
+        logger.error("schema-parse:boot-preparation:failed", {
+          durationMs: Date.now() - startedAt,
+          error: error?.message || String(error),
+          fallbackError: fallbackError?.message || String(fallbackError),
+        });
+        bootPreparationPromise = null;
+        throw error;
+      }
+    });
+  return bootPreparationPromise;
+}
+
+async function waitForSchemaParseBootPreparation() {
+  if (!bootPreparationPromise) return null;
+  return await bootPreparationPromise;
+}
+
+function getSchemaParseBootPreparationStatus() {
+  return {
+    status: bootPreparationStatus,
+    result: bootPreparationResult,
+    pending: bootPreparationStatus === "preparing",
+  };
+}
+
 async function runGenerateEmuConfig(runtimeDir, appid) {
   const exePath = resolveSchemaParseExecutable(runtimeDir);
   cleanupGeneratedAppArtifacts(runtimeDir, appid, { log: false });
@@ -885,10 +969,11 @@ async function generateSteamSchemaWithSchemaParse(options = {}) {
     return { ok: false, reason: "invalid-output-dir" };
   }
 
-  const runtime = await ensureSchemaParseRuntimeReady({
+  const preparedRuntime = await waitForSchemaParseBootPreparation();
+  const runtime = preparedRuntime || (await ensureSchemaParseRuntimeReady({
     userDataDir,
     reason: options.reason || "generate",
-  });
+  }));
   return executeSchemaParseSingle(runtime.runtimeDir, appid, outDir);
 }
 
@@ -911,10 +996,11 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
     return { ok: true, results };
   }
 
-  const runtime = await ensureSchemaParseRuntimeReady({
+  const preparedRuntime = await waitForSchemaParseBootPreparation();
+  const runtime = preparedRuntime || (await ensureSchemaParseRuntimeReady({
     userDataDir: normalizeUserDataDir(options.userDataDir),
     reason: options.reason || "generate-batch",
-  });
+  }));
   const chunkedItems = chunkArray(
     normalizedItems,
     options.chunkSize || SCHEMA_PARSE_BATCH_CHUNK_SIZE,
@@ -1068,6 +1154,7 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
 module.exports = {
   TOP_OWNERS_TTL_MS,
   ensureSchemaParseRuntimeReady,
+  getSchemaParseBootPreparationStatus,
   generateSteamSchemaWithSchemaParse,
   generateSteamSchemasWithSchemaParseBatch,
   hasSchemaParseOutputArtifacts,
@@ -1077,4 +1164,6 @@ module.exports = {
   resolveSchemaParseExecutable,
   resolveSchemaParseRuntimeDir,
   resolveSchemaParseSeedArchive,
+  startSchemaParseBootPreparation,
+  waitForSchemaParseBootPreparation,
 };
