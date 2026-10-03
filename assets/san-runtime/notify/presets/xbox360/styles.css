@@ -145,7 +145,13 @@ body[alldetails] .wrapper#achcontent {
     gap: 0;
 }
 
+/* Reserve the icon column even when decoration is disabled. */
+body[nodecoration] .wrapper#achcontent > span {
+    grid-column: 2;
+}
+
 .wrapper#achcontent > span {
+    grid-column: 2;
     font-family: "customfont", "Open Sans", "Roboto";
     /* font-size: calc(1.05rem * var(--fontsize)); */
     font-size: calc(1.25rem * var(--fontsize));

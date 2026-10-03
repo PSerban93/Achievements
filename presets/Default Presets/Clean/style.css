@@ -1,8 +1,3 @@
-@font-face {
-  font-family: "PS5 Font";
-  src: url("ps5-font.ttf");
-}
-
 html,
 body {
   margin: 0;
@@ -10,13 +5,16 @@ body {
   overflow: hidden;
 }
 body {
-  font-family: "PS5 Font", sans-serif;
+  font-family: "Segoe UI", sans-serif;
 }
 
 /* Outer container: fixed position + stable scale (never animated) */
 .ach {
   position: fixed;
   left: 50%;
+  /* Cap the plate to the transparent window so long (localized) titles
+     shrink via ellipsis/marquee instead of overflowing and being clipped */
+  max-width: calc(100vw - 18px);
   /* Stable anchor + scale, independent of animations */
   transform: translate(var(--tx, -50%), var(--offsetY, 0))
     scale(var(--scale, 1));
@@ -58,6 +56,7 @@ body {
 /* Inner wrapper is the visible plate (moves together with text/bg) */
 .ach-inner {
   width: 100%;
+  max-width: 100%;
   box-sizing: border-box;
   padding: 15px 20px;
   background: rgba(0, 0, 0, 0.85);

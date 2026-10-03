@@ -89,6 +89,7 @@ html,body{
 /* --- Content --- */
 .ani_icon{
   width:68px; height:68px;
+  flex: 0 0 68px;
   border-radius:8px;
   background:#000;
   margin-left:16px; margin-right:16px;
@@ -103,7 +104,7 @@ html,body{
 
 .text{
   display:flex; flex-direction:column; gap:2px;
-  color:#fff; min-width:0;
+  color:#fff; min-width:0; flex: 1 1 0; overflow:hidden;
     position: relative;
   z-index: 2;
 }

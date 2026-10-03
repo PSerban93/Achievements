@@ -832,6 +832,127 @@ function mergeEarnedTimeFromCached(snapshot, cached) {
   return changed ? merged : snapshot;
 }
 
+const RUNE_UPLAY_EMU = "rune-uplay";
+const RUNE_UPLAY_ACHIEVEMENTS_FILE = "achievements.cfg";
+const RUNE_UPLAY_MAX_FILE_BYTES = 2 * 1024 * 1024;
+
+function isRuneUplayConfig(configMeta) {
+  return (
+    String(configMeta?.platform || "").trim().toLowerCase() === "uplay" &&
+    String(configMeta?.emu || "").trim().toLowerCase() === RUNE_UPLAY_EMU
+  );
+}
+
+function parseRuneKeyValuesText(rawText) {
+  const text = String(rawText || "").replace(/^\uFEFF/, "");
+  const tokens = [];
+  let index = 0;
+
+  while (index < text.length) {
+    const char = text[index];
+    if (/\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+    if (char === "/" && text[index + 1] === "/") {
+      index += 2;
+      while (index < text.length && text[index] !== "\n") index += 1;
+      continue;
+    }
+    if (char === "{" || char === "}") {
+      tokens.push(char);
+      index += 1;
+      continue;
+    }
+    if (char !== '"') {
+      throw new Error("rune-uplay:unexpected-token");
+    }
+
+    index += 1;
+    let value = "";
+    let closed = false;
+    while (index < text.length) {
+      const current = text[index++];
+      if (current === '"') {
+        closed = true;
+        break;
+      }
+      if (current === "\\" && index < text.length) {
+        const escaped = text[index++];
+        value += escaped === "n" ? "\n" : escaped === "t" ? "\t" : escaped;
+      } else {
+        value += current;
+      }
+    }
+    if (!closed) throw new Error("rune-uplay:unterminated-string");
+    tokens.push(value);
+    if (tokens.length > 100000) throw new Error("rune-uplay:too-many-tokens");
+  }
+
+  let tokenIndex = 0;
+  const parseObject = (depth = 0) => {
+    if (depth > 16) throw new Error("rune-uplay:max-depth");
+    const result = {};
+    while (tokenIndex < tokens.length) {
+      const key = tokens[tokenIndex++];
+      if (key === "}") return result;
+      if (key === "{") throw new Error("rune-uplay:unexpected-open-brace");
+      if (tokenIndex >= tokens.length) {
+        throw new Error("rune-uplay:missing-value");
+      }
+      const next = tokens[tokenIndex++];
+      if (next === "{") result[key] = parseObject(depth + 1);
+      else if (next === "}") throw new Error("rune-uplay:unexpected-close-brace");
+      else result[key] = next;
+    }
+    if (depth > 0) throw new Error("rune-uplay:missing-close-brace");
+    return result;
+  };
+
+  return parseObject();
+}
+
+function readRuneUplayAchievementsCfg(filePath, fallback = {}) {
+  const previous = fallback && typeof fallback === "object" ? fallback : {};
+  try {
+    if (!filePath || !fs.existsSync(filePath)) {
+      return { valid: false, reason: "missing", snapshot: previous };
+    }
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) {
+      return { valid: false, reason: "not-file", snapshot: previous };
+    }
+    if (stat.size > RUNE_UPLAY_MAX_FILE_BYTES) {
+      return { valid: false, reason: "too-large", snapshot: previous };
+    }
+    const parsed = parseRuneKeyValuesText(fs.readFileSync(filePath, "utf8"));
+    const achievements = parsed?.achievements;
+    if (!achievements || typeof achievements !== "object" || Array.isArray(achievements)) {
+      return { valid: false, reason: "missing-achievements-root", snapshot: previous };
+    }
+
+    const snapshot = {};
+    for (const [rawId, rawEntry] of Object.entries(achievements)) {
+      const id = String(rawId || "").trim();
+      if (!/^\d+$/.test(id) || !rawEntry || typeof rawEntry !== "object") continue;
+      const earnedValue = String(rawEntry.earned ?? "").trim().toLowerCase();
+      const earned = earnedValue === "1" || earnedValue === "true" || earnedValue === "yes";
+      const rawTime = Number(rawEntry.time ?? rawEntry.earned_time ?? 0);
+      snapshot[id] = {
+        earned,
+        earned_time: earned && Number.isFinite(rawTime) ? normalizeEpoch(rawTime) : 0,
+      };
+    }
+    return { valid: true, reason: null, snapshot };
+  } catch (error) {
+    return {
+      valid: false,
+      reason: error?.message || "parse-failed",
+      snapshot: previous,
+    };
+  }
+}
+
 function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
   const {
     configMeta = null,
@@ -845,6 +966,24 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
   const normalizedPlatform = String(configMeta?.platform || "")
     .trim()
     .toLowerCase();
+
+  const runeAchievementsFile =
+    String(configMeta?.rune_uplay_achievements_file || "").trim() ||
+    (saveDir ? path.join(saveDir, RUNE_UPLAY_ACHIEVEMENTS_FILE) : "");
+  if (
+    isRuneUplayConfig(configMeta) ||
+    (normalizedPlatform === "uplay" &&
+      runeAchievementsFile &&
+      fs.existsSync(runeAchievementsFile))
+  ) {
+    const parsed = readRuneUplayAchievementsCfg(
+      runeAchievementsFile,
+      fallback || {},
+    );
+    return parsed.valid
+      ? mergeEarnedTimeFromCached(parsed.snapshot, fallback || {})
+      : fallback || {};
+  }
 
   if (normalizedPlatform === "markerpatch" || isMarkerPatchConfig(configMeta)) {
     const stateFile =
@@ -1273,6 +1412,11 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
 }
 
 module.exports = {
+  RUNE_UPLAY_ACHIEVEMENTS_FILE,
+  RUNE_UPLAY_EMU,
+  isRuneUplayConfig,
+  parseRuneKeyValuesText,
+  readRuneUplayAchievementsCfg,
   mergeEarnedTimeFromCached,
   loadAchievementsFromSaveFile,
   parseAchievementIniSection,

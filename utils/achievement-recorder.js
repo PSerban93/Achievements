@@ -8,11 +8,64 @@ const crypto = require("crypto");
 const DEFAULT_RECORDER_TIMINGS = Object.freeze({
   preMs: 10_000,
   postMs: 10_000,
-  segmentMs: 2_000,
+  segmentMs: 5_000,
   fps: 30,
   hdrToneMapping: false,
 });
 const DEFAULT_FORCE_STOP_GRACE_MS = 4_000;
+
+function getSafeOutputToken(value) {
+  return String(value || "")
+    .replace(/[^a-zA-Z0-9_-]/g, "_")
+    .slice(0, 80) || crypto.randomUUID();
+}
+
+function getStagingOutputPath(outputPath, id) {
+  const parsed = path.parse(outputPath);
+  const extension = parsed.ext || ".mp4";
+  return path.join(
+    parsed.dir,
+    `.${parsed.name}.${getSafeOutputToken(id)}.partial${extension}`,
+  );
+}
+
+function removeEmptyFile(filePath) {
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.isFile() && stat.size === 0) fs.rmSync(filePath, { force: true });
+  } catch {}
+}
+
+function preserveInterruptedOutput(outputPath, stagingPath, id) {
+  let partialPath = null;
+  try {
+    const stat = fs.statSync(stagingPath);
+    if (stat.isFile() && stat.size === 0) {
+      fs.rmSync(stagingPath, { force: true });
+    } else if (stat.isFile()) {
+      const parsed = path.parse(outputPath);
+      const token = getSafeOutputToken(id);
+      let destination = path.join(
+        parsed.dir,
+        `${parsed.name}.recovered-${token}${parsed.ext || ".mp4"}`,
+      );
+      let suffix = 1;
+      while (fs.existsSync(destination)) {
+        destination = path.join(
+          parsed.dir,
+          `${parsed.name}.recovered-${token}-${suffix}${parsed.ext || ".mp4"}`,
+        );
+        suffix += 1;
+      }
+      fs.renameSync(stagingPath, destination);
+      partialPath = destination;
+    }
+  } catch {
+    if (fs.existsSync(stagingPath)) partialPath = stagingPath;
+  }
+  removeEmptyFile(outputPath);
+  return partialPath;
+}
 
 function resolveAchievementRecorderHelper(options = {}) {
   const executableName = "achievements-recorder.exe";
@@ -77,6 +130,7 @@ class AchievementRecorderController extends EventEmitter {
     this.restartAttempt = 0;
     this.stopping = false;
     this.stopPromise = null;
+    this.stopReason = null;
     this.pendingOutputs = new Map();
     this.forceStopGraceMs = Math.max(
       100,
@@ -90,6 +144,8 @@ class AchievementRecorderController extends EventEmitter {
       running: !!this.child && !this.child.killed,
       ready: this.ready,
       pid: this.child?.pid || null,
+      stopping: this.stopping,
+      pendingOutputs: this.pendingOutputs.size,
     };
   }
 
@@ -147,6 +203,11 @@ class AchievementRecorderController extends EventEmitter {
 
   ensureStarted(reason = "unknown") {
     if (!this.enabled) return Promise.resolve(false);
+    if (this.stopping && this.stopPromise) {
+      return this.stopPromise.then(() =>
+        this.enabled ? this.ensureStarted(`${reason}:after-stop`) : false,
+      );
+    }
     if (this.ready && this.child && !this.child.killed) {
       return Promise.resolve(true);
     }
@@ -201,7 +262,7 @@ class AchievementRecorderController extends EventEmitter {
     output.on("line", (line) => {
       try {
         const message = parseRecorderProtocolLine(line);
-        if (!message) return;
+        if (!message || this.child !== child) return;
         this.handleMessage(message);
       } catch (error) {
         this.emit("protocol-error", {
@@ -215,26 +276,40 @@ class AchievementRecorderController extends EventEmitter {
       stderr = `${stderr}${chunk}`.slice(-4000);
     });
     child.once("error", (error) => {
+      if (this.child !== child) return;
       this.rejectStart(error);
       this.emit("recorder-error", error);
     });
     child.once("exit", (code, signal) => {
       output.close();
+      const isCurrentChild = this.child === child;
       const wasStopping = this.stopping;
-      const wasReady = this.ready;
-      this.ready = false;
-      this.child = null;
+      const wasReady = isCurrentChild ? this.ready : false;
       const error = new Error(
         `Achievement recorder exited (code=${code}, signal=${signal || ""})${
           stderr.trim() ? `: ${stderr.trim()}` : ""
         }`,
       );
       error.code = "recorder-exited";
-      this.rejectStart(error);
-      this.emit("exit", { code, signal, wasReady, expected: wasStopping });
-      this.cleanupPendingOutputs("helper-exit");
-      this.stopping = false;
-      if (this.enabled && !wasStopping) this.scheduleRestart();
+      if (isCurrentChild) {
+        const pendingReason = wasStopping
+          ? this.stopReason || "helper-exit"
+          : "helper-exit";
+        this.stopReason = null;
+        this.ready = false;
+        this.child = null;
+        this.rejectStart(error);
+        this.cleanupPendingOutputs(pendingReason);
+        this.stopping = false;
+        if (this.enabled && !wasStopping) this.scheduleRestart();
+      }
+      this.emit("exit", {
+        code,
+        signal,
+        wasReady,
+        expected: wasStopping || !isCurrentChild,
+        stale: !isCurrentChild,
+      });
     });
     this.startTimer = setTimeout(() => {
       const error = new Error("Achievement recorder did not become ready in time");
@@ -281,7 +356,56 @@ class AchievementRecorderController extends EventEmitter {
     }
     if (message.type === "saved" || message.type === "failed") {
       const id = String(message.id || "").trim();
-      if (id) this.pendingOutputs.delete(id);
+      const pending = this.pendingOutputs.get(id);
+      if (!id || !pending) {
+        this.emit("protocol-error", {
+          error: `Recorder returned ${message.type} for an unknown output`,
+          id: id || null,
+        });
+        return;
+      }
+
+      if (message.type === "saved") {
+        try {
+          if (
+            path.resolve(String(message.outputPath || "")) !==
+            path.resolve(pending.stagingPath)
+          ) {
+            throw new Error("Recorder returned an unexpected staging path");
+          }
+          fs.renameSync(pending.stagingPath, pending.outputPath);
+          this.pendingOutputs.delete(id);
+          const saved = { ...message, outputPath: pending.outputPath };
+          this.emit("saved", saved);
+          this.emit("message", saved);
+        } catch (error) {
+          const partialPath = preserveInterruptedOutput(
+            pending.outputPath,
+            pending.stagingPath,
+            id,
+          );
+          this.pendingOutputs.delete(id);
+          const failed = {
+            id,
+            outputPath: pending.outputPath,
+            error: `Could not commit rendered recording: ${error.message}`,
+            partialPath,
+          };
+          this.emit("failed", failed);
+          this.emit("message", { type: "failed", ...failed });
+        }
+        return;
+      }
+
+      try {
+        fs.rmSync(pending.stagingPath, { force: true });
+      } catch {}
+      removeEmptyFile(pending.outputPath);
+      this.pendingOutputs.delete(id);
+      const failed = { ...message, outputPath: pending.outputPath };
+      this.emit("failed", failed);
+      this.emit("message", failed);
+      return;
     }
     this.emit(message.type, message);
     this.emit("message", message);
@@ -327,24 +451,42 @@ class AchievementRecorderController extends EventEmitter {
       throw new TypeError("Achievement recorder output path is required");
     }
     const id = String(payload.id || crypto.randomUUID());
-    const command = JSON.stringify({ type: "trigger", id, outputPath });
     if (!this.child?.stdin?.writable) {
       const error = new Error("Achievement recorder input is unavailable");
       error.code = "recorder-input-unavailable";
       throw error;
     }
-    this.pendingOutputs.set(id, outputPath);
-    this.child.stdin.write(`${command}\n`);
+    const stagingPath = getStagingOutputPath(outputPath, id);
+    const stagingFd = fs.openSync(stagingPath, "wx");
+    fs.closeSync(stagingFd);
+    const command = JSON.stringify({ type: "trigger", id, outputPath: stagingPath });
+    this.pendingOutputs.set(id, { outputPath, stagingPath });
+    try {
+      this.child.stdin.write(`${command}\n`);
+    } catch (error) {
+      this.pendingOutputs.delete(id);
+      try {
+        fs.rmSync(stagingPath, { force: true });
+      } catch {}
+      removeEmptyFile(outputPath);
+      throw error;
+    }
     return { id, outputPath };
   }
 
   cleanupPendingOutputs(reason = "unknown") {
-    for (const [id, outputPath] of this.pendingOutputs) {
-      try {
-        const stat = fs.statSync(outputPath);
-        if (stat.isFile() && stat.size === 0) fs.rmSync(outputPath, { force: true });
-      } catch {}
-      this.emit("cancelled", { id, outputPath, reason });
+    for (const [id, pending] of this.pendingOutputs) {
+      const partialPath = preserveInterruptedOutput(
+        pending.outputPath,
+        pending.stagingPath,
+        id,
+      );
+      this.emit("cancelled", {
+        id,
+        outputPath: pending.outputPath,
+        partialPath,
+        reason,
+      });
     }
     this.pendingOutputs.clear();
   }
@@ -358,11 +500,13 @@ class AchievementRecorderController extends EventEmitter {
     if (this.startTimer) clearTimeout(this.startTimer);
     this.startTimer = null;
     const child = this.child;
-    this.cleanupPendingOutputs(reason);
     if (!child) {
+      this.stopReason = null;
+      this.cleanupPendingOutputs(reason);
       this.ready = false;
       return false;
     }
+    this.stopReason = reason;
     this.emit("stopping", { reason, pid: child.pid || null, forced: true });
     try {
       if (child.stdin?.writable) {
@@ -397,12 +541,14 @@ class AchievementRecorderController extends EventEmitter {
     const child = this.child;
     if (this.stopPromise) return this.stopPromise;
     if (!child) {
+      this.stopReason = null;
       this.ready = false;
       this.rejectStart(new Error("Achievement recorder stopped"));
       this.cleanupPendingOutputs(reason);
       return Promise.resolve(false);
     }
     this.stopping = true;
+    this.stopReason = reason;
     this.emit("stopping", { reason, pid: child.pid || null });
     try {
       if (child.stdin?.writable) {
@@ -424,8 +570,7 @@ class AchievementRecorderController extends EventEmitter {
         try {
           child.kill();
         } catch {}
-        finish();
-      }, 4_000);
+      }, this.forceStopGraceMs);
       timer.unref?.();
     });
     return this.stopPromise;

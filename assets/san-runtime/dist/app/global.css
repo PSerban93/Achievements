@@ -13,6 +13,17 @@
     src: url("../../fonts/VT323-Regular.ttf");
 }
 
+/* Font choices are available independently of the selected notification preset. */
+@font-face {
+    font-family: "Open Sans";
+    src: url("../../fonts/OpenSans-Medium.ttf");
+}
+
+@font-face {
+    font-family: "Noto Sans";
+    src: url("../../fonts/NotoSans-Regular.ttf");
+}
+
 @font-face {
     font-family: "JetBrains Mono";
     src: url("../../fonts/JetBrainsMono-Light.ttf");

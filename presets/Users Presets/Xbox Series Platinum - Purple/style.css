@@ -76,7 +76,7 @@ body {
 }
 
 .achievement-banner.animated.achievement-banner-big {
-  background-color: #107c10;
+  background-color: var(--achievements-xbox-main-color, #107c10);
 }
 
 .achievement-banner::before {
@@ -322,7 +322,7 @@ body {
 
 @keyframes mainAnimationFrames {
   0%, 11.9% { background-color: transparent; box-shadow: none; }
-  12%, 88% { background-color: #4d00c9; box-shadow: var(--ach-shadow); }
+  12%, 88% { background-color: var(--achievements-xbox-main-color, #4d00c9); box-shadow: var(--ach-shadow); }
   88.1%, 100% { background-color: transparent; box-shadow: none; }
 }
 

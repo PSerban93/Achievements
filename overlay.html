@@ -487,6 +487,28 @@
         margin-bottom: 4px;
       }
 
+      .achievement-description .hidden-description-toggle {
+        display: inline;
+        padding: 0;
+        margin: 0;
+        border: 0;
+        background: none;
+        color: inherit;
+        font: inherit;
+        text-align: left;
+        white-space: normal;
+        cursor: pointer;
+      }
+
+      .achievement-description .hidden-description-toggle:hover {
+        text-decoration: underline;
+      }
+
+      .achievement-description .hidden-description-toggle:focus-visible {
+        outline: 2px solid var(--dracula-cyan);
+        outline-offset: 2px;
+      }
+
       .achievement-progress {
         font-size: 0.8em;
         color: var(--dracula-comment);
@@ -504,6 +526,23 @@
         color: var(--dracula-cyan);
         font-size: 0.8em;
         font-weight: 600;
+      }
+
+      .trophy-tier-label {
+        font-weight: 800;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.72);
+      }
+
+      .trophy-tier-label.trophy-tier-gold {
+        color: #f9c74f;
+      }
+
+      .trophy-tier-label.trophy-tier-silver {
+        color: #c7d0d9;
+      }
+
+      .trophy-tier-label.trophy-tier-bronze {
+        color: #cd7f32;
       }
 
       .status-locked {
@@ -1015,7 +1054,31 @@
         );
       }
 
-      function resolveRarityGlowTierClass(achievement) {
+      function resolveTrophyModeDisplayTier(achievement) {
+        const rarityPct = resolveRarityPercent(achievement);
+        if (rarityPct === null) return "bronze";
+        if (rarityPct < 20) return "gold";
+        if (rarityPct < 50) return "silver";
+        return "bronze";
+      }
+
+      function getTrophyModeTierLabel(tier) {
+        const labels = {
+          gold: ["trophyTier.gold", "Gold"],
+          silver: ["trophyTier.silver", "Silver"],
+          bronze: ["trophyTier.bronze", "Bronze"],
+        };
+        const entry = labels[tier];
+        return entry ? tUi(entry[0], entry[1]) : "";
+      }
+
+      function resolveRarityGlowTierClass(
+        achievement,
+        { trophyModeEnabled = false } = {},
+      ) {
+        if (trophyModeEnabled) {
+          return `rarity-tier-${resolveTrophyModeDisplayTier(achievement)}`;
+        }
         const rarityPct = resolveRarityPercent(achievement);
         if (rarityPct === null) return "";
         if (rarityPct <= 1) return "rarity-tier-gold";
@@ -1036,11 +1099,16 @@
         return normalized.charAt(0).toUpperCase() + normalized.slice(1);
       }
 
-      function formatRarityPercent(achievement) {
+      function formatRarityPercent(
+        achievement,
+        { includeNativeTrophyType = true } = {},
+      ) {
         const rarityPct = resolveRarityPercent(achievement);
-        const trophyType = formatTrophyTypeAsRarity(
-          achievement?.trophyType || achievement?.trophy_type,
-        );
+        const trophyType = includeNativeTrophyType
+          ? formatTrophyTypeAsRarity(
+              achievement?.trophyType || achievement?.trophy_type,
+            )
+          : "";
         if (rarityPct !== null) {
           const rounded = Number.isInteger(rarityPct)
             ? String(rarityPct)
@@ -1336,6 +1404,7 @@
             await window.api.loadSavedAchievements(configName);
           const lang = overlayLang;
           const prefs = await loadOverlayPrefs();
+          const trophyModeEnabled = prefs?.trophyModeEnabled === true;
 
           if (!Array.isArray(achievementsDataObj.achievements)) {
             emptyState.style.display = "flex";
@@ -1415,17 +1484,36 @@
             )}</div>`;
             let earnedTimeHTML = "";
             let progressHTML = "";
-            const rarityHTML = `<div class="achievement-rarity">${tUi("overlay.rarityLabel", "Rarity")}: ${formatRarityPercent(achievement)}</div>`;
+            const trophyModeTier = trophyModeEnabled
+              ? resolveTrophyModeDisplayTier(achievement)
+              : "";
+            const trophyModeLabel = trophyModeEnabled
+              ? getTrophyModeTierLabel(trophyModeTier)
+              : "";
+            const rarityText = formatRarityPercent(achievement, {
+              includeNativeTrophyType: !trophyModeEnabled,
+            });
+            const trophyModeHTML = trophyModeLabel
+              ? ` · <span class="trophy-tier-label trophy-tier-${trophyModeTier}">${trophyModeLabel}</span>`
+              : "";
+            const rarityHTML = `<div class="achievement-rarity">${tUi("overlay.rarityLabel", "Rarity")}: ${rarityText}${trophyModeHTML}</div>`;
             const saved =
               savedAchievementsObj?.achievements?.[achievement.name];
             const isUnlocked = !!saved?.earned;
             const rel = isUnlocked ? icon : iconGray;
             const showHidden = prefs?.showHiddenDescription === true;
             const effectiveProgress = getEffectiveAchievementProgress(saved);
-            const descText =
-              isHidden && !isUnlocked && !showHidden
-                ? tUi("overlay.hiddenFallback", "Hidden")
-                : description;
+            const isDescriptionMasked = isHidden && !isUnlocked && !showHidden;
+            const hiddenLabel = tUi("overlay.hiddenFallback", "Hidden");
+            const hasDescription =
+              typeof achievement.description === "string"
+                ? achievement.description.trim().length > 0
+                : achievement.description &&
+                  typeof achievement.description === "object" &&
+                  Object.values(achievement.description).some(
+                    (value) => typeof value === "string" && value.trim().length > 0,
+                  );
+            const descText = isDescriptionMasked ? hiddenLabel : description;
             const rarityPercentValue = resolveRarityPercent(achievement);
 
             if (saved?.earned) {
@@ -1454,7 +1542,10 @@
             const listItem = document.createElement("li");
             listItem.className = "achievement-item";
             listItem.dataset.achievementName = String(achievement.name);
-            const rarityGlowTierClass = resolveRarityGlowTierClass(achievement);
+            const rarityGlowTierClass = resolveRarityGlowTierClass(
+              achievement,
+              { trophyModeEnabled },
+            );
             listItem.dataset.defaultIndex = String(defaultItemIndex++);
             listItem.dataset.sortName = String(
               displayName || achievement.name || "",
@@ -1477,7 +1568,7 @@
           <img class="achievement-icon" alt="Icon">
             <div class="achievement-info">
               <div class="achievement-name">${displayName}</div>
-            <div class="achievement-description">${descText}</div>
+            <div class="achievement-description"></div>
             ${progressHTML}
           </div>
           <div class="achievement-status">
@@ -1486,6 +1577,24 @@
             ${rarityHTML}
           </div>
         `;
+            const descriptionEl = listItem.querySelector(
+              ".achievement-description",
+            );
+            if (isDescriptionMasked && hasDescription) {
+              const toggle = document.createElement("button");
+              toggle.type = "button";
+              toggle.className = "hidden-description-toggle";
+              toggle.textContent = hiddenLabel;
+              toggle.setAttribute("aria-pressed", "false");
+              toggle.addEventListener("click", () => {
+                const revealed = toggle.getAttribute("aria-pressed") === "true";
+                toggle.setAttribute("aria-pressed", revealed ? "false" : "true");
+                toggle.textContent = revealed ? hiddenLabel : description;
+              });
+              descriptionEl.appendChild(toggle);
+            } else {
+              descriptionEl.textContent = descText;
+            }
             achievementsList.appendChild(listItem);
 
             const imgEl = listItem.querySelector("img.achievement-icon");
@@ -1616,6 +1725,17 @@
           overlayPrefs = {
             ...(overlayPrefs || {}),
             showHiddenDescription: payload.showHiddenDescription === true,
+          };
+          overlayPrefsLoaded = true;
+          currentDataHash = null;
+          if (currentConfigName) {
+            loadAchievements(currentConfigName);
+          }
+        }
+        if (Object.prototype.hasOwnProperty.call(payload, "trophyModeEnabled")) {
+          overlayPrefs = {
+            ...(overlayPrefs || {}),
+            trophyModeEnabled: payload.trophyModeEnabled === true,
           };
           overlayPrefsLoaded = true;
           currentDataHash = null;

@@ -573,8 +573,6 @@ function createOverlayShortcutManager({ loadHook, logger } = {}) {
   };
 
   const registerBinding = (id, shortcut, options = {}) => {
-    unregisterBinding(id);
-
     const deps = getHookDeps();
     if (!deps) {
       return { ok: false, reason: "hook-unavailable" };
@@ -644,6 +642,7 @@ function createOverlayShortcutManager({ loadHook, logger } = {}) {
       return { ok: false, reason: "hook-unavailable" };
     }
 
+    unregisterBinding(id);
     bindings.set(id, binding);
     logWithLevel("debug", "overlay:shortcut:registered", {
       id,

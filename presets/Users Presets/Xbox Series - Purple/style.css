@@ -76,7 +76,7 @@ body {
 }
 
 .achievement-banner.animated.achievement-banner-big {
-  background-color: #4d00c9;
+  background-color: var(--achievements-xbox-main-color, #4d00c9);
 }
 
 .achievement-banner .achievement-content::before {
@@ -321,8 +321,8 @@ body {
 @keyframes mainAnimationFrames {
   0% { background-color: transparent; box-shadow: none; }
   11.9% { background-color: transparent; box-shadow: none; }
-  12% { background-color: #4d00c9; box-shadow: var(--ach-shadow); }
-  88% { background-color: #4d00c9; box-shadow: var(--ach-shadow); }
+  12% { background-color: var(--achievements-xbox-main-color, #4d00c9); box-shadow: var(--ach-shadow); }
+  88% { background-color: var(--achievements-xbox-main-color, #4d00c9); box-shadow: var(--ach-shadow); }
   88.1% { background-color: transparent; box-shadow: none; }
   100% { background-color: transparent; box-shadow: none; }
 }

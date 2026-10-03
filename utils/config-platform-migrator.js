@@ -115,6 +115,9 @@ function inferOfficialPlatformFromMarkers(config = {}) {
     return "xlivelessness";
   }
 
+  // Emulator configs can carry the same catalog identifiers as Epic Official.
+  if (normalizePlatform(config?.platform) === "epic") return "";
+
   const hasEpicOfficialProductMarker = Boolean(
     config?.epic_product_id || config?.epicProductId,
   );

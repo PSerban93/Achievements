@@ -126,6 +126,7 @@ function createGameBarWidgetBridge({
   let pendingHeartbeatPush = null;
   const pendingNotificationPushes = [];
   let notificationPublishQueue = Promise.resolve();
+  let outstandingNotificationPublishes = 0;
   let packageWatcher = null;
   let packageRecheckTimer = null;
   let bridgeStarted = false;
@@ -585,9 +586,23 @@ function createGameBarWidgetBridge({
   }
 
   function publishNotification(notification = {}) {
+    if (outstandingNotificationPublishes >= MAX_PENDING_NOTIFICATIONS) {
+      log("warn", "gamebar-widget:notification-dropped", {
+        reason: "queue-full",
+        pending: outstandingNotificationPublishes,
+      });
+      return Promise.resolve({
+        status: "unavailable",
+        reason: "notification-queue-full",
+      });
+    }
+    outstandingNotificationPublishes += 1;
     const queued = notificationPublishQueue
       .catch(() => {})
-      .then(() => publishNotificationInternal(notification));
+      .then(() => publishNotificationInternal(notification))
+      .finally(() => {
+        outstandingNotificationPublishes -= 1;
+      });
     notificationPublishQueue = queued.catch(() => {});
     return queued;
   }

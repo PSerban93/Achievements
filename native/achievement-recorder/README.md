@@ -2,10 +2,19 @@
 
 This persistent Windows helper maintains a bounded rolling capture of the
 primary monitor through Windows Graphics Capture. Captured frames are encoded
-as short H.264/MP4 segments using the hardware-accelerated Windows Media
-pipeline exposed by `windows-capture`. System output is captured from the
-current default Windows playback device through WASAPI loopback and encoded as
-stereo AAC at 48 kHz/192 kbps in the same MP4 segments.
+as five-second H.264/MP4 segments using the hardware-accelerated Windows Media
+pipeline exposed by `windows-capture`. Segment finalization and final clip
+composition are serialized so slow Windows Media operations cannot create an
+unbounded number of concurrent encoders. Normal five-second rotation bounds the
+video queue, sustained pipeline stalls can be recovered by the Electron
+controller, and audio queue pressure is capped in favor of keeping the game
+responsive. System output is captured from the current default Windows playback
+device through WASAPI loopback and encoded as stereo AAC at 48 kHz/192 kbps in
+the same MP4 segments.
+
+On Windows versions that expose `GraphicsCaptureSession.MinUpdateInterval`,
+the helper requests the selected 30/60 FPS interval from the operating system.
+Older Windows builds transparently keep the callback-side frame limiter.
 
 When `Enable HDR-to-SDR Conversion for Records` is enabled, the helper captures
 FP16 scRGB frames and converts them on the GPU with a D3D11 tone-mapping shader
@@ -17,8 +26,8 @@ failure and falls back to its normal SDR capture backend before recording
 starts.
 
 When the Electron process sends a `trigger` command, the helper retains the
-segments covering ten seconds before the command, records ten seconds after
-it, and composes those segments into the requested MP4 file. Old segments are
+configured half-duration before the command, records the other half after it,
+and composes those segments into the requested MP4 file. Old segments are
 deleted continuously and every helper run uses an isolated temporary session
 folder.
 

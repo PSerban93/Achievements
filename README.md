@@ -36,6 +36,7 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
     - Last Updated (Recent-Old / Old-Recent)
   - Quick game search and filtering
   - Platform filtering and multi-select actions for ignore/delete
+  - Custom game collections shown as Dashboard cards, with Configs Only, Collections Only, or combined views; open a collection to view its games, add members with multi-select, and choose a color, icon, or custom image
   - Click-to-load configs
   - Play game launch button (requires executable and optional arguments)
   - Automatically refreshes when config or save files change
@@ -47,6 +48,8 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
   - Animated presets, a native Windows preset, and native Xbox Game Bar notifications through the optional Game Bar Widget [Achievements Overlay by JokerVerse]
   - Game Bar delivery supports achievement unlock, rarity/platinum metadata, click navigation, and textual progress (`current / maximum • percentage`)
   - The Game Bar companion is optional; when it is not installed or connected, the Electron application remains independent and uses the configured fallback
+  - Optional Trophy Mode classifies unlocks as Gold below 20% rarity, Silver from 20% to below 50%, and Bronze from 50% upward; completing every achievement keeps the dedicated Platinum notification profile
+  - Trophy Mode shows the tier color around achievement icons in notifications, the main achievement table, and the overlay; Bronze/Silver/Gold notifications use the Rare profile
   - Customizable sounds and visual presets
   - Adjustable position, duration, and scaling (presets support up to 200%)
   - Non-intrusive overlay system
@@ -72,114 +75,128 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
   - Select which achievement schema languages are generated when the source supports localization
   - Optional controller support for the overlay (`Settings -> Advanced -> Rendering`)
   - Multi-language support for achievements
+- **Profile Backup & Restore**
+  - Export the complete portable profile from **Settings -> Backup & Restore**
+  - Stream backups through a TAR container compressed with Zstandard, without loading the full profile into memory
+  - Restore configs, custom collections and their images, achievement cache, covers, images, presets, sounds, themes, playtime, preferences, account import metadata, and dashboard summary in one operation
+  - Preview backup version and contents before replacing the current profile
+  - Apply restore before watchers start, suppressing achievement notifications during migration
+  - Rebase internal profile paths and refresh dashboard fingerprints when moving the profile to another Windows account or PC
+  - Authentication token files are intentionally excluded; connected services can require sign-in again
+  - Backup archives are not encrypted and may contain sensitive settings such as the Steam Web API key
 
 ## 📁 Project Structure
 
-| File/Folder                                       | Description                                                     |
-| ------------------------------------------------- | --------------------------------------------------------------- |
-| `main.js`                                         | Main Electron process: window handling, core logic              |
-| `preload.js`                                      | IPC bridge and renderer APIs                                    |
-| `utils/playtime-log-watcher.js`                   | Tracks game start/stop and calculates total playtime            |
-| `index.html`                                      | Main UI with dashboard and config management                    |
-| `overlay.html`                                    | Achievement notification overlay                                |
-| `san-notification.html`                           | Animated achievement notification renderer                      |
-| `playtime.html`                                   | Playtime notification template                                  |
-| `progress.html`                                   | Progress notification template                                  |
-| `tray-menu.html/js/css`                           | Tray menu UI and logic                                          |
-| `playtime-totals.json`                            | Runtime-generated totals (`%APPDATA%/Achievements/`)            |
-| `preferences.json`                                | Runtime settings (`%APPDATA%/Achievements/`)                    |
-| `LICENSE`                                         | Project license file                                            |
-| `package.json`                                    | Node.js dependencies and scripts                                |
-| `README.md`                                       | This documentation                                              |
-| `style.css`                                       | Global styling for all UI components                            |
-| `assets/`                                         | Static assets:                                                  |
-| `assets/steamdb.json`                             | Steam database cache                                            |
-| `assets/uplay-steam.json`                         | Uplay to Steam mapping                                          |
-| `assets/locales/`                                 | UI translations                                                 |
-| `assets/san-runtime/`                             | Bundled runtime assets for animated notifications               |
-| `assets/vendor/fontawesome/`                      | Font Awesome icons                                              |
-| `build/`                                          | Build scripts and manifests                                     |
-| `build/prepare-playwright-browsers.js`            | Installs and verifies the full Playwright Chromium runtime      |
-| `fonts/`                                          | Font files and licenses                                         |
-| `presets/`                                        | `Default Presets` and `Users Presets` themes                    |
-| `sounds/`                                         | Notification sound assets                                       |
-| `utils/`                                          | Helper modules and utilities:                                   |
-| `utils/auto-config-generator.js`                  | Auto-generates game configs from save directories               |
-| `utils/generate_achievements_schema.js`           | Generates multi-platform achievement schemas                    |
-| `utils/watched-folders.js`                        | Watcher + auto-select + auto-config                             |
-| `utils/steam-appcache*.js`                        | Steam official appcache parsing + schema build                  |
-| `utils/exophase-scraper.js`                       | Multi-language scraping from Exophase                           |
-| `utils/xenia-*`                                   | Xenia parsing + schema generation                               |
-| `utils/rpcs3-*`                                   | RPCS3 parsing + schema generation                               |
-| `utils/shadps4-*`                                 | PS4 trophy parsing + schema generation                          |
-| `utils/achievement-data.js`                       | Achievement data processing                                     |
-| `utils/achievement-rarity.js`                     | Achievement rarity calculations                                 |
-| `utils/app-navigation.js`                         | App launch argument and navigation routing                      |
-| `utils/atomic-json-store.js`                      | Atomic JSON writes and backup recovery                          |
-| `utils/blacklist-identity.js`                     | Global/platform blacklist identity handling                     |
-| `utils/config-deletion-guard.js`                  | Prevents config recreation during deletion                      |
-| `utils/config-deletion-paths.js`                  | Validates optional save/schema deletion targets                 |
-| `utils/config-name.js`                            | Safe config names and JSON path resolution                      |
-| `utils/config-platform-migrator.js`               | Config migration between platforms                              |
-| `utils/content-version.js`                        | Content versioning utilities                                    |
-| `utils/controller-input-manager.js`               | Controller input handling                                       |
-| `utils/ea-desktop-local.js`                       | EA Desktop local integration                                    |
-| `utils/epic-api.js`                               | Epic Games API integration                                      |
-| `utils/epic-auth.js`                              | Epic authentication                                             |
-| `utils/epic-identity.js`                          | Epic artifact/AppID identity fallback                           |
-| `utils/epic-local-installations.js`               | Epic local installations detection                              |
-| `utils/epic-official.js`                          | Epic official achievements                                      |
-| `utils/xbox-pc.js`                                | Xbox App PC discovery and direct Xbox Network sync              |
-| `utils/fileCopy.js`                               | File copying utilities                                          |
-| `utils/game-cover.js`                             | Game cover image handling                                       |
-| `utils/gog-auth.js`                               | GOG authentication                                              |
-| `utils/gog-galaxy-local.js`                       | GOG Galaxy local integration                                    |
-| `utils/i18n-ui.js`                                | UI internationalization                                         |
-| `utils/local-game-name-cache.js`                  | Local game name caching                                         |
-| `utils/logger.js`                                 | Logging utilities                                               |
-| `utils/log-viewer-service.js`                     | Bounded live log tailing, rotation handling and subscriptions   |
-| `utils/github-changelog-service.js`               | GitHub release retrieval with atomic cache and offline fallback |
-| `utils/lumaplay-event-watcher.js`                 | Native LumaPlay registry change watcher                         |
-| `utils/lumaplay-registry.js`                      | LumaPlay registry handling                                      |
-| `utils/markerpatch.js`                            | Dead Space 2 MarkerPatch detection and bitflag parser           |
-| `utils/madnesspatch.js`                           | Alice MadnessPatch detection, schema and profile bitflag parser |
-| `utils/ff7-achievement-dat.js`                    | FINAL FANTASY VII legacy achievement.dat detection and parser   |
-| `utils/xlivelessness.js`                          | XLiveLessNess discovery, config generation and DAT state parser |
-| `utils/xlivelessness-spa.js`                      | XLiveLessNess PE SPAFILE/XDBF metadata and image parser         |
-| `utils/xlivelessness-worker.js`                   | Async XLiveLessNess executable discovery worker                 |
-| `utils/retroachievements.js`                      | RetroAchievements Web API authentication, import and polling    |
-| `utils/adaptive-path-watcher.js`                  | Late-created local achievement path monitoring                  |
-| `utils/match-uplay-steam.js`                      | Uplay to Steam matching                                         |
-| `utils/native-windows-notification-navigation.js` | Native toast activation routing                                 |
-| `utils/overlay-controller-service.js`             | Overlay controller service                                      |
-| `utils/overlay-shortcut-manager.js`               | Overlay shortcut management                                     |
-| `utils/parseStatsBin.js`                          | Stats binary parsing                                            |
-| `utils/paths.js`                                  | Path utilities                                                  |
-| `utils/playtime-store.js`                         | Playtime data storage                                           |
-| `utils/playwright-runtime.js`                     | Playwright runtime resolver                                     |
-| `utils/process-event-watcher.js`                  | Process event watching                                          |
-| `utils/process-config-match.js`                   | Process-to-config matching                                      |
-| `utils/process-native-host.js`                    | Isolated native process watcher host                            |
-| `utils/process-name-utils.js`                     | Process name utilities                                          |
-| `utils/process-poller.js`                         | Process polling                                                 |
-| `utils/pslist-wrapper.mjs`                        | PS list wrapper                                                 |
-| `utils/raw-hid-controller-hub.js`                 | Raw HID controller hub                                          |
-| `utils/raw-hid-controller-worker.js`              | Raw HID controller worker                                       |
-| `utils/raw-hid-profiles.js`                       | Raw HID profiles                                                |
-| `utils/rpcs3-config-generator.js`                 | RPCS3 config generation                                         |
-| `utils/rpcs3-trophy.js`                           | RPCS3 trophy handling                                           |
-| `utils/shadps4-config-generator.js`               | ShadPS4 config generation                                       |
-| `utils/shadps4-trophy.js`                         | ShadPS4 trophy handling                                         |
-| `utils/startup-task.js`                           | Startup task management                                         |
-| `utils/steam-appcache-generator.js`               | Steam appcache generation                                       |
-| `utils/steam-appcache.js`                         | Steam appcache handling                                         |
-| `utils/steam-local-users.js`                      | Steam local users                                               |
-| `utils/steam-schema-parse.js`                     | Bundled Steam schema tool runtime and generation                |
-| `utils/steamdb-launch-metadata.js`                | SteamDB launch metadata                                         |
-| `utils/ubisoft-connect-local.js`                  | Ubisoft Connect local integration                               |
-| `utils/windows-process-native-provider.js`        | Native Windows process snapshot provider                        |
-| `utils/xenia-config-generator.js`                 | Xenia config generation                                         |
-| `utils/xenia-gpd.js`                              | Xenia GPD handling                                              |
+| File/Folder                                       | Description                                                      |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| `main.js`                                         | Main Electron process: window handling, core logic               |
+| `preload.js`                                      | IPC bridge and renderer APIs                                     |
+| `utils/playtime-log-watcher.js`                   | Tracks game start/stop and calculates total playtime             |
+| `index.html`                                      | Main UI with dashboard and config management                     |
+| `overlay.html`                                    | Achievement notification overlay                                 |
+| `san-notification.html`                           | Animated achievement notification renderer                       |
+| `playtime.html`                                   | Playtime notification template                                   |
+| `progress.html`                                   | Progress notification template                                   |
+| `tray-menu.html/js/css`                           | Tray menu UI and logic                                           |
+| `playtime-totals.json`                            | Runtime-generated totals (`%APPDATA%/Achievements/`)             |
+| `preferences.json`                                | Runtime settings (`%APPDATA%/Achievements/`)                     |
+| `LICENSE`                                         | Project license file                                             |
+| `package.json`                                    | Node.js dependencies and scripts                                 |
+| `README.md`                                       | This documentation                                               |
+| `style.css`                                       | Global styling for all UI components                             |
+| `assets/`                                         | Static assets:                                                   |
+| `assets/steamdb.json`                             | Steam database cache                                             |
+| `assets/uplay-steam.json`                         | Uplay to Steam mapping                                           |
+| `assets/locales/`                                 | UI translations                                                  |
+| `assets/san-runtime/`                             | Bundled runtime assets for animated notifications                |
+| `assets/vendor/fontawesome/`                      | Font Awesome icons                                               |
+| `build/`                                          | Build scripts and manifests                                      |
+| `build/prepare-playwright-browsers.js`            | Installs and verifies the full Playwright Chromium runtime       |
+| `fonts/`                                          | Font files and licenses                                          |
+| `presets/`                                        | `Default Presets` and `Users Presets` themes                     |
+| `sounds/`                                         | Notification sound assets                                        |
+| `utils/`                                          | Helper modules and utilities:                                    |
+| `utils/auto-config-generator.js`                  | Auto-generates game configs from save directories                |
+| `utils/generate_achievements_schema.js`           | Generates multi-platform achievement schemas                     |
+| `utils/watched-folders.js`                        | Watcher + auto-select + auto-config                              |
+| `utils/steam-appcache*.js`                        | Steam official appcache parsing + schema build                   |
+| `utils/exophase-scraper.js`                       | Multi-language scraping from Exophase                            |
+| `utils/xenia-*`                                   | Xenia parsing + schema generation                                |
+| `utils/rpcs3-*`                                   | RPCS3 parsing + schema generation                                |
+| `utils/shadps4-*`                                 | PS4 trophy parsing + schema generation                           |
+| `utils/achievement-data.js`                       | Achievement data processing                                      |
+| `utils/achievement-rarity.js`                     | Achievement rarity calculations                                  |
+| `utils/trophy-mode.js`                            | Trophy Mode tier resolution for achievement notifications        |
+| `utils/app-navigation.js`                         | App launch argument and navigation routing                       |
+| `utils/atomic-json-store.js`                      | Atomic JSON writes and backup recovery                           |
+| `utils/blacklist-identity.js`                     | Global/platform blacklist identity handling                      |
+| `utils/config-deletion-guard.js`                  | Prevents config recreation during deletion                       |
+| `utils/config-deletion-paths.js`                  | Validates optional save/schema deletion targets                  |
+| `utils/config-name.js`                            | Safe config names and JSON path resolution                       |
+| `utils/config-platform-migrator.js`               | Config migration between platforms                               |
+| `utils/content-version.js`                        | Content versioning utilities                                     |
+| `utils/game-collections.js`                       | Atomic custom collection storage and game membership handling    |
+| `utils/game-collection-images.js`                 | Validation and local storage for custom collection images        |
+| `utils/controller-input-manager.js`               | Controller input handling                                        |
+| `utils/ea-desktop-local.js`                       | EA Desktop local integration                                     |
+| `utils/epic-api.js`                               | Epic Games API integration                                       |
+| `utils/epic-auth.js`                              | Epic authentication                                              |
+| `utils/epic-identity.js`                          | Epic artifact/AppID identity fallback                            |
+| `utils/epic-local-installations.js`               | Epic local installations detection                               |
+| `utils/epic-official.js`                          | Epic official achievements                                       |
+| `utils/xbox-pc.js`                                | Xbox App PC discovery and direct Xbox Network sync               |
+| `utils/fileCopy.js`                               | File copying utilities                                           |
+| `utils/game-cover.js`                             | Game cover image handling                                        |
+| `utils/gog-auth.js`                               | GOG authentication                                               |
+| `utils/gog-galaxy-local.js`                       | GOG Galaxy local integration                                     |
+| `utils/i18n-ui.js`                                | UI internationalization                                          |
+| `utils/local-game-name-cache.js`                  | Local game name caching                                          |
+| `utils/logger.js`                                 | Logging utilities                                                |
+| `utils/log-viewer-service.js`                     | Bounded live log tailing, rotation handling and subscriptions    |
+| `utils/github-changelog-service.js`               | GitHub release retrieval with atomic cache and offline fallback  |
+| `utils/lumaplay-event-watcher.js`                 | Native LumaPlay registry change watcher                          |
+| `utils/lumaplay-registry.js`                      | LumaPlay registry handling                                       |
+| `utils/markerpatch.js`                            | Dead Space 2 MarkerPatch detection and bitflag parser            |
+| `utils/madnesspatch.js`                           | Alice MadnessPatch detection, schema and profile bitflag parser  |
+| `utils/ff7-achievement-dat.js`                    | FINAL FANTASY VII legacy achievement.dat detection and parser    |
+| `utils/xlivelessness.js`                          | XLiveLessNess discovery, config generation and DAT state parser  |
+| `utils/xlivelessness-spa.js`                      | XLiveLessNess PE SPAFILE/XDBF metadata and image parser          |
+| `utils/xlivelessness-worker.js`                   | Async XLiveLessNess executable discovery worker                  |
+| `utils/retroachievements.js`                      | RetroAchievements Web API authentication, import and polling     |
+| `utils/adaptive-path-watcher.js`                  | Late-created local achievement path monitoring                   |
+| `utils/match-uplay-steam.js`                      | Uplay to Steam matching                                          |
+| `utils/native-windows-notification-navigation.js` | Native toast activation routing                                  |
+| `utils/overlay-controller-service.js`             | Overlay controller service                                       |
+| `utils/overlay-shortcut-manager.js`               | Overlay shortcut management                                      |
+| `utils/parseStatsBin.js`                          | Stats binary parsing                                             |
+| `utils/paths.js`                                  | Path utilities                                                   |
+| `utils/playtime-store.js`                         | Playtime data storage                                            |
+| `utils/profile-backup.js`                         | Validated streaming profile backup, staging and restore          |
+| `utils/profile-backup-worker.js`                  | Off-main-thread TAR + Zstandard backup creation and verification |
+| `utils/playwright-runtime.js`                     | Playwright runtime resolver                                      |
+| `utils/process-event-watcher.js`                  | Process event watching                                           |
+| `utils/process-config-match.js`                   | Process-to-config matching                                       |
+| `utils/process-native-host.js`                    | Isolated native process watcher host                             |
+| `utils/process-name-utils.js`                     | Process name utilities                                           |
+| `utils/process-poller.js`                         | Process polling                                                  |
+| `utils/pslist-wrapper.mjs`                        | PS list wrapper                                                  |
+| `utils/raw-hid-controller-hub.js`                 | Raw HID controller hub                                           |
+| `utils/raw-hid-controller-worker.js`              | Raw HID controller worker                                        |
+| `utils/raw-hid-profiles.js`                       | Raw HID profiles                                                 |
+| `utils/rpcs3-config-generator.js`                 | RPCS3 config generation                                          |
+| `utils/rpcs3-trophy.js`                           | RPCS3 trophy handling                                            |
+| `utils/shadps4-config-generator.js`               | ShadPS4 config generation                                        |
+| `utils/shadps4-trophy.js`                         | ShadPS4 trophy handling                                          |
+| `utils/startup-task.js`                           | Startup task management                                          |
+| `utils/steam-appcache-generator.js`               | Steam appcache generation                                        |
+| `utils/steam-appcache.js`                         | Steam appcache handling                                          |
+| `utils/steam-local-users.js`                      | Steam local users                                                |
+| `utils/steam-schema-parse.js`                     | Bundled Steam schema tool runtime and generation                 |
+| `utils/steamdb-launch-metadata.js`                | SteamDB launch metadata                                          |
+| `utils/ubisoft-connect-local.js`                  | Ubisoft Connect local integration                                |
+| `utils/windows-process-native-provider.js`        | Native Windows process snapshot provider                         |
+| `utils/xenia-config-generator.js`                 | Xenia config generation                                          |
+| `utils/xenia-gpd.js`                              | Xenia GPD handling                                               |
 
 ## 🛠️ Installation
 
@@ -254,15 +271,17 @@ Build output is created in the `dist/` folder. The build scripts verify the nati
 - [Playwright](https://playwright.dev) - Browser automation for achievement scraping, packaged with full Chromium and using its new headless mode by default
 - [axios](https://www.npmjs.com/package/axios) - HTTP client for platform APIs and metadata services
 - [cheerio](https://www.npmjs.com/package/cheerio) - HTML parsing
-- [jsdom](https://www.npmjs.com/package/jsdom) - DOM environment
 
 ### Features
 
 - [screenshot-desktop](https://www.npmjs.com/package/screenshot-desktop) - Optional achievement screenshot capture
 - [windows-capture](https://github.com/NiiightmareXD/windows-capture) - Windows Graphics Capture and hardware-accelerated H.264 encoding for optional achievement video clips and HDR screenshots. The bundled recorder uses a locally patched MIT-licensed 2.0.1 source snapshot to pass GPU tone-mapped surfaces directly to the encoder.
 - [@xboxreplay/xboxlive-auth](https://www.npmjs.com/package/@xboxreplay/xboxlive-auth) - Microsoft/Xbox Network authentication
-- [ws](https://www.npmjs.com/package/ws) - WebSocket support
 - [ini](https://www.npmjs.com/package/ini) - Config file parsing
+
+### Notification customisation inspiration
+
+The SAN-style template and theme workflow in Notification Customisation is independently implemented for Achievements, with credit to [Steam Achievement Notifier](https://github.com/SteamAchievementNotifier/SteamAchievementNotifier) for the design inspiration. Existing Achievements presets remain supported separately.
 
 ### Background Services
 
@@ -343,10 +362,14 @@ _Note_: If `config_path` points to a custom location, schema regeneration/cleanu
    - %APPDATA%\Steam\CODEX
    - %APPDATA%\SmartSteamEmu
    - %LOCALAPPDATA%\SKIDROW
+   - %LOCALAPPDATA%\UniverseLAN
 
 **Note**: Auto-configuration uses the Steam Web API when a key is provided in Settings. Without a key, it falls back to SteamDB/SteamHunters + Languages from Exophase.
 Sources used when available: Steam Web API, SteamDB, SteamHunters, Exophase, GOG, Epic.
 `Goldberg UplayEmu Saves` and `R1 UplayEmu Saves` are explicitly routed through the Uplay-to-Steam mapping while keeping the original Uplay AppID and Uplay schema storage.
+`%LOCALAPPDATA%\UniverseLAN` is treated as a strict GOG root. Each immediate `<ProductID>` directory is mapped to a GOG config, and runtime progress is monitored from `<ProductID>\UniverseLANData\Achievements.ini`. Legacy game-local UniverseLAN installations continue to use `UniverseLAN.ini` discovery.
+
+RUNE Ubisoft Connect saves are supported as an opt-in watched folder. Add `%USERPROFILE%\Documents\RUNE\Ubisoft Connect` (or its `achievements` subfolder) manually in **Settings -> Folders**. The app reads `<root>\achievements\<UserID>\<Uplay AppID>\achievements.cfg`, routes it through the existing Uplay schema/mapping flow, and ignores the sibling `savegames` tree. This path is intentionally not added to the default watched-folder list.
 
 #### Folder Rescan & Blacklist
 

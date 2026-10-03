@@ -196,7 +196,8 @@
         const fill = document.querySelector(".progress-fill");
         const metaDur = document.querySelector('meta[name="duration"]');
         const sizeMeta = document.querySelector("meta[width][height]");
-        const totalDurationMs = Math.max(0, Number(metaDur?.content || 5000));
+        const defaultDurationMs = Math.max(0, Number(metaDur?.content || 5000));
+        let totalDurationMs = defaultDurationMs;
         const parsedMaxWidth = Number(sizeMeta?.getAttribute("width") || 350);
         const maxWidth =
           Number.isFinite(parsedMaxWidth) && parsedMaxWidth > 0
@@ -295,6 +296,14 @@
                 : data.displayName ||
                   tUi("progress.achievementFallback", "Achievement");
 
+            const requestedDuration = Number(data.durationMs);
+            totalDurationMs = Number.isFinite(requestedDuration) && requestedDuration > 0
+              ? requestedDuration : defaultDurationMs;
+            docEl.style.setProperty("--displaytime", `${totalDurationMs}ms`);
+            // Short durations still need room for both entry and exit transitions.
+            const transitionRatio = Math.min(1, totalDurationMs / 520);
+            docEl.style.setProperty("--transition-in", `${280 * transitionRatio}ms`);
+            docEl.style.setProperty("--transition-out", `${240 * transitionRatio}ms`);
             const cur = Number(data.progress ?? 0);
             const max = Number(data.max_progress ?? 0);
             const rawScale = Number(data.scale ?? 1);
@@ -307,15 +316,14 @@
             const title = `${name}: ${formatProgressValue(cur, isFloatProgress)}/${formatProgressValue(max, isFloatProgress)}`;
             titleEl.textContent = title;
             applyProgressProfile(title, pct, scale);
-            await resolveAchievementIcon(imgEl, data.config_path, data.icon);
             fill.style.width = `${pct}%`;
             scheduleClose(totalDurationMs);
+            await resolveAchievementIcon(imgEl, data.config_path, data.icon);
           } catch (e) {
             console.error("[progress.html] render error:", e);
           }
         });
 
-        scheduleClose(totalDurationMs);
       })();
     </script>
   </body>

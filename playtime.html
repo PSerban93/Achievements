@@ -415,6 +415,10 @@
           if (d.scale)
             document.documentElement.style.setProperty("--scale", d.scale);
 
+          const requestedDuration = Number(d.durationMs);
+          const durationMs = Number.isFinite(requestedDuration) && requestedDuration > 0 ? requestedDuration : 6000;
+          document.documentElement.style.setProperty("--displaytime", `${durationMs}ms`);
+          document.documentElement.style.setProperty("--transition", `${Math.min(300, durationMs / 2)}ms`);
           closed = false;
           if (holdTimer) {
             clearTimeout(holdTimer);
@@ -434,11 +438,11 @@
           void box.offsetWidth;
           box.classList.add("playtime-out");
           const styles = getComputedStyle(document.documentElement);
-          const transition =
-            parseFloat(styles.getPropertyValue("--transition")) || 0.3;
+          const rawTransition = styles.getPropertyValue("--transition").trim();
+          const transitionMs = (parseFloat(rawTransition) || 0.3) * (rawTransition.endsWith("ms") ? 1 : 1000);
           setTimeout(
             () => ipcRenderer.send("close-playtime-window"),
-            transition * 1000,
+            transitionMs,
           );
         });
       });

@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::path::Path;
-use std::sync::atomic::{self, AtomicBool};
+use std::sync::atomic::{self, AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -683,6 +683,8 @@ pub struct VideoEncoder {
     // Channels
     frame_sender: mpsc::Sender<Option<(VideoEncoderSource, TimeSpan)>>,
     audio_sender: mpsc::Sender<Option<(AudioEncoderSource, TimeSpan)>>,
+    pending_video_samples: Arc<AtomicUsize>,
+    pending_audio_samples: Arc<AtomicUsize>,
 
     // MSS event tokens
     sample_requested: i64,
@@ -711,6 +713,55 @@ pub struct VideoEncoder {
 }
 
 impl VideoEncoder {
+    fn enqueue_video_source(
+        &mut self,
+        source: VideoEncoderSource,
+        timestamp: TimeSpan,
+    ) -> Result<(), VideoEncoderError> {
+        self.pending_video_samples.fetch_add(1, Ordering::Relaxed);
+        if let Err(error) = self.frame_sender.send(Some((source, timestamp))) {
+            self.pending_video_samples
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| Some(value.saturating_sub(1)))
+                .ok();
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    fn enqueue_audio_source(
+        &mut self,
+        source: AudioEncoderSource,
+        timestamp: TimeSpan,
+    ) -> Result<(), VideoEncoderError> {
+        self.pending_audio_samples.fetch_add(1, Ordering::Relaxed);
+        if let Err(error) = self.audio_sender.send(Some((source, timestamp))) {
+            self.pending_audio_samples
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| Some(value.saturating_sub(1)))
+                .ok();
+            return Err(error.into());
+        }
+        Ok(())
+    }
+
+    /// Returns the number of video samples waiting for the Windows media pipeline.
+    #[must_use]
+    pub fn pending_video_samples(&self) -> usize {
+        self.pending_video_samples.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of audio samples waiting for the Windows media pipeline.
+    #[must_use]
+    pub fn pending_audio_samples(&self) -> usize {
+        self.pending_audio_samples.load(Ordering::Relaxed)
+    }
+
+    /// Advances the encoder's monotonic audio clock when the caller deliberately
+    /// drops a queued packet to protect the real-time capture pipeline.
+    pub fn skip_audio_buffer(&mut self, buffer: &[u8]) {
+        let frames_in_buf = (buffer.len() as u32) / self.audio_block_align;
+        self.audio_samples_sent = self.audio_samples_sent.saturating_add(u64::from(frames_in_buf));
+    }
+
     fn create_cached_surface(
         device: &ID3D11Device,
         width: u32,
@@ -764,6 +815,8 @@ impl VideoEncoder {
         audio_receiver: AudioFrameReceiver,
         audio_block_align: u32,
         audio_sample_rate: u32,
+        pending_video_samples: Arc<AtomicUsize>,
+        pending_audio_samples: Arc<AtomicUsize>,
     ) -> Result<i64, VideoEncoderError> {
         let token = media_stream_source.SampleRequested(&TypedEventHandler::<
             MediaStreamSource,
@@ -787,11 +840,17 @@ impl VideoEncoder {
                 } else {
                     let request_clone = request;
                     let audio_receiver = audio_receiver.clone();
+                    let pending_audio_samples = Arc::clone(&pending_audio_samples);
                     ThreadPool::RunWithPriorityAndOptionsAsync(
                         &WorkItemHandler::new(move |_| {
                             let value = audio_receiver.lock().recv();
                             match value {
                                 Ok(Some((source, timestamp))) => {
+                                    pending_audio_samples
+                                        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                                            Some(value.saturating_sub(1))
+                                        })
+                                        .ok();
                                     let sample = match source {
                                         AudioEncoderSource::Buffer(bytes) => {
                                             let buf = CryptographicBuffer::CreateFromByteArray(&bytes)?;
@@ -824,11 +883,17 @@ impl VideoEncoder {
             } else {
                 let request_clone = request;
                 let frame_receiver = frame_receiver.clone();
+                let pending_video_samples = Arc::clone(&pending_video_samples);
                 ThreadPool::RunWithPriorityAndOptionsAsync(
                     &WorkItemHandler::new(move |_| {
                         let value = frame_receiver.lock().recv();
                         match value {
                             Ok(Some((source, timestamp))) => {
+                                pending_video_samples
+                                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                                        Some(value.saturating_sub(1))
+                                    })
+                                    .ok();
                                 let sample = match source {
                                     VideoEncoderSource::DirectX(surface) => {
                                         MediaStreamSample::CreateFromDirect3D11Surface(&surface.0, timestamp)?
@@ -921,6 +986,8 @@ impl VideoEncoder {
         let frame_receiver = Arc::new(Mutex::new(frame_receiver_raw));
         let audio_receiver = Arc::new(Mutex::new(audio_receiver_raw));
 
+        let pending_video_samples = Arc::new(AtomicUsize::new(0));
+        let pending_audio_samples = Arc::new(AtomicUsize::new(0));
         let sample_requested = Self::attach_sample_requested_handlers(
             &media_stream_source,
             is_video_disabled,
@@ -929,6 +996,8 @@ impl VideoEncoder {
             audio_receiver,
             audio_block_align,
             audio_sr,
+            Arc::clone(&pending_video_samples),
+            Arc::clone(&pending_audio_samples),
         )?;
 
         let media_transcoder = MediaTranscoder::new()?;
@@ -968,6 +1037,8 @@ impl VideoEncoder {
             first_timestamp: None,
             frame_sender,
             audio_sender,
+            pending_video_samples,
+            pending_audio_samples,
             sample_requested,
             media_stream_source,
             starting,
@@ -1070,6 +1141,8 @@ impl VideoEncoder {
         let frame_receiver = Arc::new(Mutex::new(frame_receiver_raw));
         let audio_receiver = Arc::new(Mutex::new(audio_receiver_raw));
 
+        let pending_video_samples = Arc::new(AtomicUsize::new(0));
+        let pending_audio_samples = Arc::new(AtomicUsize::new(0));
         let sample_requested = Self::attach_sample_requested_handlers(
             &media_stream_source,
             is_video_disabled,
@@ -1078,6 +1151,8 @@ impl VideoEncoder {
             audio_receiver,
             audio_block_align,
             audio_sr,
+            Arc::clone(&pending_video_samples),
+            Arc::clone(&pending_audio_samples),
         )?;
 
         let media_transcoder = MediaTranscoder::new()?;
@@ -1105,6 +1180,8 @@ impl VideoEncoder {
             first_timestamp: None,
             frame_sender,
             audio_sender,
+            pending_video_samples,
+            pending_audio_samples,
             sample_requested,
             media_stream_source,
             starting,
@@ -1193,7 +1270,7 @@ impl VideoEncoder {
             self.build_padded_surface(frame)?
         };
 
-        self.frame_sender.send(Some((VideoEncoderSource::DirectX(surface), timestamp)))?;
+        self.enqueue_video_source(VideoEncoderSource::DirectX(surface), timestamp)?;
 
         if self.error_notify.load(atomic::Ordering::Relaxed)
             && let Some(t) = self.transcode_thread.take()
@@ -1208,31 +1285,20 @@ impl VideoEncoder {
     /// system-relative timestamp. This keeps GPU-only conversion pipelines
     /// from reading a surface back through CPU memory before encoding.
     #[inline]
-    pub fn send_surface(
-        &mut self,
-        surface: IDirect3DSurface,
-        frame_timestamp: i64,
-    ) -> Result<(), VideoEncoderError> {
+    pub fn send_surface(&mut self, surface: IDirect3DSurface, frame_timestamp: i64) -> Result<(), VideoEncoderError> {
         if self.is_video_disabled {
             return Err(VideoEncoderError::VideoDisabled);
         }
 
         let timestamp = match self.first_timestamp {
-            Some(t0) => TimeSpan {
-                Duration: frame_timestamp - t0.Duration,
-            },
+            Some(t0) => TimeSpan { Duration: frame_timestamp - t0.Duration },
             None => {
-                self.first_timestamp = Some(TimeSpan {
-                    Duration: frame_timestamp,
-                });
+                self.first_timestamp = Some(TimeSpan { Duration: frame_timestamp });
                 TimeSpan { Duration: 0 }
             }
         };
 
-        self.frame_sender.send(Some((
-            VideoEncoderSource::DirectX(SendDirectX::new(surface)),
-            timestamp,
-        )))?;
+        self.enqueue_video_source(VideoEncoderSource::DirectX(SendDirectX::new(surface)), timestamp)?;
 
         if self.error_notify.load(atomic::Ordering::Relaxed)
             && let Some(t) = self.transcode_thread.take()
@@ -1270,14 +1336,14 @@ impl VideoEncoder {
             self.build_padded_surface(frame)?
         };
 
-        self.frame_sender.send(Some((VideoEncoderSource::DirectX(surface), video_ts)))?;
+        self.enqueue_video_source(VideoEncoderSource::DirectX(surface), video_ts)?;
 
         // Audio timestamp from running sample count
         let frames_in_buf = (audio_buffer.len() as u32) / self.audio_block_align;
         let audio_ts_ticks = ((self.audio_samples_sent as i128) * 10_000_000i128) / (self.audio_sample_rate as i128);
         let audio_ts = TimeSpan { Duration: audio_ts_ticks as i64 };
 
-        self.audio_sender.send(Some((AudioEncoderSource::Buffer(audio_buffer.to_vec()), audio_ts)))?;
+        self.enqueue_audio_source(AudioEncoderSource::Buffer(audio_buffer.to_vec()), audio_ts)?;
 
         // Advance counter after stamping
         self.audio_samples_sent = self.audio_samples_sent.saturating_add(frames_in_buf as u64);
@@ -1308,7 +1374,7 @@ impl VideoEncoder {
             }
         };
 
-        self.frame_sender.send(Some((VideoEncoderSource::Buffer(buffer.to_vec()), timestamp)))?;
+        self.enqueue_video_source(VideoEncoderSource::Buffer(buffer.to_vec()), timestamp)?;
 
         if self.error_notify.load(atomic::Ordering::Relaxed)
             && let Some(t) = self.transcode_thread.take()
@@ -1335,7 +1401,7 @@ impl VideoEncoder {
         let audio_ts_ticks = ((self.audio_samples_sent as i128) * 10_000_000i128) / (self.audio_sample_rate as i128);
         let timestamp = TimeSpan { Duration: audio_ts_ticks as i64 };
 
-        self.audio_sender.send(Some((AudioEncoderSource::Buffer(buffer.to_vec()), timestamp)))?;
+        self.enqueue_audio_source(AudioEncoderSource::Buffer(buffer.to_vec()), timestamp)?;
 
         self.audio_samples_sent = self.audio_samples_sent.saturating_add(frames_in_buf as u64);
 

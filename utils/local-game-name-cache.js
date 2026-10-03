@@ -103,6 +103,30 @@ function lookupSteamDbName(appid, opts = {}) {
   return name || null;
 }
 
+function normalizeGameTitle(value) {
+  return String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[™®©]/g, "")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function lookupSteamDbAppIdByName(name, opts = {}) {
+  const wanted = normalizeGameTitle(name);
+  if (!wanted) return null;
+  const rows = loadPreferredJsonArray(
+    resolveSteamDbRuntimePath(opts),
+    DEFAULT_STEAM_DB_ASSET,
+  );
+  const row = rows.find(
+    (entry) => normalizeGameTitle(entry?.name) === wanted,
+  );
+  const appid = String(row?.appid || "").trim();
+  return /^\d+$/.test(appid) ? appid : null;
+}
+
 function lookupUplayMappingEntry(uplayId, opts = {}) {
   const id = String(uplayId || "").trim();
   if (!id) return null;
@@ -114,6 +138,7 @@ function lookupUplayMappingEntry(uplayId, opts = {}) {
 }
 
 module.exports = {
+  lookupSteamDbAppIdByName,
   lookupSteamDbName,
   lookupUplayMappingEntry,
 };

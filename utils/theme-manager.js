@@ -4,9 +4,70 @@ const {
   defaultThemesFolder,
   userThemesFolder,
 } = require("./paths");
+const { writeJsonAtomicSync } = require("./atomic-json-store");
 
 const THEME_ID_RE = /^[a-z0-9][a-z0-9._-]{0,79}$/i;
 const TOKEN_RE = /^(?:--)?app-[a-z0-9-]+$/i;
+const BUILTIN_THEME_IDS = new Set([
+  "dracula",
+  "dark",
+  "light",
+  "oled",
+  "metro",
+  "metro-dark",
+  "aero",
+  "aero-dark",
+]);
+const CUSTOM_THEME_TOKEN_NAMES = new Set([
+  "app-bg",
+  "app-surface",
+  "app-text",
+  "app-muted",
+  "app-accent",
+  "app-accent-2",
+  "app-success",
+  "app-warning",
+  "app-attention",
+  "app-danger",
+  "app-pink",
+  "app-backdrop",
+  "app-panel-bg",
+  "app-panel-bg-strong",
+  "app-card-bg",
+  "app-card-footer-bg",
+  "app-hover-bg",
+  "app-border-subtle",
+  "app-input-bg",
+  "app-input-bg-focus",
+  "app-select-bg",
+  "app-select-bg-focus",
+  "app-select-hover-bg",
+  "app-select-border",
+  "app-select-border-focus",
+  "app-select-text",
+  "app-select-option-bg",
+  "app-select-option-text",
+  "app-select-option-hover-bg",
+  "app-select-option-selected-bg",
+  "app-select-option-selected-text",
+  "app-select-option-disabled-text",
+  "app-image-bg",
+  "app-radius-xs",
+  "app-radius-sm",
+  "app-radius-md",
+  "app-radius-lg",
+  "app-radius-xl",
+  "app-radius-panel",
+  "app-radius-pill",
+]);
+const CUSTOM_OVERLAY_TOKEN_NAMES = new Set([
+  "app-overlay-bg",
+  "app-overlay-bg-strong",
+  "app-overlay-surface",
+  "app-overlay-surface-soft",
+  "app-overlay-hover",
+]);
+const RADIUS_TOKEN_RE = /^app-radius-/;
 
 function normalizeThemeId(value) {
   const id = String(value || "").trim().toLowerCase();
@@ -20,8 +81,39 @@ function normalizeThemeName(value, fallback) {
 
 function sanitizeCssValue(value) {
   const text = String(value || "").trim();
-  if (!text || /[{};]/.test(text)) return "";
+  if (
+    !text ||
+    /[{};]/.test(text) ||
+    /(?:url\s*\(|@import|expression\s*\(|javascript:)/i.test(text)
+  ) {
+    return "";
+  }
   return text;
+}
+
+function createCustomThemeId(value) {
+  const slug = String(value || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 72);
+  return normalizeThemeId(slug ? `custom-${slug}` : "");
+}
+
+function sanitizeCustomThemeTokens(tokens, allowedNames) {
+  const sanitized = sanitizeTokens(tokens);
+  const out = {};
+  for (const [key, value] of Object.entries(sanitized)) {
+    if (!allowedNames.has(key)) continue;
+    if (RADIUS_TOKEN_RE.test(key)) {
+      const match = value.match(/^(\d+(?:\.\d+)?)(px|rem|em|%)$/i);
+      if (!match || Number(match[1]) > 999) continue;
+    }
+    out[key] = value;
+  }
+  return out;
 }
 
 function sanitizeTokens(tokens) {
@@ -247,9 +339,62 @@ function getThemeRegistryPayload() {
   };
 }
 
+function saveCustomTheme(draft, options = {}) {
+  if (!draft || typeof draft !== "object" || Array.isArray(draft)) {
+    throw new TypeError("Theme draft must be an object.");
+  }
+  const name = String(draft.name || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 80);
+  if (!name) throw new Error("Theme name is required.");
+  const id = createCustomThemeId(draft.id || name);
+  if (!id || BUILTIN_THEME_IDS.has(id)) {
+    throw new Error("Theme name cannot be used.");
+  }
+  const base = normalizeThemeId(draft.base);
+  if (!BUILTIN_THEME_IDS.has(base)) {
+    throw new Error("Theme base is invalid.");
+  }
+  const tokens = sanitizeCustomThemeTokens(
+    draft.tokens,
+    CUSTOM_THEME_TOKEN_NAMES,
+  );
+  const overlayTokens = sanitizeCustomThemeTokens(
+    draft.overlayTokens,
+    CUSTOM_OVERLAY_TOKEN_NAMES,
+  );
+  if (!Object.keys(tokens).length) {
+    throw new Error("Theme must contain at least one valid token.");
+  }
+  const effects = sanitizeEffects(draft.effects);
+  const targetFolder = path.resolve(options.userThemesFolder || userThemesFolder);
+  fs.mkdirSync(targetFolder, { recursive: true });
+  const filePath = path.resolve(targetFolder, `${id}.json`);
+  if (path.dirname(filePath) !== targetFolder) {
+    throw new Error("Theme path is invalid.");
+  }
+  if (fs.existsSync(filePath)) {
+    const error = new Error("A theme with this name already exists.");
+    error.code = "THEME_EXISTS";
+    throw error;
+  }
+  const payload = {
+    id,
+    name,
+    version: 1,
+    source: "user",
+    base,
+    tokens,
+    overlayTokens,
+    effects,
+  };
+  writeJsonAtomicSync(filePath, payload, { backup: false });
+  return readThemeFile(filePath);
+}
+
 module.exports = {
   ensureUserThemes,
   getThemeRegistryPayload,
   listThemes,
   normalizeThemeId,
+  createCustomThemeId,
+  saveCustomTheme,
 };

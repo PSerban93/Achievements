@@ -4,6 +4,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const chokidar = require("chokidar");
 const { createLogger } = require("./logger");
+const { generationDetail } = require("./emulator-generation-result");
 const {
   readJsonWithBackupSync,
   writeJsonAtomic,
@@ -71,6 +72,15 @@ const {
   resolveGogOfficialGameplayDbForConfig,
 } = require("./gog-galaxy-local");
 const { normalizeProcessNameValue } = require("./process-name-utils");
+const {
+  RUNE_UPLAY_ACHIEVEMENTS_FILE,
+  RUNE_UPLAY_EMU,
+  getSafeLocalizedText,
+  isRuneUplayConfig,
+  loadAchievementsFromSaveFile,
+  mergeEarnedTimeFromCached,
+  readRuneUplayAchievementsCfg,
+} = require("./achievement-data");
 const {
   buildUbisoftOfficialSnapshot,
   listUbisoftOfficialSpoolEntries,
@@ -206,6 +216,12 @@ const STRICT_ROOT_PROFILES = [
     suffix: ["gse saves"],
   },
   {
+    key: "universelan",
+    suffix: ["universelan"],
+    platform: "gog",
+    // <root>/<ProductID>/UniverseLANData/Achievements.ini
+  },
+  {
     key: "goldberg-uplay",
     suffix: ["goldberg uplayemu saves"],
     platform: "uplay",
@@ -225,6 +241,20 @@ const STRICT_ROOT_PROFILES = [
 // the generic strict-root rule where the first child folder is treated as an
 // AppID.
 const SPECIALIZED_STRICT_ROOT_PROFILES = [
+  {
+    key: "rune-uplay",
+    suffix: ["rune", "ubisoft connect"],
+    platform: "uplay",
+    // <root>/achievements/<user>/<appid>/achievements.cfg
+    watchDepth: 4,
+  },
+  {
+    key: "rune-uplay-achievements",
+    suffix: ["rune", "ubisoft connect", "achievements"],
+    platform: "uplay",
+    // <root>/<user>/<appid>/achievements.cfg
+    watchDepth: 3,
+  },
   {
     key: "steam-official",
     suffix: ["steam", "appcache", "stats"],
@@ -296,6 +326,109 @@ function getStrictRootProfile(rootPath) {
     }
   }
   return null;
+}
+function resolveRuneUplayRootInfo(rootPath) {
+  const parts = splitPathLower(rootPath);
+  const isBaseRoot = matchesPathSuffix(parts, ["rune", "ubisoft connect"]);
+  const isAchievementsRoot = matchesPathSuffix(parts, [
+    "rune",
+    "ubisoft connect",
+    "achievements",
+  ]);
+  if (!isBaseRoot && !isAchievementsRoot) return null;
+  const normalizedRoot = path.resolve(rootPath);
+  return {
+    root: normalizedRoot,
+    achievementsRoot: isAchievementsRoot
+      ? normalizedRoot
+      : path.join(normalizedRoot, "achievements"),
+  };
+}
+async function discoverRuneUplayEntries(rootPath, shouldSkipPath = null) {
+  const rootInfo = resolveRuneUplayRootInfo(rootPath);
+  if (!rootInfo) return [];
+  if (
+    typeof shouldSkipPath === "function" &&
+    shouldSkipPath(rootInfo.achievementsRoot)
+  ) {
+    return [];
+  }
+  let users = [];
+  try {
+    users = await fsp.readdir(rootInfo.achievementsRoot, {
+      withFileTypes: true,
+    });
+  } catch {
+    return [];
+  }
+  const found = [];
+  for (const userEntry of users) {
+    if (!userEntry.isDirectory()) continue;
+    const userDir = path.join(rootInfo.achievementsRoot, userEntry.name);
+    if (typeof shouldSkipPath === "function" && shouldSkipPath(userDir)) {
+      continue;
+    }
+    let appDirs = [];
+    try {
+      appDirs = await fsp.readdir(userDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const appEntry of appDirs) {
+      if (!appEntry.isDirectory() || !/^\d+$/.test(appEntry.name)) continue;
+      const appDir = path.join(userDir, appEntry.name);
+      if (typeof shouldSkipPath === "function" && shouldSkipPath(appDir)) {
+        continue;
+      }
+      const achievementsFile = path.join(
+        appDir,
+        RUNE_UPLAY_ACHIEVEMENTS_FILE,
+      );
+      try {
+        if (!fs.statSync(achievementsFile).isFile()) continue;
+      } catch {
+        continue;
+      }
+      found.push({
+        appid: appEntry.name,
+        appDir,
+        achievementsFile,
+        userId: userEntry.name,
+      });
+    }
+  }
+  return found;
+}
+function parseRuneUplayFileEvent(rootPath, targetPath) {
+  const rootInfo = resolveRuneUplayRootInfo(rootPath);
+  if (!rootInfo) return null;
+  const segments = getRelativeSegmentsFromRoot(
+    rootInfo.achievementsRoot,
+    targetPath,
+  );
+  if (
+    segments.length !== 3 ||
+    !/^\d+$/.test(segments[1]) ||
+    String(segments[2]).toLowerCase() !== RUNE_UPLAY_ACHIEVEMENTS_FILE
+  ) {
+    return null;
+  }
+  return {
+    appid: segments[1],
+    appDir: path.dirname(targetPath),
+    achievementsFile: targetPath,
+    userId: segments[0],
+  };
+}
+function shouldIgnoreRuneUplayPath(rootPath, targetPath) {
+  const rootInfo = resolveRuneUplayRootInfo(rootPath);
+  if (!rootInfo || rootInfo.root === rootInfo.achievementsRoot) return false;
+  // Chokidar may present the watched root with different path casing or a
+  // resolved prefix, so do not depend only on `candidatePath !== root` in the
+  // caller. Keep both the ancestors leading to `achievements` and the entire
+  // achievements subtree; reject sibling trees such as `savegames`.
+  if (isPathInsideRoot(targetPath, rootInfo.achievementsRoot)) return false;
+  return !isPathInsideRoot(rootInfo.achievementsRoot, targetPath);
 }
 function getSpecializedStrictRootProfile(rootPath) {
   const parts = splitPathLower(rootPath);
@@ -378,11 +511,6 @@ function isRpcs3TempFolderName(name) {
   const value = String(name || "").toLowerCase();
   return /(?:\$|\uFF04)temp(?:\$|\uFF04)/.test(value);
 }
-const {
-  loadAchievementsFromSaveFile,
-  getSafeLocalizedText,
-} = require("./achievement-data");
-
 function coercePath(input) {
   if (!input) return "";
   if (typeof input === "string") return input;
@@ -504,6 +632,7 @@ const DEFAULT_WATCH_ROOTS = (() => {
     ["APPDATA", ["Steam", "CODEX"]],
     ["APPDATA", ["SmartSteamEmu"]],
     ["LOCALAPPDATA", ["SKIDROW"]],
+    ["LOCALAPPDATA", ["UniverseLAN"]],
   ];
 
   return spec
@@ -1380,6 +1509,14 @@ module.exports = function makeWatchedFolders({
       return "steam";
     }
 
+    if (
+      /^[0-9a-fA-F]{32}$/.test(id) &&
+      hasPlatformVariant(id, "epic-official") &&
+      !hasPlatformVariant(id, "epic")
+    ) {
+      return "epic";
+    }
+
     return null;
   }
 
@@ -1850,6 +1987,9 @@ module.exports = function makeWatchedFolders({
     if (!/^[0-9a-fA-F]+$/.test(appid)) return false;
     const platform = normalizePlatform(task?.forcePlatform) || "steam";
     if (platform.endsWith("-official")) return false;
+    // Relinking an existing config needs the single-item path, which honors
+    // allowExistingVariant and the explicit save-path override together.
+    if (task.allowExistingVariant === true) return false;
     if (task.__emu) return false;
     if (
       task.__gogClientId ||
@@ -2143,9 +2283,9 @@ module.exports = function makeWatchedFolders({
           state.detail = "Waiting for schema generation";
           state.finalState = "skipped";
         } else if (result && result.reason) {
-          state.phase = result.reason === "blacklisted" ? "skipped" : "skipped";
-          state.detail = "Config generation skipped";
-          state.finalState = "skipped";
+          state.phase = result.failed ? "failed" : "skipped";
+          state.detail = result.status ? generationDetail(result) : "Config generation skipped";
+          state.finalState = state.phase;
         } else {
           state.phase = "failed";
           state.detail = "Config generation failed";
@@ -5116,6 +5256,9 @@ module.exports = function makeWatchedFolders({
   function getCacheMetaParserRevision(filePath) {
     const baseName = path.basename(filePath).toLowerCase();
     const parentName = path.basename(path.dirname(filePath)).toLowerCase();
+    if (baseName === RUNE_UPLAY_ACHIEVEMENTS_FILE) {
+      return "rune-uplay-parser:1";
+    }
     return parentName === "stats" &&
       (baseName === "achievements.ini" || baseName === "stats.ini")
         ? "online-fix-parser:2"
@@ -5288,6 +5431,15 @@ module.exports = function makeWatchedFolders({
     }
     if (!meta?.save_path) return [];
 
+    if (isRuneUplayConfig(meta)) {
+      out.add(meta.save_path);
+      out.add(
+        String(meta?.rune_uplay_achievements_file || "").trim() ||
+          path.join(meta.save_path, RUNE_UPLAY_ACHIEVEMENTS_FILE),
+      );
+      return Array.from(out);
+    }
+
     if (isXeniaMeta(meta)) {
       out.add(meta.save_path);
       const gpdPath = resolveGpdPathForMeta(meta);
@@ -5429,6 +5581,24 @@ module.exports = function makeWatchedFolders({
     return Array.from(out);
   }
 
+  function hasActiveUniverseLanSaveSource(meta) {
+    if ((normalizePlatform(meta?.platform) || "steam") !== "gog") {
+      return false;
+    }
+    const savePath = String(meta?.save_path || "").trim();
+    if (!savePath) return false;
+    return [
+      path.join(savePath, "UniverseLAN.ini"),
+      path.join(savePath, "UniverseLANData", "Achievements.ini"),
+    ].some((candidate) => {
+      try {
+        return fs.statSync(candidate).isFile();
+      } catch {
+        return false;
+      }
+    });
+  }
+
   function isExpectedMadnessPatchStateFile(meta, filePath) {
     const checkpointRoot = getMadnessPatchCheckpointRoot(meta);
     if (!checkpointRoot || !filePath) return false;
@@ -5472,6 +5642,7 @@ module.exports = function makeWatchedFolders({
     const isGogOfficial = isGogOfficialMeta(meta);
     const isUbisoftOfficial = isUbisoftOfficialMeta(meta);
     const isEaOfficial = isEaOfficialMeta(meta);
+    const isRuneUplay = isRuneUplayConfig(meta);
     const isMarkerPatch = isMarkerPatchConfig(meta);
     const isMadnessPatch = isMadnessPatchConfig(meta);
     const isXLiveLessNess = isXLiveLessNessConfig(meta);
@@ -5492,6 +5663,8 @@ module.exports = function makeWatchedFolders({
       if (appidStr && base !== `${appidStr}.spool`) return;
     } else if (isEaOfficial) {
       if (base !== EA_VERBOSE_LOG_NAME.toLowerCase()) return;
+    } else if (isRuneUplay) {
+      if (base !== RUNE_UPLAY_ACHIEVEMENTS_FILE) return;
     } else if (isSteamOfficial) {
       if (!base.endsWith(".bin") || !base.startsWith("usergamestats_")) return;
       const appidStr = String(meta?.appid || appid || "").toLowerCase();
@@ -5808,6 +5981,14 @@ module.exports = function makeWatchedFolders({
       const parsed = readMadnessPatchSnapshot(filePath, prev);
       if (parsed.valid) {
         cur = parsed.snapshot;
+      } else {
+        parseOk = false;
+        cur = prev;
+      }
+    } else if (isRuneUplay) {
+      const parsed = readRuneUplayAchievementsCfg(filePath, prev);
+      if (parsed.valid) {
+        cur = mergeEarnedTimeFromCached(parsed.snapshot, prev);
       } else {
         parseOk = false;
         cur = prev;
@@ -6195,6 +6376,7 @@ module.exports = function makeWatchedFolders({
           description: cfgEntry
             ? getSafeLocalizedText(cfgEntry.description, lang)
             : "",
+          hidden: Number(cfgEntry?.hidden) === 1 || cfgEntry?.hidden === "true",
           icon: cfgEntry?.icon || "",
           icon_gray: cfgEntry?.icon_gray || cfgEntry?.icongray || "",
           appid: String(meta?.appid || appid || ""),
@@ -7925,6 +8107,12 @@ module.exports = function makeWatchedFolders({
       path.join(parentDir, id, "user_stats.ini"),
       path.join(parentDir, id, "stats.bin"),
     ].filter(Boolean);
+    if (isRuneUplayConfig(meta)) {
+      candidatesRaw.unshift(
+        String(meta?.rune_uplay_achievements_file || "").trim() ||
+          path.join(baseDir, RUNE_UPLAY_ACHIEVEMENTS_FILE),
+      );
+    }
 
     const candidates = [];
     const seenCandidates = new Set();
@@ -9412,23 +9600,26 @@ module.exports = function makeWatchedFolders({
         }
         if (!result || result.skipped) {
           emitSingleGeneration("end", {
-            status: "success",
-            phase: "skipped",
+            status: result?.failed ? "failed" : "success",
+            phase: result?.failed ? "failed" : "skipped",
             detail:
-              result?.pendingSchema === true
+              result?.status ? generationDetail(result) : result?.pendingSchema === true
                 ? "Waiting for schema generation"
                 : "Config generation skipped",
             percent: 100,
           });
           watcherLogger.info("watcher:generate-skipped", {
             appid,
-            platform: desiredPlatform || null,
+            platform: result?.platform || desiredPlatform || null,
             pendingSchema: result?.pendingSchema === true,
+            reason: result?.reason, status: result?.status,
+            blacklistScope: result?.blacklistScope, durationMs: result?.durationMs,
           });
           return {
+            ...result,
             created: false,
             reason:
-              result?.pendingSchema === true ? "pending-schema" : "skipped",
+              result?.reason || (result?.pendingSchema === true ? "pending-schema" : "skipped"),
           };
         }
         existingConfigIds.add(appid);
@@ -9515,6 +9706,13 @@ module.exports = function makeWatchedFolders({
         try {
           const metas = getConfigMetas(appid);
           for (const meta of metas || []) {
+            if (
+              opts.__emu === RUNE_UPLAY_EMU &&
+              (normalizePlatform(meta?.platform) !== "uplay" ||
+                getMetaNormalizedSavePath(meta) !== normalizedSavePath)
+            ) {
+              continue;
+            }
             const cfgFile = path.join(configsDir, `${meta.name}.json`);
             if (!fs.existsSync(cfgFile)) continue;
             const data = JSON.parse(fs.readFileSync(cfgFile, "utf8"));
@@ -12023,8 +12221,10 @@ module.exports = function makeWatchedFolders({
       const yieldIfNeeded = createTimeSlicer(BOOT_SCAN_SLICE_MS);
       const strictRootProfile = getStrictRootProfile(scanBase);
       const specializedRootProfile = getSpecializedStrictRootProfile(scanBase);
+      const runeUplayRootInfo = resolveRuneUplayRootInfo(scanBase);
       const strictRootPlatform =
-        normalizePlatform(strictRootProfile?.platform) || null;
+        normalizePlatform(strictRootProfile?.platform) ||
+        (runeUplayRootInfo ? "uplay" : null);
       const isShadPs4ScanRoot = isShadPs4RuntimePath(scanBase);
       const attachSeedOptions = rescanInProgress.value
         ? { deferInitialSeed: true }
@@ -12041,8 +12241,41 @@ module.exports = function makeWatchedFolders({
       let nemirtingasDiscoveryPlatform = null;
       const nemirtingasRootInfo = resolveNemirtingasBaseInfo(rootPath);
       const isNemirtingasRoot = nemirtingasRootInfo !== null;
+      let runeUplayDiscoveredCount = 0;
 
-      if (gogTargetEvidence?.detected === true) {
+      if (runeUplayRootInfo) {
+        scanTelemetry.handledBy = "rune-uplay";
+        const runeEntries = await discoverRuneUplayEntries(
+          scanBase,
+          shouldSkipPath,
+        );
+        runeUplayDiscoveredCount = runeEntries.length;
+        for (const entry of runeEntries) {
+          const id = String(entry.appid || "").trim();
+          if (!id || isAppIdBlacklisted(id, "uplay", blacklistState)) continue;
+          const normalizedPath = normalizeObservedPath(entry.appDir, id);
+          const exactMeta = getConfigMetas(id).find(
+            (meta) =>
+              normalizePlatform(meta?.platform) === "uplay" &&
+              getMetaNormalizedSavePath(meta) === normalizedPath,
+          );
+          if (exactMeta && isRuneUplayConfig(exactMeta)) {
+            knownAppIds.add(id);
+            if (normalizedPath) recordExistingSavePath(id, normalizedPath);
+            continue;
+          }
+          generationTasks.push({
+            appid: id,
+            forcePlatform: "uplay",
+            appDir: entry.appDir,
+            normalizedPath,
+            __savePathOverride: entry.appDir,
+            __emu: RUNE_UPLAY_EMU,
+            allowExistingVariant: hasPlatformVariant(id, "uplay"),
+          });
+          if (normalizedPath) markPendingSavePath(id, normalizedPath);
+        }
+      } else if (gogTargetEvidence?.detected === true) {
         scanTelemetry.handledBy = "gog-targeted";
         gogInfoFound = gogTargetEvidence.hasGogInfo
           ? await findGogInfoAppId(
@@ -13354,7 +13587,9 @@ module.exports = function makeWatchedFolders({
         return;
       }
 
-      scanTelemetry.discovered = discovered.length;
+      scanTelemetry.discovered = runeUplayRootInfo
+        ? runeUplayDiscoveredCount
+        : discovered.length;
 
       for (const id of discovered) {
         try {
@@ -13421,6 +13656,29 @@ module.exports = function makeWatchedFolders({
           ) {
             continue;
           }
+          if (
+            strictRootProfile?.key === "universelan" &&
+            targetPlatform === "gog"
+          ) {
+            const activeExistingMeta = getConfigMetas(id).find(
+              (meta) =>
+                (normalizePlatform(meta?.platform) || "steam") === "gog" &&
+                getMetaNormalizedSavePath(meta) !== normalizedDir &&
+                hasActiveUniverseLanSaveSource(meta),
+            );
+            if (activeExistingMeta) {
+              watcherLogger.info(
+                "universelan:global-root-preserve-active-config",
+                {
+                  appid: id,
+                  configName: activeExistingMeta.name || null,
+                  currentPath: activeExistingMeta.save_path || null,
+                  discoveredPath: appDir,
+                },
+              );
+              continue;
+            }
+          }
           watcherLogger.info("watcher:force-platform-new-path", {
             appid: id,
             target: targetPlatform,
@@ -13431,6 +13689,18 @@ module.exports = function makeWatchedFolders({
             forcePlatform: targetPlatform,
             appDir,
             normalizedPath: normalizedDir,
+            // UniverseLAN can move a game from its legacy game-local layout
+            // to the canonical global ProductID directory while keeping the
+            // same GOG identity. Allow the existing GOG config to be relinked
+            // instead of leaving its save_path on the inactive legacy path.
+            allowExistingVariant:
+              strictRootProfile?.key === "universelan" &&
+              targetPlatform === "gog",
+            __savePathOverride:
+              strictRootProfile?.key === "universelan" &&
+              targetPlatform === "gog"
+                ? appDir
+                : null,
           });
           markPendingSavePath(id, normalizedDir);
         } finally {
@@ -13955,9 +14225,15 @@ module.exports = function makeWatchedFolders({
       specializedRootProfile?.key === "nemirtingas-galaxy"
         ? normalizePlatform(specializedRootProfile.platform)
         : null;
+    const specializedRuneUplayPlatform =
+      specializedRootProfile?.key === "rune-uplay" ||
+      specializedRootProfile?.key === "rune-uplay-achievements"
+        ? "uplay"
+        : null;
     const strictRootPlatform =
       normalizePlatform(strictRootProfile?.platform) ||
       specializedNemirtingasPlatform ||
+      specializedRuneUplayPlatform ||
       null;
     const xLiveLessNessWatchMetadata =
       getXLiveLessNessWatchMetadata(root);
@@ -13992,7 +14268,8 @@ module.exports = function makeWatchedFolders({
       ignoreInitial: true,
       ignored: (candidatePath, stats) =>
         candidatePath !== root &&
-        (isPathBlocked(candidatePath) ||
+        (shouldIgnoreRuneUplayPath(root, candidatePath) ||
+          isPathBlocked(candidatePath) ||
           discoveryWatchPolicy.shouldIgnore(candidatePath, stats, {
             allowRuntimeAuxiliaryFiles: rootWatcherReady,
           })),
@@ -14548,6 +14825,8 @@ module.exports = function makeWatchedFolders({
         const isSteamSchemaBin = !!steamInfo && steamInfo.kind === "schema";
         const isSteamUserBin = !!steamInfo && steamInfo.kind === "user";
         const base = path.basename(filePath).toLowerCase();
+        const runeUplayEvent = parseRuneUplayFileEvent(root, filePath);
+        if (resolveRuneUplayRootInfo(root) && !runeUplayEvent) return;
         const isGpd = base.endsWith(".gpd");
         const isTropusr = base === "tropusr.dat";
         const isTropconf = base === "tropconf.sfm";
@@ -14559,6 +14838,7 @@ module.exports = function makeWatchedFolders({
           !isPs4Xml &&
           !isSteamSchemaBin &&
           !isSteamUserBin &&
+          !runeUplayEvent &&
           !(
             base === "stats.ini" &&
             path.basename(path.dirname(filePath)).toLowerCase() === "stats"
@@ -14577,7 +14857,9 @@ module.exports = function makeWatchedFolders({
           ? parseStrictRootAppId(root, filePath)
           : null;
         let appid = null;
-        if (isSteamSchemaBin || isSteamUserBin) {
+        if (runeUplayEvent) {
+          appid = runeUplayEvent.appid;
+        } else if (isSteamSchemaBin || isSteamUserBin) {
           appid = steamInfo?.appid || null;
         } else if (isGpd) {
           appid = path.basename(filePath, path.extname(filePath));
@@ -14817,6 +15099,8 @@ module.exports = function makeWatchedFolders({
         const isSteamSchemaBin = !!steamInfo && steamInfo.kind === "schema";
         const isSteamUserBin = !!steamInfo && steamInfo.kind === "user";
         const base = path.basename(filePath).toLowerCase();
+        const runeUplayEvent = parseRuneUplayFileEvent(root, filePath);
+        if (resolveRuneUplayRootInfo(root) && !runeUplayEvent) return;
         const isGpd = base.endsWith(".gpd");
         const isTropusr = base === "tropusr.dat";
         const isTropconf = base === "tropconf.sfm";
@@ -14828,6 +15112,7 @@ module.exports = function makeWatchedFolders({
           !isPs4Xml &&
           !isSteamSchemaBin &&
           !isSteamUserBin &&
+          !runeUplayEvent &&
           !(
             base === "stats.ini" &&
             path.basename(path.dirname(filePath)).toLowerCase() === "stats"
@@ -14846,7 +15131,9 @@ module.exports = function makeWatchedFolders({
           ? parseStrictRootAppId(root, filePath)
           : null;
         let appid = null;
-        if (isSteamSchemaBin || isSteamUserBin) {
+        if (runeUplayEvent) {
+          appid = runeUplayEvent.appid;
+        } else if (isSteamSchemaBin || isSteamUserBin) {
           appid = steamInfo?.appid || null;
         } else if (isGpd) {
           appid = path.basename(filePath, path.extname(filePath));
@@ -15067,6 +15354,16 @@ module.exports = function makeWatchedFolders({
           schedule();
           return;
         }
+        if (resolveRuneUplayRootInfo(root)) {
+          schedule();
+          return;
+        }
+        if (resolveNemirtingasBaseInfo(root)) {
+          // The provider layout is <user>/<appid>; the user directory can
+          // itself be hexadecimal, so let the dedicated scan select games.
+          if (resolveNemirtingasBaseInfo(dir)?.sub.length <= 2) schedule();
+          return;
+        }
 
         const base = path.basename(dir);
         if (strictRootProfile) {
@@ -15129,7 +15426,13 @@ module.exports = function makeWatchedFolders({
               alternatePlatform,
               normalizedDir || "",
             );
-            if (existingSchemaMeta) {
+            const shouldRelinkUniverseLan =
+              strictRootProfile?.key === "universelan" &&
+              alternatePlatform === "gog" &&
+              existingSchemaMeta &&
+              getMetaNormalizedSavePath(existingSchemaMeta) !== normalizedDir &&
+              !hasActiveUniverseLanSaveSource(existingSchemaMeta);
+            if (existingSchemaMeta && !shouldRelinkUniverseLan) {
               watcherLogger.info("watcher:addDir-skip-existing-schema", {
                 appid: String(base),
                 path: dir,
@@ -15163,6 +15466,8 @@ module.exports = function makeWatchedFolders({
               generationResult = await generateOneAppId(base, dir, {
                 forcePlatform: alternatePlatform,
                 normalizedSavePath: normalizedDir || "",
+                allowExistingVariant: shouldRelinkUniverseLan,
+                __savePathOverride: shouldRelinkUniverseLan ? dir : null,
               });
             } finally {
               if (normalizedDir && generationResult?.reason !== "inflight") {
@@ -16732,6 +17037,7 @@ module.exports = function makeWatchedFolders({
     app.on("before-quit", async () => {
       stopLumaPlayDiscoveryPolling();
       stopBootOnboardingAttentionLoop();
+      stopMissingRootPoller();
       for (const entry of folderWatchers.values()) {
         entry.stopped = true;
         entry.rescanQueued = false;

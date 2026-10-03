@@ -111,6 +111,24 @@
         el.textContent = value;
       }
     });
+
+    document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => {
+      const key = el.getAttribute("data-i18n-placeholder");
+      const value = key ? strings[key] : null;
+      if (typeof value === "string") el.setAttribute("placeholder", value);
+    });
+
+    document.querySelectorAll("[data-i18n-aria-label]").forEach((el) => {
+      const key = el.getAttribute("data-i18n-aria-label");
+      const value = key ? strings[key] : null;
+      if (typeof value === "string") el.setAttribute("aria-label", value);
+    });
+
+    document.querySelectorAll("[data-i18n-title]").forEach((el) => {
+      const key = el.getAttribute("data-i18n-title");
+      const value = key ? strings[key] : null;
+      if (typeof value === "string") el.setAttribute("title", value);
+    });
   }
 
   async function setUiLanguage(lang) {

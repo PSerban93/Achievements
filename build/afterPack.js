@@ -9,11 +9,13 @@ module.exports = async (context) => {
     throw new Error("afterPack: appOutDir is missing");
   }
 
-  const requiredUnpackedWorkers = [
+  const requiredUnpackedUtilities = [
     ["XLiveLessNess", "xlivelessness-worker.js"],
     ["Game Bar named pipe", "gamebar-widget-pipe-worker.js"],
+    ["Profile backup", "profile-backup-worker.js"],
+    ["Profile backup runtime", "profile-backup.js"],
   ];
-  for (const [label, fileName] of requiredUnpackedWorkers) {
+  for (const [label, fileName] of requiredUnpackedUtilities) {
     const workerPath = path.join(
       appOutDir,
       "resources",
@@ -23,6 +25,36 @@ module.exports = async (context) => {
     );
     if (!fs.existsSync(workerPath)) {
       throw new Error(`afterPack: ${label} worker missing at ${workerPath}`);
+    }
+  }
+  const unpackedRuntimeDependencies = [
+    ["adm-zip", "adm-zip.js"],
+    ["tar-stream", "index.js"],
+    ["b4a", "index.js"],
+    ["bare-events", "index.js"],
+    ["bare-fs", "index.js"],
+    ["bare-path", "index.js"],
+    ["bare-stream", "index.js"],
+    ["bare-url", "index.js"],
+    ["events-universal", "index.js"],
+    ["fast-fifo", "index.js"],
+    ["streamx", "index.js"],
+    ["teex", "index.js"],
+    ["text-decoder", "index.js"],
+  ];
+  for (const [packageName, entryFile] of unpackedRuntimeDependencies) {
+    const dependencyPath = path.join(
+      appOutDir,
+      "resources",
+      "app.asar.unpacked",
+      "node_modules",
+      packageName,
+      entryFile,
+    );
+    if (!fs.existsSync(dependencyPath)) {
+      throw new Error(
+        `afterPack: Unpacked runtime dependency missing at ${dependencyPath}`,
+      );
     }
   }
 

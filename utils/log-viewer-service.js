@@ -28,6 +28,7 @@ const KNOWN_LOG_SOURCES = Object.freeze({
   persistence: "Cache & Persistence",
   "uplay-mapping": "Ubisoft Mapping",
   "schema-parse": "Steam Schema Parser",
+  "profile-backup": "Backup & Restore",
   ui: "User Interface",
   ipc: "IPC Errors",
 });
@@ -138,6 +139,7 @@ function createLogViewerService(options = {}) {
   let directoryWatcher = null;
   let debounceTimer = null;
   let pollTimer = null;
+  let sourcesSignature = "";
 
   fs.mkdirSync(logDir, { recursive: true });
 
@@ -151,14 +153,42 @@ function createLogViewerService(options = {}) {
     pollTimer = null;
   };
 
-  const send = (subscription, payload) => {
+  const sendChannel = (subscription, channel, payload) => {
     const webContents = subscription.webContents;
     if (!webContents || webContents.isDestroyed?.()) return false;
     try {
-      webContents.send("settings:logs:append", payload);
+      webContents.send(channel, payload);
       return true;
     } catch {
       return false;
+    }
+  };
+
+  const send = (subscription, payload) =>
+    sendChannel(subscription, "settings:logs:append", payload);
+
+  const serializeSources = (sources) =>
+    JSON.stringify(
+      sources.map((source) => [source.id, source.label, source.exists === true]),
+    );
+
+  const publishSourcesIfChanged = async () => {
+    const sources = await listSources(logDir);
+    const nextSignature = serializeSources(sources);
+    if (nextSignature === sourcesSignature) return;
+    sourcesSignature = nextSignature;
+    const notified = new Set();
+    for (const subscription of subscriptions.values()) {
+      const webContents = subscription.webContents;
+      const key = String(webContents?.id || "");
+      if (!key || notified.has(key)) continue;
+      if (
+        sendChannel(subscription, "settings:logs:sources-changed", {
+          sources,
+        })
+      ) {
+        notified.add(key);
+      }
     }
   };
 
@@ -224,6 +254,13 @@ function createLogViewerService(options = {}) {
         });
       }
     }
+    try {
+      await publishSourcesIfChanged();
+    } catch (error) {
+      logger?.warn?.("logs-viewer:sources-refresh-failed", {
+        error: error?.message || String(error),
+      });
+    }
     stopWatcherIfIdle();
   };
 
@@ -265,6 +302,7 @@ function createLogViewerService(options = {}) {
     subscriptions.delete(key);
     stopWatcherIfIdle();
     const allowed = await listSources(logDir);
+    sourcesSignature = serializeSources(allowed);
     if (subscriptionVersions.get(key) !== version) {
       return {
         sourceId: safeId,

@@ -32,9 +32,7 @@ function readStore() {
 }
 
 function writeStore(data) {
-  try {
-    writeJsonAtomicSync(STORE_PATH, data, { backup: true });
-  } catch {}
+  writeJsonAtomicSync(STORE_PATH, data, { backup: true });
 }
 
 function accumulatePlaytime(configName, millis) {

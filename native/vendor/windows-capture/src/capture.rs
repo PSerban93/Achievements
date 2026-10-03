@@ -20,7 +20,7 @@ use windows_future::AsyncActionCompletedHandler;
 use crate::d3d11::{self, create_d3d_device};
 use crate::frame::Frame;
 use crate::graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl};
-use crate::settings::{GraphicsCaptureItemType, Settings};
+use crate::settings::{GraphicsCaptureItemType, MinimumUpdateIntervalSettings, Settings};
 use crate::winrt::WinRT;
 
 const fn dispatcher_queue_options() -> DispatcherQueueOptions {
@@ -296,6 +296,18 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Initialize WinRT
         let _winrt = WinRT::new().map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
 
+        // Validate optional capture throttling before constructing the consumer
+        // handler. Handler construction may allocate encoders and audio devices,
+        // which must not happen for an unsupported setting that will be retried.
+        if settings.minimum_update_interval_settings != MinimumUpdateIntervalSettings::Default
+            && !GraphicsCaptureApi::is_minimum_update_interval_supported()
+                .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?
+        {
+            return Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
+                graphics_capture_api::Error::MinimumUpdateIntervalUnsupported,
+            ));
+        }
+
         // Create a dispatcher queue for the current thread
         let controller = unsafe {
             CreateDispatcherQueueController(dispatcher_queue_options())
@@ -377,6 +389,15 @@ pub trait GraphicsCaptureApiHandler: Sized {
         let thread_handle = thread::spawn(move || -> Result<(), GraphicsCaptureApiError<Self::Error>> {
             // Initialize WinRT
             let _winrt = WinRT::new().map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
+
+            if settings.minimum_update_interval_settings != MinimumUpdateIntervalSettings::Default
+                && !GraphicsCaptureApi::is_minimum_update_interval_supported()
+                    .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?
+            {
+                return Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
+                    graphics_capture_api::Error::MinimumUpdateIntervalUnsupported,
+                ));
+            }
 
             // Create a dispatcher queue for the current thread
             let controller = unsafe {

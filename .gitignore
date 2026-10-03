@@ -9,6 +9,7 @@ dist/
 /my_login.txt
 scripts/
 logs/
+docs/
 /native/**/target/
 tests/
 tests/overlay-shortcut-manager.test.js

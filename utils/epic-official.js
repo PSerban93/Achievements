@@ -33,6 +33,10 @@ const epicOfficialLogger = createLogger("epic-official", {
   level: process.env.EPIC_OFFICIAL_LOG_LEVEL || "info",
 });
 let epicProductMap = null;
+let epicProductMapExpiresAt = 0;
+let epicProductMapPromise = null;
+const EPIC_PRODUCT_MAP_SUCCESS_TTL_MS = 6 * 60 * 60 * 1000;
+const EPIC_PRODUCT_MAP_FAILURE_TTL_MS = 5 * 60 * 1000;
 const EPIC_OFFICIAL_IMPORT_META_FILE = "epic-official-import-meta.json";
 const EPIC_OFFICIAL_IMPORT_CONCURRENCY = 5;
 
@@ -122,26 +126,47 @@ function extractEpicStoreSlugFromCatalogItem(catalogItem = null) {
 }
 
 async function loadEpicProductMap(timeoutMs = 20000) {
-  if (epicProductMap && typeof epicProductMap === "object") return epicProductMap;
-  try {
-    const url =
-      "https://store-content.ak.epicgames.com/api/content/productmapping/";
-    const res = await axios.get(url, {
-      timeout: timeoutMs,
-      responseType: "json",
-      validateStatus: (status) => status >= 200 && status < 500,
-    });
-    if (res.status < 400 && res.data && typeof res.data === "object") {
-      epicProductMap = res.data;
-      return epicProductMap;
-    }
-  } catch (err) {
-    epicOfficialLogger.warn("epic-official:productmap-fetch-failed", {
-      error: err?.message || String(err),
-    });
+  if (epicProductMap && epicProductMapExpiresAt > Date.now()) {
+    return epicProductMap;
   }
-  epicProductMap = {};
-  return epicProductMap;
+  if (epicProductMapPromise) return epicProductMapPromise;
+  epicProductMapPromise = (async () => {
+    try {
+      const url =
+        "https://store-content.ak.epicgames.com/api/content/productmapping/";
+      const res = await axios.get(url, {
+        timeout: timeoutMs,
+        responseType: "json",
+        validateStatus: (status) => status >= 200 && status < 500,
+      });
+      if (
+        res.status < 400 &&
+        res.data &&
+        typeof res.data === "object" &&
+        !Array.isArray(res.data) &&
+        Object.keys(res.data).length > 0
+      ) {
+        epicProductMap = res.data;
+        epicProductMapExpiresAt = Date.now() + EPIC_PRODUCT_MAP_SUCCESS_TTL_MS;
+        return epicProductMap;
+      }
+      epicOfficialLogger.warn("epic-official:productmap-fetch-failed", {
+        status: res.status,
+      });
+    } catch (err) {
+      epicOfficialLogger.warn("epic-official:productmap-fetch-failed", {
+        error: err?.message || String(err),
+      });
+    }
+    epicProductMap = {};
+    epicProductMapExpiresAt = Date.now() + EPIC_PRODUCT_MAP_FAILURE_TTL_MS;
+    return epicProductMap;
+  })();
+  try {
+    return await epicProductMapPromise;
+  } finally {
+    epicProductMapPromise = null;
+  }
 }
 
 async function resolveEpicStoreSlug(candidates = [], timeoutMs = 20000) {
@@ -173,6 +198,24 @@ function extractEpicHero(data = {}) {
   );
 }
 
+function catalogImageUrls(catalogItem, preferredTypes) {
+  const images = asArray(catalogItem?.keyImages || catalogItem?.KeyImages);
+  const urls = [];
+  for (const type of preferredTypes) {
+    const matches = images.filter(
+      (image) =>
+        String(image?.type || image?.Type || "").trim().toLowerCase() ===
+          type.toLowerCase() &&
+        firstNonEmpty(image?.url, image?.Url),
+    );
+    for (const match of matches) {
+      const url = firstNonEmpty(match.url, match.Url);
+      if (!urls.includes(url)) urls.push(url);
+    }
+  }
+  return urls;
+}
+
 async function downloadEpicStoreImage(url, outPath, timeoutMs = 20000) {
   const sourceUrl = String(url || "").trim();
   if (!sourceUrl) return false;
@@ -189,7 +232,15 @@ async function downloadEpicStoreImage(url, outPath, timeoutMs = 20000) {
       timeout: timeoutMs,
       validateStatus: (status) => status >= 200 && status < 500,
     });
-    if (res.status >= 400 || !res.data) return false;
+    const contentType = String(res.headers?.["content-type"] || "").toLowerCase();
+    if (
+      res.status >= 400 ||
+      !res.data ||
+      !res.data.byteLength ||
+      /^(text\/|application\/(?:json|xml))/.test(contentType)
+    ) {
+      return false;
+    }
     fs.mkdirSync(path.dirname(outPath), { recursive: true });
     fs.writeFileSync(outPath, res.data);
     return true;
@@ -213,7 +264,38 @@ async function cacheEpicOfficialStoreImages(asset = {}, options = {}) {
     Number.isFinite(options?.timeoutMs) && options.timeoutMs > 0
       ? Number(options.timeoutMs)
       : 20000;
-  const existingImages = getEpicOfficialStoreImageState(userDataDir, productId);
+  let existingImages = getEpicOfficialStoreImageState(userDataDir, productId);
+  const alreadyComplete = existingImages.complete;
+  const catalogItem = options?.catalogItem || null;
+  if (!existingImages.complete && catalogItem) {
+    const portraitUrls = catalogImageUrls(catalogItem, [
+      "DieselGameBoxTall",
+      "OfferImageTall",
+    ]);
+    const headerUrls = catalogImageUrls(catalogItem, [
+      "DieselGameBoxWide",
+      "DieselGameBox",
+      "OfferImageWide",
+    ]);
+    if (!existingImages.portraitExists) {
+      for (const url of portraitUrls) {
+        if (await downloadEpicStoreImage(url, existingImages.portraitPath, timeoutMs)) break;
+      }
+    }
+    if (!existingImages.headerExists) {
+      for (const url of headerUrls) {
+        if (await downloadEpicStoreImage(url, existingImages.headerPath, timeoutMs)) break;
+      }
+    }
+    existingImages = getEpicOfficialStoreImageState(userDataDir, productId);
+    epicOfficialLogger.info("epic-official:catalog-images-cached", {
+      productId,
+      namespace: asset?.namespace || null,
+      catalogItemId: asset?.catalogItemId || null,
+      portraitSaved: existingImages.portraitExists,
+      headerSaved: existingImages.headerExists,
+    });
+  }
   const explicitSlug = normalizeEpicStoreSlug(
     firstNonEmpty(
       options?.epic_store_slug,
@@ -247,12 +329,17 @@ async function cacheEpicOfficialStoreImages(asset = {}, options = {}) {
       portraitSaved: true,
       headerSaved: true,
       title: String(options?.title || asset?.title || "").trim(),
-      skippedExisting: true,
+      skippedExisting: alreadyComplete,
     };
   }
   const slug = explicitSlug || (await resolveMappedSlug());
   if (!slug) {
-    return { slug: "", portraitSaved: false, headerSaved: false, title: "" };
+    return {
+      slug: "",
+      portraitSaved: existingImages.portraitExists,
+      headerSaved: existingImages.headerExists,
+      title: String(options?.title || asset?.title || "").trim(),
+    };
   }
   try {
     const url = `https://store-content.ak.epicgames.com/api/en-US/content/products/${encodeURIComponent(
@@ -264,7 +351,12 @@ async function cacheEpicOfficialStoreImages(asset = {}, options = {}) {
       validateStatus: (status) => status >= 200 && status < 500,
     });
     if (res.status >= 400 || !res.data || typeof res.data !== "object") {
-      return { slug, portraitSaved: false, headerSaved: false, title: "" };
+      return {
+        slug,
+        portraitSaved: existingImages.portraitExists,
+        headerSaved: existingImages.headerExists,
+        title: String(options?.title || asset?.title || "").trim(),
+      };
     }
     const data = res.data || {};
     const hero = extractEpicHero(data);
@@ -308,7 +400,12 @@ async function cacheEpicOfficialStoreImages(asset = {}, options = {}) {
       slug,
       error: err?.message || String(err),
     });
-    return { slug, portraitSaved: false, headerSaved: false, title: "" };
+    return {
+      slug,
+      portraitSaved: existingImages.portraitExists,
+      headerSaved: existingImages.headerExists,
+      title: String(options?.title || asset?.title || "").trim(),
+    };
   }
 }
 
@@ -1367,6 +1464,15 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     normalizeEpicAccountId(token?.account_id);
   const progress =
     typeof options?.onProgress === "function" ? options.onProgress : null;
+  const emitProgress = (state) => {
+    try {
+      progress?.(state);
+    } catch (err) {
+      epicOfficialLogger.warn("epic-official:import-library:progress-failed", {
+        error: err?.message || String(err),
+      });
+    }
+  };
   fs.mkdirSync(outputDir, { recursive: true });
   const schemaRootBase = isNonEmptyString(options?.schemaRootDir)
     ? String(options.schemaRootDir).trim()
@@ -1377,7 +1483,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     schemaRootBase,
   });
 
-  progress?.({
+  emitProgress({
     phase: "fetchingLibrary",
     detail: "Fetching Epic entitlements",
     percent: 5,
@@ -1400,7 +1506,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     entitlements = [];
   }
 
-  progress?.({
+  emitProgress({
     phase: "fetchingLibrary",
     detail: "Fetching Epic library items",
     percent: 6,
@@ -1510,6 +1616,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
   let localInstallUpdated = 0;
   let importMetaChanged = false;
   const schemaFailureSamples = [];
+  const assetFailureSamples = [];
   const playableSkipSamples = [];
   const imported = [];
   let completed = 0;
@@ -1591,8 +1698,16 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
           catalogItemId: asset.catalogItemId,
           appName: asset.appName,
         });
+        const imageState = getEpicOfficialStoreImageState(
+          options?.userDataDir,
+          productId,
+        );
+        let catalogItem = null;
         let catalogStoreSlug = "";
-        if (!previous.epic_store_slug && asset.catalogItemId) {
+        if (
+          asset.catalogItemId &&
+          (!imageState.complete || !previous.epic_store_slug)
+        ) {
           try {
             const catalog = await withEpicImportRetry(
               () =>
@@ -1603,15 +1718,16 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
                 }),
               { attempts: 2, baseDelayMs: 1500 },
             );
-            catalogStoreSlug = extractEpicStoreSlugFromCatalogItem(
-              catalog?.item || null,
-            );
-          } catch {}
+            catalogItem = catalog?.item || null;
+            catalogStoreSlug = extractEpicStoreSlugFromCatalogItem(catalogItem);
+          } catch (error) {
+            epicOfficialLogger.warn("epic-official:catalog-item-fetch-failed", {
+              namespace: asset.namespace || null,
+              catalogItemId: asset.catalogItemId,
+              error: error?.message || String(error),
+            });
+          }
         }
-        const imageState = getEpicOfficialStoreImageState(
-          options?.userDataDir,
-          productId,
-        );
         let storeImages = {
           slug: previous.epic_store_slug || catalogStoreSlug || "",
           portraitSaved: imageState.portraitExists,
@@ -1630,6 +1746,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
             epic_catalog_item_id: asset.catalogItemId || "",
             epic_app_name: asset.appName || "",
             epic_store_slug: previous.epic_store_slug || catalogStoreSlug || "",
+            catalogItem,
             title: displayName,
           });
           if (storeImages?.skippedExisting) imageSkippedExisting += 1;
@@ -1742,7 +1859,13 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
             { attempts: 2, baseDelayMs: 1500 },
           );
           catalogItem = catalog.item || null;
-        } catch {}
+        } catch (error) {
+          epicOfficialLogger.warn("epic-official:catalog-item-fetch-failed", {
+            namespace: asset.namespace || null,
+            catalogItemId: asset.catalogItemId,
+            error: error?.message || String(error),
+          });
+        }
       }
       catalogPlayable = catalogItemLooksPlayable(catalogItem);
       if (!catalogPlayable) {
@@ -1833,6 +1956,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
         epic_catalog_item_id: asset.catalogItemId || "",
         epic_app_name: asset.appName || "",
         epic_store_slug: catalogStoreSlug,
+        catalogItem,
         title,
       });
       if (storeImages?.skippedExisting) imageSkippedExisting += 1;
@@ -1936,7 +2060,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
       completed += 1;
       const basePercent =
         8 + Math.round((completed / Math.max(assets.length, 1)) * 82);
-      progress?.({
+      emitProgress({
         phase: "checkingGame",
         detail,
         current: completed,
@@ -1961,7 +2085,30 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     while (nextAssetIndex < assets.length) {
       const index = nextAssetIndex;
       nextAssetIndex += 1;
-      await processAsset(assets[index], index);
+      try {
+        await processAsset(assets[index], index);
+      } catch (err) {
+        const asset = assets[index];
+        const error = err?.message || String(err);
+        failed += 1;
+        epicOfficialLogger.warn("epic-official:import-library:asset-failed", {
+          index,
+          namespace: asset?.namespace || null,
+          catalogItemId: asset?.catalogItemId || null,
+          productId: asset?.productId || null,
+          title: asset?.title || asset?.appName || null,
+          error,
+        });
+        if (assetFailureSamples.length < 10) {
+          assetFailureSamples.push({
+            namespace: asset?.namespace || "",
+            catalogItemId: asset?.catalogItemId || "",
+            productId: asset?.productId || "",
+            title: asset?.title || asset?.appName || "",
+            error,
+          });
+        }
+      }
     }
   });
   await Promise.all(runners);
@@ -1970,9 +2117,11 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     saveEpicOfficialImportMeta(importMetaState.path, importMeta);
   }
 
-  progress?.({
+  emitProgress({
     phase: "completed",
-    detail: "Epic library import completed",
+    detail: failed
+      ? `Epic library import completed; ${failed} ${failed === 1 ? "game" : "games"} failed`
+      : "Epic library import completed",
     current: assets.length,
     total: assets.length,
     percent: 100,
@@ -2000,6 +2149,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     importMetaUpdated: importMetaChanged === true,
     playableSkipSamples,
     schemaFailureSamples,
+    assetFailureSamples,
   });
 
   return {
@@ -2023,6 +2173,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
     localInstallUpdated,
     importMetaPath: importMetaState.path || "",
     importMetaUpdated: importMetaChanged === true,
+    assetFailureSamples,
     imported,
   };
 }

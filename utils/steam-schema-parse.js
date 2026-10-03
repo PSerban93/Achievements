@@ -3,6 +3,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 const { execFile, spawn } = require("child_process");
 const { promisify } = require("util");
+const { watchGenerationProcess } = require("./generation-process-timeout");
 const { createLogger } = require("./logger");
 const { updateTopOwnersIds } = require("./update-top-owners");
 const {
@@ -21,6 +22,7 @@ const SCHEMA_PARSE_BATCH_CHUNK_SIZE = 20;
 const SCHEMA_PARSE_AUTH_RETRY_DELAY_MS = 30000;
 const SCHEMA_PARSE_CHUNK_DELAY_MS = 7000;
 const SCHEMA_PARSE_OUTPUT_DIR_NAMES = ["output", "_OUTPUT"];
+const SCHEMA_PARSE_GAME_TIMEOUT_MS = 180000;
 const SCHEMA_PARSE_MUTABLE_NAMES = [
   "my_login.txt",
   "refresh_tokens.json",
@@ -39,6 +41,7 @@ function normalizeUserDataDir(userDataDir = "") {
 
 function applySchemaParseEnvironment(baseEnv = process.env) {
   const nextEnv = { ...(baseEnv || {}) };
+  nextEnv.PYTHONUNBUFFERED = "1";
   const username = String(nextEnv.GSE_CFG_USERNAME || "").trim();
   const password = String(nextEnv.GSE_CFG_PASSWORD || "").trim();
   if (!username) {
@@ -565,17 +568,39 @@ async function runGenerateEmuConfig(runtimeDir, appid) {
   cleanupGeneratedAppArtifacts(runtimeDir, appid, { log: false });
   logger.info("schema-parse:run:start", { appid, runtimeDir });
   let result;
+  let streamedStdout = "";
+  let streamedStderr = "";
   try {
-    result = await execFileAsync(exePath, [String(appid)], {
+    // Inventory is unrelated to achievements and can stall after a complete
+    // achievements result. Keep the executable and its runtime unchanged.
+    const pending = execFileAsync(exePath, ["-skip_inv", String(appid)], {
       cwd: runtimeDir,
       windowsHide: true,
       shell: false,
       maxBuffer: 8 * 1024 * 1024,
       env: applySchemaParseEnvironment(process.env),
     });
+    pending.child.stdout?.setEncoding("utf8");
+    pending.child.stderr?.setEncoding("utf8");
+    pending.child.stdout?.on("data", (chunk) => { streamedStdout += chunk; });
+    pending.child.stderr?.on("data", (chunk) => { streamedStderr += chunk; });
+    const deadline = watchGenerationProcess(pending.child, SCHEMA_PARSE_GAME_TIMEOUT_MS);
+    try {
+      result = await pending;
+      if (deadline.error) throw deadline.error;
+    } catch (error) {
+      if (deadline.error) {
+        deadline.error.stdout = error.stdout || streamedStdout;
+        deadline.error.stderr = error.stderr || streamedStderr;
+        throw deadline.error;
+      }
+      throw error;
+    } finally {
+      deadline.clear();
+    }
   } catch (err) {
-    const stdout = String(err?.stdout || "");
-    const stderr = String(err?.stderr || "");
+    const stdout = String(err?.stdout || streamedStdout);
+    const stderr = String(err?.stderr || streamedStderr);
     logger.warn("schema-parse:run:command-failed", {
       appid,
       code:
@@ -601,6 +626,38 @@ async function runGenerateEmuConfig(runtimeDir, appid) {
     stdout: String(result.stdout || ""),
     stderr: String(result.stderr || ""),
   };
+}
+
+function classifySchemaParseResult(appid, result, stdout = "") {
+  if (result.ok) return result;
+  const steamId = String(appid).replace(/^0+(?=\d)/, "");
+  const text = String(stdout);
+  const starts = [...text.matchAll(/(?:\*+\s*generating info for app id|\*+\s*STARTED config for app id)\s+(\d+)/gi)];
+  const hasExplicitEmpty = (block) => [...block.matchAll(/\[X\]\s*app id\s+(\d+)\s+has not achievements/gi)]
+    .some((match) => match[1].replace(/^0+(?=\d)/, "") === steamId);
+  // A batch's game name must come from the same game's output block.
+  const blocks = starts.flatMap((match, index) =>
+    match[1].replace(/^0+(?=\d)/, "") === steamId
+      ? [text.slice(match.index, starts[index + 1]?.index ?? text.length)] : []);
+  // An unrelated later authentication retry must not discard an already
+  // confirmed empty result for this AppID.
+  const appText = [...blocks].reverse().find(hasExplicitEmpty) || blocks[blocks.length - 1] ||
+    (starts.length ? "" : text);
+  const nameMatch = appText.match(/App name on store:\s*(['"])(.+)\1/);
+  const displayName = result.displayName || nameMatch?.[2]?.trim() || "";
+  const explicitEmpty = hasExplicitEmpty(appText);
+  if (result.status === "identified-no-achievements" || (displayName && explicitEmpty)) {
+    logger.info("schema-parse:run:confirmed-no-achievements", {
+      appid, displayName, source: explicitEmpty ? "stdout" : "empty-generated-schema",
+    });
+    return { ...result, displayName, status: "identified-no-achievements", identified: true, count: 0 };
+  }
+  const missingMetadata = [...appText.matchAll(/KeyError:\s*(\d+)\b/g)]
+    .some((match) => match[1].replace(/^0+(?=\d)/, "") === steamId);
+  if (missingMetadata && !displayName) {
+    return { ...result, status: "not-found", reason: "application-metadata-missing" };
+  }
+  return { ...result, displayName };
 }
 
 async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
@@ -631,7 +688,8 @@ async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
     }
   }
   try {
-    const result = readSchemaParseGeneratedResult(appid, runResult.appOutputDir, outDir);
+    const result = classifySchemaParseResult(appid,
+      readSchemaParseGeneratedResult(appid, runResult.appOutputDir, outDir), runResult.stdout);
     if (result?.ok) {
       if (runError) {
         logger.warn("schema-parse:run:partial-success", {
@@ -646,6 +704,8 @@ async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
       }
       return result;
     }
+    // Inventory/download failures must not erase an explicit achievements result.
+    if (["identified-no-achievements", "not-found"].includes(result.status)) return result;
     if (runError) {
       throw runError;
     }
@@ -676,7 +736,7 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
     // are digits-only, and no command string or shell is used.
     const cp = spawn( // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
       exePath,
-      normalizedAppIds,
+      ["-skip_inv", ...normalizedAppIds],
       {
         cwd: runtimeDir,
         windowsHide: true,
@@ -685,6 +745,8 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
+    const deadline = watchGenerationProcess(cp, SCHEMA_PARSE_GAME_TIMEOUT_MS);
+    let deadlineProgress = -1;
     let stdout = "";
     let stdoutLineBuffer = "";
     let stderr = "";
@@ -695,6 +757,10 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
     let lastProgressCount = 0;
     let sawStartedStdout = false;
     const emitBatchProgress = (appid, current, detail, percent) => {
+      if (current > deadlineProgress) {
+        deadlineProgress = current;
+        deadline.touch();
+      }
       try {
         if (typeof options.onProgress !== "function") return;
         const itemName = readSchemaParseGeneratedDisplayName(
@@ -783,10 +849,18 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
     });
     cp.on("error", (err) => {
       clearInterval(pollTimer);
+      deadline.clear();
       reject(err);
     });
     cp.on("close", (code) => {
       clearInterval(pollTimer);
+      deadline.clear();
+      if (deadline.error) {
+        deadline.error.stdout = stdout;
+        deadline.error.stderr = stderr;
+        reject(deadline.error);
+        return;
+      }
       if (code === 0) {
         resolve({ stdout, stderr });
       } else {
@@ -920,7 +994,7 @@ function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
     : null;
   const displayName = readSchemaParseGeneratedDisplayName(appOutputDir, appid);
   if (!fs.existsSync(schemaJsonPath)) {
-    logger.info("schema-parse:run:no-achievements", { appid });
+    logger.info("schema-parse:run:missing-achievements-json", { appid });
     return {
       ok: false,
       reason: "no-achievements-json",
@@ -931,6 +1005,11 @@ function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
 
   const rawSchema = JSON.parse(fs.readFileSync(schemaJsonPath, "utf8"));
   const achievements = normalizeGeneratedAchievementsSchema(rawSchema);
+  if (!achievements.length) {
+    return { ok: false, status: displayName && Array.isArray(rawSchema) && rawSchema.length === 0
+      ? "identified-no-achievements" : "ambiguous", count: 0, displayName,
+      identified: !!displayName, launchMetadata, reason: "empty-generated-schema" };
+  }
   fs.mkdirSync(outDir, { recursive: true });
   const outJsonPath = path.join(outDir, "achievements.json");
   fs.writeFileSync(outJsonPath, JSON.stringify(achievements, null, 2), "utf8");
@@ -959,7 +1038,7 @@ function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
 }
 
 async function generateSteamSchemaWithSchemaParse(options = {}) {
-  const appid = String(options.appid || "").trim();
+  const appid = String(options.appid || "").trim().replace(/^0+(?=\d)/, "");
   const outDir = path.resolve(String(options.outDir || "").trim());
   const userDataDir = normalizeUserDataDir(options.userDataDir);
   if (!/^\d+$/.test(appid)) {
@@ -981,7 +1060,7 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
   const items = Array.isArray(options.items) ? options.items : [];
   const normalizedItems = items
     .map((item) => ({
-      appid: String(item?.appid || "").trim(),
+      appid: String(item?.appid || "").trim().replace(/^0+(?=\d)/, ""),
       outDir: path.resolve(String(item?.outDir || "").trim()),
       resultKey: String(item?.resultKey || item?.appid || "").trim(),
     }))
@@ -1006,44 +1085,53 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
     options.chunkSize || SCHEMA_PARSE_BATCH_CHUNK_SIZE,
   );
   const batchErrors = [];
+  let batchStdout = "";
   let completedBeforeChunk = 0;
   for (let chunkIndex = 0; chunkIndex < chunkedItems.length; chunkIndex += 1) {
     const chunk = chunkedItems[chunkIndex];
     const chunkAppIds = chunk.map((item) => item.appid);
-    const runChunk = async (attemptAppIds = chunkAppIds, attemptStartIndex = 0) =>
-      runGenerateEmuConfigBatch(runtime.runtimeDir, attemptAppIds, {
-        ...options,
-        onProgress:
-          typeof options.onProgress === "function"
-            ? (progress = {}) => {
-                const current =
-                  Number.isFinite(Number(progress.current)) &&
-                  Number(progress.current) >= 0
-                    ? Number(progress.current)
-                    : 0;
-                options.onProgress({
-                  ...progress,
-                  current: completedBeforeChunk + attemptStartIndex + current,
-                  total: normalizedItems.length,
-                  percent:
-                    Number.isFinite(Number(progress.percent)) &&
-                    Number(progress.percent) >= 0
-                      ? Math.max(
-                          0,
-                          Math.min(
-                            78,
-                            Math.round(
-                              ((completedBeforeChunk + attemptStartIndex + current) /
-                                Math.max(normalizedItems.length, 1)) *
-                                78,
+    const runChunk = async (attemptAppIds = chunkAppIds, attemptStartIndex = 0) => {
+      try {
+        const result = await runGenerateEmuConfigBatch(runtime.runtimeDir, attemptAppIds, {
+          ...options,
+          onProgress:
+            typeof options.onProgress === "function"
+              ? (progress = {}) => {
+                  const current =
+                    Number.isFinite(Number(progress.current)) &&
+                    Number(progress.current) >= 0
+                      ? Number(progress.current)
+                      : 0;
+                  options.onProgress({
+                    ...progress,
+                    current: completedBeforeChunk + attemptStartIndex + current,
+                    total: normalizedItems.length,
+                    percent:
+                      Number.isFinite(Number(progress.percent)) &&
+                      Number(progress.percent) >= 0
+                        ? Math.max(
+                            0,
+                            Math.min(
+                              78,
+                              Math.round(
+                                ((completedBeforeChunk + attemptStartIndex + current) /
+                                  Math.max(normalizedItems.length, 1)) *
+                                  78,
+                              ),
                             ),
-                          ),
-                        )
-                      : 0,
-                });
-              }
-            : null,
-      });
+                          )
+                        : 0,
+                  });
+                }
+              : null,
+        });
+        batchStdout += result.stdout || "";
+        return result;
+      } catch (error) {
+        batchStdout += error.stdout || "";
+        throw error;
+      }
+    };
     let chunkError = null;
     try {
       await runChunk();
@@ -1096,6 +1184,12 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
       batchErrors.length > 0 &&
       !hasSchemaParseGeneratedAchievements(runtime.runtimeDir, item.appid);
     try {
+      const generatedResult = classifySchemaParseResult(item.appid,
+        readSchemaParseGeneratedResult(item.appid, appOutputDir, item.outDir), batchStdout);
+      if (generatedResult.ok || ["identified-no-achievements", "not-found"].includes(generatedResult.status)) {
+        results.set(item.resultKey, generatedResult);
+        continue;
+      }
       if (shouldRetrySingle) {
         logger.info("schema-parse:batch:retry-single", {
           appid: item.appid,
@@ -1124,13 +1218,15 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
           results.set(item.resultKey, {
             ok: false,
             reason: "retry-single-failed",
+            status: "technical-error",
+            error: String(err?.message || err),
           });
           continue;
         }
       }
       results.set(
         item.resultKey,
-        readSchemaParseGeneratedResult(item.appid, appOutputDir, item.outDir),
+        generatedResult,
       );
     } finally {
       cleanupGeneratedAppArtifacts(runtime.runtimeDir, item.appid);

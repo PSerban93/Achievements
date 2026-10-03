@@ -107,6 +107,8 @@
         setVar("--dClose", dClose);
         setVar("--dSlideBk", dSlideBk);
         setVar("--dFade", dFade);
+
+        return { dOpen, sOpen };
       };
 
       function fileUrl(p) {
@@ -164,7 +166,7 @@
         descInner.textContent = d;
         if (descWrap) descWrap.style.display = d ? 'block' : 'none';
 
-        applyTimeline();
+        const { dOpen, sOpen } = applyTimeline();
 
         const scale = Math.max(0.01, Number(payload?.scale || 1));
         document.body.style.transform = `scale(${scale})`;

@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SAN Notification</title>
+    <script src="utils/san-preset-capabilities.js"></script>
     <style>
       html,
       body {
@@ -14,6 +15,64 @@
         background: transparent;
         display: grid;
         place-content: center;
+      }
+      /* Effects grow the transparent window, not the preset's layout viewport. */
+      body[data-san-layout] {
+        position: absolute;
+        inset: var(--san-paint-gutter) auto auto var(--san-paint-gutter);
+        width: var(--san-layout-width);
+        height: var(--san-layout-height);
+        overflow: visible;
+      }
+      /* Keep authored viewport proportions relative to the layout, not Glow's
+         larger paint window. Scope overrides to the presets that use them. */
+      body[san-preset="gfwl"] .wrapper#achiconwrapper {
+        width: calc(17.5 * var(--san-vmax, 1vmax));
+        height: calc(17.5 * var(--san-vmax, 1vmax));
+      }
+      body[san-preset="windows"] .wrapper#achiconwrapper {
+        max-width: calc(15 * var(--san-vmax, 1vmax));
+        max-height: calc(15 * var(--san-vmax, 1vmax));
+      }
+      body[san-preset="xboxone"] #overlay {
+        width: calc(30 * var(--san-vw, 1vw));
+      }
+      body[san-preset="xboxone"]:not([ss]) #unlockmsg,
+      body[san-preset="xboxone"]:not([ss]) #title {
+        --translate: calc(-100 * var(--san-vh, 1vh));
+      }
+      body[san-preset="xboxone"]:not([ss]) .wrapper#achcontent > #desc {
+        translate: 0 calc(100 * var(--san-vh, 1vh));
+      }
+      body[san-preset="epicgames"] #overlay {
+        width: calc(20 * var(--san-vh, 1vh));
+      }
+      /* Fit automatic portraits inside the preset's existing icon slot. */
+      #achicon[data-game-portrait] {
+        aspect-ratio: 1 / 1;
+        height: auto !important;
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+      }
+      /* Explicit points selection is independent of the decoration marker. */
+      body[san-preset="xboxone"] #achcontent > [data-san-points]::before,
+      body[san-preset="xbox360"] #achcontent > [data-san-points]::before,
+      body[san-preset="gfwl"] #achcontent > [data-san-points]::before {
+        content: attr(gs) attr(unit) " - ";
+        display: inline !important;
+      }
+      body[san-preset="xboxone"] #achcontent > [data-san-points]::before {
+        --ssize: 30%;
+        padding-left: calc(1.25rem * var(--fontsize));
+        background: var(--s) left / var(--ssize) no-repeat;
+      }
+      body[san-preset="xboxone"] #achcontent > [data-san-points][unit="%"]::before {
+        --ssize: 20%;
+      }
+      #achcontent > [data-san-points-hidden]::before {
+        content: none !important;
+        display: none !important;
       }
     </style>
   </head>
@@ -44,8 +103,20 @@
 
       function loadCss(id, href) {
         return new Promise((resolve) => {
-          if (!href || document.getElementById(id)) {
+          if (!href) {
             resolve();
+            return;
+          }
+          const existing = document.getElementById(id);
+          if (existing) {
+            const nextHref = new URL(href, document.baseURI).href;
+            if (existing.href === nextHref) {
+              resolve();
+              return;
+            }
+            existing.onload = () => resolve();
+            existing.onerror = () => resolve();
+            existing.href = href;
             return;
           }
           const link = document.createElement("link");
@@ -87,21 +158,34 @@
             ? NaN
             : Number(rawValue);
         const hasPercent = Number.isFinite(raw);
+        const trophyModeEnabled = payload?.trophyModeEnabled === true;
         const value = hasPercent ? Math.max(raw, 0.1) : 50;
-        const rarity = 1;
-        const semirarity = 5;
+        const rarity = trophyModeEnabled ? 20 : 1;
+        const semirarity = trophyModeEnabled ? 50 : 5;
         const tier =
           tierFromPayload ||
-          (value <= rarity ? "gold" : value <= semirarity ? "silver" : "bronze");
+          (trophyModeEnabled
+            ? value < rarity
+              ? "gold"
+              : value < semirarity
+                ? "silver"
+                : "bronze"
+            : value <= rarity
+              ? "gold"
+              : value <= semirarity
+                ? "silver"
+                : "bronze");
         return { value, rarity, semirarity, tier, hasPercent };
       }
 
       function shouldShowSanPercent(payload, customisation) {
         if (!getPercentInfo(payload).hasPercent) return false;
-        if (payload?.showRarityPercentage === false) return false;
-        if (payload?.showRarityPercentage === true) return true;
-        if (customisation.usepercent) return true;
-        return payload?.isRare === true;
+        // usepercent replaces XP/G; text rows and badges are independent.
+        const mode = customisation.showpercent ?? "rare";
+        if (mode === "off") return false;
+        if (mode === "all") return true;
+        if (mode === "rare" || mode === "rareonly") return payload?.isRare === true;
+        return payload?.showRarityPercentage !== false;
       }
 
       function pickRarityAsset(value, tier) {
@@ -124,25 +208,30 @@
         return Number.isFinite(value) ? value : 0;
       }
 
-      function hasIndexedSanPercent(customisation) {
-        return getPresetIndexValue(customisation, "percent") > 0;
-      }
-
-      function shouldRenderIndexedPercentAsBadge(customisation) {
-        return customisation?.percentbadge === true || customisation?.sspercentbadge === true;
-      }
-
       function isScreenshotSanMode(payload, customisation) {
         return customisation?.ss === true || payload?.screenshotMode === true;
       }
 
-      function getSanElementPosition(payload, customisation, key, fallbackKey, ssFallbackKey) {
-        const indexed = getPresetIndexValue(customisation, key);
-        if (indexed > 0) return indexed;
-        if (isScreenshotSanMode(payload, customisation) && ssFallbackKey) {
-          return safeNumber(customisation[ssFallbackKey], 0);
+      function useScreenshotSanSettings(payload, customisation) {
+        return isScreenshotSanMode(payload, customisation) && customisation?.elemsmatch !== true;
+      }
+
+      function getOwnSanNumber(customisation, key) {
+        if (!key || !Object.prototype.hasOwnProperty.call(customisation || {}, key)) {
+          return null;
         }
-        return safeNumber(customisation[fallbackKey], 0);
+        const value = Number(customisation[key]);
+        return Number.isFinite(value) ? value : null;
+      }
+
+      function getSanElementPosition(payload, customisation, key, fallbackKey, ssFallbackKey) {
+        if (useScreenshotSanSettings(payload, customisation) && ssFallbackKey) {
+          const screenshotValue = getOwnSanNumber(customisation, ssFallbackKey);
+          if (screenshotValue !== null) return screenshotValue;
+        }
+        const activeValue = getOwnSanNumber(customisation, fallbackKey);
+        if (activeValue !== null) return activeValue;
+        return getPresetIndexValue(customisation, key);
       }
 
       function getSanPercentPosition(payload, customisation) {
@@ -150,36 +239,52 @@
       }
 
       function getSanDecorationPosition(payload, customisation) {
-        return getSanElementPosition(payload, customisation, "decoration", "decorationpos", "ssdecorationpos");
+        return window.AchievementsSanCapabilities.getDecorationPosition(customisation,
+          { screenshotMode: isScreenshotSanMode(payload, customisation) });
       }
 
       function getSanHiddenIconPosition(payload, customisation) {
         return getSanElementPosition(payload, customisation, "hiddenicon", "hiddeniconpos", "sshiddeniconpos");
       }
 
-      function resolveSanBadgePosition(value) {
+      function resolveSanBadgePosition(value, offsetX = 0, offsetY = 0, scale = 1) {
         const normalized = String(value || "bottomcenter").toLowerCase().replace(/[\s_-]+/g, "");
         const map = {
-          top: { left: "50%", right: "auto", top: "0", bottom: "auto", translate: "-50% -50%" },
-          bottom: { left: "50%", right: "auto", top: "auto", bottom: "0", translate: "-50% 50%" },
-          left: { left: "0", right: "auto", top: "50%", bottom: "auto", translate: "-50% -50%" },
-          right: { left: "auto", right: "0", top: "50%", bottom: "auto", translate: "50% -50%" },
-          topcenter: { left: "50%", right: "auto", top: "0", bottom: "auto", translate: "-50% -50%" },
-          bottomcenter: { left: "50%", right: "auto", top: "auto", bottom: "0", translate: "-50% 50%" },
-          topleft: { left: "0", right: "auto", top: "0", bottom: "auto", translate: "-50% -50%" },
-          topright: { left: "auto", right: "0", top: "0", bottom: "auto", translate: "50% -50%" },
-          bottomleft: { left: "0", right: "auto", top: "auto", bottom: "0", translate: "-50% 50%" },
-          bottomright: { left: "auto", right: "0", top: "auto", bottom: "0", translate: "50% 50%" },
-          center: { left: "50%", right: "auto", top: "50%", bottom: "auto", translate: "-50% -50%" },
+          top: { x: 50, y: 10 },
+          bottom: { x: 50, y: 90 },
+          left: { x: 20, y: 50 },
+          right: { x: 80, y: 50 },
+          topcenter: { x: 50, y: 10 },
+          bottomcenter: { x: 50, y: 90 },
+          topleft: { x: 20, y: 10 },
+          topright: { x: 80, y: 10 },
+          bottomleft: { x: 20, y: 90 },
+          bottomright: { x: 80, y: 90 },
+          center: { x: 50, y: 50 },
         };
-        return map[normalized] || map.bottomcenter;
+        const { x, y } = map[normalized] || map.bottomcenter;
+        const safeScale = Math.max(0.01, safeNumber(scale, 1));
+        const xPixels = safeNumber(offsetX, 0) * safeScale;
+        const yPixels = safeNumber(offsetY, 0) * safeScale;
+        const offsetPosition = (percent, pixels) => {
+          if (!pixels) return `${percent}%`;
+          const operator = pixels > 0 ? "+" : "-";
+          return `calc(${percent}% ${operator} ${Math.abs(pixels)}px)`;
+        };
+        return {
+          insetInline: `${offsetPosition(x, xPixels)} ${offsetPosition(100 - x, -xPixels)}`,
+          insetBlock: `${offsetPosition(y, yPixels)} 0`,
+          translate: "0 -50%",
+        };
       }
 
       function applySanBadgePosition(badge, position) {
-        badge.style.left = position.left;
-        badge.style.right = position.right;
-        badge.style.top = position.top;
-        badge.style.bottom = position.bottom;
+        badge.style.left = "";
+        badge.style.right = "";
+        badge.style.top = "";
+        badge.style.bottom = "";
+        badge.style.setProperty("inset-inline", position.insetInline);
+        badge.style.setProperty("inset-block", position.insetBlock);
         badge.style.translate = position.translate;
       }
 
@@ -192,10 +297,14 @@
 
       function getActiveSanBadgeValue(payload, customisation, key, fallback = "") {
         const ssKey = `ss${key}`;
-        if (isScreenshotSanMode(payload, customisation) && customisation[ssKey] !== undefined) {
+        if (useScreenshotSanSettings(payload, customisation) && customisation[ssKey] !== undefined) {
           return customisation[ssKey];
         }
         return customisation[key] !== undefined ? customisation[key] : fallback;
+      }
+
+      function isSanBadgeEnabled(payload, customisation) {
+        return Boolean(getActiveSanBadgeValue(payload, customisation, "percentbadge", false));
       }
 
       function getPlatinumIcon(customisation) {
@@ -220,83 +329,107 @@
         }
         if (customisation.bgstyle) body.setAttribute(customisation.bgstyle, "");
         if (customisation.bgonly) body.setAttribute("bgonly", "");
-        if (customisation.alldetails) body.setAttribute("alldetails", "");
         if (payload?.isRare) body.setAttribute("rare", "");
         if (payload?.isPlatinum) body.setAttribute("plat", "");
-        if (customisation.fastanim) body.setAttribute("fastanim", "");
+        body.setAttribute(payload?.isPlatinum ? "plat" : payload?.isRare ? "rare" : "main", "");
+        body.toggleAttribute("notify1line", Boolean(payload?.notify1line));
+        body.toggleAttribute("nodecorationshadow", !customisation.decorationshadow);
+        const fastDurationBelow = window.AchievementsSanCapabilities
+          .getPresetDefinition(preset).fastDurationBelow;
+        if (fastDurationBelow && safeNumber(customisation.displaytime, 10) < fastDurationBelow)
+          body.setAttribute("fastanim", "");
         if (isScreenshotSanMode(payload, customisation)) body.setAttribute("ss", "");
         if (customisation.ssdisplay) body.setAttribute("ssdisplay", "");
         if (!customisation.iconanim) body.setAttribute("noiconanim", "");
       }
 
       function applyCustomFont(customisation) {
-        if (!customisation.customfont) return;
+        document.getElementById("san-custom-font-style")?.remove();
+        const safeFamilies = new Set([
+          "Titillium Web",
+          "Roboto",
+          "Noto Sans",
+          "Open Sans",
+          "JetBrains Mono",
+          "VT323",
+        ]);
+        const selectedFamily = safeFamilies.has(customisation.fontfamily)
+          ? customisation.fontfamily
+          : "";
+        if (!customisation.customfont && !selectedFamily) return;
         const style = document.createElement("style");
-        style.textContent = `
+        style.id = "san-custom-font-style";
+        style.textContent = `${customisation.customfont ? `
           @font-face {
             font-family: "customfont";
             src: url("${fileUrl(customisation.customfont)}");
           }
+        ` : ""}
+          ${customisation.customfont ? `.wrapper#achcont > .wrapper#achcontent { font-family: "customfont" !important; }` : ""}
+          ${selectedFamily ? `#unlockmsg, #title, #desc { font-family: "${selectedFamily}" !important; }` : ""}
         `;
         document.head.appendChild(style);
       }
 
       function setTextElements(payload, customisation, percent) {
-        const icons = getPresetIcons(customisation);
-        const useScreenshotElems = isScreenshotSanMode(payload, customisation);
-        const elems = useScreenshotElems && Array.isArray(customisation.sselems)
-          ? customisation.sselems
-          : Array.isArray(customisation.elems)
-          ? customisation.elems
-          : useScreenshotElems && Array.isArray(icons.sselems)
-            ? icons.sselems
-            : Array.isArray(icons.elems)
-            ? icons.elems
-            : ["unlockmsg", "title", "desc"];
+        const gameName = payload?.gameName || payload?.configName || "Example Game";
+        const { rows, elements: filter } = window.AchievementsSanCapabilities.getTextLayout(
+          customisation.preset, customisation,
+          { screenshotMode: isScreenshotSanMode(payload, customisation) },
+        );
         const strings = {
-          unlockmsg: customisation.unlockmsg || "Achievement Unlocked",
-          title: payload?.displayName || "Achievement Unlocked",
-          desc: payload?.description || "",
+          unlockmsg: (customisation.usecustomtext && customisation.usegametitleunlockmsg) || customisation.usegametitle
+            ? gameName
+            : (customisation.usecustomtext && customisation.customtextunlockmsg) ||
+              customisation.customtext ||
+              customisation.unlockmsg ||
+              (payload?.isPlatinum
+                ? payload?.sanTheme?.notificationText?.congratulations || "Congratulations!"
+                : payload?.sanTheme?.notificationText?.unlocked || "Achievement unlocked"),
+          title: customisation.usecustomtext && customisation.usegametitletitle
+            ? gameName
+            : (customisation.usecustomtext && customisation.customtexttitle) ||
+              payload?.displayName || "Achievement Unlocked",
+          desc: customisation.usecustomtext && customisation.usegametitledesc
+            ? gameName
+            : (customisation.usecustomtext && customisation.customtextdesc) ||
+              payload?.description || "",
         };
-        const filter = elems.filter((elem) => elem !== null);
-
-        const offset = ["steamdeck", "epicgames", "ps5"].includes(customisation.preset) &&
-          filter.length < 3
-          ? 1
-          : 0;
-        const positions = new Map([
-          ["unlockmsg", [1, 0]],
-          ["title", [2 - offset, 1 - offset]],
-          ["desc", [3 - offset, 2 - offset]],
-        ]);
         const decorationPosition = getSanDecorationPosition(payload, customisation);
         const hiddenIconPosition = getSanHiddenIconPosition(payload, customisation);
-        const indexedPercent = hasIndexedSanPercent(customisation);
-        const badgeOnlyIndexedPercent = indexedPercent && shouldRenderIndexedPercentAsBadge(customisation);
-        const textPercentPosition = badgeOnlyIndexedPercent
-          ? 0
-          : getSanPercentPosition(payload, customisation);
+        const textPercentPosition = getSanPercentPosition(payload, customisation);
         const percentText = shouldShowSanPercent(payload, customisation) && textPercentPosition > 0
           ? ` (${percent.value.toFixed(1)}%)`
           : "";
 
-        for (const [id, [pos, index]] of positions.entries()) {
-          const el = document.getElementById(id);
+        for (const row of rows) {
+          const el = document.getElementById(row.elementId);
           if (!el) continue;
-          const typeValue = filter[index] || "";
-          const decoration = pos === decorationPosition
-            ? `<span id="decoration"></span>`
-            : "";
+          const pos = row.position;
+          const hiddenRow = row.omitted;
+          const typeValue = row.content;
+          const decoration = !hiddenRow && customisation.showdecoration === true && pos === decorationPosition;
           const hiddenIcon =
-            customisation.showhiddenicon && payload?.hidden === true &&
-            pos === hiddenIconPosition
-              ? `<span id="hiddenicon"></span>`
-              : "";
+            !hiddenRow && customisation.showhiddenicon && payload?.hidden === true &&
+            pos === hiddenIconPosition;
           const percentPart =
-            pos === textPercentPosition ? percentText : "";
-          const html = `${decoration}${hiddenIcon}${strings[typeValue] || ""}${percentPart}`;
-          el.innerHTML = html;
-          if (!el.textContent) el.innerHTML = "";
+            !hiddenRow && pos === textPercentPosition ? percentText : "";
+          const children = [];
+          if (decoration) {
+            const decorationEl = document.createElement("span");
+            decorationEl.id = "decoration";
+            children.push(decorationEl);
+          }
+          if (hiddenIcon) {
+            const hiddenIconEl = document.createElement("span");
+            hiddenIconEl.id = "hiddenicon";
+            children.push(hiddenIconEl);
+          }
+          const text = `${strings[typeValue] || ""}${percentPart}`;
+          if (text) children.push(document.createTextNode(text));
+          if (el.childNodes.length !== children.length ||
+              children.some((child, index) => !el.childNodes[index].isEqualNode(child)))
+            el.replaceChildren(...children);
         }
 
         document.body.toggleAttribute("alldetails", filter.length === 3);
@@ -304,51 +437,60 @@
       }
 
       function setBadge(payload, customisation, percent) {
-        const wrapper = document.getElementById("achiconwrapper");
-        const indexedPercent = hasIndexedSanPercent(customisation);
-        const screenshotBadge = isScreenshotSanMode(payload, customisation) && customisation.sspercentbadge;
-        const indexedBadge = indexedPercent && shouldRenderIndexedPercentAsBadge(customisation);
-        if (!wrapper || (!customisation.percentbadge && !screenshotBadge && !indexedBadge)) return;
-        if (!shouldShowSanPercent(payload, { ...customisation, usepercent: true })) return;
-        const badge = document.createElement("span");
-        badge.id = "badge";
-        const usesBadgeImage = getActiveSanBadgeValue(payload, customisation, "percentbadgeimg") === true;
-        if (usesBadgeImage) badge.setAttribute("badgeimg", "");
-        badge.textContent = usesBadgeImage ? "" : `${percent.value.toFixed(1)}%`;
-
-        if (indexedBadge && !customisation.percentbadge && !screenshotBadge) {
-          Object.assign(badge.style, {
-            left: "50%",
-            top: "calc(100% + 0.15rem)",
-            right: "auto",
-            bottom: "auto",
-            translate: "-50% 0",
-            whiteSpace: "nowrap",
-            zIndex: "120",
-          });
-        } else {
-          const position = isScreenshotSanMode(payload, customisation)
-            ? customisation.sspercentbadgepos
-            : customisation.percentbadgepos;
-          const badgePosition = resolveSanBadgePosition(position);
-          applySanBadgePosition(badge, badgePosition);
+        if (!isSanBadgeEnabled(payload, customisation) || !percent.hasPercent) {
+          document.querySelectorAll("#achiconwrapper #badge").forEach((badge) => badge.remove());
+          return;
         }
+        for (const wrapper of document.querySelectorAll("#achiconwrapper")) {
+        const badge = wrapper.querySelector("#badge") || document.createElement("span");
+        badge.id = "badge";
+        const usesBadgeImage = Boolean(getActiveSanBadgeValue(payload, customisation, "percentbadgeimg"));
+        badge.toggleAttribute("badgeimg", usesBadgeImage);
+        const badgeText = usesBadgeImage ? "" : `${percent.value.toFixed(1)}%`;
+        if (badge.textContent !== badgeText) badge.textContent = badgeText;
         const offsetX = safeNumber(getActiveSanBadgeValue(payload, customisation, "percentbadgex"), 0);
         const offsetY = safeNumber(getActiveSanBadgeValue(payload, customisation, "percentbadgey"), 0);
-        if (offsetX) badge.style.marginLeft = `calc(${offsetX}px * var(--scale))`;
-        if (offsetY) badge.style.marginTop = `calc(${offsetY}px * var(--scale))`;
-        wrapper.appendChild(badge);
+        const scale = Math.max(0.01, safeNumber(customisation.scale, 100) / 100);
+        const position = getActiveSanBadgeValue(
+          payload,
+          customisation,
+          "percentbadgepos",
+          "bottomcenter",
+        );
+        applySanBadgePosition(
+          badge,
+          resolveSanBadgePosition(position, offsetX, offsetY, scale),
+        );
+        if (badge.parentElement !== wrapper) wrapper.appendChild(badge);
+        }
       }
 
       function applySanVariables(payload, customisation) {
+        const fontSize = Number(payload?.sanTheme?.runtimeFontSize);
+        if (Number.isFinite(fontSize) && fontSize > 0)
+          document.documentElement.style.fontSize = `${fontSize}px`;
         const theme = payload?.sanTheme || {};
         const dimensions = theme.presetDimensions || {};
+        const gutter = Math.max(0, safeNumber(theme.windowGutter, 0));
+        const layoutWidth = Math.max(1, safeNumber(theme.layoutWidth,
+          safeNumber(theme.width, window.innerWidth) - gutter * 2));
+        const layoutHeight = Math.max(1, safeNumber(theme.layoutHeight,
+          safeNumber(theme.height, window.innerHeight) - gutter * 2));
+        setVar("--san-paint-gutter", `${gutter}px`);
+        setVar("--san-layout-width", `${layoutWidth}px`);
+        setVar("--san-layout-height", `${layoutHeight}px`);
+        // Layout dimensions already include notification scale. Applying scale
+        // again here would change the original proportions at 200% and above.
+        setVar("--san-vw", `${layoutWidth / 100}px`);
+        setVar("--san-vh", `${layoutHeight / 100}px`);
+        setVar("--san-vmax", `${Math.max(layoutWidth, layoutHeight) / 100}px`);
+        document.body.setAttribute("data-san-layout", "");
         const scale = Math.max(0.1, safeNumber(customisation.scale, 100) / 100);
         const percent = getPercentInfo(payload);
         const icons = getPresetIcons(customisation);
         const decoration = pickRarityAsset(icons.decoration || "", percent.tier);
         const gameIcon =
-          payload?.iconPath ||
+          (customisation.usecustomgameicon && customisation.gameicon) ||
           payload?.gameIconPath ||
           payload?.appIconPath ||
           customisation.gameicon ||
@@ -356,24 +498,20 @@
         const logo = pickRarityAsset(
           customisation.replacelogo && icons.decoration
             ? icons.decoration
-            : customisation.usegameicon && gameIcon
-              ? gameIcon
-              : icons.logo || customisation.logo || "",
+            : icons.logo || customisation.logo || "",
           percent.tier,
         );
         const bgImage =
           customisation.bgstyle === "gameart"
             ? payload?.headerPath || customisation.gameart || customisation.bgImage || customisation.bgimg
             : customisation.bgstyle === "bgimg"
-              ? customisation.bgimg || customisation.bgImage
+              ? (customisation.bgachicon ? payload?.iconPath : "") || customisation.bgimg || customisation.bgImage
               : "";
 
         const displayTimeSec = Math.max(1, safeNumber(customisation.displaytime, 8));
         const requestedTransitionMs = Math.max(50, safeNumber(customisation.transition, 150));
-        const transitionMs = Math.max(
-          50,
-          Math.min(requestedTransitionMs, Math.floor((displayTimeSec * 1000) / 16)),
-        );
+        const transitionMs = Math.min(requestedTransitionMs,
+          window.AchievementsSanCapabilities.getTransitionLimit(customisation.preset, displayTimeSec));
 
         setVar("--notifywidth", `${Math.max(1, safeNumber(dimensions.width, 300)) * scale}px`);
         setVar("--notifyheight", `${Math.max(1, safeNumber(dimensions.height, 50)) * scale}px`);
@@ -388,7 +526,7 @@
         setVar("--bgimgbrightness", `${safeNumber(customisation.bgimgbrightness, 100)}%`);
         setVar("--brightness", `${safeNumber(customisation.brightness, 100)}%`);
         setVar("--roundness", `${(safeNumber(customisation.roundness, 0) / 4) * scale}px`);
-        setVar("--fontsize", safeNumber(customisation.fontsize, 100) / 100);
+        setVar("--fontsize", customisation.usecustomfontsizes ? 1 : safeNumber(customisation.fontsize, 100) / 100);
         setVar("--opacity", safeNumber(customisation.opacity, 100) / 100);
         setVar(
           "--iconroundness",
@@ -405,23 +543,44 @@
         setVar(
           "--fontshadow",
           customisation.fontshadow
-            ? `drop-shadow(${safeNumber(customisation.fontshadowx, 0)}px ${safeNumber(customisation.fontshadowy, 0)}px ${scale * safeNumber(customisation.fontshadowscale, 1)}px ${customisation.fontshadowcolor || "#000"})`
+            ? `drop-shadow(${safeNumber(customisation.fontshadowx, 0)}px ${safeNumber(customisation.fontshadowy, 0)}px ${scale * safeNumber(customisation.fontshadowscale, 1)}px ${customisation.fontshadowcolor || "#000"}) `.repeat(3)
             : "none",
         );
         setVar("--iconanimcolor", customisation.iconanimcolor || "#ffb84e");
         setVar("--iconshadowcolor", customisation.iconshadowcolor || "#ffb84e99");
         setVar("--logo", cssUrl(logo));
-        setVar("--decoration", cssUrl(decoration));
+        setVar("--decoration", customisation.showdecoration === true ? cssUrl(decoration) : "none");
         const decorationPosition = getSanDecorationPosition(payload, customisation);
         const hasDecorationPosition = decorationPosition > 0;
-        const shouldShowDecoration = decoration && (hasDecorationPosition || customisation.preset === "epicgames");
+        const shouldShowDecoration =
+          customisation.showdecoration === true &&
+          decoration &&
+          (hasDecorationPosition || customisation.preset === "epicgames");
         setVar("--decorationdisplaytype", shouldShowDecoration ? "block" : "none");
-        document.body.toggleAttribute("nodecoration", !shouldShowDecoration);
+        // SAN hides decorations through these variables, retaining each preset's
+        // text columns. The common nodecoration rule would span those columns
+        // and remove the authored space between the achievement icon and text.
         setVar("--hiddenicon", cssUrl(customisation.hiddenicon));
         setVar("--primarycolor", customisation.primarycolor || "#203e7a");
         setVar("--secondarycolor", customisation.secondarycolor || "#0c2a66");
         setVar("--tertiarycolor", customisation.tertiarycolor || "#ffffff");
         setVar("--fontcolor", customisation.fontcolor || "#ffffff");
+        const points = customisation.usepercent
+          ? percent.value.toFixed(1)
+          : String(100 - Math.round(percent.value / 5) * 5);
+        const pointsCapability = window.AchievementsSanCapabilities
+          .getPresetDefinition(customisation.preset).points;
+        const unit = customisation.usepercent ? "%" : pointsCapability.unit;
+        setVar("--gs", points);
+        setVar("--unit", unit);
+        setVar("--raritycolor", { bronze: "#a05526", silver: "#828282", gold: "#b4904a" }[percent.tier] || "#a05526");
+        const pointsTargets = pointsCapability.targets
+          .map((id) => document.getElementById(id));
+        for (const target of pointsTargets) {
+          if (!target) continue;
+          target.setAttribute("gs", points);
+          target.setAttribute("unit", unit);
+        }
         setVar(
           "--glow",
           customisation.glow
@@ -436,9 +595,10 @@
         setVar(
           "--glowanim",
           customisation.glow && customisation.glowanim && customisation.glowanim !== "off"
-            ? `${customisation.glowanim} calc(var(--transition) * ${safeNumber(customisation.glowspeed, 50)}) linear infinite`
+            ? `${customisation.glowanim} calc(var(--transition) * var(--glowspeed)) linear infinite`
             : "none",
         );
+        setVar("--glowspeed", safeNumber(customisation.glowspeed, 50));
         setVar("--blur", `${(safeNumber(customisation.blur, 0) * scale) / 50}px`);
         setVar(
           "--mask",
@@ -447,8 +607,8 @@
             : "none",
         );
         setVar("--outline", customisation.useoutline ? customisation.outline || "solid" : "none");
-        setVar("--outlinecolor", customisation.outlinecolor || "transparent");
-        setVar("--outlinewidth", `${(safeNumber(customisation.outlinewidth, 0) / 25) * scale}px`);
+        setVar("--outlinecolor", customisation.outlinecolor || "#8a2be2");
+        setVar("--outlinewidth", `${(safeNumber(customisation.outlinewidth, 50) / 25) * scale}px`);
         setVar("--iconscale", safeNumber(customisation.iconscale, 100) / 100);
         setVar("--logoscale", safeNumber(customisation.logoscale, 100) / 100);
         setVar("--decorationscale", safeNumber(customisation.decorationscale, 100) / 100);
@@ -510,11 +670,6 @@
           "--badgefontcolor",
           getActiveSanBadgeValue(payload, customisation, "percentbadgefontcolor", "#ffffff"),
         );
-        const badgePosition = resolveSanBadgePosition(
-          isScreenshotSanMode(payload, customisation)
-            ? customisation.sspercentbadgepos
-            : customisation.percentbadgepos,
-        );
         setVar("--badgeposx", "auto");
         setVar("--badgeposy", "auto");
         const badgeFontSize = safeNumber(
@@ -543,28 +698,55 @@
           getActiveSanBadgeValue(payload, customisation, "percentbadgeimg") ? cssUrl(badgeAsset) : "none",
         );
 
-        const achicon = document.getElementById("achicon");
-        if (achicon) {
+        for (const achicon of document.querySelectorAll("#achicon")) {
           const defaultAchIcon = customisation.defaultAchIcon || "";
           const platinumIcon = payload?.isPlatinum
             ? getPlatinumIcon(customisation)
             : "";
-          const customIcon =
-            platinumIcon ||
-            payload?.iconPath ||
-            (customisation.usecustomimgicon && customisation.customimgicon
-              ? customisation.customimgicon
-              : "");
+          // SAN's selected image source applies to every notification style.
+          // Platinum artwork is the default only when no image override is active.
+          const selectedCustomIcon = customisation.usecustomimgicon && customisation.customimgicon;
+          const selectedGameIcon = !selectedCustomIcon && customisation.usegameicon && gameIcon;
+          const customIcon = selectedCustomIcon || selectedGameIcon || platinumIcon || payload?.iconPath || "";
+          achicon.toggleAttribute(
+            "data-game-portrait",
+            Boolean(selectedGameIcon &&
+              !(customisation.usecustomgameicon && customisation.gameicon)),
+          );
           const fallbackIconUrl = fileUrl(defaultAchIcon);
           achicon.onerror = () => {
             if (fallbackIconUrl && achicon.src !== fallbackIconUrl) {
               achicon.src = fallbackIconUrl;
             }
           };
-          achicon.src = fileUrl(customIcon || defaultAchIcon);
+          const iconUrl = fileUrl(customIcon || defaultAchIcon);
+          if (achicon.getAttribute("src") !== iconUrl) achicon.src = iconUrl;
         }
 
         setTextElements(payload, customisation, percent);
+        const pointsAvailability = window.AchievementsSanCapabilities.getPointsAvailability(
+          customisation.preset, customisation,
+          { matchesSelector: (selector) => Boolean(document.querySelector(selector)) },
+        );
+        document.body.dataset.sanPointsStatus = pointsAvailability.reason || "available";
+        const pointsProfile = window.AchievementsSanCapabilities.getPresetDefinition(customisation.preset);
+        const pointsRows = window.AchievementsSanCapabilities.getTextRows(customisation.preset, customisation,
+          { screenshotMode: isScreenshotSanMode(payload, customisation) });
+        const preferredRow = isScreenshotSanMode(payload, customisation) && customisation.preset === "xboxone"
+          ? "desc" : "title";
+        const textRows = pointsRows.filter((row) => !row.omitted && !row.cssHidden && row.content);
+        const pointsRow = textRows.find((row) => row.elementId === preferredRow) || textRows[0];
+        for (const id of ["unlockmsg", "title", "desc"]) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          const active = customisation.showpoints === true && pointsAvailability.available && pointsProfile.points.supported &&
+            customisation.preset !== "epicgames" && id === pointsRow?.elementId;
+          el.toggleAttribute("data-san-points", active);
+          el.toggleAttribute("data-san-points-hidden", typeof customisation.showpoints === "boolean" && !active);
+          if (active) { el.setAttribute("gs", points); el.setAttribute("unit", unit); }
+        }
+        const xpArea = document.getElementById("xpwrapper");
+        if (xpArea) xpArea.style.display = pointsAvailability.available ? "" : "none";
         setBadge(payload, customisation, percent);
       }
 
@@ -579,7 +761,22 @@
         }, 120);
       }
 
-      window.api?.onNotification?.((payload) => {
+      let renderSequence = 0;
+
+      // Settings holds the existing DOM when applying edits to a stopped frame.
+      // Sending another notification would rebuild it and restart every stage.
+      window.__achievementsSanApplyPreview = (payload) => {
+        if (!window.__achievementsPreviewClock) return;
+        const theme = payload?.sanTheme || {};
+        const customisation = { ...(theme.customisation || {}) };
+        customisation.preset = String(customisation.preset || theme.preset || "default").toLowerCase();
+        setBodyAttributes(payload, customisation);
+        applyCustomFont(customisation);
+        applySanVariables(payload, customisation);
+      };
+
+      function renderNotificationPayload(payload) {
+        const sequence = ++renderSequence;
         const theme = payload?.sanTheme || {};
         const customisation = {
           ...(theme.customisation || {}),
@@ -592,13 +789,19 @@
           loadCss("san-baseanim-css", theme.runtime?.baseAnimCssUrl),
           loadCss("san-preset-css", theme.runtime?.presetCssUrl),
         ]).then(() => {
+          if (sequence !== renderSequence) return;
+          document
+            .querySelectorAll("body > :not(script)")
+            .forEach((element) => element.remove());
           document.body.insertAdjacentHTML("beforeend", theme.presetHtml || "");
           setBodyAttributes(payload, customisation);
           applyCustomFont(customisation);
           applySanVariables(payload, customisation);
           notifyReady();
         });
-      });
+      }
+
+      window.api?.onNotification?.(renderNotificationPayload);
     </script>
   </body>
 </html>

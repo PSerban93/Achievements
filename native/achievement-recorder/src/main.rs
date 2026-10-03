@@ -1,7 +1,10 @@
+#![recursion_limit = "256"]
+
 use std::collections::{HashMap, VecDeque};
 use std::error::Error;
 use std::fs;
 use std::io::{self, BufRead, Write};
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 use std::slice;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,6 +59,11 @@ const AUDIO_BITRATE: u32 = 192_000;
 const MAX_FAILED_SEGMENTS: usize = 256;
 const MAX_FAILED_ERROR_CHARS: usize = 1_000;
 const PENDING_JOB_FINALIZE_GRACE_MS: u64 = 120_000;
+const MAX_CONCURRENT_FINALIZERS: usize = 1;
+const PIPELINE_SLOW_MS: u64 = 1_000;
+const PIPELINE_STALLED_MS: u64 = 10_000;
+const RENDER_STALLED_MS: u64 = 60_000;
+const MAX_ENCODER_AUDIO_PACKETS: usize = 256;
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -81,6 +89,8 @@ struct CaptureFlags {
     hdr_tone_map: bool,
     border_mode: &'static str,
     border_fallback: bool,
+    capture_interval_mode: &'static str,
+    capture_interval_ms: f64,
     ready_signal: Arc<AtomicBool>,
 }
 
@@ -120,7 +130,9 @@ struct PendingJob {
 }
 
 struct RenderResult {
+    generation: u64,
     segment_paths: Vec<PathBuf>,
+    render_ms: u64,
 }
 
 struct PrepareResult {
@@ -135,6 +147,13 @@ struct FinalizeResult {
     frames: u64,
     finalize_ms: u64,
     result: Result<(), String>,
+}
+
+#[derive(Clone, Copy)]
+struct FinalizingRange {
+    start_ms: u64,
+    end_ms: u64,
+    started_ms: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -166,17 +185,39 @@ struct Capture {
     rate_limited_frames: u64,
     max_frame_gap_ms: f64,
     last_stats_ms: u64,
+    last_stats_captured_frames: u64,
+    last_stats_encoded_frames: u64,
+    last_stats_estimated_dropped_frames: u64,
+    last_stats_rate_limited_frames: u64,
     rotation_count: u64,
     rotation_delay_reported: bool,
+    prepare_started_ms: Option<u64>,
+    prepare_completed: u64,
+    prepare_total_ms: u64,
+    prepare_last_ms: u64,
+    prepare_max_ms: u64,
+    finalize_completed: u64,
+    finalize_total_ms: u64,
+    finalize_last_ms: u64,
+    finalize_max_ms: u64,
+    audio_backpressure_drops: u64,
     prepare_tx: Sender<PrepareResult>,
     prepare_rx: Receiver<PrepareResult>,
     finalize_tx: Sender<FinalizeResult>,
     finalize_rx: Receiver<FinalizeResult>,
     finalizing: usize,
-    finalizing_ranges: Vec<(u64, u64)>,
+    finalizing_ranges: Vec<FinalizingRange>,
     worker_handles: Vec<thread::JoinHandle<()>>,
     render_tx: Sender<RenderResult>,
     render_rx: Receiver<RenderResult>,
+    rendering: bool,
+    render_started_ms: Option<u64>,
+    render_generation: u64,
+    active_render_generation: Option<u64>,
+    render_completed: u64,
+    render_total_ms: u64,
+    render_last_ms: u64,
+    render_max_ms: u64,
     audio: Option<AudioLoopback>,
     audio_error: Option<String>,
     tone_mapper: Option<ToneMapper>,
@@ -236,6 +277,16 @@ fn pending_job_expiry(due_ms: u64) -> u64 {
     due_ms.saturating_add(PENDING_JOB_FINALIZE_GRACE_MS)
 }
 
+fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
 fn is_border_unsupported(error: &GraphicsCaptureApiError<AnyError>) -> bool {
     if matches!(
         error,
@@ -262,6 +313,15 @@ fn should_retry_sdr(error: &GraphicsCaptureApiError<AnyError>) -> bool {
             | GraphicsCaptureApiError::GraphicsCaptureApiError(
                 GraphicsCaptureError::DirectXError(_) | GraphicsCaptureError::WindowsError(_)
             )
+    )
+}
+
+fn is_minimum_interval_unsupported(error: &GraphicsCaptureApiError<AnyError>) -> bool {
+    matches!(
+        error,
+        GraphicsCaptureApiError::GraphicsCaptureApiError(
+            GraphicsCaptureError::MinimumUpdateIntervalUnsupported
+        )
     )
 }
 
@@ -517,6 +577,8 @@ impl Capture {
             "hdrToneMapping": self.tone_mapper.is_some(),
             "borderMode": self.flags.border_mode,
             "borderFallback": self.flags.border_fallback,
+            "captureIntervalMode": self.flags.capture_interval_mode,
+            "captureIntervalMs": self.flags.capture_interval_ms,
             "pipeline": "precreated-segments-async-finalize",
         }));
     }
@@ -572,15 +634,24 @@ impl Capture {
         let audio_enabled = self.audio.is_some();
         let tx = self.prepare_tx.clone();
         self.preparing = true;
+        self.prepare_started_ms = Some(now_ms);
         self.worker_handles.push(thread::spawn(move || {
             let started = Instant::now();
-            let segment = create_segment_encoder(&path, width, height, fps, audio_enabled)
-                .map(|encoder| PreparedSegment {
-                    encoder,
-                    path,
-                    audio_enabled,
-                })
-                .map_err(|error| error.to_string());
+            let segment = catch_unwind(AssertUnwindSafe(|| {
+                create_segment_encoder(&path, width, height, fps, audio_enabled)
+            }))
+            .map_err(|payload| {
+                format!(
+                    "Segment encoder preparation panicked: {}",
+                    panic_payload_message(payload)
+                )
+            })
+            .and_then(|result| result.map_err(|error| error.to_string()))
+            .map(|encoder| PreparedSegment {
+                encoder,
+                path,
+                audio_enabled,
+            });
             let prepare_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
             let _ = tx.send(PrepareResult {
                 segment,
@@ -597,7 +668,13 @@ impl Capture {
             match audio.receiver.try_recv() {
                 Ok(packet) => {
                     if let Some(active) = self.active.as_mut() {
-                        active.encoder.send_audio_buffer(&packet, 0)?;
+                        if active.encoder.pending_audio_samples() >= MAX_ENCODER_AUDIO_PACKETS {
+                            self.audio_backpressure_drops =
+                                self.audio_backpressure_drops.saturating_add(1);
+                            active.encoder.skip_audio_buffer(&packet);
+                        } else {
+                            active.encoder.send_audio_buffer(&packet, 0)?;
+                        }
                     }
                 }
                 Err(mpsc::TryRecvError::Empty) => return Ok(true),
@@ -636,7 +713,16 @@ impl Capture {
     fn spawn_finalize(&mut self, active: ActiveSegment, end_ms: u64) {
         let tx = self.finalize_tx.clone();
         self.finalizing = self.finalizing.saturating_add(1);
-        self.finalizing_ranges.push((active.start_ms, end_ms));
+        self.finalizing_ranges.push(FinalizingRange {
+            start_ms: active.start_ms,
+            end_ms,
+            started_ms: end_ms,
+        });
+        emit(json!({
+            "type": "segment-finalizer-started",
+            "startMs": active.start_ms,
+            "endMs": end_ms,
+        }));
         self.worker_handles.push(thread::spawn(move || {
             let ActiveSegment {
                 encoder,
@@ -645,7 +731,14 @@ impl Capture {
                 frames,
             } = active;
             let started = Instant::now();
-            let result = encoder.finish().map_err(|error| error.to_string());
+            let result = catch_unwind(AssertUnwindSafe(|| encoder.finish()))
+                .map_err(|payload| {
+                    format!(
+                        "Segment finalization panicked: {}",
+                        panic_payload_message(payload)
+                    )
+                })
+                .and_then(|result| result.map_err(|error| error.to_string()));
             let finalize_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
             let _ = tx.send(FinalizeResult {
                 path,
@@ -659,6 +752,18 @@ impl Capture {
     }
 
     fn rotate_active(&mut self, now_ms: u64) -> Result<bool, AnyError> {
+        if self.finalizing >= MAX_CONCURRENT_FINALIZERS {
+            if !self.rotation_delay_reported {
+                self.rotation_delay_reported = true;
+                emit(json!({
+                    "type": "segment-rotation-delayed",
+                    "atMs": now_ms,
+                    "reason": "finalizer-backpressure",
+                    "finalizersActive": self.finalizing,
+                }));
+            }
+            return Ok(false);
+        }
         let Some(prepared) = self.prepared.take() else {
             if self.compatibility_mode || (!self.preparing && self.prepare_failures >= 3) {
                 if !self.compatibility_mode {
@@ -826,11 +931,17 @@ impl Capture {
     fn process_pipeline_results(&mut self, now_ms: u64) {
         while let Ok(result) = self.prepare_rx.try_recv() {
             self.preparing = false;
+            self.prepare_started_ms = None;
+            self.prepare_completed = self.prepare_completed.saturating_add(1);
+            self.prepare_total_ms = self.prepare_total_ms.saturating_add(result.prepare_ms);
+            self.prepare_last_ms = result.prepare_ms;
+            self.prepare_max_ms = self.prepare_max_ms.max(result.prepare_ms);
             match result.segment {
                 Ok(segment) if segment.audio_enabled == self.audio.is_some() => {
                     emit(json!({
                         "type": "segment-prepared",
                         "prepareMs": result.prepare_ms,
+                        "slow": result.prepare_ms >= PIPELINE_SLOW_MS,
                         "path": segment.path,
                     }));
                     self.prepared = Some(segment);
@@ -859,13 +970,21 @@ impl Capture {
 
         while let Ok(result) = self.finalize_rx.try_recv() {
             self.finalizing = self.finalizing.saturating_sub(1);
-            if let Some(index) = self
-                .finalizing_ranges
-                .iter()
-                .position(|range| *range == (result.start_ms, result.end_ms))
-            {
+            if let Some(index) = self.finalizing_ranges.iter().position(|range| {
+                range.start_ms == result.start_ms && range.end_ms == result.end_ms
+            }) {
                 self.finalizing_ranges.swap_remove(index);
             }
+            self.finalize_completed = self.finalize_completed.saturating_add(1);
+            self.finalize_total_ms = self.finalize_total_ms.saturating_add(result.finalize_ms);
+            self.finalize_last_ms = result.finalize_ms;
+            self.finalize_max_ms = self.finalize_max_ms.max(result.finalize_ms);
+            emit(json!({
+                "type": "segment-finalizer-completed",
+                "startMs": result.start_ms,
+                "endMs": result.end_ms,
+                "finalizeMs": result.finalize_ms,
+            }));
             match result.result {
                 Ok(())
                     if result.frames > 0
@@ -890,6 +1009,7 @@ impl Capture {
                         "endMs": result.end_ms,
                         "frames": result.frames,
                         "finalizeMs": result.finalize_ms,
+                        "slow": result.finalize_ms >= PIPELINE_SLOW_MS,
                         "pendingFinalizers": self.finalizing,
                     }));
                 }
@@ -934,7 +1054,50 @@ impl Capture {
         if now_ms.saturating_sub(self.last_stats_ms) < 30_000 {
             return;
         }
+        let interval_ms = now_ms.saturating_sub(self.last_stats_ms).max(1);
+        let interval_captured_frames = self
+            .captured_frames
+            .saturating_sub(self.last_stats_captured_frames);
+        let interval_encoded_frames = self
+            .encoded_frames
+            .saturating_sub(self.last_stats_encoded_frames);
+        let interval_estimated_dropped_frames = self
+            .estimated_dropped_frames
+            .saturating_sub(self.last_stats_estimated_dropped_frames);
+        let interval_rate_limited_frames = self
+            .rate_limited_frames
+            .saturating_sub(self.last_stats_rate_limited_frames);
+        let capture_fps = interval_captured_frames as f64 * 1_000.0 / interval_ms as f64;
+        let encoded_fps = interval_encoded_frames as f64 * 1_000.0 / interval_ms as f64;
         self.last_stats_ms = now_ms;
+        self.last_stats_captured_frames = self.captured_frames;
+        self.last_stats_encoded_frames = self.encoded_frames;
+        self.last_stats_estimated_dropped_frames = self.estimated_dropped_frames;
+        self.last_stats_rate_limited_frames = self.rate_limited_frames;
+        let prepare_age_ms = self
+            .prepare_started_ms
+            .map(|started| now_ms.saturating_sub(started))
+            .unwrap_or(0);
+        let oldest_finalizer_age_ms = self
+            .finalizing_ranges
+            .iter()
+            .map(|range| now_ms.saturating_sub(range.started_ms))
+            .max()
+            .unwrap_or(0);
+        let active_video_queue = self
+            .active
+            .as_ref()
+            .map(|active| active.encoder.pending_video_samples())
+            .unwrap_or(0);
+        let active_audio_queue = self
+            .active
+            .as_ref()
+            .map(|active| active.encoder.pending_audio_samples())
+            .unwrap_or(0);
+        let render_age_ms = self
+            .render_started_ms
+            .map(|started| now_ms.saturating_sub(started))
+            .unwrap_or(0);
         emit(json!({
             "type": "capture-stats",
             "uptimeMs": now_ms,
@@ -942,12 +1105,52 @@ impl Capture {
             "encodedFrames": self.encoded_frames,
             "estimatedDroppedFrames": self.estimated_dropped_frames,
             "rateLimitedFrames": self.rate_limited_frames,
+            "intervalMs": interval_ms,
+            "intervalCapturedFrames": interval_captured_frames,
+            "intervalEncodedFrames": interval_encoded_frames,
+            "intervalEstimatedDroppedFrames": interval_estimated_dropped_frames,
+            "intervalRateLimitedFrames": interval_rate_limited_frames,
+            "captureFps": capture_fps,
+            "encodedFps": encoded_fps,
             "maxFrameGapMs": self.max_frame_gap_ms,
             "rotationCount": self.rotation_count,
             "segmentsReady": self.segments.len(),
             "finalizersActive": self.finalizing,
             "encoderPrepared": self.prepared.is_some(),
             "encoderPreparing": self.preparing,
+            "encoderPrepareAgeMs": prepare_age_ms,
+            "prepareCompleted": self.prepare_completed,
+            "prepareLastMs": self.prepare_last_ms,
+            "prepareAverageMs": if self.prepare_completed > 0 {
+                self.prepare_total_ms / self.prepare_completed
+            } else {
+                0
+            },
+            "prepareMaxMs": self.prepare_max_ms,
+            "finalizeCompleted": self.finalize_completed,
+            "finalizeLastMs": self.finalize_last_ms,
+            "finalizeAverageMs": if self.finalize_completed > 0 {
+                self.finalize_total_ms / self.finalize_completed
+            } else {
+                0
+            },
+            "finalizeMaxMs": self.finalize_max_ms,
+            "oldestFinalizerAgeMs": oldest_finalizer_age_ms,
+            "pipelineStalled": prepare_age_ms >= PIPELINE_STALLED_MS
+                || oldest_finalizer_age_ms >= PIPELINE_STALLED_MS,
+            "activeVideoQueue": active_video_queue,
+            "activeAudioQueue": active_audio_queue,
+            "audioBackpressureDrops": self.audio_backpressure_drops,
+            "rendering": self.rendering,
+            "renderAgeMs": render_age_ms,
+            "renderCompleted": self.render_completed,
+            "renderLastMs": self.render_last_ms,
+            "renderAverageMs": if self.render_completed > 0 {
+                self.render_total_ms / self.render_completed
+            } else {
+                0
+            },
+            "renderMaxMs": self.render_max_ms,
             "pendingRecords": self.pending_jobs.len(),
             "failedSegments": self.failed_segments.len(),
             "oldestFailedSegmentAgeMs": self
@@ -960,6 +1163,15 @@ impl Capture {
 
     fn process_render_results(&mut self) {
         while let Ok(result) = self.render_rx.try_recv() {
+            if self.active_render_generation == Some(result.generation) {
+                self.rendering = false;
+                self.render_started_ms = None;
+                self.active_render_generation = None;
+            }
+            self.render_completed = self.render_completed.saturating_add(1);
+            self.render_total_ms = self.render_total_ms.saturating_add(result.render_ms);
+            self.render_last_ms = result.render_ms;
+            self.render_max_ms = self.render_max_ms.max(result.render_ms);
             for path in result.segment_paths {
                 if let Some(count) = self.in_use.get_mut(&path) {
                     *count = count.saturating_sub(1);
@@ -985,6 +1197,14 @@ impl Capture {
                 }));
                 continue;
             }
+            index += 1;
+        }
+        if self.rendering {
+            return;
+        }
+
+        let mut index = 0;
+        while index < self.pending_jobs.len() {
             if self.pending_jobs[index].due_ms > now_ms {
                 index += 1;
                 continue;
@@ -1017,7 +1237,7 @@ impl Capture {
             let overlapping_finalizer = self
                 .finalizing_ranges
                 .iter()
-                .any(|(start_ms, end_ms)| *end_ms > target_start && *start_ms < target_end);
+                .any(|range| range.end_ms > target_start && range.start_ms < target_end);
             if finalized_through < target_end || overlapping_finalizer {
                 index += 1;
                 continue;
@@ -1052,6 +1272,15 @@ impl Capture {
                 }
                 continue;
             }
+            self.render_generation = self.render_generation.saturating_add(1).max(1);
+            let generation = self.render_generation;
+            self.active_render_generation = Some(generation);
+            emit(json!({
+                "type": "render-started",
+                "generation": generation,
+                "timeoutMs": RENDER_STALLED_MS,
+                "jobCount": jobs.len(),
+            }));
             let segment_paths = selected
                 .iter()
                 .map(|segment| segment.path.clone())
@@ -1061,17 +1290,26 @@ impl Capture {
             }
             let tx = self.render_tx.clone();
             let handle = thread::spawn(move || {
+                let render_started = Instant::now();
                 let primary_output = jobs[0].output_path.clone();
-                let result = render_record(&selected, target_start, target_end, &primary_output)
-                    .map_err(|error| error.to_string());
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    render_record(&selected, target_start, target_end, &primary_output)
+                }))
+                .map_err(|payload| format!("Render panicked: {}", panic_payload_message(payload)))
+                .and_then(|result| result.map_err(|error| error.to_string()));
+                let render_succeeded = result.is_ok();
                 match result {
                     Ok(()) => {
+                        let mut outcomes = Vec::with_capacity(jobs.len());
                         for (job_index, job) in jobs.into_iter().enumerate() {
                             let copy_result = if job_index == 0 {
                                 Ok(())
                             } else {
                                 fs::copy(&primary_output, &job.output_path).map(|_| ())
                             };
+                            outcomes.push((job, copy_result.map_err(|error| error.to_string())));
+                        }
+                        for (job, copy_result) in outcomes {
                             match copy_result {
                                 Ok(()) => emit(json!({
                                     "type": "saved",
@@ -1084,7 +1322,7 @@ impl Capture {
                                         "type": "failed",
                                         "id": job.id,
                                         "outputPath": job.output_path,
-                                        "error": error.to_string(),
+                                        "error": error,
                                     }));
                                 }
                             }
@@ -1102,9 +1340,26 @@ impl Capture {
                         }
                     }
                 }
-                let _ = tx.send(RenderResult { segment_paths });
+                let render_ms = render_started
+                    .elapsed()
+                    .as_millis()
+                    .min(u128::from(u64::MAX)) as u64;
+                emit(json!({
+                    "type": "render-completed",
+                    "generation": generation,
+                    "renderMs": render_ms,
+                    "success": render_succeeded,
+                }));
+                let _ = tx.send(RenderResult {
+                    generation,
+                    segment_paths,
+                    render_ms,
+                });
             });
+            self.rendering = true;
+            self.render_started_ms = Some(now_ms);
             self.worker_handles.push(handle);
+            break;
         }
     }
 
@@ -1195,8 +1450,22 @@ impl GraphicsCaptureApiHandler for Capture {
             rate_limited_frames: 0,
             max_frame_gap_ms: 0.0,
             last_stats_ms: 0,
+            last_stats_captured_frames: 0,
+            last_stats_encoded_frames: 0,
+            last_stats_estimated_dropped_frames: 0,
+            last_stats_rate_limited_frames: 0,
             rotation_count: 0,
             rotation_delay_reported: false,
+            prepare_started_ms: None,
+            prepare_completed: 0,
+            prepare_total_ms: 0,
+            prepare_last_ms: 0,
+            prepare_max_ms: 0,
+            finalize_completed: 0,
+            finalize_total_ms: 0,
+            finalize_last_ms: 0,
+            finalize_max_ms: 0,
+            audio_backpressure_drops: 0,
             prepare_tx,
             prepare_rx,
             finalize_tx,
@@ -1206,6 +1475,14 @@ impl GraphicsCaptureApiHandler for Capture {
             worker_handles: Vec::new(),
             render_tx,
             render_rx,
+            rendering: false,
+            render_started_ms: None,
+            render_generation: 0,
+            active_render_generation: None,
+            render_completed: 0,
+            render_total_ms: 0,
+            render_last_ms: 0,
+            render_max_ms: 0,
             audio,
             audio_error,
             tone_mapper,
@@ -1447,7 +1724,7 @@ fn parse_options() -> Result<Options, AnyError> {
     let mut buffer_dir = None;
     let mut pre_ms = 10_000;
     let mut post_ms = 10_000;
-    let mut segment_ms = 2_000;
+    let mut segment_ms = 5_000;
     let mut fps = 30;
     let mut hdr_tone_map = false;
     while let Some(raw) = args.next() {
@@ -1559,6 +1836,73 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn try_capture_with_rate_limit_fallback<T>(
+    monitor: T,
+    cursor_capture_settings: CursorCaptureSettings,
+    secondary_window_settings: SecondaryWindowSettings,
+    dirty_region_settings: DirtyRegionSettings,
+    color_format: ColorFormat,
+    mut flags: CaptureFlags,
+) -> Result<(), GraphicsCaptureApiError<AnyError>>
+where
+    T: TryInto<GraphicsCaptureItemType> + Clone,
+{
+    let interval_nanos = 1_000_000_000_u64 / u64::from(flags.fps.max(1));
+    let interval = Duration::from_nanos(interval_nanos);
+    flags.capture_interval_mode = "os";
+    flags.capture_interval_ms = interval.as_secs_f64() * 1_000.0;
+    emit(json!({
+        "type": "capture-rate-limit-attempt",
+        "requested": "os",
+        "intervalMs": flags.capture_interval_ms,
+        "fps": flags.fps,
+    }));
+
+    let result = try_capture_with_border_fallback(
+        monitor.clone(),
+        cursor_capture_settings,
+        secondary_window_settings,
+        MinimumUpdateIntervalSettings::Custom(interval),
+        dirty_region_settings,
+        color_format,
+        flags.clone(),
+    );
+    if !flags.ready_signal.load(Ordering::Acquire)
+        && result.as_ref().is_err_and(is_minimum_interval_unsupported)
+    {
+        emit(json!({
+            "type": "capture-rate-limit-fallback",
+            "requested": "os",
+            "effective": "callback",
+            "reason": "minimum-update-interval-unsupported",
+            "intervalMs": flags.capture_interval_ms,
+            "fps": flags.fps,
+        }));
+        let fallback_session_dir = flags.session_dir.join("rate-default");
+        if fallback_session_dir.exists() {
+            fs::remove_dir_all(&fallback_session_dir).map_err(|error| {
+                GraphicsCaptureApiError::NewHandlerError(Box::new(error) as AnyError)
+            })?;
+        }
+        fs::create_dir_all(&fallback_session_dir).map_err(|error| {
+            GraphicsCaptureApiError::NewHandlerError(Box::new(error) as AnyError)
+        })?;
+        flags.session_dir = fallback_session_dir;
+        flags.capture_interval_mode = "callback";
+        return try_capture_with_border_fallback(
+            monitor,
+            cursor_capture_settings,
+            secondary_window_settings,
+            MinimumUpdateIntervalSettings::Default,
+            dirty_region_settings,
+            color_format,
+            flags,
+        );
+    }
+    result
+}
+
 fn run() -> Result<(), AnyError> {
     let options = parse_options()?;
     fs::create_dir_all(&options.buffer_dir)?;
@@ -1597,14 +1941,15 @@ fn run() -> Result<(), AnyError> {
         hdr_tone_map: options.hdr_tone_map,
         border_mode: "without-border",
         border_fallback: false,
+        capture_interval_mode: "callback",
+        capture_interval_ms: 1_000.0 / f64::from(options.fps.max(1)),
         ready_signal: Arc::clone(&ready_signal),
     };
 
-    let mut capture_result = try_capture_with_border_fallback(
+    let mut capture_result = try_capture_with_rate_limit_fallback(
         monitor,
         CursorCaptureSettings::WithoutCursor,
         SecondaryWindowSettings::Default,
-        MinimumUpdateIntervalSettings::Default,
         DirtyRegionSettings::Default,
         color_format,
         flags,
@@ -1643,14 +1988,15 @@ fn run() -> Result<(), AnyError> {
             hdr_tone_map: false,
             border_mode: "without-border",
             border_fallback: false,
+            capture_interval_mode: "callback",
+            capture_interval_ms: 1_000.0 / f64::from(options.fps.max(1)),
             ready_signal,
         };
 
-        capture_result = try_capture_with_border_fallback(
+        capture_result = try_capture_with_rate_limit_fallback(
             fallback_monitor,
             CursorCaptureSettings::WithoutCursor,
             SecondaryWindowSettings::Default,
-            MinimumUpdateIntervalSettings::Default,
             DirtyRegionSettings::Default,
             ColorFormat::Bgra8,
             fallback_flags,
@@ -1756,6 +2102,18 @@ mod tests {
             GraphicsCaptureError::BorderConfigUnsupported,
         );
         assert!(is_border_unsupported(&error));
+    }
+
+    #[test]
+    fn rate_limit_fallback_only_recognizes_its_typed_error() {
+        let minimum_interval = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
+            GraphicsCaptureError::MinimumUpdateIntervalUnsupported,
+        );
+        let border = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
+            GraphicsCaptureError::BorderConfigUnsupported,
+        );
+        assert!(is_minimum_interval_unsupported(&minimum_interval));
+        assert!(!is_minimum_interval_unsupported(&border));
     }
 
     #[test]

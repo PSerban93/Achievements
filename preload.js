@@ -6,6 +6,10 @@ contextBridge.exposeInMainWorld("customApi", {
   closeWindow: () => ipcRenderer.send("close-window"),
 });
 let overlayDataHandler = null;
+let lastNotificationPayload = null;
+ipcRenderer.on("show-notification", (_event, data) => {
+  lastNotificationPayload = data;
+});
 
 function subscribeIpc(channel, callback, mapArgs = (_event, data) => [data]) {
   if (typeof callback !== "function") return () => {};
@@ -25,6 +29,8 @@ let rarityBorderObserver = null;
 let rarityBorderTimer = null;
 let rarityPercentageFrame = null;
 let rarityPercentageElement = null;
+let rarityPercentagePosition = null;
+let presetPreviewPaused = false;
 
 function parseNotificationRarityPercent(value) {
   if (value === null || value === undefined) return null;
@@ -32,12 +38,13 @@ function parseNotificationRarityPercent(value) {
     return Math.min(100, Math.max(0, value));
   }
   if (typeof value !== "string") return null;
-  const match = value.replace(",", ".").trim().match(/-?\d+(?:\.\d+)?/);
+  const match = value
+    .replace(",", ".")
+    .trim()
+    .match(/-?\d+(?:\.\d+)?/);
   if (!match) return null;
   const parsed = Number(match[0]);
-  return Number.isFinite(parsed)
-    ? Math.min(100, Math.max(0, parsed))
-    : null;
+  return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : null;
 }
 
 function getNotificationRarityTier(value) {
@@ -45,6 +52,14 @@ function getNotificationRarityTier(value) {
   if (percent === null || percent > 10) return "";
   if (percent <= 1) return "gold";
   if (percent <= 5) return "silver";
+  return "bronze";
+}
+
+function getTrophyModeNotificationTier(value) {
+  const percent = parseNotificationRarityPercent(value);
+  if (percent === null) return "bronze";
+  if (percent < 20) return "gold";
+  if (percent < 50) return "silver";
   return "bronze";
 }
 
@@ -173,9 +188,12 @@ function clearNotificationRarityBorder() {
   }
   rarityPercentageElement?.remove();
   rarityPercentageElement = null;
+  rarityPercentagePosition = null;
   try {
     document
-      .querySelectorAll(RARITY_BORDER_CLASSES.map((name) => `.${name}`).join(","))
+      .querySelectorAll(
+        RARITY_BORDER_CLASSES.map((name) => `.${name}`).join(","),
+      )
       .forEach((element) => element.classList.remove(...RARITY_BORDER_CLASSES));
   } catch {}
 }
@@ -192,6 +210,58 @@ function formatNotificationRarityPercent(value) {
 function normalizeNotificationRarityScale(value) {
   const scale = Number(value);
   return Number.isFinite(scale) && scale > 0 ? scale : 1;
+}
+
+function getDesignerRaritySettings() {
+  const meta = document.querySelector(
+    'meta[name="achievements-designer-rarity"]',
+  );
+  if (!meta) return null;
+  const mode = String(meta.content || "").toLowerCase();
+  if (!["inherit", "off", "rare", "all"].includes(mode)) return null;
+  const rawPosition = String(meta.dataset.position || "").toLowerCase();
+  const position =
+    rawPosition === "top"
+      ? "topcenter"
+      : rawPosition === "bottom"
+        ? "bottomcenter"
+        : rawPosition;
+  const color = String(meta.dataset.color || "");
+  const textColor = String(meta.dataset.textColor || "");
+  const opacityValue = String(meta.dataset.opacity || "");
+  const opacity =
+    opacityValue !== "" && Number.isFinite(Number(opacityValue))
+      ? Math.min(100, Math.max(0, Number(opacityValue)))
+      : null;
+  const offsetValue = (raw) => {
+    const number = Number(raw);
+    return Number.isFinite(number) ? Math.min(900, Math.max(-900, number)) : 0;
+  };
+  return {
+    mode,
+    placementSelector: /^[.#\w >-]+$/.test(meta.dataset.placementSelector || "")
+      ? meta.dataset.placementSelector : "",
+    position: [
+      "topleft",
+      "topcenter",
+      "top",
+      "topright",
+      "bottomleft",
+      "bottomcenter",
+      "bottom",
+      "bottomright",
+      "left",
+      "right",
+      "center",
+    ].includes(position)
+      ? position
+      : "",
+    color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : "",
+    textColor: /^#[0-9a-f]{3,8}$/i.test(textColor) ? textColor : "",
+    opacity,
+    offsetX: offsetValue(meta.dataset.offsetX),
+    offsetY: offsetValue(meta.dataset.offsetY),
+  };
 }
 
 function getNotificationPresetName(data = {}) {
@@ -278,36 +348,45 @@ function isNotificationIconVisuallyReady(icon, rect, scale, presetName) {
   return !isXbox360ExitSpinActive(icon, presetName);
 }
 
+function getNotificationPlacementRect(root, rect) {
+  const height = Number(root?.getAttribute("data-achievements-designer-placement-height"));
+  if (!(height > 0 && root.offsetHeight > 0) ||
+      root.computedStyleMap?.().get("height")?.toString() !== "auto") return rect;
+  const stableHeight = height * rect.height / root.offsetHeight;
+  const top = rect.top + (rect.height - stableHeight) / 2;
+  return { ...rect.toJSON(), y: top, top, bottom: top + stableHeight, height: stableHeight };
+}
+
 function attachNotificationRarityPercentage(
   icon,
   percent,
   tier,
   scaleValue,
   presetName,
+  designerSettings = null,
 ) {
   const scale = normalizeNotificationRarityScale(scaleValue);
   const badge = document.createElement("div");
   badge.id = RARITY_PERCENTAGE_ID;
   badge.textContent = formatNotificationRarityPercent(percent);
-  badge.style.setProperty(
-    "--notification-rarity-min-width",
-    `${34 * scale}px`,
-  );
-  badge.style.setProperty(
-    "--notification-rarity-padding-y",
-    `${2 * scale}px`,
-  );
-  badge.style.setProperty(
-    "--notification-rarity-padding-x",
-    `${7 * scale}px`,
-  );
-  badge.style.setProperty(
-    "--notification-rarity-font-size",
-    `${14 * scale}px`,
-  );
+  badge.style.setProperty("--notification-rarity-min-width", `${34 * scale}px`);
+  badge.style.setProperty("--notification-rarity-padding-y", `${2 * scale}px`);
+  badge.style.setProperty("--notification-rarity-padding-x", `${7 * scale}px`);
+  badge.style.setProperty("--notification-rarity-font-size", `${14 * scale}px`);
   if (tier) {
     badge.classList.add(`achievements-rarity-percentage-${tier}`);
   }
+  if (designerSettings?.color) badge.style.background = designerSettings.color;
+  if (
+    designerSettings?.opacity !== null &&
+    designerSettings?.opacity !== undefined &&
+    !/^#[0-9a-f]{8}$/i.test(designerSettings.color || "")
+  ) {
+    const baseColor = designerSettings.color || "rgb(10, 13, 18)";
+    badge.style.backgroundColor = `color-mix(in srgb, ${baseColor} ${designerSettings.opacity}%, transparent)`;
+  }
+  if (designerSettings?.textColor)
+    badge.style.color = designerSettings.textColor;
   document.documentElement.appendChild(badge);
   rarityPercentageElement = badge;
 
@@ -326,18 +405,56 @@ function attachNotificationRarityPercentage(
     badge.style.opacity = isVisible ? "1" : "0";
     badge.style.visibility = isVisible ? "visible" : "hidden";
     if (!isVisible) {
-      rarityPercentageFrame = requestAnimationFrame(position);
+      rarityPercentageFrame = presetPreviewPaused ? null : requestAnimationFrame(position);
       return;
     }
     const badgeHeight = badge.offsetHeight || 18 * scale;
-    const centerX = rect.left + rect.width / 2;
-    badge.style.left = `${centerX}px`;
-    badge.style.top = `${Math.min(
-      rect.bottom + 4 * scale,
-      Math.max(0, window.innerHeight - badgeHeight - 2 * scale),
-    )}px`;
-    rarityPercentageFrame = requestAnimationFrame(position);
+    if (designerSettings?.position) {
+      let explicitRoot = null;
+      if (designerSettings.placementSelector) {
+        try { explicitRoot = document.querySelector(designerSettings.placementSelector); } catch {}
+      }
+      const placementRoot = explicitRoot || icon.closest(
+        ".ach, .arcade-card, .dock, .notification, .achievement, " +
+          ".award-container, .hellblade-shell, .bat-shell",
+      );
+      const measuredPlacement = placementRoot?.getBoundingClientRect() || rect;
+      const placementRect = getNotificationPlacementRect(placementRoot, measuredPlacement);
+      const badgeWidth = badge.offsetWidth || 34 * scale;
+      const { position: placement } = designerSettings;
+      const offsetX = Number(designerSettings.offsetX) || 0;
+      const offsetY = Number(designerSettings.offsetY) || 0;
+      const rawX = placement.endsWith("left")
+        ? placementRect.left + 8 * scale + badgeWidth / 2
+        : placement.endsWith("right")
+          ? placementRect.right - 8 * scale - badgeWidth / 2
+          : placementRect.left + placementRect.width / 2;
+      const rawY =
+        placement === "center" ||
+        (!placement.startsWith("top") && !placement.startsWith("bottom"))
+          ? placementRect.top + placementRect.height / 2 - badgeHeight / 2
+          : placement.startsWith("top")
+            ? placementRect.top + 6 * scale
+            : placementRect.bottom - badgeHeight - 6 * scale;
+      const offsetScaleX = placementRoot?.offsetWidth > 0
+        ? measuredPlacement.width / placementRoot.offsetWidth : scale;
+      const offsetScaleY = placementRoot?.offsetHeight > 0
+        ? measuredPlacement.height / placementRoot.offsetHeight : scale;
+      const placedX = rawX + offsetX * offsetScaleX;
+      const placedY = rawY + offsetY * offsetScaleY;
+      badge.style.left = `${placedX}px`;
+      badge.style.top = `${placedY}px`;
+    } else {
+      const centerX = rect.left + rect.width / 2;
+      badge.style.left = `${centerX}px`;
+      badge.style.top = `${Math.min(
+        rect.bottom + 4 * scale,
+        Math.max(0, window.innerHeight - badgeHeight - 2 * scale),
+      )}px`;
+    }
+    rarityPercentageFrame = presetPreviewPaused ? null : requestAnimationFrame(position);
   };
+  rarityPercentagePosition = position;
   position();
 }
 
@@ -346,12 +463,15 @@ function findMatchingNotificationIcon(iconPath) {
   const expectedBasename = getAssetBasename(iconPath);
   if (!expectedUrl || !expectedBasename) return null;
   const selectors = [
+    "img.icon",
     ".icon img",
     "img.achievement-icon",
     ".achievement-icon img",
     "#icon",
     ".ani_icon img",
     ".icon-frame img",
+    ".icon-container img",
+    ".badge img",
   ];
   const candidates = Array.from(
     document.querySelectorAll(selectors.join(",")),
@@ -373,18 +493,24 @@ function findMatchingNotificationIcon(iconPath) {
 
 function applyNotificationRarityBorder(data = {}) {
   clearNotificationRarityBorder();
+  const designerSettings = getDesignerRaritySettings();
   const percent = parseNotificationRarityPercent(data?.rarityPct);
   const tier =
     getExplicitNotificationRarityTier(data) ||
-    getNotificationRarityTier(data?.rarityPct);
+    (data?.trophyModeEnabled === true
+      ? getTrophyModeNotificationTier(data?.rarityPct)
+      : getNotificationRarityTier(data?.rarityPct));
   const showPercentage =
-    data?.showRarityPercentage === true && percent !== null;
+    data?.showRarityPercentage === true &&
+    percent !== null &&
+    (!designerSettings ||
+      designerSettings.mode === "inherit" ||
+      designerSettings.mode === "all" ||
+      (designerSettings.mode === "rare" && data?.isRare === true));
   const showBorder =
-    !!tier && (data?.isRare === true || !!getExplicitNotificationRarityTier(data));
-  if (
-    (!showBorder && !showPercentage) ||
-    isLaz0rboxNotificationPreset(data)
-  ) {
+    !!tier &&
+    (data?.isRare === true || !!getExplicitNotificationRarityTier(data));
+  if ((!showBorder && !showPercentage) || isLaz0rboxNotificationPreset(data)) {
     return;
   }
   const iconPath = data?.iconPath || data?.icon || "";
@@ -393,22 +519,29 @@ function applyNotificationRarityBorder(data = {}) {
   ensureRarityBorderStyles();
 
   const apply = () => {
-    const icon = findMatchingNotificationIcon(iconPath);
-    if (!icon) return false;
-    if (showBorder) {
+    const icon =
+      findMatchingNotificationIcon(iconPath) ||
+      (designerSettings
+        ? document.querySelector(
+            "img.icon, .icon img, img.achievement-icon, .achievement-icon img, #icon, .ani_icon img, .icon-frame img, .icon-container img, .badge img",
+          )
+        : null);
+    if (icon && showBorder) {
       icon.classList.remove(...RARITY_BORDER_CLASSES);
       icon.classList.add(`achievements-rarity-border-${tier}`);
     }
     if (showPercentage && !rarityPercentageElement) {
+      if (!icon) return false;
       attachNotificationRarityPercentage(
         icon,
         percent,
         tier,
         data?.scale,
         presetName,
+        designerSettings,
       );
     }
-    return true;
+    return Boolean(icon || (designerSettings && rarityPercentageElement));
   };
 
   if (apply()) return;
@@ -484,6 +617,27 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("generation:progress:get-active"),
   loadConfigs: () => ipcRenderer.invoke("loadConfigs"),
   loadDashboardSummary: () => ipcRenderer.invoke("dashboard:summary"),
+  listCollections: () => ipcRenderer.invoke("collections:list"),
+  createCollection: (payload) =>
+    ipcRenderer.invoke("collections:create", payload),
+  pickCollectionImage: (title) =>
+    ipcRenderer.invoke("collections:pick-image", { title }),
+  updateCollection: (payload) =>
+    ipcRenderer.invoke("collections:update", payload),
+  deleteCollection: (id) => ipcRenderer.invoke("collections:delete", { id }),
+  chooseCollectionImage: (id, title) =>
+    ipcRenderer.invoke("collections:choose-image", { id, title }),
+  removeCollectionImage: (id) =>
+    ipcRenderer.invoke("collections:remove-image", { id }),
+  addGamesToCollection: (id, games) =>
+    ipcRenderer.invoke("collections:add-games", { id, games }),
+  removeGamesFromCollection: (id, games) =>
+    ipcRenderer.invoke("collections:remove-games", { id, games }),
+  onCollectionsChanged: (callback) => {
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on("collections:changed", handler);
+    return () => ipcRenderer.removeListener("collections:changed", handler);
+  },
   bootstrapDashboardSummary: (entries = {}) =>
     ipcRenderer.invoke("dashboard:summary:bootstrap", { entries }),
   saveDashboardSummaryEntries: (entries = {}) =>
@@ -566,6 +720,45 @@ contextBridge.exposeInMainWorld("api", {
   // Presets
   loadPresets: () => ipcRenderer.invoke("load-presets"),
   loadSanPresets: () => ipcRenderer.invoke("load-san-presets"),
+  loadSanDesignerTemplates: () =>
+    ipcRenderer.invoke("presets:list-san-designer-templates"),
+  saveCustomPreset: (draft) => ipcRenderer.invoke("presets:save-custom", draft),
+  getNotificationPresetLayout: (request) =>
+    ipcRenderer.invoke("presets:notification-layout", request),
+  loadNativePresetDraft: (request) =>
+    ipcRenderer.invoke("presets:load-native-draft", request),
+  loadNativePresetLogos: () => ipcRenderer.invoke("presets:list-native-logos"),
+  loadSanPresetDraft: (id) => ipcRenderer.invoke("presets:load-san-draft", id),
+  saveSanCustomPreset: (draft) =>
+    ipcRenderer.invoke("presets:save-san-custom", draft),
+  chooseSanPresetAsset: (field) =>
+    ipcRenderer.invoke("presets:choose-san-asset", field),
+  renderPresetPreview: (request) =>
+    ipcRenderer.invoke("presets:render-preview", request),
+  startLivePresetPreview: (request) =>
+    ipcRenderer.invoke("presets:live-preview-start", request),
+  updateLivePresetPreview: (request) =>
+    ipcRenderer.invoke("presets:live-preview-update", request),
+  resumeLivePresetPreview: (request) =>
+    ipcRenderer.invoke("presets:live-preview-resume", request),
+  refreshPresetPreviewRarity: (data) => {
+    lastNotificationPayload = data;
+    applyNotificationRarityBorder(data);
+  },
+  setPresetPreviewPaused: (paused) => {
+    presetPreviewPaused = paused === true;
+    if (rarityPercentageFrame !== null) cancelAnimationFrame(rarityPercentageFrame);
+    rarityPercentageFrame = null;
+    if (!presetPreviewPaused) rarityPercentagePosition?.();
+  },
+  updateLivePresetPreviewBounds: (request) =>
+    ipcRenderer.send("presets:live-preview-bounds", request),
+  replayLivePresetPreview: () =>
+    ipcRenderer.invoke("presets:live-preview-replay"),
+  snapshotLivePresetPreview: (request = {}) =>
+    ipcRenderer.invoke("presets:live-preview-snapshot", request),
+  closeLivePresetPreview: (request = {}) =>
+    ipcRenderer.invoke("presets:live-preview-close", request),
 
   // Notification
   showNotification: (data) => ipcRenderer.send("show-notification", data),
@@ -586,7 +779,11 @@ contextBridge.exposeInMainWorld("api", {
   queueProgressNotification: (data) =>
     ipcRenderer.send("queue-progress-notification", data),
   onNotification: (callback) =>
-    subscribeIpc("show-notification", callback, (_event, data) => [data]),
+    subscribeIpc("show-notification", callback, (_event, data) => {
+      lastNotificationPayload = data;
+      return [data];
+    }),
+  getLastNotification: () => lastNotificationPayload,
   onNotify: (callback) =>
     subscribeIpc("notify", callback, (_event, data) => [data]),
   notifyMain: (msg) => ipcRenderer.send("notify-from-child", msg),
@@ -604,11 +801,9 @@ contextBridge.exposeInMainWorld("api", {
   onNewAchievement: (callback) =>
     subscribeIpc("new-achievement", callback, (_event, data) => [data]),
   onRefreshAchievementsTable: (callback) =>
-    subscribeIpc(
-      "refresh-achievements-table",
-      callback,
-      (_event, data) => [data],
-    ),
+    subscribeIpc("refresh-achievements-table", callback, (_event, data) => [
+      data,
+    ]),
 
   // Update the configuration (now uses the 'update-config' event)
   updateConfig: (configData) => ipcRenderer.send("update-config", configData),
@@ -641,8 +836,12 @@ contextBridge.exposeInMainWorld("api", {
   savePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   updatePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   loadPreferences: () => ipcRenderer.invoke("load-preferences"),
+  getDashboardUiState: () => ipcRenderer.sendSync("dashboard:ui-state:load"),
+  saveDashboardUiState: (patch) =>
+    ipcRenderer.sendSync("dashboard:ui-state:save", patch),
   listAppThemes: () => ipcRenderer.invoke("themes:list"),
   reloadAppThemes: () => ipcRenderer.invoke("themes:reload"),
+  saveCustomTheme: (draft) => ipcRenderer.invoke("themes:save-custom", draft),
   listSteamOfficialAccounts: () =>
     ipcRenderer.invoke("steam-official:list-accounts"),
   getEpicOfficialStatus: () => ipcRenderer.invoke("epic-official:status"),
@@ -708,18 +907,41 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("overlay:log", { level, message, meta }),
   overlayVisibilityAck: (payload) =>
     ipcRenderer.send("overlay:visibility-ack", payload),
-  overlayNavigationReady: () =>
-    ipcRenderer.send("overlay:navigation-ready"),
+  overlayNavigationReady: () => ipcRenderer.send("overlay:navigation-ready"),
   overlayNavigationResult: (payload) =>
     ipcRenderer.send("overlay:navigation-result", payload),
   checkLocalGameImage: (appid, platform) =>
     ipcRenderer.invoke("checkLocalGameImage", appid, platform),
+  checkLocalGameHeader: (appid, platform) =>
+    ipcRenderer.invoke("checkLocalGameHeader", appid, platform),
+  checkLocalGameHeaderMeta: (appid, platform, configName = "") =>
+    ipcRenderer.invoke("checkLocalGameHeaderMeta", appid, platform, configName),
+  ensureGameHeader: (appid, platform, configName, displayName) =>
+    ipcRenderer.invoke(
+      "ensureGameHeader",
+      appid,
+      platform,
+      configName,
+      displayName,
+    ),
+  redownloadGameHeader: (payload) =>
+    ipcRenderer.invoke("redownloadGameHeader", payload),
+  redownloadXboxSavedPortraitCover: (payload) =>
+    ipcRenderer.invoke("redownloadXboxSavedPortraitCover", payload),
   checkExecutableExists: (exePath) =>
     ipcRenderer.invoke("checkExecutableExists", exePath),
   saveGameImage: (appid, buffer, platform, meta = {}) =>
     ipcRenderer.invoke("saveGameImage", appid, buffer, platform, meta),
   setCustomCoverPath: (configName, coverPath) =>
-    ipcRenderer.invoke("config:set-custom-cover-path", { configName, coverPath }),
+    ipcRenderer.invoke("config:set-custom-cover-path", {
+      configName,
+      coverPath,
+    }),
+  setCustomHeaderPath: (configName, headerPath) =>
+    ipcRenderer.invoke("config:set-custom-header-path", {
+      configName,
+      headerPath,
+    }),
   onImageUpdate: (callback) =>
     subscribeIpc("update-image", callback, (_event, data) => [data]),
   on: (channel, callback) =>
@@ -755,6 +977,11 @@ contextBridge.exposeInMainWorld("api", {
     subscribeIpc("app-navigation:error", handler, (_event, data) => [data]),
   getBootStatus: () => ipcRenderer.invoke("boot:status"),
   getAppVersion: () => ipcRenderer.invoke("app:get-version"),
+  exportProfileBackup: () => ipcRenderer.invoke("profile-backup:export"),
+  chooseProfileBackupRestore: () =>
+    ipcRenderer.invoke("profile-backup:choose-restore"),
+  restoreProfileBackup: (token) =>
+    ipcRenderer.invoke("profile-backup:restore", { token }),
   getChangelogs: (options = {}) =>
     ipcRenderer.invoke("settings:changelogs:list", options),
   listLogSources: () => ipcRenderer.invoke("settings:logs:list-sources"),
@@ -763,7 +990,15 @@ contextBridge.exposeInMainWorld("api", {
   unsubscribeLogSource: () => ipcRenderer.invoke("settings:logs:unsubscribe"),
   openLogsFolder: () => ipcRenderer.invoke("settings:logs:open-folder"),
   onSettingsLogAppend: (handler) =>
-    subscribeIpc("settings:logs:append", handler, (_event, payload) => [payload]),
+    subscribeIpc("settings:logs:append", handler, (_event, payload) => [
+      payload,
+    ]),
+  onSettingsLogSourcesChanged: (handler) =>
+    subscribeIpc(
+      "settings:logs:sources-changed",
+      handler,
+      (_event, payload) => [payload],
+    ),
   bootOverlayHidden: () => ipcRenderer.send("boot:overlay-hidden"),
   getBootOnboardingState: () => ipcRenderer.invoke("boot:onboarding:get-state"),
   discoverBootOnboardingFolders: () =>
@@ -776,6 +1011,8 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("covers:steam-product-assets", payload),
   getSteamGridDbCover: (payload) =>
     ipcRenderer.invoke("covers:steamgriddb", payload),
+  getEpicCatalogImageUrls: (payload) =>
+    ipcRenderer.invoke("covers:epic-catalog-images", payload),
   resolveEpicStoreUrl: (payload) =>
     ipcRenderer.invoke("epic:store-url", payload),
   resolveGogStoreUrl: (payload) => ipcRenderer.invoke("gog:store-url", payload),
@@ -888,6 +1125,7 @@ contextBridge.exposeInMainWorld("electron", {
         "load-saved-achievements",
         "achievement:manual-state",
         "load-presets",
+        "load-san-presets",
         "preferences:update",
         "save-preferences",
         "load-preferences",
@@ -914,8 +1152,13 @@ contextBridge.exposeInMainWorld("electron", {
         "selectExecutable",
         "launchExecutable",
         "checkLocalGameImage",
+        "checkLocalGameHeader",
+        "ensureGameHeader",
+        "redownloadGameHeader",
+        "redownloadXboxSavedPortraitCover",
         "checkExecutableExists",
         "saveGameImage",
+        "covers:epic-catalog-images",
         "generate-auto-configs",
         "blacklist:list",
         "blacklist:reset",
@@ -931,6 +1174,9 @@ contextBridge.exposeInMainWorld("electron", {
         "boot:onboarding:discover-folders",
         "boot:onboarding:apply-selection",
         "boot:onboarding:skip-all",
+        "profile-backup:export",
+        "profile-backup:choose-restore",
+        "profile-backup:restore",
       ];
       if (!valid.includes(channel))
         throw new Error(`Blocked invoke on channel: ${channel}`);

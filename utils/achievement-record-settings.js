@@ -65,7 +65,7 @@ function getAchievementRecorderTimings(prefs = {}) {
     fps,
     preMs: halfDurationMs,
     postMs: halfDurationMs,
-    segmentMs: 2_000,
+    segmentMs: 5_000,
     hdrToneMapping: prefs?.enableHdrRecords === true,
   };
 }
