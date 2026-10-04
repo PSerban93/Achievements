@@ -7,7 +7,14 @@ use std::sync::{Arc, Mutex};
 use half::f16;
 use png::{BitDepth, ColorType, Encoder, SrgbRenderingIntent};
 use windows::Win32::Foundation::RECT;
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO};
+use windows::Win32::Graphics::Gdi::{
+    BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CAPTUREBLT, CreateCompatibleBitmap,
+    CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC, DeleteObject, GetDC, GetDIBits, GetMonitorInfoW,
+    HBITMAP, HDC, HGDIOBJ, HMONITOR, MONITORINFO, ReleaseDC, SRCCOPY, SelectObject,
+};
+use windows::Win32::UI::HiDpi::{
+    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext,
+};
 use windows_capture::capture::{Context, GraphicsCaptureApiHandler};
 use windows_capture::frame::Frame;
 use windows_capture::graphics_capture_api::InternalCaptureControl;
@@ -130,9 +137,7 @@ fn enumerate_monitors() -> Result<Vec<MonitorPlacement>, AnyError> {
     if monitors.is_empty() {
         return Err("No active monitor was found".into());
     }
-    // Capture the primary monitor first because Achievements notifications are
-    // presented there. Additional monitors are then composed into the same
-    // virtual-desktop image used by the existing screenshot path.
+    // Both capture modes target the primary monitor, as the original Windows path did.
     monitors.sort_by_key(|entry| !entry.primary);
     Ok(monitors)
 }
@@ -289,6 +294,106 @@ fn capture_monitor(
     Ok(())
 }
 
+// Restore the selected object before freeing any GDI handles, including on errors.
+struct GdiCapture {
+    screen: HDC,
+    memory: HDC,
+    bitmap: HBITMAP,
+    previous: HGDIOBJ,
+}
+
+impl Drop for GdiCapture {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.previous.is_invalid() {
+                SelectObject(self.memory, self.previous);
+            }
+            if !self.memory.is_invalid() {
+                let _ = DeleteDC(self.memory);
+            }
+            if !self.bitmap.is_invalid() {
+                let _ = DeleteObject(HGDIOBJ(self.bitmap.0));
+            }
+            if !self.screen.is_invalid() {
+                ReleaseDC(None, self.screen);
+            }
+        }
+    }
+}
+
+fn capture_sdr(canvas: &mut Canvas) -> Result<(), AnyError> {
+    let width = i32::try_from(canvas.width)?;
+    let height = i32::try_from(canvas.height)?;
+    let mut capture = GdiCapture {
+        screen: unsafe { GetDC(None) },
+        memory: HDC::default(),
+        bitmap: HBITMAP::default(),
+        previous: HGDIOBJ::default(),
+    };
+    if capture.screen.is_invalid() {
+        return Err("Could not acquire the desktop device context".into());
+    }
+    unsafe {
+        capture.memory = CreateCompatibleDC(Some(capture.screen));
+        if capture.memory.is_invalid() {
+            return Err("Could not create the capture device context".into());
+        }
+        capture.bitmap = CreateCompatibleBitmap(capture.screen, width, height);
+        if capture.bitmap.is_invalid() {
+            return Err("Could not create the capture bitmap".into());
+        }
+        capture.previous = SelectObject(capture.memory, HGDIOBJ(capture.bitmap.0));
+        if capture.previous.is_invalid() {
+            return Err("Could not select the capture bitmap".into());
+        }
+        BitBlt(
+            capture.memory,
+            0,
+            0,
+            width,
+            height,
+            Some(capture.screen),
+            canvas.left,
+            canvas.top,
+            SRCCOPY | CAPTUREBLT,
+        )?;
+        // GetDIBits requires that the bitmap is not selected into a DC.
+        if SelectObject(capture.memory, capture.previous).is_invalid() {
+            return Err("Could not release the capture bitmap for reading".into());
+        }
+        capture.previous = HGDIOBJ::default();
+        let mut info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height, // Top-down pixels, with no vertical flip.
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let rows = GetDIBits(
+            capture.screen,
+            capture.bitmap,
+            0,
+            canvas.height,
+            Some(canvas.rgba.as_mut_ptr().cast()),
+            &mut info,
+            DIB_RGB_COLORS,
+        );
+        if rows != height {
+            return Err("Desktop capture returned an incomplete bitmap".into());
+        }
+    }
+    for pixel in canvas.rgba.chunks_exact_mut(4) {
+        pixel.swap(0, 2); // GDI BGRA -> PNG RGBA; GDI does not populate alpha.
+        pixel[3] = 255;
+    }
+    Ok(())
+}
+
 fn write_png(output: &PathBuf, canvas: &Canvas) -> Result<(), AnyError> {
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)?;
@@ -300,31 +405,55 @@ fn write_png(output: &PathBuf, canvas: &Canvas) -> Result<(), AnyError> {
             .and_then(|value| value.to_str())
             .unwrap_or("png")
     ));
-    let file = File::create(&temp)?;
-    let mut encoder = Encoder::new(BufWriter::new(file), canvas.width, canvas.height);
-    encoder.set_color(ColorType::Rgba);
-    encoder.set_depth(BitDepth::Eight);
-    encoder.set_source_srgb(SrgbRenderingIntent::Perceptual);
-    let mut writer = encoder.write_header()?;
-    writer.write_image_data(&canvas.rgba)?;
-    writer.finish()?;
-    std::fs::rename(temp, output)?;
-    Ok(())
+    let result = (|| -> Result<(), AnyError> {
+        let file = File::create(&temp)?;
+        let mut encoder = Encoder::new(BufWriter::new(file), canvas.width, canvas.height);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(BitDepth::Eight);
+        encoder.set_source_srgb(SrgbRenderingIntent::Perceptual);
+        let mut writer = encoder.write_header()?;
+        writer.write_image_data(&canvas.rgba)?;
+        writer.finish()?;
+        std::fs::rename(&temp, output)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    result
 }
 
 fn run() -> Result<(), AnyError> {
-    let output = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .ok_or("Usage: achievements-hdr-screenshot.exe <output.png>")?;
+    let mut args = std::env::args_os().skip(1);
+    let first = args
+        .next()
+        .ok_or("Usage: achievements-hdr-screenshot.exe [--sdr] <output.png>")?;
+    let sdr = first == "--sdr";
+    let output = PathBuf::from(if sdr {
+        args.next().ok_or("Missing output path after --sdr")?
+    } else {
+        first
+    });
+    if args.next().is_some() {
+        return Err("Unexpected screenshot arguments".into());
+    }
+    // Avoid DPI virtualization: both modes must capture physical monitor pixels.
+    if unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }
+        .is_invalid()
+    {
+        return Err("Could not enable physical-pixel desktop capture".into());
+    }
     let monitors = enumerate_monitors()?;
     let primary = monitors
         .iter()
         .copied()
         .find(|entry| entry.primary)
         .unwrap_or(monitors[0]);
-    // The existing screenshot-desktop Windows path captures the primary
-    // desktop surface. Keep the same dimensions and target when HDR is on.
+    if sdr {
+        let mut canvas = make_canvas(&[primary])?;
+        capture_sdr(&mut canvas)?;
+        return write_png(&output, &canvas);
+    }
     let canvas = Arc::new(Mutex::new(make_canvas(&[primary])?));
     capture_monitor(primary, Arc::clone(&canvas))?;
 

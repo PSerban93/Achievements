@@ -13,3 +13,4 @@ docs/
 /native/**/target/
 tests/
 tests/overlay-shortcut-manager.test.js
+build/WINDOWS-SIGNING.md

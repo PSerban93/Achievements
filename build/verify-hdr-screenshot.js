@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { executableContentHash } = require("./windows-executable-integrity");
 
 function isHdrScreenshotBuildSupported(platform = process.platform) {
   return platform === "win32";
@@ -80,7 +81,8 @@ function verifyHdrScreenshot(options = {}) {
   );
   if (!packagedFile) return 1;
 
-  if (source.hash !== packagedFile.hash) {
+  if (executableContentHash(fs.readFileSync(source.path)) !==
+      executableContentHash(fs.readFileSync(packagedFile.path))) {
     console.error(
       "Packaged HDR screenshot helper does not match the freshly built source binary.",
     );

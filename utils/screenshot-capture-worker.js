@@ -1,5 +1,4 @@
 const fs = require("fs");
-const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
 
@@ -17,64 +16,11 @@ function fail(error, code = "capture-failed") {
   process.exitCode = 1;
 }
 
-function copyWindowsCaptureFiles() {
-  const pkgDir = path.dirname(require.resolve("screenshot-desktop/package.json"));
-  const sourceDir = path.join(pkgDir, "lib", "win32");
-  const tempDir = path.join(os.tmpdir(), "screenCapture");
-  const targetBat = path.join(tempDir, "screenCapture_1.3.2.bat");
-  const targetManifest = path.join(tempDir, "app.manifest");
-
-  if (!fs.existsSync(tempDir)) {
-    fs.mkdirSync(tempDir, { recursive: true });
-  }
-  if (!fs.existsSync(targetBat)) {
-    fs.copyFileSync(path.join(sourceDir, "screenCapture_1.3.2.bat"), targetBat);
-  }
-  if (!fs.existsSync(targetManifest)) {
-    fs.copyFileSync(path.join(sourceDir, "app.manifest"), targetManifest);
-  }
-  return { tempDir, targetBat };
-}
-
 function captureWindows(outputPath, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const { tempDir, targetBat } = copyWindowsCaptureFiles();
-    const tempFile = path.join(
-      os.tmpdir(),
-      `achievements-screenshot-${process.pid}-${Date.now()}.png`,
-    );
-    const args = ["/c", targetBat, tempFile];
-
-    execFile(
-      "cmd.exe",
-      args,
-      {
-        cwd: tempDir,
-        windowsHide: true,
-        timeout: timeoutMs,
-        killSignal: "SIGKILL",
-      },
-      (err) => {
-        try {
-          if (err) {
-            const timedOut = err.killed || /timed out/i.test(err.message || "");
-            err.code = timedOut ? "capture-timeout" : err.code;
-            reject(err);
-            return;
-          }
-          fs.copyFileSync(tempFile, outputPath);
-          resolve(outputPath);
-        } finally {
-          try {
-            fs.rmSync(tempFile, { force: true });
-          } catch {}
-        }
-      },
-    );
-  });
+  return captureNativeWindows(outputPath, timeoutMs, false);
 }
 
-function resolveHdrCaptureHelper() {
+function resolveCaptureHelper() {
   const executableName = "achievements-hdr-screenshot.exe";
   const candidates = [
     path.join(__dirname, "native", executableName),
@@ -99,18 +45,23 @@ function resolveHdrCaptureHelper() {
 }
 
 function captureHdrWindows(outputPath, timeoutMs) {
+  return captureNativeWindows(outputPath, timeoutMs, true);
+}
+
+function captureNativeWindows(outputPath, timeoutMs, hdr) {
   return new Promise((resolve, reject) => {
-    const helper = resolveHdrCaptureHelper();
+    const helper = resolveCaptureHelper();
+    const prefix = hdr ? "hdr-capture" : "capture";
     if (!helper) {
-      const err = new Error("Bundled HDR screenshot helper was not found");
-      err.code = "hdr-capture-unavailable";
+      const err = new Error("Bundled Windows screenshot helper was not found");
+      err.code = `${prefix}-unavailable`;
       reject(err);
       return;
     }
 
     execFile(
       helper,
-      [outputPath],
+      hdr ? [outputPath] : ["--sdr", outputPath],
       {
         windowsHide: true,
         timeout: timeoutMs,
@@ -118,9 +69,13 @@ function captureHdrWindows(outputPath, timeoutMs) {
         maxBuffer: 64 * 1024,
       },
       (err, _stdout, stderr) => {
+        // A killed/failed encoder may leave its atomic PNG staging file behind.
+        try {
+          fs.rmSync(`${outputPath}.tmp`, { force: true });
+        } catch {}
         if (err) {
           const timedOut = err.killed || /timed out/i.test(err.message || "");
-          err.code = timedOut ? "hdr-capture-timeout" : "hdr-capture-failed";
+          err.code = `${prefix}-${timedOut ? "timeout" : "failed"}`;
           const detail = String(stderr || "").trim();
           if (detail) err.message = detail.slice(0, 1000);
           reject(err);
@@ -128,9 +83,9 @@ function captureHdrWindows(outputPath, timeoutMs) {
         }
         if (!fs.existsSync(outputPath)) {
           const missing = new Error(
-            "HDR screenshot helper exited without creating the output file",
+            "Windows screenshot helper exited without creating the output file",
           );
-          missing.code = "hdr-capture-missing-output";
+          missing.code = `${prefix}-missing-output`;
           reject(missing);
           return;
         }

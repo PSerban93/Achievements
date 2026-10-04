@@ -10,6 +10,8 @@ module.exports = async (context) => {
   }
 
   const requiredUnpackedUtilities = [
+    ["Screenshot capture", "screenshot-capture-worker.js"],
+    ["Native screenshot capture", "native/achievements-hdr-screenshot.exe"],
     ["XLiveLessNess", "xlivelessness-worker.js"],
     ["Game Bar named pipe", "gamebar-widget-pipe-worker.js"],
     ["Profile backup", "profile-backup-worker.js"],
@@ -58,6 +60,20 @@ module.exports = async (context) => {
     }
   }
 
+  // screenshot-desktop remains available on Linux/macOS; its Windows BAT/C#
+  // implementation must never enter a Windows release, packed or unpacked.
+  const legacyCapturePath = path.join(
+    appOutDir, "resources", "app.asar.unpacked", "node_modules",
+    "screenshot-desktop", "lib", "win32",
+  );
+  const { listPackage } = require("@electron/asar");
+  const archive = path.join(appOutDir, "resources", "app.asar");
+  if (fs.existsSync(legacyCapturePath) || listPackage(archive).some((entry) =>
+    /\/node_modules\/screenshot-desktop\/lib\/win32(?:\/|$)/i.test(entry.replace(/\\/g, "/")),
+  )) {
+    throw new Error("afterPack: legacy Windows screenshot BAT was bundled");
+  }
+
   const exeName = context.packager?.appInfo?.productFilename
     ? `${context.packager.appInfo.productFilename}.exe`
     : null;
@@ -78,54 +94,33 @@ module.exports = async (context) => {
     throw new Error(`afterPack: manifest missing at ${manifestPath}`);
   }
 
-  const mod = await import("rcedit");
-  const rceditFn = mod?.rcedit || mod?.default;
-  if (typeof rceditFn !== "function") {
-    throw new Error("afterPack: rcedit export is not a function");
+  // Only patch DPI settings here. Preserve Electron's compatibility, common
+  // controls and UAC manifest entries. Builder edits metadata/icon/UAC and signs
+  // afterwards; writing resources after signing would invalidate the signature.
+  const { NtExecutable, NtExecutableResource } = require("resedit");
+  const executable = NtExecutable.from(fs.readFileSync(exePath), { ignoreCert: true });
+  const resources = NtExecutableResource.from(executable);
+  const manifests = resources.entries.filter((entry) => entry.type === 24 && entry.id === 1);
+  if (!manifests.length) throw new Error("afterPack: Electron application manifest missing");
+  const template = fs.readFileSync(manifestPath, "utf8");
+  for (const entry of manifests) {
+    let manifest = Buffer.from(entry.bin).toString("utf8");
+    for (const tag of ["dpiAware", "dpiAwareness"]) {
+      const setting = template.match(new RegExp(`<${tag}\\b[^>]*>[\\s\\S]*?<\\/${tag}>`))?.[0];
+      if (!setting) throw new Error(`afterPack: ${tag} setting missing`);
+      const existing = new RegExp(`<(?:[\\w.-]+:)?${tag}\\b[^>]*>[\\s\\S]*?<\\/(?:[\\w.-]+:)?${tag}>`, "g");
+      if (existing.test(manifest)) {
+        manifest = manifest.replace(existing, setting);
+      } else {
+        const closingSettings = /<\/(?:[\w.-]+:)?windowsSettings>/;
+        if (!closingSettings.test(manifest)) {
+          throw new Error("afterPack: Electron Windows settings missing");
+        }
+        manifest = manifest.replace(closingSettings, `${setting}$&`);
+      }
+    }
+    resources.replaceResourceEntryFromString(24, entry.id, entry.lang, manifest);
   }
-
-  const appInfo = context.packager?.appInfo;
-  const productName = appInfo?.productName || "Achievements";
-  const companyName = appInfo?.companyName || "";
-  const copyright = appInfo?.copyright || "";
-  const rawVersion =
-    appInfo?.version ||
-    appInfo?.buildVersion ||
-    appInfo?.shortVersion ||
-    "1.0.0";
-  const versionParts = String(rawVersion)
-    .split(".")
-    .filter(Boolean);
-  while (versionParts.length < 4) versionParts.push("0");
-  const fileVersion = versionParts.slice(0, 4).join(".");
-
-  const requestedExecutionLevel =
-    context.packager?.platformSpecificBuildOptions?.requestedExecutionLevel ||
-    null;
-  const relIcon =
-    context.packager?.platformSpecificBuildOptions?.icon || "icon.ico";
-  const iconPath = path.isAbsolute(relIcon)
-    ? relIcon
-    : path.join(projectDir, relIcon);
-  const hasIcon = iconPath && fs.existsSync(iconPath);
-
-  const versionStrings = {
-    FileDescription: productName,
-    ProductName: productName,
-    InternalName: productName,
-    OriginalFilename: path.basename(exePath),
-  };
-  if (companyName) versionStrings.CompanyName = companyName;
-  if (copyright) versionStrings.LegalCopyright = copyright;
-
-  await rceditFn(exePath, {
-    "application-manifest": manifestPath,
-    "version-string": versionStrings,
-    "file-version": fileVersion,
-    "product-version": fileVersion,
-    ...(requestedExecutionLevel
-      ? { "requested-execution-level": requestedExecutionLevel }
-      : {}),
-    ...(hasIcon ? { icon: iconPath } : {}),
-  });
+  resources.outputResource(executable);
+  fs.writeFileSync(exePath, Buffer.from(executable.generate()));
 };

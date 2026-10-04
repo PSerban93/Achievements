@@ -8452,7 +8452,9 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
 
 /* <root>/<gameName>/<displayName>.png (timestamp if exists) */
 async function saveFullScreenShot(gameName, achDisplayName) {
-  if (!screenshot) throw new Error("screenshot-desktop is not installed");
+  if (process.platform !== "win32" && !screenshot) {
+    throw new Error("screenshot-desktop is not installed");
+  }
   const root = await getScreenshotRootFolder();
   const { gameFolder, filePath } = buildUniqueAchievementMediaPath({
     root,
@@ -21850,7 +21852,7 @@ function sanThemeUsesGameArt(sanTheme = null) {
 
 async function captureAchievementUnlockScreenshot(notificationData = {}) {
   try {
-    if (!screenshot) {
+    if (process.platform !== "win32" && !screenshot) {
       console.warn(
         tUi(
           "main.log.screenshotDesktopMissing",
@@ -36850,12 +36852,14 @@ scheduleManualCacheSeedAfterBoot();
 
 // === screenshots support ===
 let screenshot = null;
-try {
-  screenshot = require("screenshot-desktop");
-} catch (e) {
-  console.warn(
-    '⚠️ "screenshot-desktop" missing. Run: npm i screenshot-desktop',
-  );
+if (process.platform !== "win32") {
+  try {
+    screenshot = require("screenshot-desktop");
+  } catch (e) {
+    console.warn(
+      '⚠️ "screenshot-desktop" missing. Run: npm i screenshot-desktop',
+    );
+  }
 }
 
 function readPrefsSafe() {

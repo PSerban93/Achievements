@@ -10,6 +10,7 @@ if (process.platform !== "win32") {
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const { executableContentHash } = require("./windows-executable-integrity");
 
 const root = path.resolve(__dirname, "..");
 const packageJson = JSON.parse(
@@ -77,7 +78,10 @@ const results = files.map((entry) => ({
   hash: sha256(entry.filePath),
 }));
 const expectedHash = results[0].hash;
-const mismatch = results.find((entry) => entry.hash !== expectedHash);
+const expectedContentHash = executableContentHash(fs.readFileSync(files[0].filePath));
+const mismatch = results.find((entry) => entry.label === "packaged"
+  ? executableContentHash(fs.readFileSync(entry.filePath)) !== expectedContentHash
+  : entry.hash !== expectedHash);
 
 for (const result of results) {
   console.log(

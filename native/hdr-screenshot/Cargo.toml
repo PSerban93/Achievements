@@ -11,6 +11,7 @@ png = "0.18.0"
 windows = { version = "0.62.2", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",
+  "Win32_UI_HiDpi",
 ] }
 windows-capture = "2.0.1"
 
