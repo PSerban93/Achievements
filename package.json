@@ -32,6 +32,7 @@
     "prepare:recorder": "node build/prepare-recorder.js",
     "pack": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --dir && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
     "dl-browsers": "node build/prepare-playwright-browsers.js",
+    "dist:self-signed": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && node build/build-self-signed.js && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
     "dist": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64 --publish never && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
     "dist:signed": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64 --publish never --config.forceCodeSigning=true && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
     "dist:unsigned": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64 --publish never --config.win.signExecutable=false --config.forceCodeSigning=false && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot"
@@ -69,6 +70,7 @@
     "files": [
       "icon.ico",
       "main.js",
+      "windows-signing-policy.json",
       "preload.js",
       "index.html",
       "san-notification.html",
@@ -85,6 +87,11 @@
       "utils/**/*",
       "utils/pslist-wrapper.mjs",
       "assets/**",
+      "!**/*.pfx",
+      "!**/*.p12",
+      "!**/*.pvk",
+      "!**/*.key",
+      "!**/*.password",
       "!**/node_modules/screenshot-desktop/lib/win32/**",
       "!**/node_modules/playwright/.local-browsers${/*}",
       "!**/node_modules/playwright-core/.local-browsers${/*}"
@@ -152,6 +159,7 @@
       "files": [
         "icon.ico",
         "main.js",
+        "windows-signing-policy.json",
         "preload.js",
         "index.html",
         "san-notification.html",
@@ -168,6 +176,11 @@
         "utils/**/*",
         "utils/pslist-wrapper.mjs",
         "assets/**",
+        "!**/*.pfx",
+        "!**/*.p12",
+        "!**/*.pvk",
+        "!**/*.key",
+        "!**/*.password",
         "!**/node_modules/playwright/.local-browsers${/*}",
         "!**/node_modules/playwright-core/.local-browsers${/*}",
         "!utils/native/achievements-recorder.exe",

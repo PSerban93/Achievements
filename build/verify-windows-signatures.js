@@ -2,8 +2,17 @@
 
 const { execFile } = require("child_process");
 const path = require("path");
+const { verifyPinnedWindowsSignature } = require("../utils/windows-code-signature");
 
 function verifyWindowsSignatures(files) {
+  if (process.env.ACHIEVEMENTS_SIGNING_MODE === "pinned") {
+    return (async () => {
+      for (const file of files) {
+        const result = await verifyPinnedWindowsSignature(file);
+        console.log(`Verified pinned Authenticode signature and timestamp: ${result.file}`);
+      }
+    })();
+  }
   if (process.platform !== "win32") {
     return Promise.reject(new Error("Windows release signature validation requires Windows"));
   }
@@ -34,7 +43,9 @@ function verifyWindowsSignatures(files) {
         windowsHide: true,
         timeout: 120000,
         maxBuffer: 1024 * 1024,
-        env: { ...process.env, ACHIEVEMENTS_SIGNATURE_TARGETS: JSON.stringify(files.map((file) => path.resolve(file))) },
+        env: { ...process.env,
+          PSModulePath: path.join(process.env.SystemRoot || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "Modules"),
+          ACHIEVEMENTS_SIGNATURE_TARGETS: JSON.stringify(files.map((file) => path.resolve(file))) },
       },
       (error, stdout, stderr) => {
         if (stdout) process.stdout.write(stdout);

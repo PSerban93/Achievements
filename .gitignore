@@ -14,3 +14,11 @@ docs/
 tests/
 tests/overlay-shortcut-manager.test.js
 build/WINDOWS-SIGNING.md
+
+# Private signing material must never be committed.
+*.pfx
+*.p12
+*.pvk
+*.key
+*.password
+build/signing/

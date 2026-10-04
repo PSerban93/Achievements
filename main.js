@@ -275,6 +275,7 @@ const {
   createOverlayControllerService,
 } = require("./utils/overlay-controller-service");
 const { autoUpdater } = require("electron-updater");
+const { createWindowsUpdateSigning } = require("./utils/windows-update-signing");
 const getConfigInflight = new Map();
 const epicOfficialLoadSyncInflight = new Map();
 const epicOfficialRecentLoadSync = new Map();
@@ -333,6 +334,10 @@ const execLogger = createLogger("execution");
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
 const updateLogger = createLogger("updates");
+const appUpdateSigning = createWindowsUpdateSigning(autoUpdater, {
+  enabled: app.isPackaged,
+  logger: updateLogger,
+});
 const epicOfficialLogger = createLogger("epic-official", {
   level: process.env.EPIC_OFFICIAL_LOG_LEVEL || "info",
 });
@@ -4544,6 +4549,7 @@ function initializeStartupAppUpdater() {
   autoUpdater.autoInstallOnAppQuit = false;
   autoUpdater.allowPrerelease = isPrereleaseAppVersion();
   autoUpdater.on("error", async (err) => {
+    appUpdateSigning.invalidate();
     if (
       appUpdateCheckContext?.phase === "primary-prerelease" &&
       shouldFallbackPrereleaseUpdateCheckToStable(err, {
@@ -4591,7 +4597,13 @@ function initializeStartupAppUpdater() {
       bytesPerSecond: Number(progress?.bytesPerSecond || 0),
     });
   });
-  autoUpdater.on("update-downloaded", (info) => {
+  autoUpdater.on("update-downloaded", async (info) => {
+    try {
+      await appUpdateSigning.validateDownloaded(info);
+    } catch (err) {
+      autoUpdater.emit("error", err);
+      return;
+    }
     appUpdateDownloadRequested = false;
     appUpdateDownloadInFlight = false;
     appUpdateKnownVersion =
@@ -4634,6 +4646,7 @@ ipcMain.handle("app:update-download", async () => {
   }
   appUpdateDownloadRequested = true;
   appUpdateDownloadInFlight = true;
+  appUpdateSigning.invalidate();
   try {
     ensureAppUpdateProgressJob({
       version: appUpdateKnownVersion,
@@ -4663,6 +4676,12 @@ ipcMain.handle("app:update-download", async () => {
 });
 
 ipcMain.handle("app:update-install", async () => {
+  try {
+    await appUpdateSigning.verifyReadyToInstall();
+  } catch (err) {
+    autoUpdater.emit("error", err);
+    return { success: false, error: err?.message || String(err) };
+  }
   updateLogger.info("app-update:install-now", {});
   isQuitting = true;
   autoUpdater.quitAndInstall();

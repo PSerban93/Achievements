@@ -1,0 +1,10 @@
+{
+  "publisherName": "JokerVerse",
+  "certificateSubject": "CN=JokerVerse",
+  "certificateStoreSha1": "101E5C390CD2EC069A7F9EE07FB56B7EAE315C10",
+  "allowedCertificateSha256": [
+    "503FA527B0B9BF4BF3A0D148C810BCD3B84A02E33CE912E033FF280CEA9C8DEB"
+  ],
+  "requireTimestamp": true,
+  "enforceWindowsUpdates": true
+}
