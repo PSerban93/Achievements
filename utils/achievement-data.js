@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const ini = require("ini");
 const CRC32 = require("crc-32");
+const { createUplayNameResolver, alignUplaySnapshot, mergeUplaySnapshotEntries } = require("./uplay-achievement-identity");
 const parseStatsBin = require("./parseStatsBin");
 const {
   getMarkerPatchStateFile,
@@ -437,6 +438,7 @@ function getNameIndexFromConfigPath(
   configPath,
   schemaOverride = null,
   appid = null,
+  options = {},
 ) {
   try {
     const candidates = [];
@@ -451,10 +453,13 @@ function getNameIndexFromConfigPath(
     }
     for (const candidate of candidates) {
       if (!candidate || !fs.existsSync(candidate)) continue;
-      const arr = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      const parsed = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      const arr = Array.isArray(parsed) ? parsed : parsed?.achievements;
+      if (!Array.isArray(arr)) continue;
       return {
         byName: buildNameOnlyIndex(arr),
         byDisp: buildDisplayToNameIndex(arr),
+        ...(options.platform === "uplay" ? { resolveUplayName: createUplayNameResolver(arr) } : {}),
       };
     }
   } catch {}
@@ -463,6 +468,9 @@ function getNameIndexFromConfigPath(
 
 function canonNameFromIniSection(sectionTitle, nameIndex) {
   const key = normSectionTitle(sectionTitle);
+  if (nameIndex?.resolveUplayName) {
+    return nameIndex.resolveUplayName(sectionTitle) || nameIndex.byDisp.get(key) || sectionTitle;
+  }
   return (
     nameIndex?.byDisp.get(key) || nameIndex?.byName.get(key) || sectionTitle
   );
@@ -505,9 +513,13 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
         "gog-official",
         "xbox-pc",
         "retroachievements",
+        "x360recomp",
+        "ps4recomp",
+        "pcports",
         "xenia",
         "rpcs3",
         "shadps4",
+        "kytyps5",
       ].forEach((plat) =>
         candidates.add(path.join(base, plat, appid, "achievements.json")),
       );
@@ -592,6 +604,9 @@ function getSafeLocalizedText(input, lang = "english") {
 }
 function canonNameFromEntry(rawName, nameIndex) {
   const key = normSectionTitle(rawName);
+  if (nameIndex?.resolveUplayName) {
+    return nameIndex.resolveUplayName(rawName) || nameIndex.byDisp.get(key) || rawName;
+  }
   return nameIndex?.byName.get(key) || nameIndex?.byDisp.get(key) || rawName;
 }
 
@@ -912,7 +927,7 @@ function parseRuneKeyValuesText(rawText) {
   return parseObject();
 }
 
-function readRuneUplayAchievementsCfg(filePath, fallback = {}) {
+function readRuneUplayAchievementsCfg(filePath, fallback = {}, nameIndex = null) {
   const previous = fallback && typeof fallback === "object" ? fallback : {};
   try {
     if (!filePath || !fs.existsSync(filePath)) {
@@ -933,15 +948,17 @@ function readRuneUplayAchievementsCfg(filePath, fallback = {}) {
 
     const snapshot = {};
     for (const [rawId, rawEntry] of Object.entries(achievements)) {
-      const id = String(rawId || "").trim();
-      if (!/^\d+$/.test(id) || !rawEntry || typeof rawEntry !== "object") continue;
+      const rawName = String(rawId || "").trim();
+      const id = nameIndex?.resolveUplayName?.(rawName) || (/^\d+$/.test(rawName) ? rawName : "");
+      if (!id || !rawEntry || typeof rawEntry !== "object") continue;
       const earnedValue = String(rawEntry.earned ?? "").trim().toLowerCase();
       const earned = earnedValue === "1" || earnedValue === "true" || earnedValue === "yes";
       const rawTime = Number(rawEntry.time ?? rawEntry.earned_time ?? 0);
-      snapshot[id] = {
+      const entry = {
         earned,
         earned_time: earned && Number.isFinite(rawTime) ? normalizeEpoch(rawTime) : 0,
       };
+      snapshot[id] = Object.hasOwn(snapshot, id) ? mergeUplaySnapshotEntries(snapshot[id], entry) : entry;
     }
     return { valid: true, reason: null, snapshot };
   } catch (error) {
@@ -953,7 +970,25 @@ function readRuneUplayAchievementsCfg(filePath, fallback = {}) {
   }
 }
 
+function alignUplaySnapshotToConfig(snapshot, configMeta, fullSchemaPath = null) {
+  if (String(configMeta?.platform || "").trim().toLowerCase() !== "uplay") return snapshot;
+  const index = getNameIndexFromConfigPath(configMeta.config_path, fullSchemaPath, configMeta.appid, { platform: "uplay" });
+  return index.resolveUplayName ? alignUplaySnapshot(snapshot, index.resolveUplayName) : snapshot;
+}
+
 function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
+  if (String(options?.configMeta?.platform || "").trim().toLowerCase() !== "uplay") {
+    return loadAchievementsFromSaveFileRaw(saveDir, fallback, options);
+  }
+  const meta = options.configMeta;
+  const nameIndex = getNameIndexFromConfigPath(meta.config_path || options.selectedConfigPath,
+    options.fullSchemaPath, meta.appid, { platform: "uplay" });
+  const align = (snapshot) => nameIndex.resolveUplayName ? alignUplaySnapshot(snapshot, nameIndex.resolveUplayName) : snapshot;
+  const previous = align(fallback);
+  return align(loadAchievementsFromSaveFileRaw(saveDir, previous, { ...options, uplayNameIndex: nameIndex }));
+}
+
+function loadAchievementsFromSaveFileRaw(saveDir, fallback = {}, options = {}) {
   const {
     configMeta = null,
     selectedConfigPath = null,
@@ -967,6 +1002,23 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
     .trim()
     .toLowerCase();
 
+  if (normalizedPlatform === "x360recomp") {
+    const parsed = require("./x360-recomp-state").loadConfigSnapshot(configMeta, fallback);
+    return parsed.valid ? parsed.snapshot : fallback;
+  }
+  if (normalizedPlatform === "ps4recomp") {
+    const parsed = require("./ps4-recomp").loadConfigSnapshot(configMeta, fallback);
+    return parsed.valid ? parsed.snapshot : fallback;
+  }
+  if (normalizedPlatform === "pcports") {
+    const parsed = require("./pc-ports").loadConfigSnapshot(configMeta, fallback);
+    return parsed.valid ? parsed.snapshot : fallback;
+  }
+  if (normalizedPlatform === "kytyps5") {
+    const parsed = require("./kytyps5-trophy").loadConfigSnapshot(configMeta, fallback);
+    return parsed.valid ? parsed.snapshot : fallback;
+  }
+
   const runeAchievementsFile =
     String(configMeta?.rune_uplay_achievements_file || "").trim() ||
     (saveDir ? path.join(saveDir, RUNE_UPLAY_ACHIEVEMENTS_FILE) : "");
@@ -979,6 +1031,7 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
     const parsed = readRuneUplayAchievementsCfg(
       runeAchievementsFile,
       fallback || {},
+      options.uplayNameIndex,
     );
     return parsed.valid
       ? mergeEarnedTimeFromCached(parsed.snapshot, fallback || {})
@@ -1024,7 +1077,7 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
     return mergeEarnedTimeFromCached(snapshot, fallback || {});
   }
 
-  const nameIndex = getNameIndexFromConfigPath(
+  const nameIndex = options.uplayNameIndex || getNameIndexFromConfigPath(
     configPathOverride,
     fullSchemaPath,
     appid,
@@ -1238,7 +1291,8 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
         if (!rawName) continue;
         const canonical = canonNameFromEntry(rawName, nameIndex);
         if (!canonical) continue;
-        normalized[canonical] = entry;
+        normalized[canonical] = nameIndex.resolveUplayName && Object.hasOwn(normalized, canonical)
+          ? mergeUplaySnapshotEntries(normalized[canonical], entry) : entry;
       }
 
       if (Object.keys(normalized).length) return normalized;
@@ -1370,7 +1424,9 @@ function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
       for (const [secTitle, secObj] of Object.entries(flat)) {
         const key = canonNameFromIniSection(secTitle, nameIndex);
         if (!key) continue;
-        converted[key] = fromIniSection(secObj || {});
+        const entry = fromIniSection(secObj || {});
+        converted[key] = nameIndex.resolveUplayName && Object.hasOwn(converted, key)
+          ? mergeUplaySnapshotEntries(converted[key], entry) : entry;
       }
       return converted;
     } catch {
@@ -1419,6 +1475,7 @@ module.exports = {
   readRuneUplayAchievementsCfg,
   mergeEarnedTimeFromCached,
   loadAchievementsFromSaveFile,
+  alignUplaySnapshotToConfig,
   parseAchievementIniSection,
   parseOnlineFixStatsIni,
   buildOnlineFixSnapshot,

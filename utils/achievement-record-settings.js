@@ -1,6 +1,6 @@
 "use strict";
 
-const ACHIEVEMENT_RECORD_FPS_VALUES = Object.freeze([30, 60]);
+const ACHIEVEMENT_RECORD_FPS_VALUES = Object.freeze([30, 60, "unlocked"]);
 const ACHIEVEMENT_RECORD_DURATION_VALUES = Object.freeze([
   10, 15, 20, 25, 30,
 ]);
@@ -18,6 +18,7 @@ const DEFAULT_ACHIEVEMENT_RECORD_PREFERENCES = Object.freeze({
 });
 
 function normalizeAchievementRecordFps(value, fallback = 30) {
+  if (value === "unlocked") return "unlocked";
   const parsed = Number.parseInt(value, 10);
   return ACHIEVEMENT_RECORD_FPS_OPTIONS.has(parsed) ? parsed : fallback;
 }

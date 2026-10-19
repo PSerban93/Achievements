@@ -8,6 +8,7 @@
     <link rel="stylesheet" href="style.css" />
     <link rel="stylesheet" href="assets/vendor/fontawesome/css/all.min.css" />
     <script src="utils/app-theme.js"></script>
+    <script src="utils/trophy-mode.js"></script>
     <script>
       (() => {
         const applyTheme = (value) => {
@@ -229,6 +230,10 @@
 
       .trophy-tier-label.trophy-tier-bronze {
         color: #cd7f32;
+      }
+
+      .trophy-tier-label.trophy-tier-platinum {
+        color: #8fd8ec;
       }
 
       .status-manual {
@@ -1165,9 +1170,14 @@
                     data-i18n="label.settings-recordFps"
                     >Recording frame rate:</label
                   >
-                  <select id="settings-recordFpsSelect">
+                  <select
+                    id="settings-recordFpsSelect"
+                    data-i18n-title="title.settings-recordFpsSelect"
+                    title="Unlocked records without an application FPS limit, within the frames supplied by Windows and hardware capacity. It may increase CPU/GPU usage and file sizes."
+                  >
                     <option value="30">30 FPS</option>
                     <option value="60">60 FPS</option>
+                    <option value="unlocked">Unlocked</option>
                   </select>
                 </div>
                 <div class="settings-control">
@@ -1280,6 +1290,24 @@
                   Bronze, Silver and Gold notifications use the Rare
                   notification profile. Main notification options are disabled
                   while Trophy Mode is active.
+                </div>
+
+                <div id="settings-trophyModeThresholds">
+                  <div class="settings-slider">
+                    <label for="settings-trophyModeGoldThreshold" data-i18n="settings.trophyMode.goldBelow">Gold: below</label>
+                    <div class="slider-control">
+                      <input id="settings-trophyModeGoldThreshold" type="range" min="1" max="99" step="1" value="20" disabled />
+                      <span class="value" id="settings-trophyModeGoldThresholdValue">20%</span>
+                    </div>
+                  </div>
+                  <div class="settings-slider">
+                    <label for="settings-trophyModeSilverThreshold" data-i18n="settings.trophyMode.bronzeFrom">Bronze: from</label>
+                    <div class="slider-control">
+                      <input id="settings-trophyModeSilverThreshold" type="range" min="2" max="100" step="1" value="50" disabled />
+                      <span class="value" id="settings-trophyModeSilverThresholdValue">50%</span>
+                    </div>
+                  </div>
+                  <div class="hint" id="settings-trophyModeThresholdHint"></div>
                 </div>
 
                 <div class="checkbox-control">
@@ -1646,6 +1674,232 @@
 
                 <hr style="margin: 18px 0 14px" />
                 <h4
+                  id="settings-x360recompNotificationTitle"
+                  data-i18n="settings-x360recompNotificationTitle"
+                  style="margin-top: 10px"
+                >
+                  Xbox 360 Recomp Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-x360recompPositionDropdown"
+                    data-i18n="label.settings-x360recompPositionDropdown"
+                    >Xbox 360 Recomp Achievement Position:</label
+                  >
+                  <select id="settings-x360recompPositionDropdown">
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-x360recompPresetDropdown"
+                    data-i18n="label.settings-x360recompPresetDropdown"
+                    >Xbox 360 Recomp Achievement Preset:</label
+                  >
+                  <select id="settings-x360recompPresetDropdown"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-x360recompSoundSelect"
+                    data-i18n="label.settings-x360recompSoundSelect"
+                    >Xbox 360 Recomp Achievement Sound:</label
+                  >
+                  <select id="settings-x360recompSoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-x360recompSanPresetDropdown"
+                    data-i18n="label.settings-x360recompSanPresetDropdown"
+                    >Xbox 360 Recomp Achievement SAN Preset:</label
+                  >
+                  <select id="settings-x360recompSanPresetDropdown"></select>
+                </div>
+                <h4 data-i18n="settings-notificationTimingTitle">Notification Scale &amp; Timing</h4>
+                <div class="settings-slider">
+                  <label for="settings-x360recompScaleSlider">Notification Scale: <span id="settings-x360recompScaleValue">100%</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-x360recompScaleSlider" min="0.01" max="3.5" step="0.01" value="1" />
+                    <span class="value" id="settings-x360recompScaleValueDisplay">100%</span>
+                  </div>
+                </div>
+                <div class="settings-slider">
+                  <label for="settings-x360recompDurationSlider">Notification Duration: <span id="settings-x360recompDurationValue">Auto</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-x360recompDurationSlider" min="0" max="60" step="0.5" value="0" />
+                    <span class="value" id="settings-x360recompDurationValueDisplay">Auto</span>
+                  </div>
+                </div>
+                <button
+                  id="settings-testX360RecompNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testX360RecompNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test Xbox 360 Recomp Notification
+                </button>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-ps4recompNotificationTitle"
+                  data-i18n="settings-ps4recompNotificationTitle"
+                  style="margin-top: 10px"
+                >
+                  PS4 Recomp Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps4recompPositionDropdown"
+                    data-i18n="label.settings-ps4recompPositionDropdown"
+                    >PS4 Recomp Achievement Position:</label
+                  >
+                  <select id="settings-ps4recompPositionDropdown">
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps4recompPresetDropdown"
+                    data-i18n="label.settings-ps4recompPresetDropdown"
+                    >PS4 Recomp Achievement Preset:</label
+                  >
+                  <select id="settings-ps4recompPresetDropdown"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps4recompSoundSelect"
+                    data-i18n="label.settings-ps4recompSoundSelect"
+                    >PS4 Recomp Achievement Sound:</label
+                  >
+                  <select id="settings-ps4recompSoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps4recompSanPresetDropdown"
+                    data-i18n="label.settings-ps4recompSanPresetDropdown"
+                    >PS4 Recomp Achievement SAN Preset:</label
+                  >
+                  <select id="settings-ps4recompSanPresetDropdown"></select>
+                </div>
+                <h4 data-i18n="settings-notificationTimingTitle">Notification Scale &amp; Timing</h4>
+                <div class="settings-slider">
+                  <label for="settings-ps4recompScaleSlider">Notification Scale: <span id="settings-ps4recompScaleValue">100%</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-ps4recompScaleSlider" min="0.01" max="3.5" step="0.01" value="1" />
+                    <span class="value" id="settings-ps4recompScaleValueDisplay">100%</span>
+                  </div>
+                </div>
+                <div class="settings-slider">
+                  <label for="settings-ps4recompDurationSlider">Notification Duration: <span id="settings-ps4recompDurationValue">Auto</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-ps4recompDurationSlider" min="0" max="60" step="0.5" value="0" />
+                    <span class="value" id="settings-ps4recompDurationValueDisplay">Auto</span>
+                  </div>
+                </div>
+                <button
+                  id="settings-testPs4RecompNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testPs4RecompNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test PS4 Recomp Notification
+                </button>
+
+                <hr style="margin: 18px 0 14px" />
+                <h4
                   id="settings-rpcs3NotificationTitle"
                   data-i18n="settings-rpcs3NotificationTitle"
                   style="margin-top: 10px"
@@ -1871,6 +2125,119 @@
                 </button>
 
                 <hr style="margin: 18px 0 14px" />
+                <h4
+                  id="settings-kytyps5NotificationTitle"
+                  data-i18n="settings-kytyps5NotificationTitle"
+                  style="margin-top: 10px"
+                >
+                  KytyPS5 Notification
+                </h4>
+                <div class="settings-control">
+                  <label
+                    for="settings-kytyps5PositionDropdown"
+                    data-i18n="label.settings-kytyps5PositionDropdown"
+                    >KytyPS5 Achievement Position:</label
+                  >
+                  <select id="settings-kytyps5PositionDropdown">
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-kytyps5PresetDropdown"
+                    data-i18n="label.settings-kytyps5PresetDropdown"
+                    >KytyPS5 Achievement Preset:</label
+                  >
+                  <select id="settings-kytyps5PresetDropdown"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-kytyps5SoundSelect"
+                    data-i18n="label.settings-kytyps5SoundSelect"
+                    >KytyPS5 Achievement Sound:</label
+                  >
+                  <select id="settings-kytyps5SoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-kytyps5SanPresetDropdown"
+                    data-i18n="label.settings-kytyps5SanPresetDropdown"
+                    >KytyPS5 Achievement SAN Preset:</label
+                  >
+                  <select id="settings-kytyps5SanPresetDropdown"></select>
+                </div>
+                <h4 data-i18n="settings-notificationTimingTitle">Notification Scale &amp; Timing</h4>
+                <div class="settings-slider">
+                  <label for="settings-kytyps5ScaleSlider">Notification Scale: <span id="settings-kytyps5ScaleValue">100%</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-kytyps5ScaleSlider" min="0.01" max="3.5" step="0.01" value="1" />
+                    <span class="value" id="settings-kytyps5ScaleValueDisplay">100%</span>
+                  </div>
+                </div>
+                <div class="settings-slider">
+                  <label for="settings-kytyps5DurationSlider">Notification Duration: <span id="settings-kytyps5DurationValue">Auto</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-kytyps5DurationSlider" min="0" max="60" step="0.5" value="0" />
+                    <span class="value" id="settings-kytyps5DurationValueDisplay">Auto</span>
+                  </div>
+                </div>
+                <button
+                  id="settings-testKytyps5NotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testKytyps5NotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test KytyPS5 Notification
+                </button>
+
+                <hr style="margin: 18px 0 14px" />
                 <h4 id="settings-platinumTitle" style="margin-top: 10px">
                   Platinum Notification
                 </h4>
@@ -1961,6 +2328,12 @@
                       data-i18n="option.settings-progressNotificationMethodDropdown.gamebar"
                     >
                       Game Bar Notification
+                    </option>
+                    <option
+                      value="native"
+                      data-i18n="option.settings-progressNotificationMethodDropdown.native"
+                    >
+                      Native Windows Notification
                     </option>
                   </select>
                 </div>
@@ -5430,10 +5803,16 @@
                             <option value="retroachievements" disabled>
                               RetroAchievements
                             </option>
+                            <option value="ps4recomp" disabled data-i18n="option.platformSelect.ps4recomp">PS4 Recomp</option>
+                            <option value="pcports" disabled data-i18n="option.platformSelect.pcports">PC Ports</option>
+                            <option value="x360recomp" disabled data-i18n="option.platformSelect.x360recomp">Xbox 360 Recomp</option>
                             <option value="xenia" disabled>Xenia</option>
                             <option value="rpcs3" disabled>RPCS3</option>
                             <option value="shadps4" disabled>
                               PS4 (shadps4)
+                            </option>
+                            <option value="kytyps5" disabled data-i18n="option.platformSelect.kytyps5">
+                              PS5 (KytyPS5)
                             </option>
                             <option value="markerpatch" disabled>
                               MarkerPatch
@@ -5550,6 +5929,11 @@
                   </button>
                   <button id="backButton" class="hidden">Back</button>
                 </div>
+                <div id="x360RecompProfileControl" class="language-controls hidden">
+                  <label for="x360RecompProfileSelect" class="field-label" data-i18n="label.x360RecompProfile">Game Profile:</label>
+                  <select id="x360RecompProfileSelect" class="field-input"></select>
+                </div>
+                <div id="x360RecompProgressStatus" class="language-controls customisation-control-hint hidden" role="status" aria-live="polite"></div>
                 <div
                   id="configAchievementLanguageControl"
                   class="language-controls hidden"
@@ -6910,6 +7294,14 @@
         return window.__coverNameCache[key] || "";
       }
 
+      function getImageUpdateAppId(payload) {
+        const raw = payload && typeof payload === "object"
+          ? payload.appid : payload;
+        if (typeof raw !== "string" && typeof raw !== "number") return "";
+        const id = String(raw).trim();
+        return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id) ? id : "";
+      }
+
       window.__preferencesCache = window.__preferencesCache || null;
       window.__preferencesLoadPromise = null;
       const normalizeAppTheme = (value) => {
@@ -7366,9 +7758,13 @@
         function isSteamGridOnlyPlatform(value) {
           const platform = normalizeCoverPlatform(value);
           return (
+            platform === "ps4recomp" ||
+            platform === "pcports" ||
+            platform === "x360recomp" ||
             platform === "xenia" ||
             platform === "rpcs3" ||
             platform === "shadps4" ||
+            platform === "kytyps5" ||
             platform === "ps4" ||
             platform === "xlivelessness"
           );
@@ -7399,7 +7795,7 @@
           let out = String(name || "").trim();
           if (!out) return "";
           const rx =
-            /\s*\((?:steam|steam[-\s]?official|epic[-\s]?official|retroachievements|xenia|rpcs3|ps4|shadps4|markerpatch|madnesspatch|xlivelessness)\)\s*$/i;
+            /\s*\((?:steam|steam[-\s]?official|epic[-\s]?official|retroachievements|pc port|pc ports|xbox 360 recomp|xenia|rpcs3|ps4|shadps4|ps5|kytyps5|markerpatch|madnesspatch|xlivelessness)\)\s*$/i;
           while (rx.test(out)) out = out.replace(rx, "").trim();
           return out;
         }
@@ -7495,8 +7891,12 @@
         perfectBadge.style.zIndex = "5";
         imgWrap.style.position = "relative";
         imgWrap.appendChild(perfectBadge);
-        window.__setEmbeddedPlatinumBadgeByConfig = (configMeta) => {
-          const shouldShow = isPlatinumFlagEnabled(configMeta?.platinum);
+        window.__setEmbeddedPlatinumBadgeByConfig = (configMeta, schema, snapshot) => {
+          const isKyty = String(configMeta?.platform || "").trim().toLowerCase() === "kytyps5";
+          const shouldShow = isKyty
+            ? Array.isArray(schema) && schema.length > 0 && schema.every((item) =>
+                snapshot?.achievements?.[item.name]?.earned === true)
+            : isPlatinumFlagEnabled(configMeta?.platinum);
           perfectBadge.style.display = shouldShow ? "block" : "none";
         };
 
@@ -7553,11 +7953,12 @@
         }
         window.__cancelEmbeddedCoverLoads = cancelEmbeddedCoverLoads;
 
-        async function resolveCustomCoverImageSrc(customCoverPath) {
+        async function resolveCustomCoverImageSrc(customCoverPath, mtimeMs = null) {
           const safePath = String(customCoverPath || "").trim();
           if (!safePath) return "";
-          if (customCoverDataUrlCache.has(safePath)) {
-            return customCoverDataUrlCache.get(safePath) || "";
+          const cached = customCoverDataUrlCache.get(safePath);
+          if (cached && (mtimeMs == null || cached.mtimeMs === mtimeMs)) {
+            return cached.dataUrl || "";
           }
           const result = await window.api.readLocalImageDataUrl?.(safePath);
           const dataUrl =
@@ -7565,7 +7966,7 @@
               ? result.dataUrl
               : "";
           if (dataUrl) {
-            customCoverDataUrlCache.set(safePath, dataUrl);
+            customCoverDataUrlCache.set(safePath, { dataUrl, mtimeMs });
           } else {
             customCoverDataUrlCache.delete(safePath);
           }
@@ -7590,16 +7991,19 @@
           });
         }
 
-        async function resolveRenderableCustomCoverSrc(customCoverPath) {
+        async function resolveRenderableCustomCoverSrc(customCoverPath, options = {}) {
           const safePath = String(customCoverPath || "").trim();
           if (!safePath) return "";
-          const dataSrc = await resolveCustomCoverImageSrc(safePath);
+          const dataSrc = await resolveCustomCoverImageSrc(safePath, options.mtimeMs ?? null);
           if (dataSrc) {
             try {
               return await probeImageSource(dataSrc);
             } catch {}
           }
-          const localSrc = fileUrl(safePath);
+          const baseSrc = fileUrl(safePath);
+          const localSrc = baseSrc && options.mtimeMs
+            ? `${baseSrc}${baseSrc.includes("?") ? "&" : "?"}_m=${options.mtimeMs}`
+            : baseSrc;
           if (localSrc) {
             try {
               return await probeImageSource(localSrc);
@@ -8100,6 +8504,7 @@
               steamGridSize,
             });
             if (fallbackOnly) {
+              if (normalizedPlatform === "x360recomp" && await downloadFromX360RecompArtwork(targetAppId, platform)) return true;
               if (normalizedPlatform === "xbox-pc") {
                 const ok = await downloadFromXboxSavedCover(
                   targetAppId,
@@ -8392,6 +8797,14 @@
           return labels[sourceId] || sourceId || "Cover source";
         }
 
+        async function downloadFromX360RecompArtwork(appid, platform) {
+          const urls = await window.api.getX360RecompArtworkUrls(appid, "portrait");
+          for (const url of urls || []) {
+            try { await downloadAndSave(appid, url, platform); return true; } catch {}
+          }
+          return false;
+        }
+
         function buildCoverRedownloadSources(context) {
           const {
             targetAppId,
@@ -8404,6 +8817,8 @@
           } = context;
           const sources = [];
           if (fallbackOnly) {
+            if (normalizedPlatform === "x360recomp") sources.push({ id: "xbox360-marketplace",
+              run: () => downloadFromX360RecompArtwork(targetAppId, platform) });
             if (normalizedPlatform === "xbox-pc") {
               sources.push({
                 id: "xbox-title-cover",
@@ -8602,8 +9017,14 @@
           const loadToken = ++embeddedCoverLoadToken;
 
           const coverNameHint = getCoverSearchTerm(appid) || "";
+          const coverConfig = await getConfigForCoverContext(
+            appid,
+            options?.configName || "",
+          );
+          if (loadToken !== embeddedCoverLoadToken) return;
           const platform =
             normalizeCoverPlatform(platformHint) ||
+            normalizeCoverPlatform(coverConfig?.platform) ||
             (await resolvePlatformForCurrentApp(appid)) ||
             "steam";
           const steamAppIdHint = await resolveSteamAppIdForCurrentApp(appid);
@@ -8662,6 +9083,7 @@
                 gameName: coverNameHint,
                 platform,
                 configName:
+                  options?.configName ||
                   document.getElementById("configList")?.value || null,
               },
             );
@@ -9249,12 +9671,9 @@
           }
           window.__imageListenerUnsub = window.api.onImageUpdate(
             async (payload) => {
-              const appid =
-                typeof payload === "object" && payload?.appid
-                  ? String(payload.appid)
-                  : /^\d+$/.test(String(payload))
-                    ? String(payload)
-                    : null;
+              // Landscape updates have their own local-file refresh flow.
+              if (payload?.variant === "landscape") return;
+              const appid = getImageUpdateAppId(payload);
               if (!appid) return;
               const platformHint =
                 typeof payload === "object" && payload?.platform
@@ -9279,6 +9698,11 @@
                 }
                 if (selectedConfig && window.api.getConfigByName) {
                   const cfg = await window.api.getConfigByName(selectedConfig);
+                  const selectedPlatform = normalizeCoverPlatform(cfg?.platform);
+                  if (
+                    platformHint && selectedPlatform &&
+                    normalizeCoverPlatform(platformHint) !== selectedPlatform
+                  ) return;
                   selectedAppId = String(
                     cfg?.appid || cfg?.appId || cfg?.steamAppId || "",
                   ).trim();
@@ -9397,7 +9821,10 @@
         );
       }
 
-      function persistAchievementTableViewStateToStorage() {
+      let achievementTableViewStateVersion = 0;
+
+      function persistAchievementTableViewStateToStorage({ sync = true } = {}) {
+        achievementTableViewStateVersion += 1;
         writeAchievementTableStore(
           ACHIEVEMENT_TABLE_STORE.status,
           achievementTableViewState.status,
@@ -9414,6 +9841,7 @@
           ACHIEVEMENT_TABLE_STORE.raritySort,
           achievementTableViewState.raritySort,
         );
+        if (!sync) return;
         try {
           window.api?.syncAchievementTableViewState?.({
             status: achievementTableViewState.status,
@@ -9423,6 +9851,20 @@
           });
         } catch {}
       }
+
+      function receiveAchievementTableViewState(payload) {
+        if (!payload || typeof payload !== "object") return;
+        achievementTableViewState.status = normalizeAchievementTableStatus(payload.status);
+        for (const key of ["nameSort", "timeSort", "raritySort"]) {
+          achievementTableViewState[key] = normalizeAchievementTableSort(payload[key]);
+        }
+        window.__achTableViewStateHydrated = true;
+        persistAchievementTableViewStateToStorage({ sync: false });
+        updateAchievementsToolbarUi();
+        applyAchievementsSearchFilter();
+      }
+
+      window.api?.on?.("ach-table:view-state", receiveAchievementTableViewState);
 
       function getAchievementDefaultRowIndex(row) {
         const n = Number(row?.dataset?.defaultIndex);
@@ -9804,8 +10246,17 @@
       function ensureAchievementsSearchAttached() {
         if (!window.__achTableViewStateHydrated) {
           hydrateAchievementTableViewStateFromStorage();
-          persistAchievementTableViewStateToStorage();
           window.__achTableViewStateHydrated = true;
+          const version = achievementTableViewStateVersion;
+          // A reloaded main renderer adopts the session's latest filters;
+          // first startup publishes the existing persisted selection instead.
+          Promise.resolve(window.api?.getAchievementTableViewState?.()).then((state) => {
+            if (version !== achievementTableViewStateVersion) return;
+            if (state) receiveAchievementTableViewState(state);
+            else persistAchievementTableViewStateToStorage();
+          }).catch(() => {
+            if (version === achievementTableViewStateVersion) persistAchievementTableViewStateToStorage();
+          });
         }
         if (window.__achSearchAttached) {
           updateAchievementsToolbarUi();
@@ -10393,6 +10844,13 @@
           cacheOnlyEpicOfficial ? { cacheOnly: true } : {},
         );
         if (isSelectionStale()) return;
+        if (String(currentConfig?.platform || "").trim().toLowerCase() === "kytyps5") {
+          window.__setEmbeddedPlatinumBadgeByConfig?.(
+            currentConfig,
+            achievementsDataObj.achievements,
+            savedAchievementsObj,
+          );
+        }
         if (!skipPlatinumCheck) {
           await maybeRequestPlatinum(
             { name: selectedConfig, ...(currentConfig || {}) },
@@ -10512,12 +10970,22 @@
           );
         }
 
-        function resolveTrophyModeDisplayTier(achievement) {
-          const rarityPct = resolveRarityPercent(achievement);
-          if (rarityPct === null) return "bronze";
-          if (rarityPct < 20) return "gold";
-          if (rarityPct < 50) return "silver";
-          return "bronze";
+        function resolveTrophyModeDisplayTier(
+          achievement,
+          { useNativeTrophyType = false } = {},
+        ) {
+          if (useNativeTrophyType) {
+            const nativeTier = formatTrophyTypeAsRarity(
+              achievement?.trophyType || achievement?.trophy_type,
+            ).toLowerCase();
+            if (["bronze", "silver", "gold", "platinum"].includes(nativeTier)) {
+              return nativeTier;
+            }
+          }
+          return TrophyMode.resolveTrophyModeTier({
+            rarityPct: resolveRarityPercent(achievement),
+            ...TrophyMode.normalizeTrophyModeThresholds(getCachedPreferences() || {}),
+          }).tier;
         }
 
         function getTrophyModeTierLabel(tier) {
@@ -10532,10 +11000,13 @@
 
         function resolveRarityGlowTierClass(
           achievement,
-          { trophyModeEnabled = false } = {},
+          { trophyModeEnabled = false, useNativeTrophyType = false } = {},
         ) {
           if (trophyModeEnabled) {
-            return `rarity-tier-${resolveTrophyModeDisplayTier(achievement)}`;
+            const tier = resolveTrophyModeDisplayTier(achievement, {
+              useNativeTrophyType,
+            });
+            return tier === "platinum" ? "" : `rarity-tier-${tier}`;
           }
           const rarityPct = resolveRarityPercent(achievement);
           if (rarityPct === null) return "";
@@ -10589,7 +11060,9 @@
           .toLowerCase();
         const useTrophyTypeRaritySortFallback =
           platformForRaritySort === "rpcs3" ||
-          platformForRaritySort === "shadps4";
+          platformForRaritySort === "shadps4" ||
+          platformForRaritySort === "ps4recomp" ||
+          platformForRaritySort === "kytyps5";
 
         for (const achievement of unique) {
           const displayName = getSafeLocalizedText(
@@ -10682,10 +11155,13 @@
           const achImg = document.createElement("img");
           achImg.className = "ach-icon";
           const trophyModeTier = trophyModeEnabled
-            ? resolveTrophyModeDisplayTier(achievement)
+            ? resolveTrophyModeDisplayTier(achievement, {
+                useNativeTrophyType: useTrophyTypeRaritySortFallback,
+              })
             : "";
           const rarityGlowTierClass = resolveRarityGlowTierClass(achievement, {
             trophyModeEnabled,
+            useNativeTrophyType: useTrophyTypeRaritySortFallback,
           });
           if (rarityGlowTierClass) {
             achImg.classList.add(rarityGlowTierClass);
@@ -10721,10 +11197,14 @@
           const descText = isDescriptionMasked
             ? hiddenLabel
             : description || "";
+          const hasNativeTrophyType = useTrophyTypeRaritySortFallback &&
+            mapTrophyTypeToRaritySortValue(
+              achievement?.trophyType || achievement?.trophy_type,
+            ) !== null;
           const rarityText = formatRarityPercent(achievement, {
-            includeNativeTrophyType: !trophyModeEnabled,
+            includeNativeTrophyType: !trophyModeEnabled || hasNativeTrophyType,
           });
-          const trophyModeLabel = trophyModeEnabled
+          const trophyModeLabel = trophyModeEnabled && !hasNativeTrophyType
             ? getTrophyModeTierLabel(trophyModeTier)
             : "";
           row.dataset.search =
@@ -10815,6 +11295,12 @@
           const rarityLine = document.createElement("div");
           rarityLine.className = "status-rarity";
           rarityLine.textContent = rarityText;
+          if (hasNativeTrophyType) {
+            const nativeTrophyTier = resolveTrophyModeDisplayTier(achievement, {
+              useNativeTrophyType: true,
+            });
+            rarityLine.classList.add("trophy-tier-label", `trophy-tier-${nativeTrophyTier}`);
+          }
           if (trophyModeLabel) {
             rarityLine.appendChild(document.createTextNode(" · "));
             const trophyTierLine = document.createElement("span");
@@ -11084,6 +11570,9 @@
               );
           }
         }
+        if (String(phase || "").toLowerCase() === "waitingschemaparse") {
+          return tUi("main.generation.progress.waitingSchemaParse", "Waiting for schema generator");
+        }
         if (detail) return detail;
         if (
           state?.kind === "profile-backup-export" ||
@@ -11232,6 +11721,10 @@
             return tUi("main.generation.progress.finalizing", "Finalizing");
           case "completed":
             return tUi("main.generation.progress.completed", "Completed");
+          case "waitingUnlockSource":
+            return tUi("main.generation.progress.waitingUnlockSource", "Config ready; waiting for an unlock source.");
+          case "unlockSourceUnavailable":
+            return tUi("main.generation.progress.unlockSourceUnavailable", "Config ready; this port does not save achievement unlocks.");
           case "failed":
             return tUi("main.generation.progress.failed", "Failed");
           case "skipped":
@@ -12063,9 +12556,13 @@
               "gog-official",
               "xbox-pc",
               "retroachievements",
+              "ps4recomp",
+              "pcports",
+              "x360recomp",
               "xenia",
               "rpcs3",
               "shadps4",
+              "kytyps5",
               "markerpatch",
               "madnesspatch",
               "xlivelessness",
@@ -12639,12 +13136,59 @@
         );
       }
 
+      function syncRecompProfileControl(configName, config) {
+        const container = document.getElementById("x360RecompProfileControl");
+        const select = document.getElementById("x360RecompProfileSelect");
+        const sourceStatus = document.getElementById("x360RecompProgressStatus");
+        const visible = config?.platform === "x360recomp";
+        // Pending directories discover a profile; they are not player choices.
+        // Keep genuine named profiles (including re:Blue's default profile).
+        const profiles = visible && config.x360_recomp_progress_confirmed !== false ? Object.keys(config.x360_recomp_profiles || {}).filter((profile) =>
+          !["pending", "tsv-directory"].includes(config.x360_recomp_progress?.[profile]?.format)) : [];
+        const hasProfileChoice = profiles.length > 1;
+        container?.classList.toggle("hidden", !hasProfileChoice);
+        const descriptor = config?.x360_recomp_progress?.[config?.x360_recomp_profile || "default"];
+        const pending = visible && (config.x360_recomp_progress_confirmed === false || descriptor?.format === "pending" || !descriptor && config?.x360_recomp_progress_pending === true);
+        sourceStatus?.classList.toggle("hidden", !pending);
+        if (sourceStatus && pending) {
+          const unavailable = (descriptor?.reason || config.x360_recomp_progress_reason) === "port-does-not-persist";
+          const key = unavailable ? "main.generation.progress.unlockSourceUnavailable" : "main.generation.progress.waitingUnlockSource";
+          sourceStatus.setAttribute("data-i18n", key);
+          sourceStatus.textContent = tUi(key, unavailable
+            ? "Config ready; this port does not save achievement unlocks." : "Config ready; waiting for an unlock source.");
+        }
+        if (!select) return;
+        select.replaceChildren();
+        select.disabled = !hasProfileChoice;
+        select.dataset.configName = hasProfileChoice ? configName : "";
+        if (!visible) return;
+        for (const profile of profiles) {
+          const option = document.createElement("option"); option.value = option.textContent = profile; select.append(option);
+        }
+        select.value = profiles.includes(config.x360_recomp_profile) ? config.x360_recomp_profile : profiles[0] || "";
+      }
+      document.getElementById("x360RecompProfileSelect")?.addEventListener("change", async (event) => {
+        const select = event.currentTarget, name = select.dataset.configName;
+        if (!name) return;
+        select.disabled = true;
+        try { await window.api.setX360RecompProfile(name, select.value); }
+        catch (error) { console.error("Recomp profile update failed", error); }
+        finally {
+          try {
+            const config = await window.api.getConfigByName(name);
+            if (document.getElementById("configList")?.value === name) syncRecompProfileControl(name, config);
+          } catch (error) { console.error("Recomp profile refresh failed", error); }
+          finally { select.disabled = !select.dataset.configName; }
+        }
+      });
+
       async function syncAchievementLanguageForConfig(
         configName,
         config = null,
       ) {
         const safeName = String(configName || "").trim();
         if (!safeName) {
+          syncRecompProfileControl("", null);
           setConfigAchievementLanguageVisibility(false);
           refreshGlobalAchievementLanguageOption(false);
           syncingAchievementLanguage = true;
@@ -12662,6 +13206,7 @@
         if (document.getElementById("configList")?.value !== safeName) {
           return getCurrentAchievementLanguage();
         }
+        syncRecompProfileControl(safeName, resolvedConfig);
         const override = getAchievementLanguageOverride(resolvedConfig);
         setConfigAchievementLanguageVisibility(true);
         refreshGlobalAchievementLanguageOption(true);
@@ -13022,6 +13567,7 @@
           );
         }
         refreshCustomisationEditorsText();
+        refreshTrophyModeThresholdControls();
         syncAppLanguageOptions();
         refreshGlobalAchievementLanguageOption(
           !!document.getElementById("configList")?.value,
@@ -13372,6 +13918,8 @@
             process_name: "",
             custom_cover_path: "",
             custom_cover_source_path: "",
+            portraitImagePath: "",
+            portraitImageMtime: 0,
             headerImagePath: "",
             headerImageMtime: 0,
             custom_header_path: "",
@@ -13402,6 +13950,8 @@
           process_name: entry.process_name || entry.processName || "",
           custom_cover_path: entry.custom_cover_path || "",
           custom_cover_source_path: entry.custom_cover_source_path || "",
+          portraitImagePath: entry.portraitImagePath || "",
+          portraitImageMtime: Number(entry.portraitImageMtime) || 0,
           headerImagePath: entry.headerImagePath || "",
           headerImageMtime: Number(entry.headerImageMtime) || 0,
           custom_header_path: entry.custom_header_path || "",
@@ -15030,7 +15580,11 @@
             if (isStaleSelection()) return;
           }
           lastSelectedConfigMeta = configForUi || null;
-          window.__setEmbeddedPlatinumBadgeByConfig?.(configForUi || null);
+          window.__setEmbeddedPlatinumBadgeByConfig?.(
+            configForUi || null,
+            achievementsDataObj?.achievements,
+            savedAchievementsObj,
+          );
           updateBlacklistButtonState(configForUi || null);
           setMainConfigSelectionVisual(true);
           const heroTitle = document.getElementById("heroGameTitle");
@@ -15163,6 +15717,24 @@
           ],
         },
         {
+          presetId: "settings-x360recompPresetDropdown",
+          controlIds: [
+            "settings-x360recompPositionDropdown",
+            "settings-x360recompScaleSlider",
+            "settings-x360recompDurationSlider",
+            "settings-x360recompSanPresetDropdown",
+          ],
+        },
+        {
+          presetId: "settings-ps4recompPresetDropdown",
+          controlIds: [
+            "settings-ps4recompPositionDropdown",
+            "settings-ps4recompScaleSlider",
+            "settings-ps4recompDurationSlider",
+            "settings-ps4recompSanPresetDropdown",
+          ],
+        },
+        {
           presetId: "settings-rpcs3PresetDropdown",
           controlIds: [
             "settings-rpcs3PositionDropdown",
@@ -15178,6 +15750,15 @@
             "settings-shadps4ScaleSlider",
             "settings-shadps4DurationSlider",
             "settings-shadps4SanPresetDropdown",
+          ],
+        },
+        {
+          presetId: "settings-kytyps5PresetDropdown",
+          controlIds: [
+            "settings-kytyps5PositionDropdown",
+            "settings-kytyps5ScaleSlider",
+            "settings-kytyps5DurationSlider",
+            "settings-kytyps5SanPresetDropdown",
           ],
         },
       ]);
@@ -15239,6 +15820,10 @@
 
       function refreshTrophyModeNotificationControls(enabled) {
         const active = enabled === true;
+        for (const id of ["settings-trophyModeGoldThreshold", "settings-trophyModeSilverThreshold"]) {
+          const slider = document.getElementById(id);
+          if (slider) slider.disabled = !active;
+        }
         const section = document.getElementById(
           "settings-mainNotificationControls",
         );
@@ -15282,9 +15867,32 @@
           checkbox.dataset.preferencesHydrated = "1";
         }
         refreshTrophyModeNotificationControls(enabled);
+        refreshTrophyModeThresholdControls(prefs);
+        for (const id of ["settings-trophyModeGoldThreshold", "settings-trophyModeSilverThreshold"]) {
+          const slider = document.getElementById(id);
+          if (slider) slider.dataset.preferencesHydrated = "1";
+        }
         if (enabled) {
           refreshNativeWindowsNotificationControls();
         }
+      }
+
+      function refreshTrophyModeThresholdControls(prefs = getCachedPreferences() || {}) {
+        const thresholds = TrophyMode.normalizeTrophyModeThresholds(prefs);
+        const silverSlider = document.getElementById("settings-trophyModeSilverThreshold");
+        if (silverSlider) silverSlider.min = String(thresholds.trophyModeGoldThreshold + 1);
+        for (const [key, value] of Object.entries(thresholds)) {
+          const id = `settings-${key}`;
+          const slider = document.getElementById(id);
+          if (slider) slider.value = String(value);
+          const label = document.getElementById(`${id}Value`);
+          if (label) label.textContent = `${value}%`;
+        }
+        const hint = document.getElementById("settings-trophyModeThresholdHint");
+        if (hint) hint.textContent = tUi("settings.trophyMode.thresholdHint",
+          "Silver: from {gold}% to below {silver}%. Native PlayStation trophy grades stay unchanged.")
+          .replace("{gold}", thresholds.trophyModeGoldThreshold)
+          .replace("{silver}", thresholds.trophyModeSilverThreshold);
       }
 
       function populateMainPresetDropdown(presetsData) {
@@ -16373,6 +16981,26 @@
           testButtonId: "settings-testXeniaNotificationBtn",
         },
         {
+          platform: "x360recomp",
+          prefix: "x360recomp",
+          label: "Xbox 360 Recomp",
+          positionId: "settings-x360recompPositionDropdown",
+          presetId: "settings-x360recompPresetDropdown",
+          soundId: "settings-x360recompSoundSelect",
+          sanPresetId: "settings-x360recompSanPresetDropdown",
+          testButtonId: "settings-testX360RecompNotificationBtn",
+        },
+        {
+          platform: "ps4recomp",
+          prefix: "ps4recomp",
+          label: "PS4 Recomp",
+          positionId: "settings-ps4recompPositionDropdown",
+          presetId: "settings-ps4recompPresetDropdown",
+          soundId: "settings-ps4recompSoundSelect",
+          sanPresetId: "settings-ps4recompSanPresetDropdown",
+          testButtonId: "settings-testPs4RecompNotificationBtn",
+        },
+        {
           platform: "rpcs3",
           prefix: "rpcs3",
           label: "RPCS3",
@@ -16391,6 +17019,16 @@
           soundId: "settings-shadps4SoundSelect",
           sanPresetId: "settings-shadps4SanPresetDropdown",
           testButtonId: "settings-testShadps4NotificationBtn",
+        },
+        {
+          platform: "kytyps5",
+          prefix: "kytyps5",
+          label: "KytyPS5",
+          positionId: "settings-kytyps5PositionDropdown",
+          presetId: "settings-kytyps5PresetDropdown",
+          soundId: "settings-kytyps5SoundSelect",
+          sanPresetId: "settings-kytyps5SanPresetDropdown",
+          testButtonId: "settings-testKytyps5NotificationBtn",
         },
       ]);
 
@@ -16849,6 +17487,11 @@
         applyTrophyModePreference(prefs);
       }
 
+      function normalizeProgressNotificationMethod(value) {
+        const method = String(value || "animated").trim().toLowerCase();
+        return ["animated", "gamebar", "native"].includes(method) ? method : "animated";
+      }
+
       function applyProgressNotificationMethodPreferences(prefs = {}) {
         const methodSelect = document.getElementById(
           "settings-progressNotificationMethodDropdown",
@@ -16856,18 +17499,13 @@
         const positionSelect = document.getElementById(
           "settings-progressPositionDropdown",
         );
-        const method =
-          String(prefs?.progressNotificationMethod || "animated")
-            .trim()
-            .toLowerCase() === "gamebar"
-            ? "gamebar"
-            : "animated";
+        const method = normalizeProgressNotificationMethod(prefs?.progressNotificationMethod);
         if (methodSelect) methodSelect.value = method;
         for (const field of ["scale", "duration"]) {
-          setNativeWindowsControlDisabled(document.getElementById(`settings-progress${field[0].toUpperCase()}${field.slice(1)}Slider`), method === "gamebar");
+          setNativeWindowsControlDisabled(document.getElementById(`settings-progress${field[0].toUpperCase()}${field.slice(1)}Slider`), method !== "animated");
         }
         if (positionSelect) {
-          positionSelect.disabled = method === "gamebar";
+          positionSelect.disabled = method !== "animated";
           if (positionSelect.disabled) {
             positionSelect.setAttribute("aria-disabled", "true");
           } else {
@@ -17437,10 +18075,12 @@
             );
             if (recordFpsSelect) {
               recordFpsSelect.value =
-                Number(prefs?.recordFps) === 60 ? "60" : "30";
+                prefs?.recordFps === "unlocked"
+                  ? "unlocked"
+                  : Number(prefs?.recordFps) === 60 ? "60" : "30";
               recordFpsSelect.addEventListener("change", async (e) => {
                 await window.api.savePreferences({
-                  recordFps: Number(e.target.value),
+                  recordFps: e.target.value === "unlocked" ? "unlocked" : Number(e.target.value),
                 });
               });
             }
@@ -19528,9 +20168,13 @@
           "gog-official": "GOG Official",
           "xbox-pc": "Xbox PC",
           retroachievements: "RetroAchievements",
+          ps4recomp: "PS4 Recomp",
+          pcports: "PC Ports",
+          x360recomp: "Xbox 360 Recomp",
           xenia: "Xenia",
           rpcs3: "RPCS3",
           shadps4: "PS4",
+          kytyps5: "PS5 (KytyPS5)",
           markerpatch: "MarkerPatch",
           madnesspatch: "MadnessPatch",
           xlivelessness: "XLiveLessNess",
@@ -22658,6 +23302,13 @@
           iconanim: true,
           iconshadowcolor: "#ffb84e99",
           iconanimcolor: "#ffb84e",
+          iconanimrarity: false,
+          iconanimcolorbronze: "#cd7f32",
+          iconanimcolorsilver: "#c0c0c0",
+          iconanimcolorgold: "#ffd700",
+          iconshadowcolorbronze: "#cd7f3299",
+          iconshadowcolorsilver: "#c0c0c099",
+          iconshadowcolorgold: "#ffd70099",
           iconborderrarity: false,
           glowrarity: false,
           glowcolorbronze: "#cd7f32",
@@ -22690,6 +23341,7 @@
           usecustomfontcolors: false,
           textvspace: 0,
           useoutline: false,
+          outline: "solid",
           outlinecolor: "#8a2be2",
           outlinewidth: 50,
           glow: false,
@@ -22708,6 +23360,7 @@
           fontshadowx: 0,
           fontshadowy: 0,
           showpercent: "rare",
+          rarethreshold: 10,
           usepercent: false,
           percentbadge: false,
           percentbadgeimg: false,
@@ -22863,21 +23516,34 @@
           status.refreshCustomisationTranslation?.();
         };
         root.replaceChildren(toolbar, previewShell, editor, status);
+        const notificationScrollPanel = root.closest(".tab-content");
+        let refreshLivePreviewPlacement = null;
         const updateStickyPreviewOffset = () => {
           const toolbarHeight = toolbar.getBoundingClientRect().height;
+          const previewHeight = previewShell.getBoundingClientRect().height;
+          const availableHeight = notificationScrollPanel?.clientHeight || 0;
+          if (!availableHeight || !toolbarHeight || !previewHeight) return;
+          const stickyStackHeight = Math.ceil(toolbarHeight + previewHeight + 20);
+          const minimumControlsHeight = Math.min(
+            220,
+            Math.max(140, availableHeight * 0.35),
+          );
+          const disableSticky = availableHeight - stickyStackHeight < minimumControlsHeight;
+          root.classList.toggle("is-sticky-disabled", disableSticky);
           root.style.setProperty(
             "--notification-toolbar-height",
             `${toolbarHeight + 8}px`,
           );
-          document
-            .getElementById("customisationTab")
-            ?.style.setProperty(
-              "--notification-sticky-stack-height",
-              `${toolbarHeight + previewShell.getBoundingClientRect().height + 20}px`,
-            );
+          notificationScrollPanel.style.setProperty(
+            "--notification-sticky-stack-height",
+            disableSticky ? "0px" : `${stickyStackHeight}px`,
+          );
+          refreshLivePreviewPlacement?.();
         };
-        new ResizeObserver(updateStickyPreviewOffset).observe(toolbar);
-        new ResizeObserver(updateStickyPreviewOffset).observe(previewShell);
+        const stickyPreviewResizeObserver = new ResizeObserver(updateStickyPreviewOffset);
+        stickyPreviewResizeObserver.observe(toolbar);
+        stickyPreviewResizeObserver.observe(previewShell);
+        if (notificationScrollPanel) stickyPreviewResizeObserver.observe(notificationScrollPanel);
         updateStickyPreviewOffset();
 
         let activeSource = null;
@@ -23023,6 +23689,9 @@
               setEditorField("width", roundToControlStep("width", minimumWidth));
           };
           const sharedOptionKeys = {
+            "decorationImageMode:single": "option.sanMode.singleImage",
+            "decorationImageMode:rarity": "option.sanMode.rarity",
+            "iconanimrarity:single": "option.sanMode.singleColour",
             "glowrarity:single": "option.sanMode.singleColour",
             "iconborderrarity:single": "option.sanMode.singleImage",
             "bgstyle:achievement": "option.imageSource.Achievement image",
@@ -23129,6 +23798,15 @@
                   usepercent: "percentageInsteadOfPoints",
                 }[key] || key;
               const translatedFieldLabel = () => {
+                if (activeKind === "san") {
+                  const decorationTier = /^decoration(Bronze|Silver|Gold)Image$/.exec(key);
+                  if (decorationTier) return `${tUi(`trophyTier.${decorationTier[1].toLowerCase()}`, decorationTier[1])} · ${text("field.decorationImage", label)}`;
+                  const tierColour = /^(iconanimcolor|iconshadowcolor)(bronze|silver|gold)$/.exec(key);
+                  if (tierColour) {
+                    const colourKey = tierColour[1] === "iconanimcolor" ? "sanIconAnimationColour" : "sanIconShadowColour";
+                    return `${tUi(`trophyTier.${tierColour[2]}`, tierColour[2])} · ${text(`field.${colourKey}`, label)}`;
+                  }
+                }
                 const value = text(`field.${labelKey}`, label);
                 if (activeKind === "san") {
                   const physicalRows = {
@@ -23172,6 +23850,8 @@
                   if (reason.startsWith("requires:") && controls.get(parent)?.type !== "select") message = text("help.enable", "Enable {option} first.").replace("{option}", parentName);
                   else if (reason.startsWith("overridden-by:")) message = text("help.controlled", "Controlled by {option}.").replace("{option}", parentName);
                   else if (reason.startsWith("requires:") || reason.startsWith("requires-value:") || reason.startsWith("requires-choice:")) message = text("help.source", "Choose a matching option in {option}.").replace("{option}", parentName);
+                  else if (reason === "notification-type" && activeKind === "san" && key === "rarethreshold") message = text("help.rareThresholdStyle", "Select Rare in Preset Style to edit this threshold.");
+                  else if (reason === "notification-type" && activeKind === "san" && (key === "iconanimrarity" || /^icon(?:anim|shadow)color(?:bronze|silver|gold)$/.test(key))) message = text("help.rareIconColourStyle", "Select Rare in Preset Style to use colours by rarity. Platinum keeps its fixed colours.");
                   else if (reason === "notification-type") message = text("help.previewType", "Select a matching notification type in Preview.");
                   else if (reason === "requires-logo-replacement") message = text("help.enable", "Enable {option} first.").replace("{option}", text("field.replacelogo", "Replace logo with decoration"));
                   else if (reason) message = text("help.unsupported", "Not supported by this preset.");
@@ -23183,6 +23863,7 @@
                     message = `${text("help.points", "SAN points are calculated from rarity, not the game's actual XP/G.")} ${placement}`;
                   }
                   else if (activeKind === "san" && key === "showpercent") message = text("help.percentagePlacement", "Adds the rarity percentage at the end of the selected text row, separately from {option}.").replace("{option}", text("field.pointsDisplay", "Points display"));
+                  else if (activeKind === "san" && key === "rarethreshold") message = text("help.rareThreshold", "Unlocks at or below this percentage use the Rare style. The trophy type stays unchanged.");
                   else if (key === "showhiddenicon") message = text("help.hidden", "Only shown for hidden achievements.");
                   hint.textContent = message;
                   hint.hidden = !message;
@@ -23246,7 +23927,7 @@
                       if (Number(controls.get("hiddeniconpos")?.input.value) === 0)
                         setEditorField("hiddeniconpos", 1);
                     }
-                    if (key === "decorationImage") {
+                    if (key === "decorationImage" || (activeKind === "san" && /^decoration(Bronze|Silver|Gold)Image$/.test(key))) {
                       if (controls.has("showdecoration"))
                         setEditorField("showdecoration", true);
                       if (
@@ -23332,6 +24013,10 @@
                     key === "decorationImage" &&
                     controls.has("showdecoration")
                   ) {
+                    setEditorField("showdecoration", false);
+                  }
+                  if (activeKind === "san" && /^decoration(Bronze|Silver|Gold)Image$/.test(key) &&
+                      ["decorationBronzeImage", "decorationSilverImage", "decorationGoldImage"].every((field) => !controls.get(field)?.input.value)) {
                     setEditorField("showdecoration", false);
                   }
                   if (
@@ -24501,6 +25186,9 @@
               }
             }
             const assets = Object.fromEntries(sanAssetChanges);
+            // This editor-only mode is encoded as a string or a tier array in
+            // customicons, matching SAN's archive format rather than a new flag.
+            customisation.decorationImageMode = values.decorationImageMode;
             const pointsPatch = window.AchievementsSanEditor.pointsPatchForChanges(
               activeSanCapabilities, values, customisation, assets,
             );
@@ -24591,6 +25279,7 @@
             if (livePreviewActive) window.api?.updateLivePresetPreviewBounds?.(currentLivePlacement());
           });
         };
+        refreshLivePreviewPlacement = updateLivePlacement;
         const isEditorPicker = (element) => customisationPanel?.contains(element) &&
           (element?.tagName === "SELECT" || (element?.tagName === "INPUT" && element.type === "color"));
         const releaseEditorPicker = () => {
@@ -25402,6 +26091,40 @@
           }
         });
 
+      let trophyThresholdSaveQueue = Promise.resolve();
+      let trophyThresholdRevision = 0;
+      const readTrophyModeThresholdControls = () => TrophyMode.normalizeTrophyModeThresholds({
+        trophyModeGoldThreshold: document.getElementById("settings-trophyModeGoldThreshold").value,
+        trophyModeSilverThreshold: document.getElementById("settings-trophyModeSilverThreshold").value,
+      });
+      for (const id of ["settings-trophyModeGoldThreshold", "settings-trophyModeSilverThreshold"]) {
+        const slider = document.getElementById(id);
+        slider.addEventListener("input", () => {
+          trophyThresholdRevision++;
+          refreshTrophyModeThresholdControls(readTrophyModeThresholdControls());
+        });
+        slider.addEventListener("change", () => {
+          const thresholds = readTrophyModeThresholdControls();
+          const revision = ++trophyThresholdRevision;
+          trophyThresholdSaveQueue = trophyThresholdSaveQueue.then(async () => {
+            await window.api.savePreferences(thresholds);
+            await refreshPreferencesCache();
+            if (revision !== trophyThresholdRevision) return;
+            refreshTrophyModeThresholdControls();
+            const activeConfig = document.getElementById("configList")?.value;
+            if (activeConfig) await buildMainAchievementsTable(
+              activeConfig, getCurrentAchievementLanguage(), { skipPlatinumCheck: true },
+            );
+          }).catch(async (error) => {
+            console.error("Trophy Mode threshold update failed", error);
+            if (revision === trophyThresholdRevision) {
+              await refreshPreferencesCache();
+              refreshTrophyModeThresholdControls();
+            }
+          });
+        });
+      }
+
       document
         .getElementById("settings-positionDropdown")
         .addEventListener("change", (e) =>
@@ -25434,7 +26157,7 @@
         .getElementById("settings-progressNotificationMethodDropdown")
         .addEventListener("change", async (e) => {
           const progressNotificationMethod =
-            e.target.value === "gamebar" ? "gamebar" : "animated";
+            normalizeProgressNotificationMethod(e.target.value);
           applyProgressNotificationMethodPreferences({
             progressNotificationMethod,
           });
@@ -25879,6 +26602,10 @@
               ?.preferencesHydrated === "1"
               ? checkbox("settings-enableTrophyModeCheckbox")
               : base.trophyModeEnabled === true,
+          ...TrophyMode.normalizeTrophyModeThresholds(
+            byId("settings-trophyModeGoldThreshold")?.dataset.preferencesHydrated === "1"
+              ? readTrophyModeThresholdControls() : base,
+          ),
           lumaPlayWatcherEnabled: checkbox(
             "settings-enableLumaPlayWatcherCheckbox",
           ),
@@ -25945,7 +26672,9 @@
             base.recordsFolder || "",
           ),
           disableAchievementRecords: checkbox("settings-disableRecordCheckbox"),
-          recordFps: Number(getVal("settings-recordFpsSelect")) || 30,
+          recordFps: getVal("settings-recordFpsSelect") === "unlocked"
+            ? "unlocked"
+            : Number(getVal("settings-recordFpsSelect")) || 30,
           recordDurationSeconds:
             Number(getVal("settings-recordDurationSelect")) || 20,
           windowZoomFactor: Number.isFinite(zoomValue)
@@ -27818,6 +28547,7 @@
         let dashImgFlushScheduled = false;
         const dashboardCoverEnsureQueue = [];
         const dashboardCoverEnsureState = new Map();
+        const dashboardHeaderRefreshTokens = new WeakMap();
         let dashboardCoverEnsureRunning = 0;
         let detailJobsSeedReady = window.__bootManualSeedComplete === true;
         const detailJobsSeedWaiters = [];
@@ -28439,6 +29169,32 @@
           }
         };
 
+        const withDashboardImageMtime = (src, mtimeMs) => {
+          if (!src || !mtimeMs || !/^file:/i.test(src)) return src;
+          const url = new URL(src);
+          url.searchParams.set("_m", String(mtimeMs));
+          return url.href;
+        };
+
+        const resolveDashboardPortraitSrc = async (appid, platform, configName = "") => {
+          const meta = await window.api.checkLocalGameImageMeta(appid, platform, configName);
+          if (!meta?.path) return null;
+          if (meta.custom) {
+            return (await window.__resolveRenderableCustomCoverSrc?.(meta.path, {
+              mtimeMs: meta.mtimeMs,
+            })) || null;
+          }
+          return withDashboardImageMtime(fileUrl(meta.path), meta.mtimeMs);
+        };
+
+        const dashboardPortraitRefreshTokens = new WeakMap();
+        const beginDashboardPortraitRefresh = (img) => {
+          if (!img) return () => false;
+          const token = (dashboardPortraitRefreshTokens.get(img) || 0) + 1;
+          dashboardPortraitRefreshTokens.set(img, token);
+          return () => img.isConnected && dashboardPortraitRefreshTokens.get(img) === token;
+        };
+        const dashboardLandscapeRecoveryAttempts = new WeakMap();
         let dashboardImageCacheBustSeq = 0;
         const withDashboardImageCacheBuster = (src) => {
           const safeSrc = String(src || "").trim();
@@ -28470,8 +29226,28 @@
           const activeSrc = useLandscape
             ? img.dataset.landscapeSrc || fallbackIcon
             : img.dataset.portraitSrc || nextSrc;
+          const previousSrc = img.dataset.src || "";
           img.dataset.activeVariant = useLandscape ? "landscape" : "portrait";
           img.dataset.src = activeSrc;
+          const card = img.closest(".dash-card");
+          if (
+            (previousSrc !== activeSrc || forceReload) &&
+            (forceReload || card?.dataset?.platform === "kytyps5")
+          ) {
+            try {
+              window.api?.logCoverEvent?.("info", "dashboard:image:source-applied", {
+                configName: card?.dataset?.name || "",
+                appid: card?.dataset?.appid || "",
+                platform: card?.dataset?.platform || "",
+                variant,
+                activeVariant: img.dataset.activeVariant,
+                source: nextSrc,
+                activeSource: activeSrc,
+                connected: img.isConnected,
+                bootDeferred: isDashboardBooting(),
+              });
+            } catch {}
+          }
           ensureLazyObserver().observe(img);
           if (!isDashboardBooting()) {
             if (!forceReload && img.src === activeSrc) return;
@@ -28504,7 +29280,6 @@
           ) {
             return;
           }
-          const originalLandscapeSrc = img.dataset.landscapeSrc || "";
           img.dataset.headerEnsureRunning = "1";
           try {
             const platform = normalizeDashboardImagePlatform(
@@ -28513,7 +29288,6 @@
             const configName = String(card.dataset.name || "").trim();
             const displayName = String(card.dataset.display || "").trim();
             let headerPath = "";
-            let headerMtime = 0;
             try {
               const headerMeta = await window.api.checkLocalGameHeaderMeta?.(
                 appid,
@@ -28521,7 +29295,6 @@
                 configName,
               );
               headerPath = String(headerMeta?.path || "").trim();
-              headerMtime = Number(headerMeta?.mtimeMs) || 0;
             } catch {}
             if (!headerPath) {
               headerPath = String(
@@ -28532,25 +29305,12 @@
                   displayName,
                 )) || "",
               ).trim();
-              if (headerPath) {
-                try {
-                  const afterMeta = await window.api.checkLocalGameHeaderMeta?.(
-                    appid,
-                    platform || null,
-                    configName,
-                  );
-                  headerMtime = Number(afterMeta?.mtimeMs) || 0;
-                } catch {}
-              }
             }
             if (!headerPath) return;
-            if (img.dataset.landscapeSrc !== originalLandscapeSrc) return;
-            const headerSrc = headerFileUrl(headerPath);
-            const versionedSrc = headerMtime
-              ? `${headerSrc}${headerSrc.includes("?") ? "&" : "?"}_m=${headerMtime}`
-              : headerSrc;
-            applyDashboardCardImage(img, versionedSrc, {
-              variant: "landscape",
+            // Recapture local metadata after waiting. A custom image or a newer
+            // download may have replaced the initial source in the meantime.
+            await refreshDashboardHeaderByAppId(appid, platform || null, {
+              forceReload: false,
             });
           } catch {
             // Keep the neutral fallback; a later layout toggle can retry.
@@ -28562,10 +29322,65 @@
         const attachDashboardCardImageErrorHandler = (img, card, name = "") => {
           if (!img || img.dataset.dashboardErrorHandlerAttached === "1") return;
           img.dataset.dashboardErrorHandlerAttached = "1";
+          img.addEventListener("load", () => {
+            if (img.dataset.activeVariant === "landscape" && img.dataset.landscapeSrc &&
+                img.dataset.landscapeSrc !== fallbackIcon && img.currentSrc === img.src &&
+                img.src !== fallbackIcon) {
+              dashboardLandscapeRecoveryAttempts.delete(img);
+            }
+          });
           img.addEventListener("error", () => {
+            try {
+              window.api?.logCoverEvent?.("warn", "dashboard:image:load-failed", {
+                configName: name,
+                appid: card?.dataset?.appid || "",
+                platform: card?.dataset?.platform || "",
+                variant: img.dataset.activeVariant,
+                source: img.currentSrc || img.src,
+              });
+            } catch {}
             if (img.dataset.activeVariant === "landscape") {
+              const failedSrc = img.dataset.landscapeSrc || "";
               delete img.dataset.landscapeSrc;
               syncDashboardCardImageVariant(img);
+              if (!failedSrc || failedSrc === fallbackIcon || !/^file:/i.test(failedSrc)) return;
+              // One recovery per path/version. A persistent decoding error must
+              // not keep the downloader or the image element in a retry loop.
+              const failedUrl = new URL(failedSrc);
+              failedUrl.searchParams.delete("_");
+              const recoveryKey = failedUrl.href;
+              const attempts = dashboardLandscapeRecoveryAttempts.get(img) || new Set();
+              if (attempts.has(recoveryKey) || attempts.size >= 2) return;
+              attempts.add(recoveryKey);
+              dashboardLandscapeRecoveryAttempts.set(img, attempts);
+              const appid = String(card?.dataset?.appid || "").trim();
+              const platform = normalizeDashboardImagePlatform(card?.dataset?.platform) || null;
+              const configName = String(card?.dataset?.name || "").trim();
+              scheduleIdle(async () => {
+                try {
+                  if (!appid || !img.isConnected) return;
+                  const meta = await window.api.checkLocalGameHeaderMeta(appid, platform, configName);
+                  if (meta?.path && !meta.custom) {
+                    const currentSrc = withDashboardImageMtime(headerFileUrl(meta.path), meta.mtimeMs);
+                    const currentUrl = new URL(currentSrc);
+                    currentUrl.searchParams.delete("_");
+                    if (currentUrl.href === recoveryKey) {
+                      await window.api.ensureGameHeader(appid, platform, configName, card.dataset.display || "", {
+                        failedImage: meta,
+                      });
+                    }
+                  } else if (!meta?.path && !card.dataset.customHeaderPath) {
+                    await window.api.ensureGameHeader(appid, platform, configName, card.dataset.display || "");
+                  }
+                  if (img.isConnected && String(card.dataset.appid || "").trim() === appid &&
+                      String(card.dataset.name || "").trim() === configName &&
+                      (normalizeDashboardImagePlatform(card.dataset.platform) || null) === platform) {
+                    await refreshDashboardHeaderByAppId(appid, platform, { forceReload: true });
+                  }
+                } catch {
+                  // Keep the fallback until a new version or an explicit redownload.
+                }
+              });
               return;
             }
             const appid = String(card?.dataset?.appid || "").trim();
@@ -28590,9 +29405,6 @@
           const platform = normalizeDashboardImagePlatform(task?.platform);
           const configName = String(task?.name || "").trim();
           const cacheKey = makeDashboardImageCacheKey(appid, platform);
-          if (cacheKey && dashboardImageCache.has(cacheKey)) {
-            return true;
-          }
 
           if (configName) {
             try {
@@ -28605,6 +29417,13 @@
                 return true;
               }
             } catch {}
+          }
+
+          // A cached source does not prove that the current card displays it.
+          // Resolve it again so deleted files and custom covers keep their priority.
+          if (cacheKey && dashboardImageCache.has(cacheKey)) {
+            await refreshDashboardImageByAppId(appid, platform || null);
+            if (dashboardImageCache.has(cacheKey)) return true;
           }
 
           try {
@@ -28785,17 +29604,19 @@
             const platformCards = cardsByPlatform.get(platform) || [];
             if (!platformCards.length) continue;
 
+            const pendingCards = platformCards.map((card) => ({
+              card,
+              current: beginDashboardPortraitRefresh(card.querySelector(".dash-thumb")),
+            }));
             let imgSrc = null;
             try {
-              const localPath = await window.api.checkLocalGameImage(
-                id,
-                platform || null,
-              );
-              if (localPath) imgSrc = fileUrl(localPath);
+              imgSrc = await resolveDashboardPortraitSrc(id, platform || null);
             } catch {
               imgSrc = null;
             }
 
+            const currentCards = pendingCards.filter((entry) => entry.current()).map((entry) => entry.card);
+            if (!currentCards.length) continue;
             const cacheKey = makeDashboardImageCacheKey(id, platform);
             let nextImgSrc = imgSrc;
             if (imgSrc) {
@@ -28805,7 +29626,7 @@
                   : imgSrc;
               dashboardImageCache.set(cacheKey, nextImgSrc);
               clearDashboardCoverEnsureState(id, platform);
-              for (const card of platformCards) {
+              for (const card of currentCards) {
                 const name = String(card?.dataset?.name || "").trim();
                 if (name) {
                   localStorage.setItem(IMG_CACHE_PREFIX + name, nextImgSrc);
@@ -28813,14 +29634,14 @@
               }
             } else {
               dashboardImageCache.delete(cacheKey);
-              for (const card of platformCards) {
+              for (const card of currentCards) {
                 const name = String(card?.dataset?.name || "").trim();
                 if (name) localStorage.removeItem(IMG_CACHE_PREFIX + name);
               }
               nextImgSrc = fallbackIcon;
             }
 
-            for (const card of platformCards) {
+            for (const card of currentCards) {
               const img = card.querySelector(".dash-thumb");
               if (!img) continue;
               applyDashboardCardImage(img, nextImgSrc);
@@ -28849,11 +29670,15 @@
           const platform = normalizeDashboardImagePlatform(cfg?.platform);
           const customCoverPath = String(cfg?.custom_cover_path || "").trim();
 
+          const pendingCards = cards.map((card) => ({
+            card,
+            current: beginDashboardPortraitRefresh(card.querySelector(".dash-thumb")),
+          }));
           let imgSrc = null;
           if (customCoverPath) {
-            imgSrc = await (window.__resolveRenderableCustomCoverSrc?.(
-              customCoverPath,
-            ) || "");
+            imgSrc = appid
+              ? await resolveDashboardPortraitSrc(appid, platform || null, safeName)
+              : await (window.__resolveRenderableCustomCoverSrc?.(customCoverPath) || "");
             if (appid) {
               clearDashboardImageCacheByAppId(appid);
               clearDashboardCoverEnsureState(appid, platform || null);
@@ -28867,6 +29692,8 @@
             imgSrc = fallbackIcon;
           }
 
+          const currentCards = pendingCards.filter((entry) => entry.current()).map((entry) => entry.card);
+          if (!currentCards.length) return;
           try {
             if (imgSrc) {
               localStorage.setItem(IMG_CACHE_PREFIX + safeName, imgSrc);
@@ -28875,7 +29702,7 @@
             }
           } catch {}
 
-          for (const card of cards) {
+          for (const card of currentCards) {
             const img = card.querySelector(".dash-thumb");
             if (!img) continue;
             applyDashboardCardImage(img, imgSrc || fallbackIcon, {
@@ -28884,26 +29711,19 @@
           }
         }
 
-        window.refreshDashboardHeaderByConfigName = async function (
-          configName,
-          headerPath = "",
+        async function refreshDashboardHeaderByAppId(
+          appid,
+          platformHint = null,
+          options = {},
         ) {
-          const safeName = String(configName || "").trim();
-          if (!safeName || !gridEl) return;
+          const id = String(appid || "").trim();
+          if (!id || !gridEl) return;
+          const hintedPlatform = normalizeDashboardImagePlatform(platformHint);
           const allCards = Array.from(gridEl.querySelectorAll(".dash-card"));
-          const selectedCard = allCards.find(
-            (card) => String(card?.dataset?.name || "").trim() === safeName,
-          );
-          if (!selectedCard) return;
-          const targetAppId = String(selectedCard.dataset.appid || "").trim();
-          const targetPlatform = normalizeDashboardImagePlatform(
-            selectedCard.dataset.platform,
-          );
           const cards = allCards.filter(
             (card) =>
-              String(card.dataset.appid || "").trim() === targetAppId &&
-              normalizeDashboardImagePlatform(card.dataset.platform) ===
-                targetPlatform,
+              String(card.dataset.appid || "").trim() === id &&
+              (!hintedPlatform || normalizeDashboardImagePlatform(card.dataset.platform) === hintedPlatform),
           );
           for (const card of cards) {
             const img = card.querySelector(".dash-thumb");
@@ -28911,13 +29731,16 @@
             const appid = String(card.dataset.appid || "").trim();
             const platform =
               normalizeDashboardImagePlatform(card.dataset.platform) || null;
-            let path = headerPath;
+            const configName = String(card.dataset.name || "").trim();
+            const refreshToken = (dashboardHeaderRefreshTokens.get(img) || 0) + 1;
+            dashboardHeaderRefreshTokens.set(img, refreshToken);
+            let path = String(options.headerPath || "").trim();
             let headerMtime = 0;
             try {
               const headerMeta = await window.api.checkLocalGameHeaderMeta?.(
                 appid,
                 platform,
-                String(card.dataset.name || "").trim(),
+                configName,
               );
               if (headerMeta?.path) {
                 path = String(headerMeta.path).trim();
@@ -28933,17 +29756,32 @@
                 path = "";
               }
             }
-            if (path) {
+            if (path && img.isConnected && dashboardHeaderRefreshTokens.get(img) === refreshToken &&
+                String(card.dataset.appid || "").trim() === appid &&
+                String(card.dataset.name || "").trim() === configName &&
+                (normalizeDashboardImagePlatform(card.dataset.platform) || null) === platform) {
               const headerSrc = headerFileUrl(path);
               const versionedSrc = headerMtime
                 ? `${headerSrc}${headerSrc.includes("?") ? "&" : "?"}_m=${headerMtime}`
                 : headerSrc;
               applyDashboardCardImage(img, versionedSrc, {
                 variant: "landscape",
-                forceReload: true,
+                forceReload: options.forceReload === true,
               });
             }
           }
+        }
+
+        window.refreshDashboardHeaderByConfigName = async function (configName, headerPath = "") {
+          const safeName = String(configName || "").trim();
+          if (!safeName || !gridEl) return;
+          const card = Array.from(gridEl.querySelectorAll(".dash-card")).find(
+            (entry) => String(entry.dataset.name || "").trim() === safeName,
+          );
+          if (!card) return;
+          await refreshDashboardHeaderByAppId(card.dataset.appid, card.dataset.platform, {
+            headerPath, forceReload: true,
+          });
         };
 
         if (!window.__dashboardImageListenerAttached) {
@@ -28983,17 +29821,29 @@
                 }
                 return;
               }
-              const appid =
-                typeof payload === "object" && payload?.appid
-                  ? String(payload.appid)
-                  : /^\d+$/.test(String(payload))
-                    ? String(payload)
-                    : null;
+              const appid = getImageUpdateAppId(payload);
               if (!appid) return;
               const platformHint =
                 typeof payload === "object" && payload?.platform
                   ? String(payload.platform)
                   : null;
+              try {
+                window.api?.logCoverEvent?.("info", "dashboard:image:update-received", {
+                  appid,
+                  platform: platformHint,
+                  variant: payload?.variant || "portrait",
+                  cardCount: Array.from(gridEl?.querySelectorAll(".dash-card") || [])
+                    .filter((card) => card.dataset.appid === appid).length,
+                  layout: dashboardPanel?.dataset?.cardLayout || "",
+                  open: window.__dashboardOpen === true,
+                });
+              } catch {}
+              if (payload?.variant === "landscape") {
+                // Reopening must also rebuild cards from fresh header metadata.
+                window.__dashboardNeedsRebuild = true;
+                await refreshDashboardHeaderByAppId(appid, platformHint, { forceReload: true });
+                return;
+              }
               clearDashboardCoverEnsureState(appid, platformHint);
               await refreshDashboardImageByAppId(appid, platformHint, {
                 forceReload: true,
@@ -31531,7 +32381,7 @@
           const raw = String(value || "")
             .trim()
             .toUpperCase();
-          return /^[A-Z]{2}\d{4}-CUSA\d{5}_00-[A-Z0-9_]+$/.test(raw) ? raw : "";
+          return /^[A-Z]{2}\d{4}-(?:CUSA\d{5}|PPSA\d+)_00-[A-Z0-9_]+$/.test(raw) ? raw : "";
         }
 
         function getPlayStationStoreLocaleForContentId(contentId) {
@@ -31552,7 +32402,7 @@
           const platform = normalizeDashboardPlatformValue(
             target.platform || metaCfg?.platform || cfg?.platform || "",
           );
-          if (platform !== "shadps4") return "";
+          if (!["ps4recomp", "shadps4", "kytyps5"].includes(platform)) return "";
           const explicitUrl = String(
             target.ps_store_url ||
               target.psStoreUrl ||
@@ -31591,7 +32441,10 @@
           if (window.api?.resolvePlayStationStoreUrl) {
             try {
               const result = await window.api.resolvePlayStationStoreUrl({
+                platform,
+                configName: target.name,
                 appid:
+                  cfg?.ps4_recomp_title_id ||
                   target.appid ||
                   metaCfg?.appid ||
                   cfg?.appid ||
@@ -31630,7 +32483,7 @@
               target?.name ||
               "",
           )
-            .replace(/\s*\((?:PS4|shadps4)\)\s*$/i, "")
+            .replace(/\s*\((?:PS4|shadps4|PS5|kytyps5)\)\s*$/i, "")
             .trim();
           return searchTerm
             ? `https://store.playstation.com/en-us/search/${encodeURIComponent(
@@ -31842,7 +32695,9 @@
             normalizedPlatform === "gog" ||
             normalizedPlatform === "gog-official";
           const supportsPlayStationStoreMetadata =
-            normalizedPlatform === "shadps4";
+            normalizedPlatform === "ps4recomp" ||
+            normalizedPlatform === "shadps4" ||
+            normalizedPlatform === "kytyps5";
           const supportsRpcs3WikiMetadata = normalizedPlatform === "rpcs3";
           const supportsEaAppMetadata = normalizedPlatform === "ea-official";
           const hasResolvedSteamTarget =
@@ -31853,28 +32708,28 @@
               : supportsDirectSteamLink && hasSteamAppId;
           const hasEpicStoreTarget = supportsEpicStoreMetadata;
           const hasGogStoreTarget = supportsGogStoreMetadata;
-          const shadps4Cusa = String(
+          const playStationTitleId = String(
             target.appid || configMetaIndex.get(target.name)?.appid || "",
           )
             .trim()
             .toUpperCase();
-          const shadps4StoreMeta = configMetaIndex.get(target.name) || {};
-          const hasShadps4StoreData = !!String(
+          const playStationStoreMeta = configMetaIndex.get(target.name) || {};
+          const hasPlayStationStoreData = !!String(
             target.ps_store_url ||
               target.psStoreUrl ||
-              shadps4StoreMeta.ps_store_url ||
-              shadps4StoreMeta.psStoreUrl ||
+              playStationStoreMeta.ps_store_url ||
+              playStationStoreMeta.psStoreUrl ||
               target.ps_content_id ||
               target.psContentId ||
-              shadps4StoreMeta.ps_content_id ||
-              shadps4StoreMeta.psContentId ||
-              shadps4Cusa ||
+              playStationStoreMeta.ps_content_id ||
+              playStationStoreMeta.psContentId ||
+              playStationTitleId ||
               target.displayName ||
               target.name ||
               "",
           ).trim();
           const hasPlayStationStoreTarget =
-            supportsPlayStationStoreMetadata && hasShadps4StoreData;
+            supportsPlayStationStoreMetadata && hasPlayStationStoreData;
           const hasRpcs3WikiTarget =
             supportsRpcs3WikiMetadata &&
             !!String(target.displayName || target.name || "").trim();
@@ -32477,12 +33332,17 @@
               return "Xbox PC";
             case "retroachievements":
               return "RetroAchievements";
+            case "ps4recomp": return "PS4 Recomp";
+            case "pcports": return "PC Ports";
+            case "x360recomp": return "Xbox 360 Recomp";
             case "xenia":
               return "Xenia";
             case "rpcs3":
               return "RPCS3";
             case "shadps4":
               return "PS4";
+            case "kytyps5":
+              return "PS5 (KytyPS5)";
             case "markerpatch":
               return "MarkerPatch";
             case "madnesspatch":
@@ -32814,7 +33674,9 @@
                 custom_header_path: String(it.custom_header_path || "").trim(),
                 headerImagePath: String(it.headerImagePath || "").trim(),
                 headerImageMtime: Number(it.headerImageMtime) || 0,
-                img: customCoverPath ? fallbackIcon : cachedImg || fallbackIcon,
+                img: it.portraitImagePath
+                  ? withDashboardImageMtime(fileUrl(it.portraitImagePath), it.portraitImageMtime)
+                  : customCoverPath ? fallbackIcon : cachedImg || fallbackIcon,
                 hasCachedImg: !customCoverPath && Boolean(cachedImg),
               };
             });
@@ -33016,8 +33878,9 @@
                     meta.data.platform = platform;
                     meta.element.dataset.platform = platform;
                   }
+                  const isCurrentPortrait = beginDashboardPortraitRefresh(meta.img);
                   const applyDashboardImg = (img, src, options = {}) => {
-                    applyDashboardCardImage(img, src, options);
+                    if (isCurrentPortrait()) applyDashboardCardImage(img, src, options);
                   };
                   const customCoverPath = String(
                     cfg?.custom_cover_path || "",
@@ -33025,9 +33888,9 @@
                   let imgSrc = null;
                   if (customCoverPath) {
                     imgSrc =
-                      (await window.__resolveRenderableCustomCoverSrc?.(
-                        customCoverPath,
-                      )) || null;
+                      appid
+                        ? await resolveDashboardPortraitSrc(appid, normalizedPlatform || null, it.name)
+                        : (await window.__resolveRenderableCustomCoverSrc?.(customCoverPath)) || null;
                     if (imgSrc) {
                       applyDashboardImg(meta.img, imgSrc);
                       attachDashboardCardImageErrorHandler(
@@ -33048,57 +33911,25 @@
                       appid,
                       normalizedPlatform,
                     );
-                    if (meta.data?.hasCachedImg && meta.data?.img) {
-                      try {
-                        const p = await window.api.checkLocalGameImage(
-                          appid,
-                          normalizedPlatform || null,
-                        );
-                        imgSrc = p ? fileUrl(p) : null;
-                      } catch {
-                        imgSrc = null;
-                      }
+                    try {
+                      imgSrc = await resolveDashboardPortraitSrc(appid, normalizedPlatform || null);
+                    } catch {
+                      imgSrc = null;
+                    }
+                    if (isCurrentPortrait()) {
                       if (imgSrc) {
                         dashboardImageCache.set(dashboardCacheKey, imgSrc);
-                        localStorage.setItem(
-                          IMG_CACHE_PREFIX + it.name,
-                          imgSrc,
-                        );
+                        localStorage.setItem(IMG_CACHE_PREFIX + it.name, imgSrc);
                       } else {
                         dashboardImageCache.delete(dashboardCacheKey);
                         localStorage.removeItem(IMG_CACHE_PREFIX + it.name);
-                        clearDashboardCoverEnsureState(
-                          appid,
-                          normalizedPlatform || null,
-                        );
-                      }
-                    } else if (dashboardImageCache.has(dashboardCacheKey)) {
-                      imgSrc = dashboardImageCache.get(dashboardCacheKey);
-                    } else {
-                      try {
-                        const p = await window.api.checkLocalGameImage(
-                          appid,
-                          normalizedPlatform || null,
-                        );
-                        imgSrc = p ? fileUrl(p) : null;
-                      } catch {
-                        imgSrc = null;
-                      }
-                      if (imgSrc) {
-                        dashboardImageCache.set(dashboardCacheKey, imgSrc);
-                        localStorage.setItem(
-                          IMG_CACHE_PREFIX + it.name,
-                          imgSrc,
-                        );
-                      } else {
-                        dashboardImageCache.delete(dashboardCacheKey);
-                        localStorage.removeItem(IMG_CACHE_PREFIX + it.name);
+                        clearDashboardCoverEnsureState(appid, normalizedPlatform || null);
                       }
                     }
 
                     if (imgSrc) {
                       applyDashboardImg(meta.img, imgSrc);
-                      localStorage.setItem(IMG_CACHE_PREFIX + it.name, imgSrc);
+                      if (isCurrentPortrait()) localStorage.setItem(IMG_CACHE_PREFIX + it.name, imgSrc);
                     } else {
                       applyDashboardImg(meta.img, fallbackIcon);
                     }
@@ -36736,7 +37567,17 @@
                   ...new Set([...prevNames, ...newlyEarned.map((a) => a.name)]),
                 ]),
               );
-              await window.loadLocalCover?.(String(appid));
+              // A background game's update must not replace the selected cover.
+              const activeConfig = sanitizeConfigName(
+                document.getElementById("configList")?.value || "",
+              );
+              if (sameAsActive && activeConfig === cfgSanitized) {
+                await window.loadLocalCover?.(
+                  String(appid),
+                  notificationConfig?.platform || null,
+                  { configName: cfg },
+                );
+              }
             }
           }
           localStorage.setItem(K, String(unlocked));

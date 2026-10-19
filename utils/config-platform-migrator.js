@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { schemaHasNativePlatinum } = require("./platinum-summary");
 
 const VALID_PLATFORMS = new Set([
   "steam",
@@ -13,9 +14,13 @@ const VALID_PLATFORMS = new Set([
   "gog-official",
   "xbox-pc",
   "retroachievements",
+  "x360recomp",
+  "ps4recomp",
+  "pcports",
   "xenia",
   "rpcs3",
   "shadps4",
+  "kytyps5",
   "markerpatch",
   "madnesspatch",
   "xlivelessness",
@@ -52,6 +57,7 @@ function sanitizeAppIdForPlatform(value, platform) {
   const raw = String(value || "").trim();
   if (!raw) return "";
   const normalized = normalizePlatform(platform);
+  if (["ps4recomp", "pcports"].includes(normalized)) return /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(raw) ? raw.toLowerCase() : "";
   if (normalized === "epic-official") {
     return sanitizeEpicOfficialAppId(raw);
   }
@@ -70,11 +76,15 @@ function sanitizeAppIdForPlatform(value, platform) {
       ? raw
       : "";
   }
+  if (normalized === "kytyps5") {
+    return /^PPSA\d+(?:-s\d{1,2})?$/i.test(raw) ? raw.toUpperCase().replace(/-S/, "-s") : "";
+  }
   if (normalized === "xenia") {
     if (/^0x[0-9a-f]+$/i.test(raw)) return raw.slice(2);
     if (/^[0-9a-f]+$/i.test(raw)) return raw;
     return raw;
   }
+  if (normalized === "x360recomp") return /^[0-9a-f]{8}$/i.test(raw) ? raw.toUpperCase() : "";
   if (normalized === "xlivelessness") {
     return /^[0-9a-f]{8}$/i.test(raw) ? raw.toUpperCase() : "";
   }
@@ -82,6 +92,10 @@ function sanitizeAppIdForPlatform(value, platform) {
 }
 
 function inferOfficialPlatformFromMarkers(config = {}) {
+  if (config?.ps4_recomp_game && config?.ps4_recomp_install_root) return "ps4recomp";
+  if (config?.pc_port_game && config?.pc_port_install_root) return "pcports";
+  if (config?.x360_recomp_title_id && config?.x360_recomp_install_root) return "x360recomp";
+  if (config?.kytyps5_title_id && config?.kytyps5_emulator_root) return "kytyps5";
   const configPath = String(config?.config_path || "").trim().toLowerCase();
   const schemaNeedle = `${path.sep}schema${path.sep}`;
   if (configPath.includes(`${schemaNeedle}steam-official${path.sep}`)) {
@@ -242,7 +256,7 @@ function inferPlatformAndSteamId({ config, mapping }) {
     platform === "xlivelessness"
   ) {
     steamAppId = "";
-  } else if (platform === "xenia" || platform === "rpcs3") {
+  } else if (platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp" || platform === "xenia" || platform === "rpcs3" || platform === "kytyps5") {
     steamAppId = "";
   }
 
@@ -304,7 +318,23 @@ function migrateConfigPlatforms({
       data.steamAppId !== undefined ? String(data.steamAppId) : undefined;
     const prevPlatform = data.platform;
 
+    let nativePlatinumChanged = false;
+    if (["rpcs3", "shadps4", "ps4recomp"].includes(nextPlatform) && data.config_path) {
+      try {
+        const entries = JSON.parse(fs.readFileSync(
+          path.join(data.config_path, "achievements.json"), "utf8",
+        ));
+        // Missing, unreadable or empty schemas cannot establish trophy support.
+        if (Array.isArray(entries) && entries.length > 0) {
+          const nativePlatinum = schemaHasNativePlatinum(entries);
+          nativePlatinumChanged = data.native_platinum !== nativePlatinum;
+          if (nativePlatinumChanged) data.native_platinum = nativePlatinum;
+        }
+      } catch {}
+    }
+
     const needsUpdate =
+      nativePlatinumChanged ||
       nextPlatform !== prevPlatform ||
       nextSteamAppId !== prevSteamAppId ||
       !VALID_PLATFORMS.has(normalizePlatform(prevPlatform));
@@ -488,6 +518,7 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
         sanitizeAppId(data?.appId) ||
         sanitizeAppId(data?.steamAppId);
       if (!appid) continue;
+      if (platform === "ps4recomp" || platform === "x360recomp" || platform === "pcports") continue;
     const storagePlatform =
       platform === "uplay"
         ? "uplay"
@@ -513,6 +544,8 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
                   ? "rpcs3"
                   : platform === "shadps4"
                     ? "shadps4"
+                    : platform === "kytyps5"
+                      ? "kytyps5"
                     : platform === "markerpatch"
                       ? "markerpatch"
                     : platform === "madnesspatch"

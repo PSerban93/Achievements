@@ -1,23 +1,6 @@
 const axios = require("axios");
-const { generationResult } = require("./emulator-generation-result");
-
-function isPositiveNumericId(appid, maximum) {
-  const raw = String(appid ?? "").trim();
-  if (!/^\d+$/.test(raw)) return false;
-  const id = raw.replace(/^0+(?=\d)/, "");
-  return id !== "0" && (id.length < maximum.length ||
-    (id.length === maximum.length && id <= maximum));
-}
-
-// Validate each provider independently: Steam AppIDs are uint32, while
-// GOG product IDs are uint64. Compare strings to preserve integer precision.
-function isSteamAppId(appid) {
-  return isPositiveNumericId(appid, "4294967295");
-}
-
-function isGogProductId(appid) {
-  return isPositiveNumericId(appid, "18446744073709551615");
-}
+const { reportSchemaDownloadError } = require("./schema-download-warning");
+const { generationResult, isSteamAppId, isGogProductId } = require("./emulator-generation-result");
 
 async function readPublicJson(url) {
   // A failed request is never converted into a valid empty payload.
@@ -35,6 +18,7 @@ async function readPublicJson(url) {
       }
       return { data: response.data, httpStatus: response.status };
     } catch (error) {
+      reportSchemaDownloadError(error, "game-catalog");
       if (attempt >= 1 || !/timeout|ECONNRESET|ETIMEDOUT|HTTP 429|HTTP 5\d\d|status code 5\d\d/i.test(error.message)) throw error;
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }

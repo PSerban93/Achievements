@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { createLogger } = require("./logger");
+const { schemaHasNativePlatinum } = require("./platinum-summary");
 const {
   parseTrophySetDir,
   buildSnapshotFromTrophy,
@@ -24,6 +25,7 @@ const RPCS3_CONFIG_FIELDS = [
   "displayName",
   "appid",
   "platform",
+  "native_platinum",
   "config_path",
   "save_path",
   "trophy_path",
@@ -745,6 +747,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
     displayName: ensureRpcs3DisplayName(title),
     appid: String(appid),
     platform: "rpcs3",
+    native_platinum: schemaHasNativePlatinum(currentEntries),
     config_path: schemaDir,
     save_path: trophyDir,
     trophy_path: trophyDir,

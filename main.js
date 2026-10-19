@@ -11,6 +11,13 @@ const {
   Notification,
   nativeImage,
 } = require("electron");
+const x360Recomp = require("./utils/x360-recomp-state");
+const ps4Recomp = require("./utils/ps4-recomp");
+const pcPorts = require("./utils/pc-ports");
+const x360RecompArt = require("./utils/x360-recomp-art");
+const kytyTrophy = require("./utils/kytyps5-trophy");
+const { refreshKytySchemaRarity } = require("./utils/kytyps5-rarity");
+const { supportsConfig: supportsPcPortRarity, refreshPcPortSchemaRarity } = require("./utils/pc-ports-rarity");
 // Polyfill File for environments where undici expects it (Electron main may lack global File)
 if (typeof globalThis.File === "undefined") {
   const { Blob } = require("buffer");
@@ -93,8 +100,10 @@ const {
   isVerifiedSummaryComplete,
   shouldResetPlatinumFromSummary,
 } = require("./utils/platinum-summary");
+const { createUplayNameResolver } = require("./utils/uplay-achievement-identity");
 const {
   getRareTestRarityTiers,
+  normalizeTrophyModeThresholds,
   resolveTrophyModeTier,
   shouldUseRareNotificationProfile,
 } = require("./utils/trophy-mode");
@@ -208,6 +217,10 @@ const {
   ensureSchemaParseRuntimeReady,
   startSchemaParseBootPreparation,
 } = require("./utils/steam-schema-parse");
+const {
+  attachSchemaParseCoordinator,
+  IPC_ENV: SCHEMA_PARSE_IPC_ENV,
+} = require("./utils/schema-parse-coordinator");
 const {
   startPlaytimeLogWatcher,
   cacheHeaderImage,
@@ -1043,7 +1056,9 @@ function mergeSanRuntimeDefaults(customisation = {}) {
   const defaultIcons = {};
 
   for (const [key, value] of Object.entries(runtimeDefaults)) {
-    defaultIcons[key] = resolveSanRuntimeAssetValue(value);
+    // Text rows are semantic lists, not runtime asset path segments.
+    defaultIcons[key] = key === "elems" || key === "sselems"
+      ? [...value] : resolveSanRuntimeAssetValue(value);
   }
 
   const mergedIcons = {
@@ -1055,6 +1070,18 @@ function mergeSanRuntimeDefaults(customisation = {}) {
   if (customisation.preset && customisation.preset !== presetKey) {
     customIcons[customisation.preset] = mergedIcons;
   }
+
+  const standardBorder = (field, fileName) => {
+    const selected = String(customisation[field] || "");
+    const bundled = sanRuntimeAssetIfExists("img", fileName);
+    if (!selected) return bundled;
+    // Imported SAN presets can reference the author's installation. Restore only
+    // recognised stock borders; valid packed/custom artwork keeps priority.
+    if (!/^(?:https?:|data:|file:)/i.test(selected) &&
+        path.win32.basename(selected).toLowerCase() === fileName.toLowerCase() &&
+        !fs.existsSync(selected)) return bundled || selected;
+    return selected;
+  };
 
   return {
     ...customisation,
@@ -1072,15 +1099,9 @@ function mergeSanRuntimeDefaults(customisation = {}) {
     maskimg:
       customisation.maskimg ||
       sanRuntimeAssetIfExists("img", "san_trophy_mask.png"),
-    iconborderimg:
-      customisation.iconborderimg ||
-      sanRuntimeAssetIfExists("img", "saniconborder.png"),
-    iconborderimgbronze:
-      customisation.iconborderimgbronze ||
-      sanRuntimeAssetIfExists("img", "saniconborder_bronze.png"),
-    iconborderimgsilver:
-      customisation.iconborderimgsilver ||
-      sanRuntimeAssetIfExists("img", "saniconborder_silver.png"),
+    iconborderimg: standardBorder("iconborderimg", "saniconborder.png"),
+    iconborderimgbronze: standardBorder("iconborderimgbronze", "saniconborder_bronze.png"),
+    iconborderimgsilver: standardBorder("iconborderimgsilver", "saniconborder_silver.png"),
     percentbadgeimgbronze:
       customisation.percentbadgeimgbronze ||
       sanRuntimeAssetIfExists("img", "sanlogotrophy_bronze.svg"),
@@ -1156,7 +1177,12 @@ function buildSanThemeForNotification(sanPresetId, notificationScale = 1, absolu
   const baselineHeight = Math.max(90, Math.ceil((baseDimensions.height + baselinePadding * 2) * sanScale));
   // SAN uses viewport units for its root font. Extra paint space must not
   // increase typography, icon shadows or glow radii along with the window.
-  const runtimeFontSize = Math.min(200, Math.max(0.8, 0.8 + 0.03 * Math.max(baselineWidth, baselineHeight)));
+  // The minimum transparent window size is not a minimum notification scale.
+  // At 50%, typography must shrink with the plate instead of using a 260px
+  // viewport font that clips text inside the smaller notification.
+  const typographyWidth = Math.ceil((baseDimensions.width + baselinePadding * 2) * sanScale);
+  const typographyHeight = Math.ceil((baseDimensions.height + baselinePadding * 2) * sanScale);
+  const runtimeFontSize = Math.min(200, Math.max(0.8, 0.8 + 0.03 * Math.max(typographyWidth, typographyHeight)));
   const finite = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
   const animatedGlow = customisation.glowanim && customisation.glowanim !== "off";
   const glowExtent = sanTruthy(customisation.glow)
@@ -2389,15 +2415,26 @@ const DEFAULT_PREFERENCES = {
   disablePlaytime: false,
   showNotificationRarityPercentage: true,
   trophyModeEnabled: false,
+  trophyModeGoldThreshold: 20,
+  trophyModeSilverThreshold: 50,
   progressPosition: "bottom-left",
   progressNotificationMethod: "animated",
   useSanPreset: false,
   sanPreset: "",
   rareSanPreset: "",
   platinumSanPreset: "",
+  ps4recompSanPreset: "",
+  ps4recompSound: "mute",
+  ps4recompPreset: "default",
+  ps4recompPosition: "center-bottom",
+  x360recompSanPreset: "",
+  x360recompSound: "mute",
+  x360recompPreset: "default",
+  x360recompPosition: "center-bottom",
   xeniaSanPreset: "",
   rpcs3SanPreset: "",
   shadps4SanPreset: "",
+  kytyps5SanPreset: "",
   rareSound: "mute",
   rarePreset: "default",
   rarePosition: "center-bottom",
@@ -2410,6 +2447,9 @@ const DEFAULT_PREFERENCES = {
   shadps4Sound: "mute",
   shadps4Preset: "default",
   shadps4Position: "center-bottom",
+  kytyps5Sound: "mute",
+  kytyps5Preset: "default",
+  kytyps5Position: "center-bottom",
   platinumSound: "mute",
   platinumPreset: "default",
   platinumPosition: "center-bottom",
@@ -2508,6 +2548,7 @@ function mergeWithDefaultPreferences(prefs = {}) {
   );
   merged.dashboardCardLayout =
     merged.dashboardCardLayout === "landscape" ? "landscape" : "portrait";
+  Object.assign(merged, normalizeTrophyModeThresholds(merged));
   return merged;
 }
 
@@ -2740,7 +2781,7 @@ function buildBlacklistPayload({
   };
 }
 
-function persistBlacklist({ appIds = [], configKeys = [] } = {}) {
+function persistBlacklist({ appIds = [], configKeys = [], generationResults = null } = {}) {
   const nextAppIds = Array.from(
     new Set((appIds || []).map(normalizeAppIdValue).filter(Boolean)),
   );
@@ -2750,9 +2791,25 @@ function persistBlacklist({ appIds = [], configKeys = [] } = {}) {
     ),
   );
   try {
+    // Keep automatic lookup evidence only while its scoped blacklist entry exists.
+    // Removing/resetting the blacklist also removes the corresponding evidence.
+    const previousResults = readPrefsSafe().blacklistedGenerationResults;
+    const mergedResults = {
+      ...(previousResults && typeof previousResults === "object" && !Array.isArray(previousResults)
+        ? previousResults : {}),
+      ...(generationResults || {}),
+    };
+    const retainedResults = {};
+    for (const key of nextConfigKeys) {
+      const evidence = mergedResults[key];
+      if (["not-found", "identified-no-achievements"].includes(evidence?.status)) {
+        retainedResults[key] = evidence;
+      }
+    }
     const prefs = updatePreferences({
       [BLACKLIST_PREF_KEY]: nextAppIds,
       [BLACKLIST_CONFIG_PREF_KEY]: nextConfigKeys,
+      blacklistedGenerationResults: retainedResults,
     });
     return buildBlacklistPayload({
       appIds: Array.isArray(prefs?.[BLACKLIST_PREF_KEY])
@@ -3921,6 +3978,13 @@ function notifyWarn(message) {
   }
 }
 
+const { configureSchemaDownloadNotifications, createSchemaDownloadWarningReceiver } = require("./utils/schema-download-warning");
+configureSchemaDownloadNotifications(({ appid, displayName }) => {
+  notifyWarn(tUi("main.message.schemaConnectionProblem", {
+    game: displayName || tUi("main.message.schemaUnknownGame", {}, "Game"), appid,
+  }, "A connection problem occurred while downloading the schema for “{game}” ({appid})."));
+});
+
 const infoOnceKeys = new Set();
 function infoOnce(key, message) {
   if (infoOnceKeys.has(key)) return;
@@ -4684,6 +4748,15 @@ ipcMain.handle("app:update-install", async () => {
   }
   updateLogger.info("app-update:install-now", {});
   isQuitting = true;
+  // electron-updater starts its installer before app.quit(). Finish clips before
+  // handing control to it, using the same bounded drain as an ordinary quit.
+  pendingAchievementRecordQueue.clear("app-update-install");
+  await require("./utils/achievement-recorder-quit").drainAchievementRecorderForQuit(
+    achievementRecorderController,
+    { reportError: (error) => recordLogger.warn("achievement-recorder:quit-drain-failed", {
+      error: error?.message || String(error),
+    }) },
+  );
   autoUpdater.quitAndInstall();
   return { success: true };
 });
@@ -5855,6 +5928,11 @@ function setOverlayInteractive(next) {
   applyOverlayInputMode();
   applyOverlayFocusMode();
   applyOverlayKeyboardScrollShortcutRegistration();
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    try {
+      overlayWindow.webContents.send("overlay:interactive-state", { interactive: overlayInteractive });
+    } catch {}
+  }
   overlayLogger.debug("overlay:interactive:set", {
     next: overlayInteractive,
     presented: overlayPresented,
@@ -6765,11 +6843,25 @@ function applyPreferenceSideEffects(
   }
   const gameCoverPresetKeys = [
     "preset",
+    "useSanPreset",
+    "sanPreset",
     "rarePreset",
+    "rareSanPreset",
     "platinumPreset",
+    "platinumSanPreset",
+    "ps4recompPreset",
+    "ps4recompSanPreset",
+    "x360recompPreset",
+    "x360recompSanPreset",
     "xeniaPreset",
+    "xeniaSanPreset",
     "rpcs3Preset",
+    "rpcs3SanPreset",
     "shadps4Preset",
+    "shadps4SanPreset",
+    "kytyps5Preset",
+    "kytyps5SanPreset",
+    "trophyModeEnabled",
   ];
   if (
     gameCoverPresetKeys.some((key) =>
@@ -6823,10 +6915,12 @@ function applyPreferenceSideEffects(
       });
     }
   }
-  if (Object.prototype.hasOwnProperty.call(patch, "trophyModeEnabled")) {
+  if (["trophyModeEnabled", "trophyModeGoldThreshold", "trophyModeSilverThreshold"]
+      .some((key) => Object.prototype.hasOwnProperty.call(patch, key))) {
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       overlayWindow.webContents.send("overlay-preferences-updated", {
         trophyModeEnabled: prefsSnapshot.trophyModeEnabled === true,
+        ...normalizeTrophyModeThresholds(prefsSnapshot),
       });
     }
   }
@@ -7636,11 +7730,52 @@ function getAchievementRecorderController() {
     recordLogger.info("achievement-recorder:render-completed", details);
     clearAchievementRecorderRenderWatchdog(generation);
   });
+  achievementRecorderController.on("render-profile", (details) => {
+    recordLogger.info("achievement-recorder:render-profile", details);
+  });
+  for (const event of ["resource-stats", "render-deferred", "render-scheduling", "encoder-selected", "frame-rate-adjusted", "audio-capture-started"]) {
+    achievementRecorderController.on(event, (details) => {
+      recordLogger.info(`achievement-recorder:${event}`, details);
+    });
+  }
+  achievementRecorderController.on("video-backpressure", (details) => {
+    recordLogger.warn("achievement-recorder:video-backpressure", details);
+  });
+  for (const event of ["frame-rate-fallback", "pipeline-failed", "pipeline-stop-timeout", "audio-discontinuity", "audio-encoder-stalled", "keyframe-request-failed", "save-drain-failed"]) {
+    achievementRecorderController.on(event, (details) => {
+      recordLogger.warn(`achievement-recorder:${event}`, details);
+    });
+  }
+  achievementRecorderController.on("nominal-rate-fallback", (details) => {
+    recordLogger.warn("achievement-recorder:nominal-rate-fallback", details);
+  });
+  const recorderRateWarnings = new Set();
+  for (const event of ["frame-rate-observed", "frame-rate-applied"]) {
+    achievementRecorderController.on(event, (details) => {
+      recorderRateWarnings.clear();
+      recordLogger.info(`achievement-recorder:${event}`, details);
+    });
+  }
+  achievementRecorderController.on("ready", () => recorderRateWarnings.clear());
+  achievementRecorderController.on("frame-rate-query-failed", (details) => {
+    recordLogger.warn("achievement-recorder:frame-rate-query-failed", details);
+  });
+  achievementRecorderController.on("frame-rate-rejected", (details) => {
+    recordLogger.warn("achievement-recorder:frame-rate-rejected", details);
+    const key = `${details?.requestedFps}:${details?.effectiveFps}`;
+    if (recorderRateWarnings.has(key)) return;
+    recorderRateWarnings.add(key);
+    sendConsoleMessageToUI(tUi("main.notify.recordRateChangeFailed", {},
+      "The recording frame rate could not be updated. Recording continues with the previous profile."), "#FF9800");
+  });
   achievementRecorderController.on("protocol-error", (details) => {
     recordLogger.warn("achievement-recorder:protocol-error", details);
   });
   achievementRecorderController.on("audio-capture-failed", (details) => {
     recordLogger.warn("achievement-recorder:audio-capture-failed", details);
+  });
+  achievementRecorderController.on("audio-capture-retry", (details) => {
+    recordLogger.warn("achievement-recorder:audio-capture-retry", details);
   });
   achievementRecorderController.on("audio-capture-disabled", (details) => {
     recordLogger.warn("achievement-recorder:audio-capture-disabled", details);
@@ -7712,6 +7847,10 @@ function getAchievementRecorderController() {
       code: error?.code || null,
       error: error?.message || String(error),
     });
+    if (error?.code === "recorder-unsupported-profile") {
+      sendConsoleMessageToUI(tUi("main.notify.recordProfileUnsupported", {},
+        "Windows cannot use the selected recording profile. Change the recording settings and try again."), "#FF9800");
+    }
   });
   achievementRecorderController.on("exit", (details) => {
     if (details?.stale !== true) {
@@ -7746,7 +7885,7 @@ function syncAchievementRecorderState(
     prefs,
     configName: selectedConfig,
     configMode: selectedConfigMode,
-  });
+  }) && !isQuitting;
   if (!enabled && !achievementRecorderController) {
     recordLogger.info("achievement-recorder:disabled", {
       reason,
@@ -7857,11 +7996,15 @@ async function captureAchievementUnlockRecord(
   notificationData = {},
   options = {},
 ) {
+  // Retain the original trigger time through path preparation, startup and
+  // pending auto-selection; this is private recording data, not preset data.
+  const recordEventAtUnixMs = notificationData.recordEventAtUnixMs ?? Date.now();
+  notificationData = { ...notificationData, recordEventAtUnixMs };
   if (
+    isQuitting ||
     process.platform !== "win32" ||
     cachedPreferences?.disableAchievementRecords !== false ||
-    notificationData?.isTest === true ||
-    notificationData?.isPlatinum === true
+    notificationData?.isTest === true
   ) {
     return null;
   }
@@ -7888,6 +8031,7 @@ async function captureAchievementUnlockRecord(
     );
     const result = await getAchievementRecorderController().trigger({
       outputPath,
+      eventAtUnixMs: recordEventAtUnixMs,
     });
     recordLogger.info("achievement-recorder:record-requested", {
       id: result.id,
@@ -7979,13 +8123,22 @@ async function runAchievementsGenerator(
       stdio: ["pipe", "pipe", "pipe", "ipc"],
       env: {
         ...process.env,
+        [SCHEMA_PARSE_IPC_ENV]: "1",
         LOGGER_DIR: logDir,
         LOGGER_SUPPRESS_CLEAR: "1",
       },
       windowsHide: true,
     });
+    attachSchemaParseCoordinator(cp, { userDataDir, schemaRoot: schemaBaseDir });
 
     // forward logs to UI (same topic as auto-configs)
+    const receiveDownloadWarning = createSchemaDownloadWarningReceiver();
+    let settled = false;
+    const finishGeneration = (code) => {
+      if (settled) return;
+      settled = true;
+      code === 0 ? resolve() : reject(new Error(`Code: ${code}`));
+    };
     const flushLines = (chunk, level) => {
       String(chunk)
         .split(/\r?\n/)
@@ -7997,6 +8150,11 @@ async function runAchievementsGenerator(
 
     cp.on("message", (msg) => {
       if (!msg) return;
+      if (receiveDownloadWarning(msg)) return;
+      if (msg.type === "achgen:complete") {
+        finishGeneration(msg.ok ? 0 : 1);
+        return;
+      }
       if (msg.type === "achgen:progress") {
         try {
           if (typeof opts.onProgress === "function") {
@@ -8023,10 +8181,12 @@ async function runAchievementsGenerator(
       const lvl = (msg.level || "info").toLowerCase();
       pushAchgen(lvl, line);
     });
-    cp.on("error", reject);
-    cp.on("close", (code) =>
-      code === 0 ? resolve() : reject(new Error(`Code: ${code}`)),
-    );
+    cp.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    });
+    cp.on("close", finishGeneration);
   });
 }
 
@@ -8168,9 +8328,18 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   appid = sanitizedAppId;
 
   const schemaBase = SCHEMA_ROOT_PATH; // %APPDATA%\Achievements\configs\schema
+  if (normalizedPlatform === "ps4recomp" || normalizedPlatform === "x360recomp" || normalizedPlatform === "pcports") {
+    const configFiles = fs.readdirSync(configsDir).filter((file) => file.endsWith(".json"));
+    for (const file of configFiles) {
+      const cfg = readJsonSafe(path.join(configsDir, file));
+      if (cfg?.platform === normalizedPlatform && String(cfg.appid) === String(appid) &&
+          fs.existsSync(path.join(cfg.config_path || "", "achievements.json"))) return cfg.config_path;
+    }
+    return null;
+  }
   const destDir = resolveSchemaDirForPlatform(appid, normalizedPlatform);
   const achJson = path.join(destDir, "achievements.json");
-  if (normalizedPlatform === "xenia") {
+  if (normalizedPlatform === "xenia" || normalizedPlatform === "kytyps5") {
     if (fs.existsSync(achJson)) {
       return { dir: destDir, existed: true };
     }
@@ -8470,7 +8639,7 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
 }
 
 /* <root>/<gameName>/<displayName>.png (timestamp if exists) */
-async function saveFullScreenShot(gameName, achDisplayName) {
+async function saveFullScreenShot(gameName, achDisplayName, options = {}) {
   if (process.platform !== "win32" && !screenshot) {
     throw new Error("screenshot-desktop is not installed");
   }
@@ -8483,7 +8652,12 @@ async function saveFullScreenShot(gameName, achDisplayName) {
   });
   ensureDir(gameFolder);
   await enqueueScreenshotCaptureTask(
-    () => captureFullScreenShotInWorker(filePath),
+    async () => {
+      // The queue may have waited behind another PNG encoder. Revalidate the
+      // actual notification frame immediately before starting the helper.
+      await options.beforeCapture?.();
+      return captureFullScreenShotInWorker(filePath, { validateFrame: options.beforeCapture });
+    },
     {
       gameName,
       achievement: achDisplayName,
@@ -8516,6 +8690,7 @@ function pumpScreenshotCaptureQueue() {
   screenshotCaptureInFlight = true;
   notificationLogger.info("notification:screenshot:queue-run", {
     queuedRemaining: screenshotCaptureQueue.length,
+    queueWaitMs: Date.now() - next.enqueuedAt,
     gameName: next.meta.gameName || null,
     achievement: next.meta.achievement || null,
   });
@@ -8535,6 +8710,7 @@ function enqueueScreenshotCaptureTask(task, meta = {}) {
   return new Promise((resolve, reject) => {
     screenshotCaptureQueue.push({
       task,
+      enqueuedAt: Date.now(),
       resolve,
       reject,
       meta: meta && typeof meta === "object" ? meta : {},
@@ -8566,6 +8742,7 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
       outputPath,
       timeoutMs,
       enableHdrScreenshots: cachedPreferences?.enableHdrScreenshots === true,
+      validateFrame: typeof options.validateFrame === "function",
     });
     const cp = fork(script, [payload], {
       stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -8599,6 +8776,16 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
     });
     cp.on("message", (message) => {
       if (!message || typeof message !== "object") return;
+      if (message.type === "capture:validate-frame") {
+        // Recheck after worker startup and again before an HDR -> SDR fallback.
+        // A slow or failed HDR attempt must not capture a later notification.
+        Promise.resolve().then(() => options.validateFrame?.()).then(
+          () => { if (!settled && cp.connected) cp.send({ type: "capture:frame-valid", valid: true }); },
+          (error) => { if (!settled && cp.connected) cp.send({ type: "capture:frame-valid", valid: false,
+            error: error?.message || String(error) }); },
+        ).catch((error) => finish(error));
+        return;
+      }
       if (message.ok) {
         reportedSuccessPath = message.outputPath || outputPath;
         notificationLogger.info("notification:screenshot:capture-backend", {
@@ -9877,6 +10064,7 @@ const SAN_DESIGNER_BOOLEAN_FIELDS = new Set([
   "glow",
   "glowrarity",
   "iconanim",
+  "iconanimrarity",
   "iconborderrarity",
   "mask",
   "ovmatch",
@@ -9935,6 +10123,7 @@ const SAN_DESIGNER_NUMBER_RANGES = Object.freeze({
   percentbadgex: [-50, 50],
   percentbadgey: [-50, 50],
   percentpos: [0, 3],
+  rarethreshold: [0, 100],
   roundness: [0, 100],
   scale: [10, 300],
   textvspace: [-100, 100],
@@ -9954,6 +10143,12 @@ const SAN_DESIGNER_COLOR_FIELDS = new Set([
   "glowcolorsilver",
   "iconanimcolor",
   "iconshadowcolor",
+  "iconanimcolorbronze",
+  "iconanimcolorsilver",
+  "iconanimcolorgold",
+  "iconshadowcolorbronze",
+  "iconshadowcolorsilver",
+  "iconshadowcolorgold",
   "outlinecolor",
   "percentbadgecolor",
   "percentbadgefontcolor",
@@ -9984,6 +10179,9 @@ const SAN_DESIGNER_ASSET_FIELDS = new Set([
   "gameIconImage",
   "logoImage",
   "decorationImage",
+  "decorationBronzeImage",
+  "decorationSilverImage",
+  "decorationGoldImage",
   "hiddenIndicatorImage",
   "maskImage",
   "iconBorderImage",
@@ -10002,6 +10200,10 @@ function getSanDesignerAssetLabels(customisation = {}) {
   const preset = String(customisation.preset || "default").toLowerCase();
   const icons = customisation.customicons || {};
   const activeIcons = icons[customisation.preset] || icons[preset] || {};
+  const decoration = Object.prototype.hasOwnProperty.call(activeIcons, "decoration")
+    ? activeIcons.decoration
+    : resolveSanRuntimeAssetValue(SAN_DEFAULT_PRESET_ICONS[preset]?.decoration);
+  const decorationTier = (index) => Array.isArray(decoration) ? decoration[index] : decoration;
   const label = (value) => {
     const first = Array.isArray(value) ? value.find(Boolean) : value;
     return first ? path.basename(String(first)) : "";
@@ -10009,7 +10211,10 @@ function getSanDesignerAssetLabels(customisation = {}) {
   return {
     backgroundImage: label(customisation.bgimg),
     logoImage: label(activeIcons.logo),
-    decorationImage: label(activeIcons.decoration),
+    decorationImage: label(Array.isArray(decoration) ? decoration[0] : decoration),
+    decorationBronzeImage: label(decorationTier(0)),
+    decorationSilverImage: label(decorationTier(1)),
+    decorationGoldImage: label(decorationTier(2)),
     hiddenIndicatorImage: label(customisation.hiddenicon),
     maskImage: label(customisation.maskimg),
     iconBorderImage: label(customisation.iconborderimg),
@@ -10059,9 +10264,18 @@ ipcMain.handle("presets:choose-san-asset", async (event, assetField) => {
     return { ok: false, canceled: true };
   const selectedPath = result.filePaths[0];
   let iconContent = null;
+  let assetContent = null;
+  let assetExtension = "";
   try {
     const ext = path.extname(selectedPath).toLowerCase();
     const executable = gameIcon && ext === ".exe" && process.platform === "win32";
+    const allowed = font
+      ? new Set([".ttf", ".otf", ".woff", ".woff2"])
+      : new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif",
+          ...(gameIcon ? [".ico", ...(process.platform === "win32" ? [".exe"] : [])] : []),
+          ...(hiddenIndicator ? [".svg", ".ico"] : [])]);
+    if (!allowed.has(ext))
+      return { ok: false, error: "The selected preset asset is unavailable or unsupported." };
     const stat = fs.statSync(selectedPath);
     if (!stat.isFile() || (!executable && stat.size > 12 * 1024 * 1024))
       return { ok: false, error: "The selected asset must be a file under 12 MB (executables are exempt)." };
@@ -10071,6 +10285,17 @@ ipcMain.handle("presets:choose-san-asset", async (event, assetField) => {
         : nativeImage.createFromPath(selectedPath);
       if (image.isEmpty()) return { ok: false, error: "The selected file has no readable icon." };
       iconContent = image.toPNG();
+    } else {
+      const cacheRoot = path.resolve(getSanCacheFolder());
+      const relative = path.relative(cacheRoot, path.resolve(selectedPath));
+      if (relative && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) {
+        // Preview caches can disappear or be re-extracted after the file dialog
+        // closes. Keep the selected bytes for every preview, Test and Save.
+        assetContent = fs.readFileSync(selectedPath);
+        if (assetContent.length > 12 * 1024 * 1024)
+          return { ok: false, error: "The selected asset must be a file under 12 MB (executables are exempt)." };
+        assetExtension = ext;
+      }
     }
   } catch (error) {
     return { ok: false, error: error?.message || String(error) };
@@ -10083,6 +10308,8 @@ ipcMain.handle("presets:choose-san-asset", async (event, assetField) => {
   sanDesignerAssetSelections.set(token, {
     assetField,
     iconContent,
+    assetContent,
+    assetExtension,
     filePath: selectedPath,
     expiresAt: Date.now() + 4 * 60 * 60 * 1000,
   });
@@ -10096,8 +10323,9 @@ ipcMain.handle("presets:list-san-designer-templates", () =>
     .map(({ id, label }) => ({ id, label })),
 );
 
-function applySanDesignerAssets(zip, customisation, changes = {}) {
-  if (!changes || Object.keys(changes).length === 0) return;
+function applySanDesignerAssets(zip, customisation, changes = {}, decorationImageMode = "") {
+  const hasDecorationMode = ["single", "rarity"].includes(decorationImageMode);
+  if ((!changes || Object.keys(changes).length === 0) && !hasDecorationMode) return;
   const preset = String(customisation.preset || "default").toLowerCase();
   const icons =
     customisation.customicons && typeof customisation.customicons === "object"
@@ -10106,6 +10334,24 @@ function applySanDesignerAssets(zip, customisation, changes = {}) {
   const activeIcons = {
     ...(icons[customisation.preset] || icons[preset] || {}),
   };
+  if (hasDecorationMode) {
+    if (!Object.prototype.hasOwnProperty.call(activeIcons, "decoration")) {
+      // Materialise stock decorations when converting a built-in template to an
+      // editable single image/list. Keep the resulting archive portable.
+      const packDefault = (filePath) => {
+        if (!filePath || !fs.existsSync(filePath)) return "";
+        const entryName = `assets/${path.basename(filePath)}`;
+        if (!zip.getEntry(entryName)) zip.addFile(entryName, fs.readFileSync(filePath));
+        return entryName;
+      };
+      const defaults = resolveSanRuntimeAssetValue(SAN_DEFAULT_PRESET_ICONS[preset]?.decoration);
+      activeIcons.decoration = Array.isArray(defaults) ? defaults.map(packDefault) : packDefault(defaults);
+    }
+    const original = activeIcons.decoration;
+    activeIcons.decoration = decorationImageMode === "rarity"
+      ? Array.isArray(original) ? [...original] : [original || "", original || "", original || ""]
+      : Array.isArray(original) ? original[0] || null : original;
+  }
   const setAsset = (field, value) => {
     switch (field) {
       case "backgroundImage":
@@ -10126,6 +10372,20 @@ function applySanDesignerAssets(zip, customisation, changes = {}) {
           customisation.decorationpos = 1;
         }
         break;
+      case "decorationBronzeImage":
+      case "decorationSilverImage":
+      case "decorationGoldImage": {
+        const index = { decorationBronzeImage: 0, decorationSilverImage: 1, decorationGoldImage: 2 }[field];
+        const original = activeIcons.decoration;
+        const list = Array.isArray(original) ? [...original] : [original || "", original || "", original || ""];
+        list[index] = value;
+        activeIcons.decoration = list;
+        if (value) {
+          customisation.showdecoration = true;
+          if (!(Number(customisation.decorationpos) > 0)) customisation.decorationpos = 1;
+        }
+        break;
+      }
       case "hiddenIndicatorImage":
         // Empty restores SAN's bundled lock.svg through runtime defaults.
         customisation.hiddenicon = value;
@@ -10173,6 +10433,9 @@ function applySanDesignerAssets(zip, customisation, changes = {}) {
   };
   for (const [field, tokenValue] of Object.entries(changes || {})) {
     if (!SAN_DESIGNER_ASSET_FIELDS.has(field)) continue;
+    // Hidden selections from the other mode must not overwrite active artwork.
+    if (hasDecorationMode && (field === "decorationImage" ? decorationImageMode !== "single"
+      : ["decorationBronzeImage", "decorationSilverImage", "decorationGoldImage"].includes(field) && decorationImageMode !== "rarity")) continue;
     const token = String(tokenValue || "");
     if (!token) {
       setAsset(field, "");
@@ -10188,8 +10451,8 @@ function applySanDesignerAssets(zip, customisation, changes = {}) {
         "The selected preset asset expired. Choose the file again.",
       );
     }
-    let ext = ".png";
-    let content = selection.iconContent;
+    let ext = selection.assetExtension || ".png";
+    let content = selection.iconContent || selection.assetContent;
     if (!content) {
       const filePath = fs.realpathSync(selection.filePath);
       ext = path.extname(filePath).toLowerCase();
@@ -10331,17 +10594,18 @@ function applyNativeDesignerAssets(
         "The selected preset image expired. Choose the file again.",
       );
     }
-    const filePath = fs.realpathSync(
+    const assetContent = selection?.assetContent;
+    const filePath = assetContent ? "" : fs.realpathSync(
       catalogLogo?.filePath || selection.filePath,
     );
-    const ext = path.extname(filePath).toLowerCase();
-    const stat = fs.statSync(filePath);
+    const ext = assetContent ? selection.assetExtension : path.extname(filePath).toLowerCase();
+    const stat = assetContent ? null : fs.statSync(filePath);
     if (
       !new Set(field === "customFont" ? [".ttf", ".otf", ".woff", ".woff2"] : [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".avif"]).has(
         ext,
       ) ||
-      !stat.isFile() ||
-      stat.size > 12 * 1024 * 1024
+      (assetContent ? assetContent.length > 12 * 1024 * 1024
+        : !stat.isFile() || stat.size > 12 * 1024 * 1024)
     ) {
       throw new Error(
         "The selected preset image is unavailable or unsupported.",
@@ -10349,7 +10613,8 @@ function applyNativeDesignerAssets(
     }
     fs.mkdirSync(assetDir, { recursive: true });
     const assetName = `designer-assets/achievements-${field}${ext}`;
-    fs.copyFileSync(filePath, path.join(target, assetName));
+    if (assetContent) fs.writeFileSync(path.join(target, assetName), assetContent);
+    else fs.copyFileSync(filePath, path.join(target, assetName));
     if (safePrevious && previousName !== assetName) {
       fs.rmSync(path.join(target, previousName), { force: true });
     }
@@ -10430,6 +10695,8 @@ ipcMain.handle("presets:load-san-draft", (_event, id) => {
       sourceCustomisation,
       {},
     );
+    editable.decorationImageMode = Array.isArray(getSanPresetIcons(mergeSanRuntimeDefaults(sourceCustomisation)).decoration)
+      ? "rarity" : "single";
     if (!Array.isArray(editable.elems)) {
       editable.elems = SanPresetCapabilities.getTextLayout(
         sourceCustomisation.preset, sourceCustomisation,
@@ -10522,7 +10789,7 @@ ipcMain.handle("presets:save-san-custom", (event, draft = {}) => {
       draft.customisation || {},
       theme.customisation || {},
     );
-    applySanDesignerAssets(zip, theme.customisation, draft.assets);
+    applySanDesignerAssets(zip, theme.customisation, draft.assets, draft.customisation?.decorationImageMode);
     // Asset selection supplies initial flags. Explicit editor choices must win
     // on later updates, including disabling a mask or decoration already chosen.
     theme.customisation = sanitizeSanDesignerPatch(draft.customisation || {}, theme.customisation);
@@ -10578,6 +10845,8 @@ ipcMain.handle("presets:save-san-custom", (event, draft = {}) => {
     }
     if (temporary) {
       scheduleSanPresetPreviewCleanup(target, saved.id);
+    } else {
+      queueGameCoverHeroForActiveConfig("san-preset-saved", { sanPreset: saved.id });
     }
     return {
       ok: true,
@@ -11637,7 +11906,10 @@ function readCacheSilent(configName, platform = "steam", options = null) {
   const cachePath = getCachePath(configName, platform, options);
   if (!fs.existsSync(cachePath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    const document = JSON.parse(fs.readFileSync(cachePath, "utf8"));
+    return normalizePlatform(platform) === "ps4recomp"
+      ? ps4Recomp.decodeCache(readConfigForAchievementCache(configName), document)
+      : document;
   } catch {
     return null;
   }
@@ -12316,6 +12588,13 @@ ipcMain.handle("loadConfigs", () => {
       if (raw?.appid) {
         meta.appid = String(raw.appid);
         meta.blacklisted = isAppIdBlacklisted(meta.appid, meta.platform);
+        const customPortraitPath = String(raw?.custom_cover_path || "").trim();
+        const portraitMeta = getLocalImageMetadata(
+          customPortraitPath || resolveLocalGameImagePath(meta.appid, meta.platform),
+          !!customPortraitPath,
+        );
+        meta.portraitImagePath = portraitMeta?.path || "";
+        meta.portraitImageMtime = portraitMeta?.mtimeMs || 0;
         const customHeaderPath = resolveCustomHeaderPath(raw);
         meta.headerImagePath =
           customHeaderPath ||
@@ -12637,6 +12916,10 @@ function getSchemaLocalizedTextForRarity(value) {
 }
 
 function getConfigTitleForExophaseRarity(config = {}, fallback = "") {
+  if (normalizePlatform(config.platform) === "x360recomp") {
+    return String(config.x360_recomp_catalog_title || config.displayName || config.name || fallback)
+      .replace(/\s*\((?:Xbox 360 Recomp|re:Blue)\)\s*$/i, "").trim();
+  }
   const raw =
     getSafeLocalizedText(config?.displayName, "english") ||
     getSchemaLocalizedTextForRarity(config?.displayName) ||
@@ -12644,7 +12927,7 @@ function getConfigTitleForExophaseRarity(config = {}, fallback = "") {
     fallback ||
     "";
   return String(raw || "")
-    .replace(/\((?:Xenia|RPCS3|PS4|shadps4)\)\s*$/i, "")
+    .replace(/\((?:PS4 Recomp|Xenia|RPCS3|PS4|shadps4)\)\s*$/i, "")
     .replace(/[™®©]/g, "")
     .replace(/\s+/g, " ")
     .trim();
@@ -12656,7 +12939,7 @@ function buildExophaseRaritySlugCandidates(config = {}, platform = "") {
     config?.appid != null ? String(config.appid).trim() : "",
   );
   const variants = buildExophaseSlugVariants(title);
-  if (platform === "shadps4") {
+  if (platform === "shadps4" || platform === "ps4recomp") {
     return Array.from(
       new Set([...variants, ...variants.map((slug) => `${slug}-ps4`)]),
     );
@@ -12807,6 +13090,122 @@ async function refreshExophaseRarityForConfig(
     usedSlug,
     baseUrl: exoData?.baseUrl || "",
   };
+}
+
+// Imports must not wait for Exophase or replace rarity refreshed meanwhile.
+// Serialize these requests and re-read the schema after network I/O.
+let x360RecompImportRarityQueue = Promise.resolve();
+const x360RecompImportRarityPending = new Set();
+function queueX360RecompImportRarity(result) {
+  const configFile = path.join(configsDir, `${result.name}.json`);
+  if (x360RecompImportRarityPending.has(configFile)) return;
+  x360RecompImportRarityPending.add(configFile);
+  const eligible = (entry) => entry && entry.x360_recomp_origin !== "reblue" &&
+    /^\d+$/.test(String(entry.name)) && Number(entry.name) < 65536;
+  const identity = (entry) => JSON.stringify([entry.displayName, entry.description]);
+  x360RecompImportRarityQueue = x360RecompImportRarityQueue.then(async () => {
+    const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    if (normalizePlatform(config.platform) !== "x360recomp" || config.appid !== result.appid ||
+        config.config_path !== result.config_path) return;
+    const schemaFile = path.join(config.config_path, "achievements.json");
+    const schema = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
+    if (!Array.isArray(schema)) return;
+    const missing = schema.filter((entry) => eligible(entry) && normalizeExophaseRarityPct(entry.rarityPct) === null);
+    if (!missing.length) return;
+    const originals = new Map(missing.map((entry) => [String(entry.name), identity(entry)]));
+    const fetched = missing.map((entry) => ({ ...entry }));
+    rarityLogger.info("rarity:x360recomp-import:start", { configName: result.name, appid: result.appid, count: missing.length });
+    const refreshed = await refreshExophaseRarityForConfig(config, "x360recomp", fetched);
+    const currentConfig = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    if (normalizePlatform(currentConfig.platform) !== "x360recomp" || currentConfig.appid !== config.appid ||
+        currentConfig.config_path !== config.config_path || currentConfig.displayName !== config.displayName) return;
+    const current = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
+    if (!Array.isArray(current)) return;
+    const byId = new Map(fetched.map((entry) => [String(entry.name), entry]));
+    let updated = 0;
+    for (const entry of current) {
+      if (!eligible(entry) || normalizeExophaseRarityPct(entry.rarityPct) !== null ||
+          originals.get(String(entry.name)) !== identity(entry)) continue;
+      const match = byId.get(String(entry.name));
+      const percent = normalizeExophaseRarityPct(match?.rarityPct);
+      if (percent === null) continue;
+      entry.rarityPct = percent;
+      entry.raritySource = match.raritySource || EXOPHASE_RARITY_SOURCE;
+      updated++;
+    }
+    if (updated) {
+      writeJsonAtomicSync(schemaFile, current, { backup: true });
+      const entries = current.filter(eligible).map((entry) => ({ name: String(entry.name), percent: normalizeExophaseRarityPct(entry.rarityPct) }))
+        .filter((entry) => entry.percent !== null);
+      writeAchievementPercentagesSidecar(config.config_path, config.appid, entries, { source: EXOPHASE_RARITY_SOURCE });
+      await invalidateDashboardSummaryEntry(result.name, "x360recomp-import-rarity");
+      broadcastToAll("refresh-achievements-table", result.name);
+      if (selectedConfig === result.name && overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", result.name);
+      }
+    }
+    rarityLogger.info("rarity:x360recomp-import:complete", { configName: result.name, appid: result.appid,
+      updated, matchedCount: refreshed.matched, fetchedCount: refreshed.fetchedCount, slug: refreshed.usedSlug });
+  }).catch((error) => {
+    rarityLogger.warn("rarity:x360recomp-import:failed", { configName: result.name, appid: result.appid, error: error.message });
+  }).finally(() => x360RecompImportRarityPending.delete(configFile));
+}
+
+let ps4RecompImportRarityQueue = Promise.resolve();
+const ps4RecompImportRarityPending = new Set();
+function queuePs4RecompImportRarity(result) {
+  const configFile = path.join(configsDir, `${result.name}.json`);
+  if (ps4RecompImportRarityPending.has(configFile)) return;
+  ps4RecompImportRarityPending.add(configFile);
+  const eligible = (entry) => entry &&
+    /^\d+$/.test(String(entry.name)) && Number(entry.name) < 10000;
+  const identity = (entry) => JSON.stringify([entry.displayName, entry.description]);
+  ps4RecompImportRarityQueue = ps4RecompImportRarityQueue.then(async () => {
+    const config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    if (normalizePlatform(config.platform) !== "ps4recomp" || config.appid !== result.appid ||
+        config.config_path !== result.config_path) return;
+    const schemaFile = path.join(config.config_path, "achievements.json");
+    const schema = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
+    if (!Array.isArray(schema)) return;
+    const missing = schema.filter((entry) => eligible(entry) && normalizeExophaseRarityPct(entry.rarityPct) === null);
+    if (!missing.length) return;
+    const originals = new Map(missing.map((entry) => [String(entry.name), identity(entry)]));
+    const fetched = missing.map((entry) => ({ ...entry }));
+    rarityLogger.info("rarity:ps4recomp-import:start", { configName: result.name, appid: result.appid, count: missing.length });
+    const refreshed = await refreshExophaseRarityForConfig(config, "ps4recomp", fetched);
+    const currentConfig = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    if (normalizePlatform(currentConfig.platform) !== "ps4recomp" || currentConfig.appid !== config.appid ||
+        currentConfig.config_path !== config.config_path || currentConfig.displayName !== config.displayName) return;
+    const current = JSON.parse(fs.readFileSync(schemaFile, "utf8"));
+    if (!Array.isArray(current)) return;
+    const byId = new Map(fetched.map((entry) => [String(entry.name), entry]));
+    let updated = 0;
+    for (const entry of current) {
+      if (!eligible(entry) || normalizeExophaseRarityPct(entry.rarityPct) !== null ||
+          originals.get(String(entry.name)) !== identity(entry)) continue;
+      const match = byId.get(String(entry.name));
+      const percent = normalizeExophaseRarityPct(match?.rarityPct);
+      if (percent === null) continue;
+      entry.rarityPct = percent;
+      entry.raritySource = match.raritySource || EXOPHASE_RARITY_SOURCE;
+      updated++;
+    }
+    if (updated) {
+      writeJsonAtomicSync(schemaFile, current, { backup: true });
+      const entries = current.filter(eligible).map((entry) => ({ name: String(entry.name), percent: normalizeExophaseRarityPct(entry.rarityPct) }))
+        .filter((entry) => entry.percent !== null);
+      writeAchievementPercentagesSidecar(config.config_path, config.appid, entries, { source: EXOPHASE_RARITY_SOURCE });
+      await invalidateDashboardSummaryEntry(result.name, "ps4recomp-import-rarity");
+      broadcastToAll("refresh-achievements-table", result.name);
+      if (selectedConfig === result.name && overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", result.name);
+      }
+    }
+    rarityLogger.info("rarity:ps4recomp-import:complete", { configName: result.name, appid: result.appid,
+      updated, matchedCount: refreshed.matched, fetchedCount: refreshed.fetchedCount, slug: refreshed.usedSlug });
+  }).catch((error) => {
+    rarityLogger.warn("rarity:ps4recomp-import:failed", { configName: result.name, appid: result.appid, error: error.message });
+  }).finally(() => ps4RecompImportRarityPending.delete(configFile));
 }
 
 function resolveSteamAppIdForRarity(config = {}) {
@@ -13021,6 +13420,9 @@ ipcMain.handle(
 
       const normalizedPlatform = normalizePlatform(config?.platform);
       const cacheFallbackPlatforms = new Set([
+        "ps4recomp",
+        "pcports",
+        "x360recomp",
         "xenia",
         "steam",
         "uplay",
@@ -13033,6 +13435,7 @@ ipcMain.handle(
         "epic",
         "epic-official",
         "shadps4",
+        "kytyps5",
         "markerpatch",
         "madnesspatch",
         "xlivelessness",
@@ -13220,6 +13623,33 @@ ipcMain.handle(
             error: error.message,
           };
         }
+      }
+      if (normalizedPlatform === "ps4recomp") {
+        const cached = (await loadPreviousAchievements(configName, normalizedPlatform, ps4Recomp.cacheOptions(config))) || {};
+        const parsed = ps4Recomp.loadConfigSnapshot({ ...config, name: configName }, cached);
+        return { achievements: await applyManualOverridesForReturn(parsed.snapshot, null, cached),
+          save_path: ps4Recomp.progressPath(config), ...(parsed.valid || parsed.missing ? {} : { error: parsed.error }) };
+      }
+      if (normalizedPlatform === "pcports") {
+        const cached = (await loadPreviousAchievements(configName, normalizedPlatform, pcPorts.cacheOptions(config))) || {};
+        const parsed = pcPorts.loadConfigSnapshot(config, cached);
+        return { achievements: await applyManualOverridesForReturn(parsed.snapshot, null, cached),
+          save_path: pcPorts.progressPath(config), ...(parsed.valid || parsed.missing ? {} : { error: parsed.error }) };
+      }
+      if (normalizedPlatform === "x360recomp") {
+        const cached = (await loadPreviousAchievements(configName, normalizedPlatform, x360Recomp.profileOptions(config))) || {};
+        const parsed = x360Recomp.loadConfigSnapshot(config, cached);
+        return { achievements: await applyManualOverridesForReturn(parsed.snapshot, null, cached),
+          save_path: x360Recomp.progressPath(config), ...(parsed.valid || parsed.missing ? {} : { error: parsed.error }) };
+      }
+      if (normalizedPlatform === "kytyps5") {
+        const cached = (await loadPreviousAchievements(configName, normalizedPlatform, kytyTrophy.profileOptions(config))) || {};
+        const parsed = kytyTrophy.loadConfigSnapshot(config, cached);
+        return {
+          achievements: await applyManualOverridesForReturn(parsed.snapshot, null, cached),
+          save_path: kytyTrophy.resolveProgressPath(config),
+          ...(parsed.valid ? {} : { error: parsed.reason }),
+        };
       }
       if (normalizedPlatform === "shadps4") {
         const progressPath = resolvePs4ProgressPathForConfig(config);
@@ -14050,6 +14480,8 @@ function collectConfigSaveDeletionDirectories({
   configData,
 }) {
   const appidStr = String(appid || "").trim();
+  // A Kyty config owns the active user's set files, never the whole title directory.
+  if (["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(normalizePlatform(platform))) return [];
   if (!appidStr) return [];
   const targets = new Set();
   const addTarget = (candidate) => {
@@ -14191,6 +14623,12 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         });
       }
       const appid =
+        (normalizePlatform(configData?.platform) === "ps4recomp"
+          ? sanitizeAppIdForPlatform(configData?.appid, "ps4recomp") : "") ||
+        (normalizePlatform(configData?.platform) === "pcports"
+          ? sanitizeAppIdForPlatform(configData?.appid, "pcports") : "") ||
+        (normalizePlatform(configData?.platform) === "kytyps5"
+          ? sanitizeAppIdForPlatform(configData?.appid, "kytyps5") : "") ||
         sanitizeAppId(configData?.appid) ||
         sanitizeAppId(configData?.appId) ||
         sanitizeAppId(configData?.steamAppId) ||
@@ -14295,6 +14733,14 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         }
       }
 
+      const preserveKytySharedAssets = ["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform) &&
+        fs.readdirSync(configsDir).filter((file) => file.toLowerCase().endsWith(".json"))
+          .some((file) => {
+            try {
+              const other = JSON.parse(fs.readFileSync(path.join(configsDir, file), "utf8"));
+              return normalizePlatform(other.platform) === platform && other.appid === appid;
+            } catch { return true; } // Preserve shared assets if another config cannot be inspected.
+          });
       if (deleteExtras) {
         try {
           for (const cachePath of cachePathsForDelete) {
@@ -14320,7 +14766,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
             error: err?.message || String(err),
           });
         }
-        if (appid && !isFf7LocalAchievementSource) {
+        if (appid && !isFf7LocalAchievementSource && !preserveKytySharedAssets) {
           try {
             const imagePlatforms = getImagePlatformCandidates(appid, platform);
             for (const imagePlatform of imagePlatforms) {
@@ -14350,7 +14796,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         // This local source intentionally reuses Steam metadata for 39140.
         // Keep shared schema/images intact when only its config is deleted.
         const canDeleteSchema =
-          !isFf7LocalAchievementSource &&
+          !isFf7LocalAchievementSource && !preserveKytySharedAssets &&
           (!configPathValue || isManagedSchemaPath(configPathValue));
         if (canDeleteSchema && appid) {
           try {
@@ -14446,7 +14892,17 @@ ipcMain.handle("delete-config", async (_event, payload) => {
           }
 
           if (!deletedDir) {
-            if (platform === "rpcs3") {
+            if (platform === "ps4recomp") {
+              // Shared runtime logs also contain other collection games. Preserve them.
+            } else if (platform === "pcports") {
+              await deleteFile(pcPorts.progressPath(configData || {}));
+            } else if (platform === "x360recomp") {
+              await deleteFile(x360Recomp.progressPath(configData || {}));
+            } else if (platform === "kytyps5") {
+              for (const progressPath of kytyTrophy.resolveProgressPaths(configData || {})) {
+                if (kytyTrophy.parseProgressPath(progressPath)) await deleteFile(progressPath);
+              }
+            } else if (platform === "rpcs3") {
               const tropusr = resolveTropusrPathForConfig(configData || {});
               await deleteFile(tropusr);
             } else if (platform === "shadps4") {
@@ -14998,6 +15454,15 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
       platform = "epic";
     }
     platform = platform || "steam";
+    if (platform === "ps4recomp") {
+      return { success: false, message: tUi("main.message.schemaPs4RecompRescan", {}, "Rescan the PS4 port installation folder to regenerate its schema.") };
+    }
+    if (platform === "pcports") {
+      return { success: false, message: tUi("main.message.schemaPcPortsRescan", {}, "Rescan the PC port installation folder to regenerate its schema.") };
+    }
+    if (platform === "x360recomp") {
+      return { success: false, message: tUi("main.message.schemaX360RecompRescan", {}, "Rescan the Xbox 360 recompilation folder to regenerate its schema.") };
+    }
     if (platform === "xenia") {
       return {
         success: false,
@@ -15008,6 +15473,12 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
       return {
         success: false,
         message: tUi("main.message.schemaRpcs3Rescan"),
+      };
+    }
+    if (platform === "kytyps5") {
+      return {
+        success: false,
+        message: tUi("main.message.schemaKytyps5Rescan", {}, "PS5 schemas are generated from local trophy files. Rescan the KytyPS5 folder instead."),
       };
     }
     if (platform === "shadps4") {
@@ -16387,6 +16858,12 @@ function refreshNativePresetDesignerRuntime(folder) {
   } finally { fs.rmSync(temporary, { force: true }); }
 }
 function getNativePresetRenderGeometry(folder) {
+  try { refreshNativePresetScreenshotTiming(folder); }
+  catch (error) {
+    notificationLogger.warn("preset:screenshot-timing-refresh-failed", {
+      folder, error: error?.message || String(error),
+    });
+  }
   const dimensions = getPresetDimensions(folder);
   try {
     const manifest = JSON.parse(fs.readFileSync(path.join(folder, "custom-preset.json"), "utf8"));
@@ -16414,6 +16891,23 @@ function getNativePresetRenderGeometry(folder) {
       layoutHeight: dimensions.height - oldGutter * 2,
     };
   } catch { return dimensions; }
+}
+
+function refreshNativePresetScreenshotTiming(folder) {
+  const index = path.join(folder, "index.html");
+  const html = fs.readFileSync(index, "utf8");
+  // Narrow migration for installed Default templates and copies carrying this
+  // exact old measurement block. Preserve every other byte and saved option.
+  const oldBlock = /([ \t]*setTimeout\(\(\) => \{\r?\n[ \t]*startMarqueeIfOverflow\(titleEl\);\r?\n[ \t]*\/\/ small retry in case layout shifts\r?\n[ \t]*setTimeout\(\(\) => startMarqueeIfOverflow\(titleEl\), 350\);\r?\n[ \t]*\}, )900(\);)/;
+  if (!html.includes("const inMs = Math.max(120, Math.round(1400 * timelineScale))") ||
+      !oldBlock.test(html)) return;
+  const refreshed = html.replace(oldBlock, "$1inMs + 30$2");
+  const temporary = `${index}.${crypto.randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, refreshed, "utf8");
+    fs.renameSync(temporary, index);
+  } finally { fs.rmSync(temporary, { force: true }); }
+  notificationLogger.info("preset:screenshot-timing-refreshed", { folder });
 }
 
 function configureNativePresetViewport(spec) {
@@ -16798,6 +17292,21 @@ function createNotificationWindow(message) {
         );
       }
     }
+    if (message.screenshotRequested === true) {
+      try {
+        const { installNotificationScreenshotReadiness } = require("./utils/notification-screenshot-readiness");
+        await notificationWindow.webContents.executeJavaScript(
+          `(${installNotificationScreenshotReadiness.toString()})(${JSON.stringify({
+            displayName: message.displayName, durationMs: message.durationMs,
+            san: isSanNotification, sanPreset: message.sanTheme?.preset || "",
+          })})`,
+        );
+      } catch (error) {
+        notificationLogger.warn("notification:screenshot:readiness-install-failed", {
+          error: error?.message || String(error),
+        });
+      }
+    }
     notificationWindow.webContents.send("show-notification", {
       name: message.name || "",
       hidden: sanTruthy(message.hidden),
@@ -16812,13 +17321,17 @@ function createNotificationWindow(message) {
       configName: message.configName || "",
       gameName: message.gameName || "",
       config_path: message.config_path || "",
+      points: message.points,
       rarityPct: message.rarityPct,
       rarityTier: message.rarityTier || "",
       rarityTierSource: message.rarityTierSource || "",
       trophyType: message.trophyType || "",
+      isTest: message.isTest === true,
+      testPreset: message.testPreset === true,
       isRare: message.isRare === true,
       usesRareProfile: message.usesRareProfile === true,
       trophyModeEnabled: message.trophyModeEnabled === true,
+      ...normalizeTrophyModeThresholds(message),
       isPlatinum: message.isPlatinum === true,
       showRarityPercentage: message.showRarityPercentage === true,
       preset: message.preset || preset,
@@ -16934,7 +17447,9 @@ ipcMain.on("show-notification", async (_event, achievement) => {
 
 // New Image Windows
 // Return path to image if exists locally
-ipcMain.handle("checkLocalGameImage", async (_event, appid, platformArg) => {
+function resolveLocalGameImagePath(appid, platformArg) {
+  appid = normalizeSafeImageAppId(appid);
+  if (!appid) return null;
   const platform = normalizePlatform(platformArg) || getPlatformForAppId(appid);
   ipcLogger.info("checkLocalGameImage:request", { appid, platform });
   const baseDir = path.join(app.getPath("userData"), "images");
@@ -17007,6 +17522,41 @@ ipcMain.handle("checkLocalGameImage", async (_event, appid, platformArg) => {
   }
   ipcLogger.info("checkLocalGameImage:miss", { appid, platform });
   return null;
+}
+
+ipcMain.handle("checkLocalGameImage", async (_event, appid, platformArg) =>
+  resolveLocalGameImagePath(appid, platformArg),
+);
+
+function getLocalImageMetadata(imagePath, custom = false) {
+  if (!imagePath) return null;
+  try {
+    const stat = fs.statSync(imagePath);
+    if (!stat.isFile() || stat.size === 0) return null;
+    return { path: imagePath, mtimeMs: stat.mtimeMs || 0, size: stat.size, custom };
+  } catch {
+    return null;
+  }
+}
+
+ipcMain.handle("checkLocalGameImageMeta", async (_event, appid, platformArg, configNameArg = "") => {
+  const safeAppId = normalizeSafeImageAppId(appid);
+  if (!safeAppId) return null;
+  const configName = String(configNameArg || "").trim();
+  if (configName && !/[\\/\u0000-\u001f]/.test(configName)) {
+    try {
+      const config = JSON.parse(fs.readFileSync(resolveConfigJsonPath(configsDir, configName), "utf8"));
+      const requestedPlatform = normalizePlatform(platformArg);
+      const configuredPlatform = normalizePlatform(config?.platform);
+      if (String(config?.appid || config?.appId || "").trim() === safeAppId &&
+          (!requestedPlatform || !configuredPlatform || configuredPlatform === requestedPlatform)) {
+        const customPath = String(config?.custom_cover_path || "").trim();
+        // A configured custom cover keeps priority even if its file is unavailable.
+        if (customPath) return getLocalImageMetadata(customPath, true);
+      }
+    } catch {}
+  }
+  return getLocalImageMetadata(resolveLocalGameImagePath(safeAppId, platformArg));
 });
 
 ipcMain.handle("checkLocalGameHeader", async (_event, appid, platformArg) => {
@@ -17038,13 +17588,12 @@ ipcMain.handle(
     }
     const headerPath = customPath || resolveLocalGameHeaderPath(appid, platformArg);
     if (!headerPath) return null;
-    let mtimeMs = 0;
-    try {
-      mtimeMs = fs.statSync(headerPath).mtimeMs || 0;
-    } catch {}
-    return { path: headerPath, mtimeMs, custom: !!customPath };
+    return getLocalImageMetadata(headerPath, !!customPath);
   },
 );
+
+ipcMain.handle("covers:x360recomp-art", (_event, appid, variant = "portrait") =>
+  x360RecompArt.artworkUrls(appid, variant));
 
 ipcMain.handle("covers:epic-catalog-images", async (_event, payload = {}) => {
   const platform = normalizePlatform(payload?.platform);
@@ -17089,24 +17638,49 @@ const dashboardHeaderDownloads = new Map();
 const dashboardHeaderMisses = new Map();
 const dashboardHeaderRedownloads = new Map();
 const DASHBOARD_HEADER_MISS_TTL_MS = 30 * 60 * 1000;
-ipcMain.handle(
-  "ensureGameHeader",
-  async (_event, appid, platformArg, configName, displayName) => {
+ipcMain.on("game-header:updated", (_event, payload = {}) => {
+  const appid = normalizeSafeImageAppId(payload.appid);
+  const platform = normalizePlatform(payload.platform);
+  if (!appid || !platform) return;
+  dashboardHeaderMisses.delete(`${platform}:${appid}`);
+  broadcastToAll("update-image", { appid, platform, variant: "landscape" });
+});
+const ensureLocalGameHeader =
+  async (appid, platformArg, configName, displayName, options = {}) => {
     const safeAppId = normalizeSafeImageAppId(appid);
     if (!safeAppId) return null;
-    const existing = resolveLocalGameHeaderPath(safeAppId, platformArg);
-    if (existing) {
-      dashboardHeaderMisses.delete(
-        `${normalizePlatform(platformArg) || "steam"}:${safeAppId}`,
-      );
+    const platform = normalizePlatform(platformArg) || getPlatformForAppId(safeAppId) || "steam";
+    const key = `${platform}:${safeAppId}`;
+    if (dashboardHeaderDownloads.has(key)) return dashboardHeaderDownloads.get(key);
+    if (dashboardHeaderRedownloads.has(key)) {
+      await dashboardHeaderRedownloads.get(key);
+      return resolveLocalGameHeaderPath(safeAppId, platform);
+    }
+
+    const existing = resolveLocalGameHeaderPath(safeAppId, platform);
+    let recoverExisting = false;
+    const failedImage = options?.failedImage;
+    if (existing && failedImage?.path && path.resolve(existing) === path.resolve(String(failedImage.path))) {
+      const imageRoot = path.resolve(app.getPath("userData"), "images");
+      const relativePath = path.relative(imageRoot, path.resolve(existing));
+      const managed = relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath) &&
+        /^(?:header|game-cover-hero)\.(?:jpg|jpeg|png|webp|gif)$/i.test(path.basename(existing));
+      const current = getLocalImageMetadata(existing);
+      recoverExisting = !!(managed && current && current.mtimeMs === Number(failedImage.mtimeMs) &&
+        current.size === Number(failedImage.size));
+      if (recoverExisting) {
+        // Keep the old file until a validated replacement is ready. The failed
+        // snapshot must match, so a newer download cannot be overwritten by an
+        // obsolete recovery request. Custom files never enter this path.
+        dashboardHeaderMisses.delete(key);
+        ipcLogger.info("ensureGameHeader:recover-image", { appid: safeAppId, platform, path: existing });
+      }
+    }
+    if (existing && !recoverExisting) {
+      dashboardHeaderMisses.delete(key);
       return existing;
     }
 
-    const platform =
-      normalizePlatform(platformArg) ||
-      getPlatformForAppId(safeAppId) ||
-      "steam";
-    const key = `${platform}:${safeAppId}`;
     const missedAt = dashboardHeaderMisses.get(key) || 0;
     if (Date.now() - missedAt < DASHBOARD_HEADER_MISS_TTL_MS) return null;
     if (!dashboardHeaderDownloads.has(key)) {
@@ -17134,6 +17708,7 @@ ipcMain.handle(
             steamHeaderUrl,
             {
               platform,
+              forceDownload: recoverExisting,
               gameName:
                 String(displayName || "").trim() ||
                 String(
@@ -17167,8 +17742,8 @@ ipcMain.handle(
       });
       return null;
     }
-  },
-);
+  };
+ipcMain.handle("ensureGameHeader", (_event, ...args) => ensureLocalGameHeader(...args));
 
 ipcMain.handle("redownloadGameHeader", async (_event, payload = {}) => {
   const appid = normalizeSafeImageAppId(payload?.appid);
@@ -17377,9 +17952,11 @@ ipcMain.on("show-test-notification", (event, options) => {
     forceTestRare: previewRare,
     isTestRare: previewRare,
     rarityPct: previewRare
-      ? options.rarityPct != null
-        ? Number(options.rarityPct)
-        : 4.2
+      ? options.useSanPreset === true && options.sanPreset
+        ? getNotificationSanRareThreshold({ ...options, testPreset: true }, prefs)
+        : options.rarityPct != null
+          ? Number(options.rarityPct)
+          : 4.2
       : null,
     rarityTier: previewRare ? String(options.rarityTier || "silver") : "",
     showRarityPercentage: previewRare && options.showRarityPercentage !== false,
@@ -17398,12 +17975,18 @@ ipcMain.on("show-test-notification", (event, options) => {
   queueAchievementNotification(notificationData);
 });
 
-function getRandomTestRareRarity({ trophyModeEnabled = false } = {}) {
-  const tiers = getRareTestRarityTiers({ trophyModeEnabled });
+function getRandomTestRareRarity({ maxPercent = null, ...preferences } = {}) {
+  let tiers = getRareTestRarityTiers(preferences);
+  const limit = maxPercent == null ? null : Math.min(100, Math.max(0, Number(maxPercent)));
+  if (Number.isFinite(limit)) {
+    if (limit < 0.01) return { tier: "gold", percent: limit };
+    tiers = tiers.filter((tier) => tier.min <= limit)
+      .map((tier) => ({ ...tier, max: Math.min(tier.max, limit) }));
+  }
   const tier = tiers[crypto.randomInt(tiers.length)];
   const percent =
     Math.round((tier.min + Math.random() * (tier.max - tier.min)) * 100) / 100;
-  return { tier: tier.name, percent };
+  return { tier: tier.name, percent: Number.isFinite(limit) ? Math.min(percent, limit) : percent };
 }
 
 function resolveTestNotificationSanPreset(options = {}, fallback = "") {
@@ -17418,6 +18001,15 @@ ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
   const baseDir = app.isPackaged ? process.resourcesPath : __dirname;
   const rarity = getRandomTestRareRarity({
     trophyModeEnabled: prefs.trophyModeEnabled === true,
+    ...normalizeTrophyModeThresholds(prefs),
+    maxPercent: options.useSanPreset === true && resolveTestNotificationSanPreset(options, prefs.rareSanPreset) &&
+        !isNativeWindowsNotificationPreset(options.preset || prefs.rarePreset || prefs.preset || "default") &&
+        !isGameBarNotificationPreset(options.preset || prefs.rarePreset || prefs.preset || "default")
+      ? getNotificationSanRareThreshold({ ...options,
+          preset: options.preset || prefs.rarePreset || prefs.preset || "default",
+          sanPreset: resolveTestNotificationSanPreset(options, prefs.rareSanPreset),
+          testPreset: true }, prefs)
+      : null,
   });
   const tierLabel = rarity.tier.charAt(0).toUpperCase() + rarity.tier.slice(1);
 
@@ -17480,10 +18072,17 @@ ipcMain.on("show-test-emulator-notification", (_event, options = {}) => {
       ? "RPCS3"
       : platform === "shadps4"
         ? "ShadPS4"
-        : "Xenia";
+        : platform === "kytyps5"
+          ? "KytyPS5"
+          : platform === "ps4recomp" ? "PS4 Recomp" : platform === "x360recomp" ? "Xbox 360 Recomp" : "Xenia";
   const tierLabel = trophyType
     ? trophyType.charAt(0).toUpperCase() + trophyType.slice(1)
     : "";
+  // Demonstration data only: emulator tests have no real game's rarity sidecar.
+  const testRarityPct = normalizeNotificationRarityPercent(options.rarityPct) ??
+    (isTrophyPlatform
+      ? ({ bronze: 75, silver: 35, gold: 4.2 }[trophyType] ?? null)
+      : getRandomTestRareRarity().percent);
 
   queueAchievementNotification({
     name: `TEST_${String(platform || "emulator").toUpperCase()}_NOTIFICATION`,
@@ -17508,6 +18107,9 @@ ipcMain.on("show-test-emulator-notification", (_event, options = {}) => {
     config_path: baseDir,
     platform,
     trophyType,
+    rarityPct: testRarityPct,
+    ...(platform === "x360recomp" ? { points: 10 } : {}),
+    raritySource: testRarityPct !== null ? "test" : null,
     preset:
       options.preset || prefs[`${platform}Preset`] || prefs.preset || "default",
     position:
@@ -17584,6 +18186,10 @@ function markConfigPlatinumFlag(configName) {
   if (!fs.existsSync(cfgPath)) return false;
   try {
     const data = JSON.parse(fs.readFileSync(cfgPath, "utf8"));
+    if (normalizePlatform(data.platform) === "kytyps5") {
+      queueDashboardSummaryReconcile(safe, "kytyps5-profile-completed");
+      return false;
+    }
     if (data.platinum === true) {
       queueDashboardSummaryReconcile(safe, "platinum-already-flagged");
       return false; // already flagged
@@ -19404,6 +20010,8 @@ ipcMain.handle("presets:save-custom", (event, draft = {}) => {
     }
     if (temporary) {
       scheduleNativePresetPreviewCleanup(finalTarget);
+    } else {
+      queueGameCoverHeroForActiveConfig("custom-preset-saved", { preset: cleanName });
     }
     return { ok: true, name: cleanName, id: slug, temporary, updated: update };
   } catch (error) {
@@ -19593,12 +20201,18 @@ function getPresetPreviewHoldMs(durationMs, sanTheme) {
     ),
   );
 }
-function getPresetPreviewRarity(sampleState) {
+function getPresetPreviewRarity(sampleState, sanTheme = null) {
   const trophyModeEnabled = cachedPreferences?.trophyModeEnabled === true;
   const isRare = sampleState === "rare";
   return {
+    isTest: true,
     trophyModeEnabled,
-    rarityPct: isRare ? (trophyModeEnabled ? 35 : 4.2) : null,
+    ...normalizeTrophyModeThresholds(cachedPreferences),
+    rarityPct: isRare
+      ? sanTheme
+        ? SanPresetCapabilities.getRareThreshold(sanTheme.customisation)
+        : (trophyModeEnabled ? 35 : 4.2)
+      : null,
     rarityTier: isRare ? "silver" : "",
     isRare,
     showRarityPercentage: isRare,
@@ -19694,7 +20308,7 @@ async function captureNotificationPresetPreview({
   previewWindow.webContents.setZoomFactor(presetScale);
   previewWindow.webContents.setAudioMuted(true);
   const platinumPreview = sampleState === "platinum";
-  const previewRarity = getPresetPreviewRarity(sampleState);
+  const previewRarity = getPresetPreviewRarity(sampleState, sanTheme);
   const platinumIcon = platinumPreview
     ? getPlatinumPresetIconPath(presetFolder, preset)
     : "";
@@ -20383,7 +20997,7 @@ ipcMain.handle("presets:live-preview-start", async (event, request = {}) => {
       Math.min(120000, Number(request.resumeOffsetMs) || 0),
     );
     const platinumPreview = request.sampleState === "platinum";
-    const previewRarity = getPresetPreviewRarity(request.sampleState);
+    const previewRarity = getPresetPreviewRarity(request.sampleState, sanTheme);
     const platinumIcon = platinumPreview
       ? getPlatinumPresetIconPath(folder, request.preset)
       : "";
@@ -20646,6 +21260,8 @@ ipcMain.handle("presets:live-preview-update", async (event, request = {}) => {
       ? Math.round((Number(sanTheme.customisation?.displaytime) || 8) * 1000)
       : getPresetAnimationDuration(folder);
     const payload = { ...state.payload, sanTheme, durationMs,
+      ...(sanTheme ? getPresetPreviewRarity(state.payload.isPlatinum ? "platinum" :
+        state.payload.isRare ? "rare" : "normal", sanTheme) : {}),
       hidden: !state.payload.isPlatinum && sanTheme?.customisation?.showhiddenicon === true,
       preset: request.preset || state.payload.preset };
     let updateSource;
@@ -20997,7 +21613,8 @@ async function reconcileConfigPlatinumFromSummary(
 
   const complete = isVerifiedSummaryComplete(currentSummary);
   const runtimeCompletionOwned = complete && options.allowCompleteMark !== true;
-  if (!complete && options.allowCompleteMark !== true) {
+  if (!complete && options.allowCompleteMark !== true &&
+      normalizePlatform(currentSummary.platform) !== "kytyps5") {
     const previousTotal = Math.max(
       0,
       Math.floor(Number(options.previousSummary?.total) || 0),
@@ -21079,6 +21696,22 @@ async function reconcileConfigPlatinumFromSummary(
       normalizePlatform(config?.platform || currentSummary?.platform) ||
       "steam";
     const nativePlatinum = config?.native_platinum === true;
+    if (platform === "kytyps5") {
+      // A game config is shared by all users; completion follows the active cache.
+      const latestConfig = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
+      const fingerprint = await getDashboardSummaryFingerprintPart(configPath);
+      if (!latestConfig || !fingerprint || latestConfig.kytyps5_user_id !== config.kytyps5_user_id ||
+          !fingerprintPartsEqual(currentSummary.fingerprint?.config, fingerprint)) {
+        return { changed: false, reason: "kyty-profile-superseded" };
+      }
+      const synced = await dashboardSummaryStore.updatePlatinumState(safeName, {
+        platinum: complete, nativePlatinum, basis: { unlocked: currentSummary.unlocked, total: currentSummary.total },
+        configFingerprint: fingerprint, platinumCompletedTotal: complete ? currentSummary.total : 0,
+        expectedObservedAt: Number(currentSummary.observedAt) || 0,
+      });
+      if (synced) queueDashboardSummaryBroadcast({ [safeName]: synced });
+      return { changed: false, reason: "kyty-profile-completion", platinum: complete };
+    }
     const shouldReset = shouldResetPlatinumFromSummary({
       current: currentSummary,
       previous: options.previousSummary || null,
@@ -21269,12 +21902,16 @@ function buildAchievementNotificationDedupeKey(notificationData = {}) {
     String(value || "")
       .trim()
       .toLowerCase();
-  return [
+  const parts = [
     normalize(notificationData.config_path || notificationData.configName),
     normalize(notificationData.displayName),
     normalize(notificationData.description),
     normalize(notificationData.icon || notificationData.icon_gray),
-  ].join("::");
+  ];
+  if (notificationData.platform === "ps4recomp") parts.push(normalize(notificationData.ps4RecompScope), normalize(notificationData.name));
+  if (notificationData.platform === "x360recomp") parts.push(
+    normalize(notificationData.x360RecompScope), normalize(notificationData.name));
+  return parts.join("::");
 }
 
 function computeNotificationScreenshotFallbackDelay(durationMs) {
@@ -21282,14 +21919,18 @@ function computeNotificationScreenshotFallbackDelay(durationMs) {
     Number.isFinite(Number(durationMs)) && Number(durationMs) > 0
       ? Number(durationMs)
       : 4000;
-  return Math.max(450, Math.min(1600, Math.round(safeDuration * 0.35)));
+  // This is a watchdog, never an unconditional early screenshot trigger.
+  return safeDuration + 1000;
 }
 
-function clearPendingNotificationScreenshot(webContentsId) {
+function clearPendingNotificationScreenshot(webContentsId, reason = "rearmed") {
   const state = pendingNotificationScreenshots.get(webContentsId);
   if (!state) return;
   if (state.timer) clearTimeout(state.timer);
   pendingNotificationScreenshots.delete(webContentsId);
+  if (!state.fired && reason === "notification-closed") {
+    notificationLogger.warn("notification:screenshot:cancelled", { webContentsId, reason });
+  }
 }
 
 function armPendingNotificationScreenshot(
@@ -21304,7 +21945,12 @@ function armPendingNotificationScreenshot(
   const state = {
     fired: false,
     timer: null,
-    run: async (reason) => {
+    run: async (reason, details = {}) => {
+      if (state.fired) return;
+      if (notificationWindow.isDestroyed()) return;
+      const frame = await notificationWindow.webContents.executeJavaScript(
+        "window.__achievementsScreenshotReadiness?.check() || {ready:false,reason:'readiness-unavailable'}",
+      ).catch(() => ({ ready: false, reason: "renderer-unavailable" }));
       if (state.fired) return;
       state.fired = true;
       if (state.timer) {
@@ -21312,16 +21958,25 @@ function armPendingNotificationScreenshot(
         state.timer = null;
       }
       pendingNotificationScreenshots.delete(webContentsId);
+      if (!frame.ready) {
+        notificationLogger.warn("notification:screenshot:frame-unavailable", {
+          reason: frame.reason, webContentsId, elapsedMs: details?.elapsedMs || null,
+        });
+        return;
+      }
       notificationLogger.info("notification:screenshot-trigger", {
         reason,
         webContentsId,
+        stage: frame.reason,
+        elapsedMs: details?.elapsedMs || frame.elapsedMs,
+        brokenImages: frame.brokenImages || 0,
       });
       await doShot();
     },
   };
 
   state.timer = setTimeout(() => {
-    void state.run("fallback-timeout");
+    void state.run("readiness-watchdog");
   }, computeNotificationScreenshotFallbackDelay(durationMs));
 
   pendingNotificationScreenshots.set(webContentsId, state);
@@ -21477,11 +22132,18 @@ function normalizeNotificationTrophyType(value) {
   return "";
 }
 
+function isPlayStationEmulatorNotificationPlatform(platform) {
+  const normalized = normalizePlatform(platform);
+  return ["ps4recomp", "rpcs3", "shadps4", "kytyps5"].includes(normalized);
+}
+
 function isTrophyTierNotificationPlatform(platform) {
   const normalized = normalizePlatform(platform);
   return (
+    normalized === "ps4recomp" ||
     normalized === "rpcs3" ||
     normalized === "shadps4" ||
+    normalized === "kytyps5" ||
     normalized === "markerpatch" ||
     normalized === "madnesspatch"
   );
@@ -21489,10 +22151,57 @@ function isTrophyTierNotificationPlatform(platform) {
 
 function getEmulatorNotificationPreferencePrefix(platform) {
   const normalized = normalizePlatform(platform);
+  if (normalized === "ps4recomp") return "ps4recomp";
+  if (normalized === "x360recomp") return "x360recomp";
   if (normalized === "xenia") return "xenia";
   if (normalized === "rpcs3") return "rpcs3";
   if (normalized === "shadps4") return "shadps4";
+  if (normalized === "kytyps5") return "kytyps5";
   return "";
+}
+
+// Keep preparation of game artwork on the same preset/SAN selection rules as
+// real achievement notifications. Preview tests retain their explicit choices.
+function resolveAchievementPresetSelection({ normalPreset = "default", emulatorPreferencePrefix = "",
+  isPlatinum = false, usesRareProfile = false, testPreset = false, achievement = {} } = {}, prefs = cachedPreferences || {}) {
+  const preset = testPreset ? normalPreset : isPlatinum ? prefs.platinumPreset || normalPreset :
+    usesRareProfile ? prefs.rarePreset || normalPreset :
+      emulatorPreferencePrefix ? prefs[`${emulatorPreferencePrefix}Preset`] || normalPreset : normalPreset;
+  const preferenceSanPreset = testPreset ? String(achievement.sanPreset || "") :
+    isPlatinum ? String(prefs.platinumSanPreset || "") :
+      usesRareProfile ? String(prefs.rareSanPreset || "") :
+        emulatorPreferencePrefix ? String(prefs[`${emulatorPreferencePrefix}SanPreset`] || "") : String(prefs.sanPreset || "");
+  const sanPreset = String(Object.prototype.hasOwnProperty.call(achievement, "sanPreset")
+    ? achievement.sanPreset || "" : preferenceSanPreset).trim();
+  const useSanPreset = !!((testPreset === true ? achievement.useSanPreset === true :
+    achievement.useSanPreset === true || prefs.useSanPreset === true) && sanPreset);
+  return { preset, sanPreset, useSanPreset };
+}
+
+function getNotificationSanRareThreshold(achievement = {}, prefs = cachedPreferences || {}) {
+  const usesSan = achievement.testPreset === true
+    ? achievement.useSanPreset === true
+    : achievement.useSanPreset === true || prefs.useSanPreset === true;
+  if (!usesSan) return 10;
+  // Emulator profiles retain their own preset. Other unlocks are classified
+  // using the Rare profile before deciding whether to route to that profile.
+  const profile = getEmulatorNotificationPreferencePrefix(achievement.platform) || "rare";
+  const preset = achievement.testPreset === true
+    ? achievement.preset || "default"
+    : prefs[`${profile}Preset`] || achievement.preset || prefs.preset || "default";
+  if (isNativeWindowsNotificationPreset(preset) || isGameBarNotificationPreset(preset)) return 10;
+  const sanPreset = Object.prototype.hasOwnProperty.call(achievement, "sanPreset")
+    ? String(achievement.sanPreset || "")
+    : String(prefs[`${profile}SanPreset`] || "");
+  if (!sanPreset) return 10;
+  try {
+    return SanPresetCapabilities.getRareThreshold(findSanPresetById(sanPreset)?.theme?.customisation);
+  } catch (error) {
+    notificationLogger.warn("san-notification:rare-threshold-unavailable", {
+      sanPreset, error: error?.message || String(error),
+    });
+    return 10;
+  }
 }
 
 function queueAchievementNotification(achievement) {
@@ -21516,6 +22225,8 @@ function queueAchievementNotification(achievement) {
   const emulatorPreferencePrefix =
     getEmulatorNotificationPreferencePrefix(platform);
   const usesEmulatorNotificationProfile = !!emulatorPreferencePrefix;
+  const usesNativePlayStationTrophies =
+    isPlayStationEmulatorNotificationPlatform(platform);
   const isPlatinum =
     achievement.isPlatinum === true ||
     achievement.__isPlatinum === true ||
@@ -21529,31 +22240,40 @@ function queueAchievementNotification(achievement) {
     isPlatinum || (isTest && !isTestRare && !hasExplicitRarity)
       ? { percent: null, source: null }
       : resolveNotificationRarity(achievement);
+  const rareThreshold = rarity.percent !== null && !isPlatinum
+    ? getNotificationSanRareThreshold(achievement, prefs) : 10;
   const isRare =
     achievement.forceTestRare === true ||
     (!achievement.testPreset &&
-      !usesEmulatorNotificationProfile &&
+      (!usesEmulatorNotificationProfile || usesNativePlayStationTrophies) &&
       rarity.percent !== null &&
       rarity.percent >= 0 &&
-      rarity.percent <= 10);
+      rarity.percent <= rareThreshold);
   const trophyModeEnabled = prefs.trophyModeEnabled === true;
   const trophyRarityTier =
     usesTrophyTier && ["bronze", "silver", "gold"].includes(trophyType)
       ? trophyType
       : "";
-  const trophyModeTier = trophyModeEnabled
-    ? resolveTrophyModeTier({
-        rarityPct: rarity.percent,
-        isPlatinum,
-      })
-    : { tier: trophyRarityTier, source: trophyRarityTier ? "native" : "" };
+  // Native PlayStation grades remain authoritative even with Trophy Mode enabled.
+  const trophyModeTier = usesNativePlayStationTrophies && trophyRarityTier
+    ? { tier: trophyRarityTier, source: "native" }
+    : trophyModeEnabled
+      ? resolveTrophyModeTier({
+          rarityPct: rarity.percent,
+          isPlatinum,
+          ...normalizeTrophyModeThresholds(prefs),
+        })
+      : { tier: trophyRarityTier, source: trophyRarityTier ? "native" : "" };
   const rarityTier =
     trophyModeTier.tier === "platinum" ? "" : trophyModeTier.tier || "";
-  const usesRareProfile = shouldUseRareNotificationProfile({
-    trophyModeEnabled,
-    isRare,
-    isPlatinum,
-  });
+  // Rarity metadata and profile selection are separate: PlayStation emulator unlocks keep
+  // their platform preset, position, sound and timing. Platinum retains its profile.
+  const usesRareProfile = !usesNativePlayStationTrophies &&
+    shouldUseRareNotificationProfile({
+      trophyModeEnabled,
+      isRare,
+      isPlatinum,
+    });
   const lang = selectedLanguage || "english";
 
   const displayName = getSafeLocalizedText(achievement.displayName, lang);
@@ -21568,22 +22288,15 @@ function queueAchievementNotification(achievement) {
     "center-bottom";
   const normalSound =
     achievement.sound || selectedSound || prefs.sound || "mute";
-  const emulatorPreset = emulatorPreferencePrefix
-    ? prefs[`${emulatorPreferencePrefix}Preset`] || normalPreset
-    : normalPreset;
   const emulatorPosition = emulatorPreferencePrefix
     ? prefs[`${emulatorPreferencePrefix}Position`] || normalPosition
     : normalPosition;
   const emulatorSound = emulatorPreferencePrefix
     ? prefs[`${emulatorPreferencePrefix}Sound`] || normalSound
     : normalSound;
-  const resolvedPreset = achievement.testPreset
-    ? normalPreset
-    : isPlatinum
-      ? prefs.platinumPreset || normalPreset
-      : usesRareProfile
-        ? prefs.rarePreset || normalPreset
-        : emulatorPreset;
+  const presetSelection = resolveAchievementPresetSelection({ normalPreset, emulatorPreferencePrefix,
+    isPlatinum, usesRareProfile, testPreset: achievement.testPreset, achievement }, prefs);
+  const resolvedPreset = presetSelection.preset;
   const resolvedPosition = achievement.testPreset
     ? normalPosition
     : isPlatinum
@@ -21598,26 +22311,8 @@ function queueAchievementNotification(achievement) {
       : usesRareProfile
         ? prefs.rareSound || normalSound
         : emulatorSound;
-  const emulatorSanPreset = emulatorPreferencePrefix
-    ? String(prefs[`${emulatorPreferencePrefix}SanPreset`] || "")
-    : prefs.sanPreset || "";
-  const preferenceSanPreset = achievement.testPreset
-    ? String(achievement.sanPreset || "")
-    : isPlatinum
-      ? String(prefs.platinumSanPreset || "")
-      : usesRareProfile
-        ? String(prefs.rareSanPreset || "")
-        : emulatorSanPreset;
-  const sanPresetCandidate = String(
-    Object.prototype.hasOwnProperty.call(achievement, "sanPreset")
-      ? achievement.sanPreset || ""
-      : preferenceSanPreset || "",
-  ).trim();
-  const useSanPreset =
-    (achievement.testPreset === true
-      ? achievement.useSanPreset === true
-      : achievement.useSanPreset === true || prefs.useSanPreset === true) &&
-    sanPresetCandidate;
+  const sanPresetCandidate = presetSelection.sanPreset;
+  const useSanPreset = presetSelection.useSanPreset;
   const usesNativeWindowsPreset =
     isNativeWindowsNotificationPreset(resolvedPreset);
   const usesGameBarPreset = isGameBarNotificationPreset(resolvedPreset);
@@ -21643,16 +22338,21 @@ function queueAchievementNotification(achievement) {
     configName: achievement.configName || achievement.config_name || "",
     gameName: achievement.gameName || "",
     name: getNotificationAchievementKeys(achievement)[0] || "",
+    points: achievement.points ?? achievement.gamerscore,
+    ...(platform === "ps4recomp" ? { ps4RecompScope: achievement.ps4RecompScope || "" } : {}),
+    ...(platform === "x360recomp" ? { x360RecompScope: achievement.x360RecompScope || "" } : {}),
     rarityPct: rarity.percent,
     raritySource: rarity.source,
     rarityTier: achievement.testPreset
       ? String(achievement.rarityTier || "")
       : rarityTier,
     rarityTierSource: trophyModeTier.source || "",
+    rareThreshold,
     trophyType,
     isRare,
     usesRareProfile,
     trophyModeEnabled,
+    ...normalizeTrophyModeThresholds(prefs),
     showRarityPercentage:
       achievement.testPreset === true
         ? achievement.showRarityPercentage !== false
@@ -21703,6 +22403,7 @@ function queueAchievementNotification(achievement) {
     rarityPct: notificationData.rarityPct,
     rarityTier: notificationData.rarityTier || null,
     rarityTierSource: notificationData.rarityTierSource || null,
+    rareThreshold: notificationData.rareThreshold,
     trophyType: notificationData.trophyType || null,
     rare: notificationData.isRare,
     rareProfile: notificationData.usesRareProfile === true,
@@ -21715,7 +22416,6 @@ function queueAchievementNotification(achievement) {
   });
   if (
     !notificationData.isTest &&
-    !notificationData.isPlatinum &&
     prefs.disableAchievementRecords === false
   ) {
     void captureAchievementUnlockRecord(notificationData);
@@ -21786,26 +22486,66 @@ function isGameCoverPreset(value) {
   );
 }
 
-function configUsesGameCoverPreset(config = {}, activePreset = "") {
-  const prefs = cachedPreferences || {};
-  const platform = normalizePlatform(config?.platform);
-  const candidates = [
-    activePreset,
-    prefs.preset,
-    prefs.rarePreset,
-    prefs.platinumPreset,
-  ];
-  if (["xenia", "rpcs3", "shadps4"].includes(platform)) {
-    candidates.push(prefs[`${platform}Preset`]);
+function getNotificationGameArtworkUsage(selection = {}, { presetFolder, sanTheme } = {}) {
+  const preset = selection.preset || "default";
+  if (isNativeWindowsNotificationPreset(preset) || isGameBarNotificationPreset(preset)) {
+    return { needed: false, source: "native", useFallbackImage: false };
   }
-  return candidates.some(isGameCoverPreset);
+  if (selection.useSanPreset && selection.sanPreset) {
+    const theme = sanTheme === undefined ? findSanPresetById(selection.sanPreset)?.theme : sanTheme;
+    if (theme) {
+      return { needed: sanThemeUsesGameArt(theme), source: "san", useFallbackImage: false };
+    }
+    // The real renderer falls back to the native preset if the SAN archive
+    // cannot be loaded, so artwork preparation follows that same fallback.
+  }
+  const folder = presetFolder === undefined ? resolveNotificationPresetFolder(preset).presetFolder : presetFolder;
+  let customUsesGameCover = false;
+  try {
+    customUsesGameCover = JSON.parse(fs.readFileSync(path.join(folder, "custom-preset.json"), "utf8"))
+      .backgroundMode === "gamecover";
+  } catch {}
+  const needed = isGameCoverPreset(preset) || customUsesGameCover;
+  return { needed, source: "native", useFallbackImage: needed };
+}
+
+function getConfigGameArtworkSelections(config = {}, activePreset = "") {
+  const prefs = cachedPreferences || {};
+  const platform = normalizePlatform(config.platform);
+  const emulatorPreferencePrefix = getEmulatorNotificationPreferencePrefix(platform);
+  const usesNativeTrophies = isPlayStationEmulatorNotificationPlatform(platform);
+  const normalPreset = activePreset || prefs.preset || "default";
+  const normalUsesRareProfile = !usesNativeTrophies && shouldUseRareNotificationProfile({
+    trophyModeEnabled: prefs.trophyModeEnabled === true });
+  const profiles = [{ usesRareProfile: normalUsesRareProfile }, { isPlatinum: true }];
+  // Xenia/X360 keep their platform profile unless Trophy Mode routes to Rare;
+  // PlayStation grades keep their platform profile. Other games can use Rare.
+  if (!emulatorPreferencePrefix && !normalUsesRareProfile) profiles.push({ usesRareProfile: true });
+  return profiles.map((profile) => resolveAchievementPresetSelection({ normalPreset, emulatorPreferencePrefix, ...profile }, prefs));
+}
+
+function configUsesGameCoverPreset(config = {}, activePreset = "", savedSelection = null) {
+  return getConfigGameArtworkSelections(config, activePreset).some((selection) => {
+    const usage = getNotificationGameArtworkUsage(selection);
+    if (savedSelection && (savedSelection.sanPreset
+      ? usage.source !== "san" || selection.sanPreset !== savedSelection.sanPreset
+      : usage.source !== "native" || selection.preset !== savedSelection.preset)) return false;
+    return usage.needed;
+  });
 }
 
 function queueGameCoverHeroForConfig(
   config = {},
-  { configName = "", preset = "", reason = "config-selected" } = {},
+  { configName = "", preset = "", reason = "config-selected", savedSelection = null } = {},
 ) {
-  if (!configUsesGameCoverPreset(config, preset)) return;
+  try {
+    if (!configUsesGameCoverPreset(config, preset, savedSelection)) return;
+  } catch (error) {
+    notificationLogger.warn("game-cover-hero:preset-check-failed", {
+      configName, reason, error: error?.message || String(error),
+    });
+    return;
+  }
   const appid = String(
     config?.appid || config?.appId || config?.steamAppId || "",
   ).trim();
@@ -21831,7 +22571,7 @@ function queueGameCoverHeroForConfig(
   });
 }
 
-function queueGameCoverHeroForActiveConfig(reason = "preferences-update") {
+function queueGameCoverHeroForActiveConfig(reason = "preferences-update", savedSelection = null) {
   if (selectedConfigMode === "view-only") return;
   const safeName = sanitizeOptionalConfigName(selectedConfig);
   if (!safeName) return;
@@ -21841,6 +22581,7 @@ function queueGameCoverHeroForActiveConfig(reason = "preferences-update") {
     configName: safeName,
     preset: selectedPreset,
     reason,
+    savedSelection,
   });
 }
 
@@ -21869,7 +22610,7 @@ function sanThemeUsesGameArt(sanTheme = null) {
   );
 }
 
-async function captureAchievementUnlockScreenshot(notificationData = {}) {
+async function captureAchievementUnlockScreenshot(notificationData = {}, options = {}) {
   try {
     if (process.platform !== "win32" && !screenshot) {
       console.warn(
@@ -21890,7 +22631,7 @@ async function captureAchievementUnlockScreenshot(notificationData = {}) {
       displayName: achName,
       config: notificationData.config_path || null,
     });
-    const saved = await saveFullScreenShot(gameName, achName);
+    const saved = await saveFullScreenShot(gameName, achName, options);
     notificationLogger.info("notification:screenshot:success", {
       displayName: achName,
       path: saved,
@@ -22353,7 +23094,10 @@ function buildNativeWindowsNotificationGroupId(notificationData = {}) {
 }
 
 function formatNotificationTrophyTier(notificationData = {}) {
-  if (notificationData.trophyModeEnabled !== true) return "";
+  const hasNativePlayStationTier =
+    isPlayStationEmulatorNotificationPlatform(notificationData.platform) &&
+    notificationData.rarityTierSource === "native";
+  if (notificationData.trophyModeEnabled !== true && !hasNativePlayStationTier) return "";
   const tier = String(notificationData.rarityTier || "")
     .trim()
     .toLowerCase();
@@ -22400,6 +23144,7 @@ function showNativeWindowsAchievementNotification(
   notificationData = {},
   callbacks = {},
 ) {
+  const isProgress = notificationData.notificationType === "progress";
   if (
     process.platform !== "win32" ||
     !Notification ||
@@ -22416,15 +23161,15 @@ function showNativeWindowsAchievementNotification(
     notificationData.iconPath && fs.existsSync(notificationData.iconPath)
       ? notificationData.iconPath
       : ICON_PATH;
-  const title = notificationData.displayName || "Achievement";
-  const body = [
+  const title = notificationData.displayName || (isProgress ? tUi("progress.achievementFallback", {}, "Achievement") : "Achievement");
+  const body = isProgress ? notificationData.description || notificationData.configName || "" : [
     notificationData.description || notificationData.configName || "",
     formatNativeWindowsNotificationRarity(notificationData),
   ]
     .filter(Boolean)
     .join("\n");
   const groupId = buildNativeWindowsNotificationGroupId(notificationData);
-  const notificationId = `ach-${crypto
+  const notificationId = `${isProgress ? "prg" : "ach"}-${crypto
     .createHash("sha1")
     .update(
       [
@@ -22457,11 +23202,13 @@ function showNativeWindowsAchievementNotification(
       groupId,
       groupTitle: notificationData.configName || "Achievements",
     };
-    if (hasNavigationRoute && registeredNavigationRoute) {
-      const launchArguments = encodeNativeWindowsNotificationLaunchArguments({
-        token: notificationId,
-        ...registeredNavigationRoute,
-      });
+    if ((hasNavigationRoute && registeredNavigationRoute) || isProgress) {
+      const launchArguments = hasNavigationRoute && registeredNavigationRoute
+        ? encodeNativeWindowsNotificationLaunchArguments({
+            token: notificationId,
+            ...registeredNavigationRoute,
+          })
+        : "";
       notificationOptions.toastXml = buildNativeWindowsAchievementToastXml({
         launchArguments,
         groupId,
@@ -22469,6 +23216,7 @@ function showNativeWindowsAchievementNotification(
         title,
         body,
         iconUrl: pathToFileURL(iconPath).toString(),
+        ...(isProgress ? { progress: notificationData.nativeProgress || { value: null } } : {}),
       });
     } else {
       Object.assign(notificationOptions, {
@@ -22483,7 +23231,7 @@ function showNativeWindowsAchievementNotification(
 
     nativeNotification = new Notification(notificationOptions);
 
-    if (hasNavigationRoute) {
+    if (hasNavigationRoute || isProgress) {
       activeNativeAchievementNotifications.retain(
         notificationId,
         nativeNotification,
@@ -22502,6 +23250,7 @@ function showNativeWindowsAchievementNotification(
     nativeNotification.once("show", () => {
       notificationLogger.info("native-windows-notification:show", {
         displayName: notificationData.displayName,
+        type: isProgress ? "progress" : "achievement",
         config: notificationData.config_path || null,
         groupId,
         navigationEnabled: hasNavigationRoute,
@@ -22588,7 +23337,9 @@ function showCustomAchievementNotification({
 }) {
   let notificationWindow = null;
   try {
-    notificationWindow = createNotificationWindow(notificationData);
+    notificationWindow = createNotificationWindow({
+      ...notificationData, screenshotRequested: shouldScreenshot === true,
+    });
     registerAnimatedNotificationNavigation(
       notificationWindow,
       notificationData,
@@ -22612,7 +23363,22 @@ function showCustomAchievementNotification({
     const armScreenshot = () =>
       armPendingNotificationScreenshot(
         notificationWindow,
-        () => captureAchievementUnlockScreenshot(notificationData),
+        () => captureAchievementUnlockScreenshot(notificationData, {
+          beforeCapture: async () => {
+            const frame = !notificationWindow.isDestroyed() &&
+              await notificationWindow.webContents.executeJavaScript(
+                "window.__achievementsScreenshotReadiness?.check()",
+              ).catch(() => null);
+            if (!frame?.ready) {
+              const error = new Error("Notification left its readable stage before capture.");
+              error.code = "capture-frame-unavailable";
+              throw error;
+            }
+            notificationLogger.debug("notification:screenshot:frame-validated", {
+              elapsedMs: frame.elapsedMs, stage: frame.reason,
+            });
+          },
+        }),
         notificationData.durationMs,
       );
     if (notificationWindow.webContents.isLoading()) {
@@ -22628,7 +23394,7 @@ function showCustomAchievementNotification({
       clearTimeout(closeTimer);
       closeTimer = null;
     }
-    clearPendingNotificationScreenshot(notificationWebContentsId);
+    clearPendingNotificationScreenshot(notificationWebContentsId, "notification-closed");
     windowLogger.info("create-notification-window:closed", {
       preset: notificationData.preset || "default",
       position: notificationData.position || "center-bottom",
@@ -22700,6 +23466,7 @@ function processNextNotification() {
     config_path: achievement.config_path,
     configName: notificationConfigName,
     gameName,
+    points: achievement.points ?? achievement.gamerscore,
     rarityPct: achievement.rarityPct,
     raritySource: achievement.raritySource || null,
     rarityTier: achievement.rarityTier || "",
@@ -22710,6 +23477,7 @@ function processNextNotification() {
     usePresetLayout: achievement.usePresetLayout === true,
     usesRareProfile: achievement.usesRareProfile === true,
     trophyModeEnabled: achievement.trophyModeEnabled === true,
+    ...normalizeTrophyModeThresholds(achievement),
     showRarityPercentage:
       achievement.testPreset === true
         ? achievement.showRarityPercentage !== false
@@ -22795,30 +23563,15 @@ function processNextNotification() {
           appid: notificationData.appid || notificationConfig?.appid,
           platform: notificationData.platform || notificationConfig?.platform });
   }
-  const sanUsesGameArt = sanThemeUsesGameArt(notificationData.sanTheme);
-  let nativeDesignerUsesGameCover = false;
-  if (presetFolder) {
-    try {
-      nativeDesignerUsesGameCover =
-        JSON.parse(
-          fs.readFileSync(
-            path.join(presetFolder, "custom-preset.json"),
-            "utf8",
-          ),
-        ).backgroundMode === "gamecover";
-    } catch {}
-  }
-  if (
-    normalizedPreset === "game cover" ||
-    sanUsesGameArt ||
-    nativeDesignerUsesGameCover
-  ) {
+  const gameArtwork = getNotificationGameArtworkUsage(notificationData, {
+    presetFolder, sanTheme: notificationData.sanTheme || null,
+  });
+  if (gameArtwork.needed) {
     const headerPath = resolveGameCoverHeaderPathForNotification(achievement, {
       useRandomTestImage: notificationData.isTest === true,
       // SAN themes retain their own bundled background when no game image is
       // available. The generic Game Cover preset keeps its existing fallback.
-      useFallbackImage:
-        normalizedPreset === "game cover" || nativeDesignerUsesGameCover,
+      useFallbackImage: gameArtwork.useFallbackImage,
     });
     if (headerPath) {
       notificationData.headerPath = headerPath;
@@ -23109,6 +23862,33 @@ function queuePlatinumAfterCurrent(notificationData) {
   flushPendingPlatinum();
 }
 
+function normalizeProgressNotificationMethod(value) {
+  const method = String(value || "animated").trim().toLowerCase();
+  return ["animated", "gamebar", "native"].includes(method) ? method : "animated";
+}
+
+function showNativeWindowsProgressNotification(data, callbacks) {
+  const current = Number(data?.progress);
+  const maximum = Number(data?.max_progress);
+  const hasCurrent = data?.progress !== null && data?.progress !== undefined && data?.progress !== "" && Number.isFinite(current);
+  const hasMaximum = Number.isFinite(maximum) && maximum > 0;
+  const ratio = hasCurrent && hasMaximum ? Math.max(0, Math.min(1, current / maximum)) : null;
+  const configName = String(data?.configName || data?.config_name || "");
+  return showNativeWindowsAchievementNotification({
+    ...data,
+    notificationType: "progress",
+    isTest: data?.isTestProgress === true,
+    configName,
+    description: ratio === null ? [configName, hasCurrent ? String(current) : ""].filter(Boolean).join("\n") : configName,
+    iconPath: resolveIconAbsolutePath(data?.config_path, data?.icon || data?.icon_gray),
+    nativeProgress: {
+      value: ratio,
+      status: ratio === null ? "" : `${current} / ${maximum}`,
+      valueStringOverride: ratio === null ? "" : `${Math.round(ratio * 100)}%`,
+    },
+  }, callbacks);
+}
+
 function queueProgressNotification(data) {
   const isTestProgress = data?.isTestProgress === true;
   if (
@@ -23132,16 +23912,11 @@ function queueProgressNotification(data) {
   const timing = getNotificationTimingPreferences("progress");
   const scale = normalizeNotificationScale(data?.scale ?? timing.scale).scale;
   const notificationDuration = data?.notificationDuration ?? timing.duration;
-  const notificationMethod =
-    String(
-      data?.notificationMethod ||
-        cachedPreferences?.progressNotificationMethod ||
-        "animated",
-    )
-      .trim()
-      .toLowerCase() === "gamebar"
-      ? "gamebar"
-      : "animated";
+  const notificationMethod = normalizeProgressNotificationMethod(
+    data?.notificationMethod ||
+      cachedPreferences?.progressNotificationMethod ||
+      "animated",
+  );
   data = { ...(data || {}), scale, notificationDuration, notificationMethod };
   notificationLogger.info("queue-progress", {
     displayName: data?.displayName || "",
@@ -23160,12 +23935,64 @@ function processNextProgressNotification() {
 
   const data = progressNotificationQueue.shift();
   isProgressShowing = true;
+  let finished = false;
 
   const finishProgressNotification = () => {
-    if (!isProgressShowing) return;
+    if (finished) return;
+    finished = true;
     isProgressShowing = false;
     processNextProgressNotification();
   };
+
+  if (data?.notificationMethod === "native") {
+    let timer = null;
+    let shown = false;
+    let fallbackStarted = false;
+    const finishNative = () => { clearTimeout(timer); finishProgressNotification(); };
+    const fallback = (reason, error = null) => {
+      if (finished || fallbackStarted) return;
+      // A failure arriving after the show signal must not display the same
+      // progress update again through an animated fallback.
+      if (shown) { finishNative(); return; }
+      fallbackStarted = true;
+      clearTimeout(timer);
+      notificationLogger.warn("native-windows-progress:fallback", {
+        displayName: data?.displayName || "", reason, error: error ? String(error.message || error) : null,
+      });
+      try {
+        const window = showProgressNotification({ ...data, notificationMethod: "animated" });
+        if (window) window.once("closed", finishNative);
+        else finishNative();
+      } catch (fallbackError) {
+        notificationLogger.warn("native-windows-progress:fallback-failed", { error: String(fallbackError.message || fallbackError) });
+        finishNative();
+      }
+    };
+    try {
+      const notification = showNativeWindowsProgressNotification(data, {
+        onShow: () => {
+          if (finished || fallbackStarted || shown) return;
+          shown = true;
+          clearTimeout(timer);
+          timer = setTimeout(finishNative, NATIVE_WINDOWS_QUEUE_INTERVAL_MS);
+          timer.unref?.();
+        },
+        onFailed: (error) => fallback("failed-event", error),
+        onClose: () => { if (!fallbackStarted) finishNative(); },
+      });
+      if (!notification) fallback("show-failed");
+      else if (!finished && !fallbackStarted && !shown) {
+        timer = setTimeout(() => {
+          notificationLogger.warn("native-windows-progress:no-show-signal", { displayName: data?.displayName || "" });
+          // Display is uncertain: release the queue without creating a second
+          // notification that Windows could show alongside the first one.
+          finishNative();
+        }, NATIVE_WINDOWS_SHOW_WATCHDOG_MS);
+        timer.unref?.();
+      }
+    } catch (error) { fallback("show-failed", error); }
+    return;
+  }
 
   if (data?.notificationMethod === "gamebar") {
     const current = Number(data?.progress);
@@ -23283,10 +24110,36 @@ if (!fs.existsSync(cacheDir)) {
   fs.mkdirSync(cacheDir, { recursive: true });
 }
 
+function resolveKytyAchievementCacheProfile(configName, options = null) {
+  const resolved = normalizeAchievementCacheOptions(options);
+  const parsed = kytyTrophy.parseProgressPath(resolved.filePath || resolved.savePath || resolved.progressPath || "");
+  const cfg = (!resolved.kytyps5UserId || !resolved.kytyps5EmulatorRoot) ? readConfigForAchievementCache(configName) : null;
+  return {
+    userId: String(resolved.kytyps5UserId || parsed?.userId || cfg?.kytyps5_user_id || ""),
+    emulatorRoot: resolved.kytyps5EmulatorRoot || parsed?.emulatorRoot || cfg?.kytyps5_emulator_root || "",
+  };
+}
+
 function makeCacheKey(configName, platform = "steam", options = null) {
   const safeName = sanitizeConfigName(configName || "") || "unknown";
   const safePlatform = normalizePlatform(platform) || "steam";
   const parts = [safeName, safePlatform];
+  if (safePlatform === "ps4recomp") {
+    return [...parts, "profile_" + ps4Recomp.cacheScope(readConfigForAchievementCache(configName), options || {})].join("_");
+  }
+  if (safePlatform === "pcports") {
+    return [...parts, "profile_" + pcPorts.cacheScope(readConfigForAchievementCache(configName), options || {})].join("_");
+  }
+  if (safePlatform === "x360recomp") {
+    return [...parts, `profile_${x360Recomp.cacheScope(readConfigForAchievementCache(configName), options || {})}`].join("_");
+  }
+  if (safePlatform === "kytyps5") {
+    const profile = resolveKytyAchievementCacheProfile(configName, options);
+    if (!/^\d+$/.test(profile.userId) || !profile.emulatorRoot) throw new Error("Missing Kyty cache profile");
+    const runtime = require("crypto").createHash("sha256")
+      .update(path.resolve(profile.emulatorRoot).toLowerCase()).digest("hex").slice(0, 12);
+    return [...parts, `user_${profile.userId}`, `runtime_${runtime}`].join("_");
+  }
   const scopedAccountId = resolveScopedAchievementCacheAccountId(
     configName,
     safePlatform,
@@ -23322,13 +24175,25 @@ function getCachePath(configName, platform = "steam", options = null) {
   return path.join(cacheDir, `${key}_achievements_cache.json`);
 }
 
+ps4Recomp.configureCacheStorage({
+  getPath: (config) => getCachePath(config.name, "ps4recomp", ps4Recomp.cacheOptions(config)),
+  getConfigs: () => fs.readdirSync(configsDir).filter((name) => name.endsWith(".json")).flatMap((name) => {
+    try {
+      const config = JSON.parse(fs.readFileSync(path.join(configsDir, name), "utf8"));
+      return normalizePlatform(config.platform) === "ps4recomp"
+        ? [{ ...config, name: path.basename(name, ".json"), platform: "ps4recomp" }] : [];
+    } catch { return []; }
+  }),
+});
+
 function listScopedAchievementCachePaths(configName, platform = "steam") {
   const normalizedPlatform = normalizePlatform(platform) || "steam";
   if (
     normalizedPlatform !== "steam-official" &&
     normalizedPlatform !== "epic-official" &&
     normalizedPlatform !== "shadps4" &&
-    normalizedPlatform !== "xlivelessness"
+    normalizedPlatform !== "xlivelessness" &&
+    normalizedPlatform !== "ps4recomp" && normalizedPlatform !== "pcports" && normalizedPlatform !== "x360recomp" && normalizedPlatform !== "kytyps5"
   ) {
     const exactPath = getCachePath(configName, normalizedPlatform);
     return exactPath ? [exactPath] : [];
@@ -23340,7 +24205,7 @@ function listScopedAchievementCachePaths(configName, platform = "steam") {
   if (!cacheDir || !fs.existsSync(cacheDir)) return [];
   const escapedBaseKey = baseKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const rx = new RegExp(
-    `^${escapedBaseKey}(?:_acct_[A-Za-z0-9-]+)?(?:_user_[A-Za-z0-9._-]+)?(?:_profile_.+)?_achievements_cache\\.json$`,
+    `^${escapedBaseKey}(?:_acct_[A-Za-z0-9-]+)?(?:_user_[A-Za-z0-9._-]+)?(?:_runtime_[a-f0-9]+)?(?:_profile_.+)?_achievements_cache\\.json$`,
     "i",
   );
   try {
@@ -23350,6 +24215,95 @@ function listScopedAchievementCachePaths(configName, platform = "steam") {
       .map((entry) => path.join(cacheDir, entry));
   } catch {
     return [];
+  }
+}
+
+function migrateKytyAchievementCaches({ payload, configs }) {
+  const snapshots = new Map();
+  const backupDir = path.join(cacheDir, ".kyty-migration");
+  const normalizedCaches = new Map();
+  const receiptPath = (cachePath, snapshot) => {
+    // Key order changes during saving; the receipt identifies content, not
+    // formatting. Normalise earned_time just as savePreviousAchievements does.
+    const ordered = Object.fromEntries(Object.keys(snapshot).sort().map((id) => {
+      const state = snapshot[id];
+      return [id, state && typeof state === "object"
+        ? Object.fromEntries(Object.keys(state).sort().map((key) =>
+            [key, key === "earned_time" ? state[key] ?? 0 : state[key]]))
+        : state];
+    }));
+    const hash = crypto.createHash("sha256")
+      .update(`${path.basename(cachePath)}\0${JSON.stringify(ordered)}`).digest("hex");
+    return path.join(backupDir, `format-v2.${hash}.json`);
+  };
+  const readNormalizedCache = (cachePath, config) => {
+    if (normalizedCaches.has(cachePath)) return normalizedCaches.get(cachePath);
+    const bytes = fs.readFileSync(cachePath);
+    const old = JSON.parse(bytes.toString("utf8"));
+    if (!old || typeof old !== "object" || Array.isArray(old)) throw new Error(`Invalid Kyty cache: ${cachePath}`);
+    fs.mkdirSync(backupDir, { recursive: true });
+    const backup = path.join(backupDir, `${path.basename(cachePath)}.${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 12)}.bak`);
+    if (!fs.existsSync(backup)) fs.writeFileSync(backup, bytes);
+    // A scoped filename alone does not imply v2: boot seeding can still have
+    // written legacy IDs. Receipts also cover an interrupted migration whose
+    // new snapshot contains only set-0 IDs and therefore no "s1_..." keys.
+    const isV2 = config.kytyps5_format_version === 2 ||
+      fs.existsSync(receiptPath(cachePath, old)) ||
+      Object.keys(old).some((id) => /^s\d+_\d+$/.test(id));
+    const normalized = {};
+    for (const [id, state] of Object.entries(old)) {
+      const key = !isV2 && /^\d+$/.test(id)
+        ? kytyTrophy.trophyKey(config.kytyps5_service_label ?? 0, id) : id;
+      normalized[key] = state && typeof state === "object" &&
+        Object.prototype.hasOwnProperty.call(state, "earned_time")
+        ? { ...state, earned_time: state.earned_time ?? 0 } : state;
+    }
+    normalizedCaches.set(cachePath, normalized);
+    return normalized;
+  };
+  const orderedConfigs = configs.slice().sort((a, b) =>
+    Number(a.name === payload.name) - Number(b.name === payload.name));
+  for (const entry of orderedConfigs) {
+    const config = entry.data;
+    const user = String(config.kytyps5_user_id ?? kytyTrophy.parseProgressPath(config.save_path)?.userId ?? "");
+    const candidates = [];
+    for (const cachePath of listScopedAchievementCachePaths(entry.name, "kytyps5")) {
+      const match = /_user_(\d+)_runtime_[a-f0-9]+_achievements_cache\.json$/i.exec(cachePath);
+      if (match && cachePath === getCachePath(entry.name, "kytyps5", kytyTrophy.profileOptions(config, match[1]))) {
+        candidates.push({ cachePath, userId: match[1] });
+      }
+    }
+    if (config.kytyps5_format_version !== 2 && /^\d+$/.test(user)) {
+      candidates.push(...[`${entry.name}_kytyps5_achievements_cache.json`, `${entry.name}_achievements_cache.json`]
+        .map((file) => ({ cachePath: path.join(cacheDir, file), userId: user })));
+    }
+    for (const { cachePath, userId } of candidates) {
+      if (!fs.existsSync(cachePath)) continue;
+      const old = readNormalizedCache(cachePath, config);
+      const next = snapshots.get(userId) || {};
+      for (const [key, state] of Object.entries(old)) {
+        if (!next[key] || state?.manual === true ||
+            (next[key]?.manual !== true && state?.earned === true)) next[key] = state;
+      }
+      snapshots.set(userId, next);
+    }
+  }
+  const destinationConfig = configs.find((entry) => entry.name === payload.name)?.data || payload;
+  for (const [userId, snapshot] of snapshots) {
+    const options = kytyTrophy.profileOptions(payload, userId);
+    const destination = getCachePath(payload.name, "kytyps5", options);
+    let previous = {};
+    if (fs.existsSync(destination)) {
+      previous = readNormalizedCache(destination, destinationConfig);
+    }
+    const merged = mergeManualAchievementOverrides({ ...snapshot, ...previous }, snapshot);
+    // Persist the receipt before the atomic cache write. If config retirement
+    // is interrupted, the next migration must not map the new IDs again.
+    writeJsonAtomicSync(receiptPath(destination, merged), { formatVersion: 2 });
+    if (savePreviousAchievements(payload.name, merged, "kytyps5", { ...options, skipManualMerge: true }) === false &&
+        (!fs.existsSync(destination) || !deepEqual(JSON.parse(fs.readFileSync(destination, "utf8")), merged))) {
+      throw new Error(`Cannot migrate Kyty cache for user ${userId}`);
+    }
   }
 }
 
@@ -23723,6 +24677,14 @@ function normalizeCacheSeedPath(input) {
 
 function buildCacheSeedKey(config) {
   if (!config || typeof config !== "object") return "";
+  if (normalizePlatform(config.platform) === "ps4recomp") return `ps4recomp:${config.appid}:${config.ps4_recomp_install_root}:${ps4Recomp.cacheScope(config)}`;
+  if (normalizePlatform(config.platform) === "pcports") return "pcports:" + pcPorts.progressPath(config);
+  if (normalizePlatform(config.platform) === "x360recomp") {
+    return `x360recomp:${x360Recomp.cacheScope(config)}:${x360Recomp.progressPath(config)}`;
+  }
+  if (normalizePlatform(config.platform) === "kytyps5") {
+    return `kytyps5:${kytyTrophy.resolveProgressPaths(config).map(normalizeCacheSeedPath).join("|")}`;
+  }
   const cfgPath = normalizeCacheSeedPath(config.config_path);
   if (cfgPath) return `cfg:${cfgPath}`;
   const savePath = normalizeCacheSeedPath(config.save_path);
@@ -23813,6 +24775,14 @@ async function readCacheJson(pathToRead) {
   });
 }
 
+function alignUplayCachedSnapshot(configName, platform, snapshot) {
+  if (normalizePlatform(platform) === "ps4recomp") {
+    return ps4Recomp.decodeCache(readConfigForAchievementCache(configName), snapshot);
+  }
+  if (normalizePlatform(platform) !== "uplay") return snapshot;
+  return alignUplaySnapshotToConfig(snapshot, readConfigForAchievementCache(configName));
+}
+
 async function loadPreviousAchievements(
   configName,
   platform = "steam",
@@ -23838,7 +24808,19 @@ async function loadPreviousAchievements(
     );
   const effectiveOptions = scopedAccountId
     ? { ...resolvedOptions, accountId: scopedAccountId }
-    : resolvedOptions;
+    : normalizedPlatform === "kytyps5"
+      ? { ...resolvedOptions, ...(() => {
+          const profile = resolveKytyAchievementCacheProfile(configName, resolvedOptions);
+          return { kytyps5UserId: profile.userId, kytyps5EmulatorRoot: profile.emulatorRoot };
+        })() } : normalizedPlatform === "x360recomp"
+      ? { ...resolvedOptions, ...(() => {
+          const cfg = readConfigForAchievementCache(configName);
+          const profile = resolvedOptions.x360RecompProfile || x360Recomp.profileForPath(cfg, resolvedOptions.filePath || resolvedOptions.savePath || "") || cfg?.x360_recomp_profile;
+          const captured = x360Recomp.profileOptions(cfg, profile);
+          return { ...captured, x360RecompRoot: resolvedOptions.x360RecompRoot || captured.x360RecompRoot,
+            x360RecompGeneration: Object.hasOwn(resolvedOptions, "x360RecompGeneration") ? resolvedOptions.x360RecompGeneration : captured.x360RecompGeneration,
+            filePath: resolvedOptions.filePath || captured.filePath, savePath: resolvedOptions.savePath || captured.savePath };
+        })() } : resolvedOptions;
   const cachePath = getCachePath(
     configName,
     normalizedPlatform,
@@ -23848,7 +24830,7 @@ async function loadPreviousAchievements(
     try {
       const data = await readCacheJson(cachePath);
       bumpCacheBatchStat("hits");
-      return data;
+      return alignUplayCachedSnapshot(configName, normalizedPlatform, data);
     } catch (e) {
       notifyError(tUi("main.notify.cache.readFailed", { error: e.message }));
       bumpCacheBatchStat("errors");
@@ -23862,6 +24844,7 @@ async function loadPreviousAchievements(
       scopedAccountId
     ) &&
     !(normalizedPlatform === "shadps4" && scopedShadPs4UserId) &&
+    normalizedPlatform !== "ps4recomp" && normalizedPlatform !== "pcports" && normalizedPlatform !== "x360recomp" && normalizedPlatform !== "kytyps5" &&
     !(normalizedPlatform === "xlivelessness" && scopedXLiveLessNessProfile)
   ) {
     const legacyPath = path.join(
@@ -23872,7 +24855,7 @@ async function loadPreviousAchievements(
       try {
         const data = await readCacheJson(legacyPath);
         bumpCacheBatchStat("hits");
-        return data;
+        return alignUplayCachedSnapshot(configName, normalizedPlatform, data);
       } catch (e) {
         bumpCacheBatchStat("errors");
       }
@@ -23912,7 +24895,7 @@ async function loadPreviousAchievements(
               fs.copyFileSync(altPath, cachePath);
             }
           } catch {}
-          return data;
+          return alignUplayCachedSnapshot(configName, normalizedPlatform, data);
         } catch {
           bumpCacheBatchStat("errors");
         }
@@ -23939,7 +24922,19 @@ function savePreviousAchievements(
   );
   const effectiveOptions = scopedAccountId
     ? { ...resolvedOptions, accountId: scopedAccountId }
-    : resolvedOptions;
+    : normalizedPlatform === "kytyps5"
+      ? { ...resolvedOptions, ...(() => {
+          const profile = resolveKytyAchievementCacheProfile(configName, resolvedOptions);
+          return { kytyps5UserId: profile.userId, kytyps5EmulatorRoot: profile.emulatorRoot };
+        })() } : normalizedPlatform === "x360recomp"
+      ? { ...resolvedOptions, ...(() => {
+          const cfg = readConfigForAchievementCache(configName);
+          const profile = resolvedOptions.x360RecompProfile || x360Recomp.profileForPath(cfg, resolvedOptions.filePath || resolvedOptions.savePath || "") || cfg?.x360_recomp_profile;
+          const captured = x360Recomp.profileOptions(cfg, profile);
+          return { ...captured, x360RecompRoot: resolvedOptions.x360RecompRoot || captured.x360RecompRoot,
+            x360RecompGeneration: Object.hasOwn(resolvedOptions, "x360RecompGeneration") ? resolvedOptions.x360RecompGeneration : captured.x360RecompGeneration,
+            filePath: resolvedOptions.filePath || captured.filePath, savePath: resolvedOptions.savePath || captured.savePath };
+        })() } : resolvedOptions;
   const cachePath = getCachePath(
     configName,
     normalizedPlatform,
@@ -23952,6 +24947,9 @@ function savePreviousAchievements(
       normalizedPlatform,
       effectiveOptions,
     );
+    if (normalizedPlatform === "ps4recomp" && fs.existsSync(cachePath) && !existing) {
+      throw new Error("PS4 Recomp cache is invalid; preserving it instead of overwriting progress");
+    }
     if (
       existing &&
       typeof existing === "object" &&
@@ -24003,10 +25001,15 @@ function savePreviousAchievements(
       }
       ordered[key] = normalized;
     }
-    if (existing && deepEqual(existing, ordered)) {
+    const document = normalizedPlatform === "ps4recomp"
+      ? ps4Recomp.encodeCache(readConfigForAchievementCache(configName), ordered, existing || {}, effectiveData)
+      : ordered;
+    const existingDocument = normalizedPlatform === "ps4recomp" && existing
+      ? ps4Recomp.encodeCache(readConfigForAchievementCache(configName), existing) : existing;
+    if (existing && deepEqual(existingDocument, document)) {
       return false;
     }
-    writeJsonAtomicSync(cachePath, ordered);
+    writeJsonAtomicSync(cachePath, document);
     markGameBarWidgetSnapshotDirty("achievement-cache-saved");
     queueDashboardSummaryReconcile(configName, "achievement-cache-saved");
     persistenceLogger.info("save-achievement-cache", {
@@ -24284,6 +25287,7 @@ async function monitorAchievementsFile(filePath) {
     normalizePlatform(selectedPlatform) ||
     normalizePlatform(configMeta?.platform) ||
     "steam";
+  const isKyty = normalizePlatform(configMeta?.platform) === "kytyps5";
   const isPs4 =
     normalizePlatform(configMeta?.platform) === "shadps4" ||
     String(filePath || "")
@@ -24294,6 +25298,7 @@ async function monitorAchievementsFile(filePath) {
       resolvePs4ProgressPathForConfig(configMeta)
     : "";
   const currentCacheOptions = {
+    ...(isKyty ? kytyTrophy.profileOptions(configMeta) : {}),
     appid: configMeta?.appid || currentAppId || "",
     filePath: selectedPs4ProgressPath || filePath || "",
     savePath:
@@ -24302,12 +25307,15 @@ async function monitorAchievementsFile(filePath) {
       path.dirname(filePath || ""),
     shadps4UserId: getPs4UserIdFromProgressPath(selectedPs4ProgressPath),
   };
-  previousAchievements =
+  const kytyPendingBaselines = new Set();
+  const loadedPreviousAchievements =
     (await loadPreviousAchievements(
       configName,
       currentPlatform,
       currentCacheOptions,
     )) || {};
+  if (monitorToken !== achievementMonitorToken) return;
+  previousAchievements = loadedPreviousAchievements;
   const ps4PreviousByPath = new Map();
   const ps4FirstLoadByPath = new Map();
   const normalizePs4ProgressKey = (fp) =>
@@ -24437,6 +25445,7 @@ async function monitorAchievementsFile(filePath) {
     sourceFilePath = filePath,
     opts = {},
   ) => {
+    if (monitorToken !== achievementMonitorToken) return;
     const activeFilePath = sourceFilePath || filePath;
     const activePs4ProgressPath = isPs4
       ? (isPs4ProgressXmlPath(activeFilePath) ? activeFilePath : "") ||
@@ -24466,7 +25475,22 @@ async function monitorAchievementsFile(filePath) {
     let touchedInLoop = false;
     let lumaPlayReadFailed = false;
     try {
-      if (isXenia) {
+      if (isKyty) {
+        const parsed = kytyTrophy.loadConfigSnapshot(configMeta, previousAchievements);
+        if (parsed.valid) {
+          const failedLabels = new Set((parsed.failures || []).map((failure) =>
+            kytyTrophy.parseProgressPath(failure.progressPath)?.serviceLabel));
+          if (isFirstLoad) for (const label of failedLabels) kytyPendingBaselines.add(label);
+          else for (const label of [...kytyPendingBaselines]) {
+            if (failedLabels.has(label)) continue;
+            for (const [key, state] of Object.entries(parsed.snapshot)) {
+              if (Number(/^s(\d+)_/.exec(key)?.[1] || "0") === label) previousAchievements[key] = state;
+            }
+            kytyPendingBaselines.delete(label);
+          }
+        }
+        currentAchievements = parsed.valid ? parsed.snapshot : previousAchievements;
+      } else if (isXenia) {
         const parsed = parseGpdFile(activeFilePath);
         currentAchievements = buildSnapshotFromGpd(parsed);
       } else if (isRpcs3) {
@@ -24590,6 +25614,15 @@ async function monitorAchievementsFile(filePath) {
       if (!isRetry) {
         setTimeout(() => processSnapshot(true), 220);
       }
+      return;
+    }
+
+    // A selected Kyty config starts from its current progress, without replaying old unlocks.
+    if (isKyty && isFirstLoad) {
+      previousAchievements = currentAchievements;
+      savePreviousAchievements(configName, previousAchievements, currentPlatform, currentCacheOptions);
+      isFirstLoad = false;
+      bootSeeding = false;
       return;
     }
 
@@ -25062,7 +26095,28 @@ async function monitorAchievementsFile(filePath) {
         return;
       }
     }
-    if (fs.existsSync(filePath)) {
+    if (isKyty) {
+      const sources = kytyTrophy.resolveProgressPaths(configMeta);
+      processSnapshot(false);
+      refreshAchievementsUi();
+      achievementsWatcher = () => {
+        if (monitorToken !== achievementMonitorToken) return;
+        processSnapshot(false);
+        refreshAchievementsUi();
+      };
+      for (const source of sources) {
+        if (source !== filePath) extraAchievementFiles.add(source);
+        fs.watchFile(source, { interval: 1000 }, source === filePath ? achievementsWatcher : () => {
+          if (monitorToken !== achievementMonitorToken) return;
+          processSnapshot(false, source);
+          refreshAchievementsUi();
+        });
+      }
+      achievementMonitorTimer = null;
+      return;
+    }
+    // watchFile also detects first creation of the selected source.
+    if (isKyty || fs.existsSync(filePath)) {
       processSnapshot(false);
       refreshAchievementsUi();
 
@@ -25780,6 +26834,54 @@ async function applyActiveConfigUpdate(
     }
     return;
   }
+  if (normalizedPlatform === "ps4recomp") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = ps4Recomp.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
+  if (normalizedPlatform === "pcports") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = pcPorts.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
+  if (normalizedPlatform === "x360recomp") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = x360Recomp.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    // The dedicated watcher monitors every profile, including absent state files.
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
+  if (normalizedPlatform === "kytyps5") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = kytyTrophy.resolveProgressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    monitorAchievementsFile(achievementsFilePath);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", {
+        language: selectedLanguage,
+        uiLanguage: selectedUiLanguage,
+      });
+    }
+    return;
+  }
   if (normalizedPlatform === "shadps4") {
     const appid = String(config.appid || "");
     currentAppId = appid || null;
@@ -26141,6 +27243,54 @@ async function applyActiveConfigUpdate(
     return;
   }
 
+  if (normalizedPlatform === "ps4recomp") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = ps4Recomp.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
+  if (normalizedPlatform === "pcports") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = pcPorts.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
+  if (normalizedPlatform === "x360recomp") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = x360Recomp.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    // The dedicated watcher monitors every profile, including absent state files.
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
+  if (normalizedPlatform === "kytyps5") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = kytyTrophy.resolveProgressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    monitorAchievementsFile(achievementsFilePath);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", {
+        language: selectedLanguage,
+        uiLanguage: selectedUiLanguage,
+      });
+    }
+    return;
+  }
   if (normalizedPlatform === "shadps4") {
     const appid = String(config.appid || "");
     currentAppId = appid || null;
@@ -26445,7 +27595,7 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
       }
     }
 
-    if (!foundSchemaPath && hasAppId) {
+    if (!foundSchemaPath && hasAppId && !["ps4recomp", "x360recomp", "pcports"].includes(normalizePlatform(data.platform))) {
       const schemaBase = path.join(configsDir, "schema");
       const platformDir = resolveSchemaDirForPlatform(appid, data?.platform);
       const platformJson = path.join(platformDir, "achievements.json");
@@ -26749,10 +27899,6 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     }
     payload.appid = sanitizedAppId;
 
-    if (safeOld !== safeNew && fs.existsSync(oldConfigPath)) {
-      fs.renameSync(oldConfigPath, newConfigPath);
-    }
-
     applyConfigPlatformDefaults(payload);
     const prevPlatform = normalizePlatform(prevConfig?.platform) || null;
     let nextPlatform = normalizePlatform(payload.platform) || null;
@@ -26761,7 +27907,13 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     }
     nextPlatform = nextPlatform || "steam";
     payload.platform = nextPlatform;
-    const oldCachePath = getCachePath(safeOld, prevPlatform || "steam");
+    // Freeze the old profile before moving its config: Kyty cache identity
+    // otherwise tries to read the old filename after it has disappeared.
+    const oldCachePath = getCachePath(
+      safeOld,
+      prevPlatform || "steam",
+      prevPlatform === "kytyps5" ? kytyTrophy.profileOptions(prevConfig) : prevPlatform === "x360recomp" ? x360Recomp.profileOptions(prevConfig) : null,
+    );
     let newCachePath = "";
     const oldScopedCachePaths = listScopedAchievementCachePaths(
       safeOld,
@@ -26861,10 +28013,17 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
         if (detectedBase) payload.save_path = detectedBase;
       }
     } catch {}
+    if (safeOld !== safeNew && fs.existsSync(oldConfigPath)) {
+      fs.renameSync(oldConfigPath, newConfigPath);
+    }
     fs.writeFileSync(newConfigPath, JSON.stringify(payload, null, 2));
 
-    newCachePath = getCachePath(safeNew, nextPlatform);
-    if (fs.existsSync(oldCachePath)) {
+    newCachePath = getCachePath(
+      safeNew,
+      nextPlatform,
+      nextPlatform === "kytyps5" ? kytyTrophy.profileOptions(payload) : nextPlatform === "x360recomp" ? x360Recomp.profileOptions(payload) : null,
+    );
+    if (oldCachePath !== newCachePath && fs.existsSync(oldCachePath)) {
       fs.renameSync(oldCachePath, newCachePath);
     }
     const prevCachePlatform = normalizePlatform(prevPlatform);
@@ -26874,7 +28033,8 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
       (nextCachePlatform === "steam-official" ||
         nextCachePlatform === "epic-official" ||
         nextCachePlatform === "shadps4" ||
-        nextCachePlatform === "xlivelessness")
+        nextCachePlatform === "xlivelessness" ||
+        nextCachePlatform === "kytyps5" || nextCachePlatform === "x360recomp")
     ) {
       const oldPrefix = `${sanitizeConfigName(safeOld || "")}_${nextCachePlatform}`;
       const newPrefix = `${sanitizeConfigName(safeNew || "")}_${nextCachePlatform}`;
@@ -26891,9 +28051,19 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
           cacheDir,
           `${newPrefix}${baseName.slice(oldPrefix.length)}`,
         );
+        if (scopedOldPath === scopedNewPath) continue;
         try {
           fs.renameSync(scopedOldPath, scopedNewPath);
-        } catch {}
+        } catch (error) {
+          if (nextCachePlatform === "kytyps5" || nextCachePlatform === "x360recomp") {
+            persistenceLogger.error("kytyps5:cache:rename-failed", {
+              oldPath: scopedOldPath,
+              newPath: scopedNewPath,
+              error: error?.message || String(error),
+            });
+            throw error;
+          }
+        }
       }
     }
 
@@ -28670,7 +29840,8 @@ ipcMain.handle(
         notifyError(tUi("main.notify.executable.pathMissing"));
         return { success: false, error: "executable-path-missing" };
       }
-      const args = splitArgsString(effectiveArgs);
+      const waitForPs4Runtime = normalizePlatform(configData?.platform) === "ps4recomp";
+      const args = splitArgsString(waitForPs4Runtime ? ps4Recomp.launchArguments(effectiveArgs, configData.ps4_recomp_port) : effectiveArgs);
       const isAppsFolderTarget = /^shell:AppsFolder\\/i.test(
         String(exePath || "").trim(),
       );
@@ -28686,8 +29857,21 @@ ipcMain.handle(
       const child = spawn(launchExecutable, launchArgs, {
         cwd,
         detached: true,
-        stdio: "ignore",
+        stdio: waitForPs4Runtime ? ["ignore", "ignore", "pipe"] : "ignore",
       });
+      if (waitForPs4Runtime) {
+        let launchStderr = "";
+        child.stderr?.on("data", (chunk) => { launchStderr = (launchStderr + chunk.toString()).slice(-4096); });
+        const logPath = path.join(ps4Recomp.source(configData), "last_run.log");
+        appLogger.info("ps4recomp:play:spawn", { configName: requestedConfigName,
+          game: configData.ps4_recomp_game, executable: exePath, args: launchArgs, cwd, pid: child.pid || null, logPath });
+        child.once("exit", (code, signal) => {
+          appLogger[code === 0 ? "info" : "warn"]("ps4recomp:play:exit", {
+            configName: requestedConfigName, game: configData.ps4_recomp_game, code, signal, logPath,
+            ...(launchStderr.trim() ? { error: launchStderr.trim() } : {}),
+          });
+        });
+      }
       child.on("error", (err) => {
         if (err.code === "ENOENT") {
           notifyError(
@@ -28706,20 +29890,26 @@ ipcMain.handle(
       child.unref();
 
       if (requestedConfigName && configData) {
-        configData.__playtimeKey = requestedConfigName;
-        if (child?.pid) {
-          configData.__launchPid = child.pid;
-          manualLaunchPidMap.set(child.pid, requestedConfigName);
-          setTimeout(() => {
-            if (manualLaunchPidMap.get(child.pid) === requestedConfigName) {
-              manualLaunchPidMap.delete(child.pid);
-            }
-          }, 120000);
+        if (waitForPs4Runtime) {
+          // The launcher may spend minutes preparing the game, or stop before
+          // bb-probe starts. Only verified runtime detection starts playtime.
+          appLogger.info("ps4recomp:play:awaiting-runtime", { configName: requestedConfigName, launcherPid: child.pid || null });
+        } else {
+          configData.__playtimeKey = requestedConfigName;
+          if (child?.pid) {
+            configData.__launchPid = child.pid;
+            manualLaunchPidMap.set(child.pid, requestedConfigName);
+            setTimeout(() => {
+              if (manualLaunchPidMap.get(child.pid) === requestedConfigName) {
+                manualLaunchPidMap.delete(child.pid);
+              }
+            }, 120000);
+          }
+          manualLaunchInProgress = true;
+          detectedConfigName = requestedConfigName;
+          activePlaytimeConfigs.add(requestedConfigName);
+          startPlaytimeLogWatcher(configData);
         }
-        manualLaunchInProgress = true;
-        detectedConfigName = requestedConfigName;
-        activePlaytimeConfigs.add(requestedConfigName);
-        startPlaytimeLogWatcher(configData);
       } else {
         notifyError(
           requestedConfigName
@@ -28733,7 +29923,8 @@ ipcMain.handle(
         success: true,
         pid: child?.pid || null,
         configName: requestedConfigName || null,
-        playtimeTrackingStarted: Boolean(requestedConfigName && configData),
+        playtimeTrackingStarted: Boolean(requestedConfigName && configData && !waitForPs4Runtime),
+        ...(waitForPs4Runtime ? { playtimeTrackingPending: true } : {}),
       };
     } catch (err) {
       notifyError(
@@ -29830,13 +31021,28 @@ ipcMain.on("request-current-config", (event) => {
   }
 });
 
-ipcMain.on("ach-table:view-state", (_event, payload) => {
+function isAchievementTableViewStateSender(sender) {
+  return [mainWindow, overlayWindow].some((window) =>
+    window && !window.isDestroyed() && window.webContents === sender);
+}
+
+ipcMain.on("ach-table:get-view-state", (event, payload) => {
+  if (!isAchievementTableViewStateSender(event.sender) || typeof payload?.requestId !== "string") return;
+  event.sender.send("ach-table:view-state:response", {
+    requestId: payload.requestId,
+    state: sharedAchievementTableViewState,
+  });
+});
+
+ipcMain.on("ach-table:view-state", (event, payload) => {
+  if (!isAchievementTableViewStateSender(event.sender)) return;
   const normalized = normalizeAchievementTableViewState(payload);
   if (!normalized) return;
   sharedAchievementTableViewState = normalized;
-  if (overlayWindow && !overlayWindow.isDestroyed()) {
+  for (const target of [mainWindow, overlayWindow]) {
+    if (!target || target.isDestroyed() || target.webContents === event.sender) continue;
     try {
-      overlayWindow.webContents.send("ach-table:view-state", normalized);
+      target.webContents.send("ach-table:view-state", normalized);
     } catch {}
   }
 });
@@ -30921,10 +32127,18 @@ ipcMain.on("notify-from-child", (_event, message) => {
   }
 });
 
+// notification-render-ready remains the loading signal used by Customisation.
+// Real screenshots use a separate content/animation readiness signal.
 ipcMain.on("notification-render-ready", (event) => {
+  if (!pendingNotificationScreenshots.has(event.sender.id)) return;
+  void event.sender.executeJavaScript(
+    "window.__achievementsScreenshotReadiness?.assetReady()",
+  ).catch(() => {});
+});
+ipcMain.on("notification-screenshot-ready", (event, details = {}) => {
   const state = pendingNotificationScreenshots.get(event.sender.id);
   if (!state) return;
-  void state.run("renderer-ready");
+  void state.run("content-ready", details);
 });
 
 ipcMain.on("overlay:visibility-ack", (event, payload = {}) => {
@@ -31047,6 +32261,12 @@ async function upsertAutoSelectIndexEntryFromPath(filePath) {
   if (!data || typeof data !== "object") {
     removeAutoSelectIndexEntry(safeName);
     return;
+  }
+
+  if (normalizePlatform(data.platform) === "ps4recomp" && data.ps4_recomp_port === "uncharted" &&
+      typeof data.arguments === "string" && data.arguments.trim() === "--play") {
+    data.arguments = ps4Recomp.launchArguments(data.arguments, data.ps4_recomp_port);
+    writeJsonAtomicSync(filePath, data, { backup: true });
   }
 
   if (
@@ -31498,15 +32718,17 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
       const entry = autoSelectIndex.configEntries.get(configName);
       return (
         getConfigProcessArgTokens(entry?.data).length > 0 ||
-        isXLiveLessNessConfig(entry?.data)
+        isXLiveLessNessConfig(entry?.data) || normalizePlatform(entry?.data?.platform) === "ps4recomp"
       );
     });
     if (!requiresArguments) continue;
+    const requiresPs4RuntimeIdentity = Array.from(configNames).some((configName) =>
+      normalizePlatform(autoSelectIndex.configEntries.get(configName)?.data?.platform) === "ps4recomp");
 
     for (const proc of Array.isArray(procs) ? procs : []) {
       const pid = Math.floor(Number(proc?.pid));
       if (!Number.isFinite(pid) || pid <= 0) continue;
-      if (!requireCommandLineForArguments) continue;
+      if (!requireCommandLineForArguments && !requiresPs4RuntimeIdentity) continue;
       if (normalizeProcessCmdLine(proc)) continue;
 
       const processName = String(proc?.name || "")
@@ -31564,6 +32786,9 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
 }
 
 function getProcessConfigMatchKind(proc, configData, configName) {
+  if (normalizePlatform(configData?.platform) === "ps4recomp") {
+    return ps4Recomp.matchesProcess(configData, proc || {}) ? PROCESS_CONFIG_MATCH.EXACT_ARGUMENTS : PROCESS_CONFIG_MATCH.NONE;
+  }
   if (!proc || !proc.name || !hasProcessNameValue(configData?.process_name)) {
     return PROCESS_CONFIG_MATCH.NONE;
   }
@@ -31906,11 +33131,11 @@ async function isDashboardSummaryFingerprintCurrent(
   return true;
 }
 
-async function loadDashboardAchievementSnapshot(configName, platform) {
-  const cachePath = getCachePath(configName, platform);
+async function loadDashboardAchievementSnapshot(configName, platform, options = null) {
+  const cachePath = getCachePath(configName, platform, options);
   try {
     const raw = await fs.promises.readFile(cachePath, "utf8");
-    return { cacheAvailable: true, cachePath, snapshot: JSON.parse(raw) };
+    return { cacheAvailable: true, cachePath, snapshot: alignUplayCachedSnapshot(configName, platform, JSON.parse(raw)) };
   } catch (error) {
     if (error?.code !== "ENOENT") {
       persistenceLogger.warn("dashboard-summary:cache-read-failed", {
@@ -31922,9 +33147,10 @@ async function loadDashboardAchievementSnapshot(configName, platform) {
   }
   // Preserve the existing scoped/legacy/alias fallback behavior on a miss.
   // The common canonical-cache path above stays fully asynchronous.
-  const snapshot = (await loadPreviousAchievements(configName, platform)) || {};
+  const snapshot = (await loadPreviousAchievements(configName, platform, options)) || {};
   if (Object.keys(snapshot).length > 0 && !fs.existsSync(cachePath)) {
     const migrated = savePreviousAchievements(configName, snapshot, platform, {
+      ...options,
       skipManualMerge: true,
     });
     if (migrated) {
@@ -32083,7 +33309,8 @@ async function reconcileDashboardSummaryEntry(
 
   const platform = normalizePlatform(config?.platform) || "steam";
   const { snapshot, cachePath, cacheAvailable } =
-    await loadDashboardAchievementSnapshot(safeName, platform);
+    await loadDashboardAchievementSnapshot(safeName, platform,
+      platform === "kytyps5" ? kytyTrophy.profileOptions(config) : platform === "x360recomp" ? x360Recomp.profileOptions(config) : null);
   if (!cacheAvailable) {
     const existing = await dashboardSummaryStore.getEntry(safeName);
     if (existing?.source === "achievement-cache") {
@@ -32119,8 +33346,20 @@ async function reconcileDashboardSummaryEntry(
       getDashboardSummaryFingerprintPart(schemaFile),
       getDashboardSummaryFingerprintPart(cachePath),
     ]);
+  if (["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform)) {
+    try {
+      if (!deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), config)) {
+        queueDashboardSummaryReconcile(safeName, "kytyps5-profile-superseded");
+        return false;
+      }
+    } catch { return false; }
+  }
   const entry = {
     platform,
+    ...(["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform) ? {
+      platinum: total > 0 && unlocked === total,
+      nativePlatinum: config.native_platinum === true,
+    } : {}),
     appid: config?.appid != null ? String(config.appid) : null,
     pct: total > 0 ? Math.round((unlocked / total) * 100) : 0,
     unlocked,
@@ -32472,7 +33711,7 @@ function startRetroAchievementsActivePoll(
 async function autoSelectRunningGameConfigOnce(processes) {
   try {
     const list = Array.isArray(processes) ? processes : [];
-    if (!list.length) return;
+    if (!list.length) { ps4Recomp.updateRuntimeProcesses(list); return; }
     if (process.env.ACH_LOG_PROCESSES === "1") {
       const logPath = path.join(app.getPath("userData"), "process-log.txt");
       fs.writeFileSync(logPath, list.map((p) => p.name).join("\n"), "utf8");
@@ -32488,6 +33727,15 @@ async function autoSelectRunningGameConfigOnce(processes) {
       procsByExe.get(exe).push(p);
     }
     await enrichProcessCommandLinesForAutoSelect(procsByExe);
+
+    ps4Recomp.updateRuntimeProcesses(list);
+
+    // PS4 Recomp needs executable, game arguments and save-root identity.
+    // Its playtime watcher must see the same enriched snapshot as auto-select,
+    // not the earlier name-only notification from the native process provider.
+    if (ipcMain.listenerCount("ps4recomp:runtime-processes") > 0) {
+      ipcMain.emit("ps4recomp:runtime-processes", null, list);
+    }
 
     const getEntry = (name) => {
       const safe = sanitizeConfigName(name || "");
@@ -32706,7 +33954,7 @@ async function autoSelectRunningGameConfigOnce(processes) {
           configName: entry.name,
           source: "process",
         });
-        startPlaytimeLogWatcher(entry.data);
+        startPlaytimeLogWatcher(entry.data, { initialProcesses: list });
       }
       return;
     }
@@ -32829,7 +34077,7 @@ async function autoSelectRunningGameConfigOnce(processes) {
           configName: entry.name,
           source: "process",
         });
-        startPlaytimeLogWatcher(entry.data);
+        startPlaytimeLogWatcher(entry.data, { initialProcesses: list });
       }
       return;
     }
@@ -32843,6 +34091,7 @@ async function autoSelectRunningGameConfigOnce(processes) {
 }
 
 async function autoSelectRunningGameConfig(processes) {
+  ps4Recomp.observeRuntimeProcesses(processes);
   autoSelectPendingProcesses = Array.isArray(processes) ? processes : [];
   if (autoSelectRunningGameConfigInFlight) return;
 
@@ -32915,6 +34164,7 @@ configureAutoGenerationBlacklist((result) => {
   }
   const appIds = new Set(readBlacklistFromPrefs());
   const configKeys = new Set(readBlacklistedConfigKeysFromPrefs());
+  const generationResults = {};
   if (scope === "global") {
     const id = normalizeAppIdValue(result.appid);
     if (!id) throw new Error("Invalid automatic blacklist AppID");
@@ -32922,10 +34172,18 @@ configureAutoGenerationBlacklist((result) => {
   } else {
     for (const id of [result.appid, ...(result.aliases || [])]) {
       const key = buildBlacklistConfigKey(id, result.platform);
-      if (key) configKeys.add(key);
+      if (key) {
+        configKeys.add(key);
+        generationResults[key] = {
+          status: result.status,
+          identified: result.identified === true,
+          source: result.source || null,
+          displayName: result.displayName || null,
+        };
+      }
     }
   }
-  const payload = persistBlacklist({ appIds: Array.from(appIds), configKeys: Array.from(configKeys) });
+  const payload = persistBlacklist({ appIds: Array.from(appIds), configKeys: Array.from(configKeys), generationResults });
   setBlacklistedAppIds(payload.appids);
   setBlacklistedConfigKeys(payload.configKeys);
   prefsLogger.info("blacklist:auto-generation", {
@@ -32938,6 +34196,7 @@ configureAutoGenerationBlacklist((result) => {
 });
 const {
   loadAchievementsFromSaveFile,
+  alignUplaySnapshotToConfig,
   getSafeLocalizedText,
   buildCrcNameMap,
   resolveConfigSchemaPath,
@@ -33739,6 +34998,46 @@ async function seedManualConfigsAtBoot() {
 
     const platform = normalizePlatform(config?.platform) || "steam";
 
+    if (platform === "ps4recomp") {
+      const options = ps4Recomp.cacheOptions(config);
+      const previous = (await loadPreviousAchievements(configFileName, platform, options)) || {};
+      try { if (!deepEqual(JSON.parse(fs.readFileSync(full, "utf8")), config)) return; } catch { return; }
+      const parsed = ps4Recomp.loadConfigSnapshot({ ...config, name: configFileName }, previous);
+      if (parsed.valid) seedCacheFromSnapshot(configFileName, parsed.snapshot, platform, options);
+      return;
+    }
+    if (platform === "pcports") {
+      const options = pcPorts.cacheOptions(config);
+      const previous = (await loadPreviousAchievements(configFileName, platform, options)) || {};
+      try { if (!deepEqual(JSON.parse(fs.readFileSync(full, "utf8")), config)) return; } catch { return; }
+      const parsed = pcPorts.loadConfigSnapshot(config, previous);
+      if (parsed.valid) seedCacheFromSnapshot(configFileName, parsed.snapshot, platform, options);
+      return;
+    }
+    if (platform === "x360recomp") {
+      const profile = x360Recomp.profileOptions(config);
+      const previous = (await loadPreviousAchievements(configFileName, platform, profile)) || {};
+      try { if (!deepEqual(JSON.parse(fs.readFileSync(full, "utf8")), config)) return; } catch { return; }
+      const parsed = x360Recomp.loadConfigSnapshot(config, previous);
+      if (parsed.valid || parsed.missing) seedCacheFromSnapshot(configFileName, parsed.snapshot, platform, profile);
+      return;
+    }
+    if (platform === "kytyps5") {
+      const profile = kytyTrophy.profileOptions(config);
+      const previous = (await loadPreviousAchievements(configFileName, platform, profile)) || {};
+      // A rescan can consolidate or retarget this config while the boot read is queued.
+      // Never overwrite the migrated cache with a snapshot from its former schema.
+      try {
+        if (!deepEqual(JSON.parse(fs.readFileSync(full, "utf8")), config)) return;
+      } catch { return; }
+      const parsed = kytyTrophy.loadConfigSnapshot(config, previous);
+      if (parsed.valid) {
+        seedCacheFromSnapshot(configFileName, parsed.snapshot, platform, profile);
+      } else {
+        bumpCacheBatchStat("errors");
+      }
+      return;
+    }
     if (platform === "shadps4") {
       try {
         const ps4Trophy = require("./utils/shadps4-trophy");
@@ -34533,9 +35832,13 @@ function applyConfigPlatformDefaults(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
   const normalizedPlatform = normalizePlatform(payload.platform);
   if (
+    normalizedPlatform === "ps4recomp" ||
+    normalizedPlatform === "pcports" ||
+    normalizedPlatform === "x360recomp" ||
     normalizedPlatform === "xenia" ||
     normalizedPlatform === "rpcs3" ||
     normalizedPlatform === "shadps4" ||
+    normalizedPlatform === "kytyps5" ||
     normalizedPlatform === "steam-official" ||
     normalizedPlatform === "epic-official" ||
     normalizedPlatform === "gog-official" ||
@@ -34596,9 +35899,13 @@ const SCHEMA_PLATFORM_DIRS = [
   "epic-official",
   "xbox-pc",
   "retroachievements",
+  "ps4recomp",
+  "pcports",
+  "x360recomp",
   "xenia",
   "rpcs3",
   "shadps4",
+  "kytyps5",
   "markerpatch",
   "madnesspatch",
   "xlivelessness",
@@ -34616,9 +35923,13 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "epic-official") return "epic-official";
   if (normalized === "xbox-pc") return "xbox-pc";
   if (normalized === "retroachievements") return "retroachievements";
+  if (normalized === "ps4recomp") return "ps4recomp";
+  if (normalized === "pcports") return "pcports";
+  if (normalized === "x360recomp") return "x360recomp";
   if (normalized === "xenia") return "xenia";
   if (normalized === "rpcs3") return "rpcs3";
   if (normalized === "shadps4") return "shadps4";
+  if (normalized === "kytyps5") return "kytyps5";
   if (normalized === "markerpatch") return "markerpatch";
   if (normalized === "madnesspatch") return "madnesspatch";
   if (normalized === "xlivelessness") return "xlivelessness";
@@ -34639,6 +35950,10 @@ function isManagedSchemaPath(p) {
 function schemaPathMatchesPlatform(appid, platform, schemaPath) {
   if (!isManagedSchemaPath(schemaPath)) return false;
   const expected = resolveSchemaDirForPlatform(appid, platform);
+  if (["ps4recomp", "x360recomp", "pcports"].includes(normalizePlatform(platform))) {
+    const relative = path.relative(expected, schemaPath || "");
+    return !!relative && !relative.startsWith("..") && !path.isAbsolute(relative);
+  }
   return (
     path.normalize(schemaPath || "").toLowerCase() ===
     path.normalize(expected).toLowerCase()
@@ -34686,9 +36001,13 @@ function getPlatformForAppId(appid) {
           "gog",
           "epic",
           "epic-official",
+          "ps4recomp",
+          "pcports",
+          "x360recomp",
           "xenia",
           "rpcs3",
           "shadps4",
+          "kytyps5",
           "markerpatch",
           "madnesspatch",
           "xlivelessness",
@@ -34703,9 +36022,13 @@ function getPlatformForAppId(appid) {
           "ubisoft-official",
           "uplay",
           "gog",
+          "ps4recomp",
+          "pcports",
+          "x360recomp",
           "xenia",
           "rpcs3",
           "shadps4",
+          "kytyps5",
           "markerpatch",
           "madnesspatch",
           "xlivelessness",
@@ -35328,9 +36651,13 @@ ipcMain.handle(
       platform === "gog-official" ||
       platform === "xbox-pc" ||
       platform === "retroachievements" ||
+      platform === "ps4recomp" ||
+      platform === "x360recomp" ||
       platform === "xenia" ||
       platform === "rpcs3" ||
-      platform === "shadps4";
+      platform === "shadps4" ||
+      platform === "kytyps5" ||
+      supportsPcPortRarity(config);
 
     if (!supportedPlatform) {
       return {
@@ -35339,7 +36666,7 @@ ipcMain.handle(
         message: tUi(
           "main.message.rarityRefreshUnsupportedPlatform",
           { platform },
-          `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG/Xbox PC/RetroAchievements/Xenia/RPCS3/ShadPS4 configs (current: ${platform}).`,
+          `Rarity refresh is supported only for Steam/Uplay/Ubisoft Official/Epic/Epic Official/GOG/Xbox PC/RetroAchievements/Xenia/RPCS3/ShadPS4/KytyPS5/LADXHD configs (current: ${platform}).`,
         ),
       };
     }
@@ -35512,7 +36839,76 @@ ipcMain.handle(
       }
     }
 
+    if (supportsPcPortRarity(config)) {
+      rarityLogger.info("rarity:manual-refresh:start", {
+        configName: config.name || safeName, platform, appid: config.appid,
+        source: EXOPHASE_RARITY_SOURCE, sourcePlatform: "retro",
+      });
+      try {
+        const refreshed = await refreshPcPortSchemaRarity(config, { logger: rarityLogger });
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config.name || safeName, platform, appid: config.appid,
+          source: EXOPHASE_RARITY_SOURCE, sourcePlatform: "retro",
+          sidecarPath: refreshed.sidecarPath, baseUrl: refreshed.baseUrl,
+          fetchedCount: refreshed.fetchedCount, matchedCount: refreshed.matched,
+          schemaUpdated: refreshed.updated,
+        });
+        await invalidateDashboardSummaryEntry(config.name || safeName, "pcports-rarity-refreshed");
+        broadcastToAll("refresh-achievements-table", config.name || safeName);
+        if (selectedConfig === (config.name || safeName) && overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.webContents.send("load-overlay-data", config.name || safeName);
+        }
+        return { success: true, configName: config.name || safeName, platform,
+          appid: config.appid, sidecarPath: refreshed.sidecarPath,
+          fetchedCount: refreshed.fetchedCount, matchedCount: refreshed.matched };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config.name || safeName, platform, appid: config.appid,
+          source: EXOPHASE_RARITY_SOURCE, error: err?.message || String(err),
+        });
+        return { success: false, code: "fetch-failed", message: tUi(
+          "main.message.rarityRefreshFailedWithError", { error: err?.message || String(err) },
+          `Rarity refresh failed: ${err?.message || String(err)}`,
+        ) };
+      }
+    }
+
+    if (platform === "kytyps5") {
+      rarityLogger.info("rarity:manual-refresh:start", {
+        configName: config.name || safeName, platform, appid: config.appid,
+        source: EXOPHASE_RARITY_SOURCE,
+      });
+      try {
+        const refreshed = await refreshKytySchemaRarity(config, { logger: rarityLogger });
+        rarityLogger.info("rarity:manual-refresh:written", {
+          configName: config.name || safeName, platform, appid: config.appid,
+          source: EXOPHASE_RARITY_SOURCE, sidecarPath: refreshed.sidecarPath,
+          baseUrl: refreshed.baseUrl, fetchedCount: refreshed.fetchedCount,
+          matchedCount: refreshed.matched, schemaUpdated: refreshed.updated,
+        });
+        await invalidateDashboardSummaryEntry(config.name || safeName, "kytyps5-rarity-refreshed");
+        broadcastToAll("refresh-achievements-table", config.name || safeName);
+        if (selectedConfig === (config.name || safeName) && overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.webContents.send("load-overlay-data", config.name || safeName);
+        }
+        return { success: true, configName: config.name || safeName, platform,
+          appid: config.appid, sidecarPath: refreshed.sidecarPath,
+          fetchedCount: refreshed.fetchedCount, matchedCount: refreshed.matched };
+      } catch (err) {
+        rarityLogger.warn("rarity:manual-refresh:failed", {
+          configName: config.name || safeName, platform, appid: config.appid,
+          source: EXOPHASE_RARITY_SOURCE, error: err?.message || String(err),
+        });
+        return { success: false, code: "fetch-failed", message: tUi(
+          "main.message.rarityRefreshFailedWithError", { error: err?.message || String(err) },
+          `Rarity refresh failed: ${err?.message || String(err)}`,
+        ) };
+      }
+    }
+
     if (
+      platform === "ps4recomp" ||
+      platform === "x360recomp" ||
       platform === "xenia" ||
       platform === "rpcs3" ||
       platform === "shadps4"
@@ -35536,7 +36932,8 @@ ipcMain.handle(
         const refreshed = await refreshExophaseRarityForConfig(
           config,
           platform,
-          schemaAchievements,
+          platform === "x360recomp" ? schemaAchievements.filter((entry) =>
+            entry.x360_recomp_origin !== "reblue" && Number(entry.name) < 65536) : schemaAchievements,
         );
         const sidecarPath = writeAchievementPercentagesSidecar(
           path.dirname(schemaPath),
@@ -35915,11 +37312,12 @@ ipcMain.handle(
           configName: config?.name || safeName,
         });
       }
+      const resolveUplayName = platform === "uplay" ? createUplayNameResolver(schemaAchievements) : null;
       const entries = buildRarityEntriesForSchema(
         fetchedMap,
         schemaAchievements,
         {
-          normalizeName: (name) =>
+          normalizeName: (name) => resolveUplayName ? resolveUplayName(name) || "" :
             normalizeAchievementNameForRarity(
               name,
               resolved?.stripNames === true,
@@ -36146,18 +37544,18 @@ const PLAYSTATION_STORE_SEARCH_LOCALES = [
   "it-it",
 ];
 
-function normalizePlayStationCusa(value) {
+function normalizePlayStationTitleId(value) {
   const raw = String(value || "")
     .trim()
     .toUpperCase();
-  return /^CUSA\d{5}$/.test(raw) ? raw : "";
+  return /^(?:CUSA\d{5}|PPSA\d+)$/.test(raw) ? raw : "";
 }
 
 function normalizePlayStationContentId(value) {
   const raw = String(value || "")
     .trim()
     .toUpperCase();
-  return /^[A-Z]{2}\d{4}-CUSA\d{5}_00-[A-Z0-9_]+$/.test(raw) ? raw : "";
+  return /^[A-Z]{2}\d{4}-(?:CUSA\d{5}|PPSA\d+)_00-[A-Z0-9_]+$/.test(raw) ? raw : "";
 }
 
 function getPlayStationStoreLocaleForContentId(contentId) {
@@ -36186,7 +37584,7 @@ function buildPlayStationStoreProductUrl(contentId, locale = "") {
 
 function normalizePlayStationSearchTitle(value) {
   return String(value || "")
-    .replace(/\s*\((?:PS4|shadps4)\)\s*$/i, "")
+    .replace(/\s*\((?:PS4|shadps4|PS5|kytyps5)\)\s*$/i, "")
     .trim();
 }
 
@@ -36233,7 +37631,7 @@ function extractPlayStationProductsFromSearchHtml(html) {
     .filter((product) => product.id);
 }
 
-function scorePlayStationProductMatch(product, cusa, searchName) {
+function scorePlayStationProductMatch(product, titleId, searchName) {
   const productId = String(product?.id || "").toUpperCase();
   const npTitleId = String(product?.npTitleId || "").toUpperCase();
   const classification = String(
@@ -36243,9 +37641,9 @@ function scorePlayStationProductMatch(product, cusa, searchName) {
     ? product.platforms.map((item) => String(item || "").toUpperCase())
     : [];
   let score = 0;
-  if (npTitleId === `${cusa}_00`) score += 500;
-  else if (npTitleId.startsWith(cusa)) score += 450;
-  if (productId.includes(cusa)) score += 400;
+  if (npTitleId === `${titleId}_00`) score += 500;
+  else if (npTitleId.startsWith(titleId)) score += 450;
+  if (productId.includes(titleId)) score += 400;
   if (classification === "FULL_GAME") score += 120;
   if (classification === "BUNDLE") score += 40;
   if (
@@ -36253,7 +37651,8 @@ function scorePlayStationProductMatch(product, cusa, searchName) {
   ) {
     score -= 200;
   }
-  if (platforms.includes("PS4")) score += 30;
+  const expectedPlatform = titleId.startsWith("PPSA") ? "PS5" : "PS4";
+  if (platforms.includes(expectedPlatform)) score += 30;
   const expectedName = normalizePlayStationComparableTitle(searchName);
   const productName = normalizePlayStationComparableTitle(product?.name || "");
   if (expectedName && productName) {
@@ -36282,9 +37681,9 @@ async function fetchPlayStationStoreSearchProducts(searchTerm, locale) {
   return extractPlayStationProductsFromSearchHtml(res?.data || "");
 }
 
-async function resolvePlayStationStoreProductByCusa(cusa, searchTerm) {
+async function resolvePlayStationStoreProductByTitleId(titleId, searchTerm) {
   const cleanSearchTerm = normalizePlayStationSearchTitle(searchTerm);
-  if (!cusa || !cleanSearchTerm) return null;
+  if (!titleId || !cleanSearchTerm) return null;
   const batches = [
     PLAYSTATION_STORE_SEARCH_LOCALES.slice(0, 4),
     PLAYSTATION_STORE_SEARCH_LOCALES.slice(4),
@@ -36301,12 +37700,12 @@ async function resolvePlayStationStoreProductByCusa(cusa, searchTerm) {
           .filter((product) => {
             const productId = String(product?.id || "").toUpperCase();
             const npTitleId = String(product?.npTitleId || "").toUpperCase();
-            return productId.includes(cusa) || npTitleId.startsWith(cusa);
+            return productId.includes(titleId) || npTitleId.startsWith(titleId);
           })
           .map((product) => ({
             ...product,
             locale,
-            score: scorePlayStationProductMatch(product, cusa, cleanSearchTerm),
+            score: scorePlayStationProductMatch(product, titleId, cleanSearchTerm),
           }));
       }),
     );
@@ -36330,7 +37729,7 @@ function persistPlayStationStoreMetadata(configName, contentId, storeUrl) {
   try {
     if (!fs.existsSync(configPath)) return false;
     const raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
-    if (normalizePlatform(raw?.platform) !== "shadps4") return false;
+    if (!["ps4recomp", "shadps4", "kytyps5"].includes(normalizePlatform(raw?.platform))) return false;
     const next = {
       ...raw,
       ps_content_id: contentId,
@@ -36359,8 +37758,8 @@ function persistPlayStationStoreMetadata(configName, contentId, storeUrl) {
 }
 
 ipcMain.handle("playstation:store-url", async (_evt, payload = {}) => {
-  const cusa = normalizePlayStationCusa(
-    payload?.appid || payload?.cusa || payload?.titleId || "",
+  const titleId = normalizePlayStationTitleId(
+    payload?.appid || payload?.cusa || payload?.ppsa || payload?.titleId || "",
   );
   const rawContentId = normalizePlayStationContentId(
     payload?.ps_content_id ||
@@ -36393,13 +37792,13 @@ ipcMain.handle("playstation:store-url", async (_evt, payload = {}) => {
         source: "config-content-id",
       };
     }
-    if (!cusa) throw new Error("invalid-playstation-cusa");
+    if (!titleId) throw new Error("invalid-playstation-title-id");
     const searchName = normalizePlayStationSearchTitle(
       payload?.displayName || payload?.title || payload?.name || "",
     );
     if (!searchName) throw new Error("playstation-search-term-required");
-    const product = await resolvePlayStationStoreProductByCusa(
-      cusa,
+    const product = await resolvePlayStationStoreProductByTitleId(
+      titleId,
       searchName,
     );
     const contentId = normalizePlayStationContentId(product?.id || "");
@@ -36418,12 +37817,12 @@ ipcMain.handle("playstation:store-url", async (_evt, payload = {}) => {
       contentId,
       title: product.name || "",
       locale: product.locale || "",
-      source: "store-search-cusa",
+      source: titleId.startsWith("PPSA") ? "store-search-ppsa" : "store-search-cusa",
       persisted,
     };
   } catch (err) {
     ipcLogger.warn("playstation:store-url:failed", {
-      appid: cusa || null,
+      appid: titleId || null,
       configName: configName || null,
       error: err?.message || String(err),
     });
@@ -36783,6 +38182,72 @@ watchedFoldersApi = makeWatchedFolders({
   requestDashboardRefresh,
   onDashboardSummaryInvalidate: (configName, reason) =>
     invalidateDashboardSummaryEntry(configName, reason),
+  migrateKytyCaches: migrateKytyAchievementCaches,
+  onKytyConfigChanging: async (configs) => {
+    if (configs.some((entry) => entry.name === selectedConfig)) await monitorAchievementsFile(null);
+  },
+  onPs4RecompConfigChanged: async (result) => {
+    if (result.created) queuePs4RecompImportRarity(result);
+    if (result.configUpdated || result.schemaUpdated) await invalidateDashboardSummaryEntry(result.name, "ps4recomp-updated");
+    if (!result.rarityOnly && (result.created || result.configUpdated || result.schemaUpdated)) {
+      void ensureLocalGameHeader(result.appid, "ps4recomp", result.name, result.displayName)
+        .catch((error) => ipcLogger.warn("ps4recomp:landscape:failed", { error: error.message }));
+    }
+    if (selectedConfig !== result.name || normalizePlatform(selectedPlatform) !== "ps4recomp") return;
+    selectedConfigPath = result.config_path;
+    fullAchievementsConfigPath = path.join(result.config_path, "achievements.json");
+    currentAppId = result.appid;
+    achievementsFilePath = ps4Recomp.progressPath(result);
+    broadcastToAll("refresh-achievements-table");
+    if (result.rarityOnly && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", result.name);
+    }
+  },
+  onPcPortConfigChanged: async (result) => {
+    if (result.configUpdated || result.schemaUpdated) await invalidateDashboardSummaryEntry(result.name, "pcports-updated");
+    if (!result.rarityOnly && (result.created || result.configUpdated || result.schemaUpdated)) {
+      void ensureLocalGameHeader(result.appid, "pcports", result.name, result.displayName)
+        .catch((error) => ipcLogger.warn("pcports:landscape:failed", { error: error.message }));
+    }
+    if (selectedConfig !== result.name || normalizePlatform(selectedPlatform) !== "pcports") return;
+    selectedConfigPath = result.config_path;
+    fullAchievementsConfigPath = path.join(result.config_path, "achievements.json");
+    currentAppId = result.appid;
+    achievementsFilePath = pcPorts.progressPath(result);
+    broadcastToAll("refresh-achievements-table");
+    if (result.rarityOnly && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", result.name);
+    }
+  },
+  onRecompConfigChanged: async (result) => {
+    if (result.configUpdated || result.schemaUpdated) await invalidateDashboardSummaryEntry(result.name, "x360recomp-updated");
+    if (!result.progressOnly && (result.created || result.configUpdated || result.schemaUpdated)) {
+      queueX360RecompImportRarity(result);
+      void x360RecompArt.ensurePortrait(app.getPath("userData"), result.appid).then((imagePath) => {
+        if (imagePath) broadcastToAll("update-image", { appid: result.appid, platform: "x360recomp" });
+      }).catch((error) => ipcLogger.warn("x360recomp:portrait:failed", { error: error.message }));
+      void ensureLocalGameHeader(result.appid, "x360recomp", result.name, result.displayName)
+        .catch((error) => ipcLogger.warn("x360recomp:landscape:failed", { error: error.message }));
+    }
+    if (selectedConfig !== result.name || normalizePlatform(selectedPlatform) !== "x360recomp") return;
+    selectedConfigPath = result.config_path;
+    fullAchievementsConfigPath = path.join(result.config_path, "achievements.json");
+    currentAppId = result.appid;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("refresh-achievements-table");
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+  },
+  onKytyConfigChanged: async (result) => {
+    await invalidateDashboardSummaryEntry(result.name, "kytyps5-profile-or-schema-updated");
+    if (selectedConfig !== result.name || normalizePlatform(selectedPlatform) !== "kytyps5") return;
+    selectedConfigPath = result.config_path;
+    fullAchievementsConfigPath = path.join(result.config_path, "achievements.json");
+    currentAppId = result.appid;
+    achievementsFilePath = kytyTrophy.resolveProgressPath(result);
+    await monitorAchievementsFile(achievementsFilePath);
+    if (selectedConfig !== result.name) return;
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("refresh-achievements-table");
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+  },
   onSeedCache: ({
     appid,
     configName,
@@ -36790,6 +38255,11 @@ watchedFoldersApi = makeWatchedFolders({
     platform,
     savePath,
     filePath,
+    x360RecompProfile,
+    x360RecompRoot,
+    x360RecompGeneration,
+    ps4RecompSource,
+    pcPortsSource,
   }) => {
     try {
       let plat = normalizePlatform(platform) || "steam";
@@ -36808,6 +38278,9 @@ watchedFoldersApi = makeWatchedFolders({
         appid,
         savePath: savePath || null,
         filePath: filePath || null,
+        ...(plat === "x360recomp" ? { x360RecompProfile, x360RecompRoot, x360RecompGeneration } : {}),
+        ...(plat === "ps4recomp" ? { ps4RecompSource } : {}),
+        ...(plat === "pcports" ? { pcPortsSource } : {}),
       });
     } catch (e) {
       console.warn(
@@ -36829,7 +38302,7 @@ watchedFoldersApi = makeWatchedFolders({
       if (fs.existsSync(cachePath)) {
         const raw = fs.readFileSync(cachePath, "utf8");
         const parsed = JSON.parse(raw);
-        return parsed;
+        return alignUplayCachedSnapshot(configName, platform, parsed);
       }
     } catch (err) {
       console.warn(
@@ -36966,9 +38439,52 @@ function resolveManualAchievementCacheContext(configName) {
       getPs4UserIdFromProgressPath(progressPath) ||
       config?.shadps4_user_id ||
       "";
+  } else if (platform === "x360recomp") {
+    Object.assign(options, x360Recomp.profileOptions(config));
+  } else if (platform === "kytyps5") {
+    Object.assign(options, kytyTrophy.profileOptions(config));
   }
   return { safeName, config, platform, options };
 }
+
+let recompProfileUpdate = Promise.resolve();
+ipcMain.handle("x360recomp:set-profile", (_event, payload = {}) => {
+  const operation = recompProfileUpdate.catch(() => {}).then(async () => {
+    const safeName = sanitizeConfigName(payload.configName || "");
+    const configFile = path.join(configsDir, `${safeName}.json`);
+    if (!safeName || !x360Recomp.validProfile(payload.profile)) throw new Error("Invalid recomp profile");
+    let config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    if (normalizePlatform(config.platform) !== "x360recomp" || !Object.hasOwn(config.x360_recomp_profiles || {}, payload.profile) ||
+        ["pending", "tsv-directory"].includes(config.x360_recomp_progress?.[payload.profile]?.format)) throw new Error("Unknown recomp profile");
+    if (config.x360_recomp_profile === payload.profile) return { success: true };
+    await watchedFoldersApi?.stopRecompConfig(safeName);
+    try {
+      // Closing the watcher drains queued writes. Keep edits made while waiting.
+      config = JSON.parse(fs.readFileSync(configFile, "utf8"));
+      if (normalizePlatform(config.platform) !== "x360recomp" || !Object.hasOwn(config.x360_recomp_profiles || {}, payload.profile) ||
+          ["pending", "tsv-directory"].includes(config.x360_recomp_progress?.[payload.profile]?.format)) throw new Error("Unknown recomp profile");
+      config.x360_recomp_profile = payload.profile;
+      config.save_path = x360Recomp.progressPath(config);
+      const progressState = x360Recomp.progressStatus(config);
+      config.x360_recomp_progress_pending = progressState.pending;
+      config.x360_recomp_progress_reason = progressState.reason;
+      const cached = readCacheSilent(safeName, "x360recomp", x360Recomp.profileOptions(config)) || {};
+      const snapshot = x360Recomp.loadConfigSnapshot(config, cached).snapshot;
+      const schema = readJsonSafe(path.join(config.config_path, "achievements.json"));
+      config.platinum = Array.isArray(schema) && schema.length > 0 && schema.every((entry) => snapshot[String(entry.name)]?.earned);
+      writeJsonAtomicSync(configFile, config, { backup: true });
+    } finally { await watchedFoldersApi?.refreshRecompConfig(safeName); }
+    await invalidateDashboardSummaryEntry(safeName, "x360recomp-profile-changed");
+    if (selectedConfig === safeName) {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("refresh-achievements-table");
+      if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.webContents.send("load-overlay-data", safeName);
+    }
+    requestDashboardRefresh({ mode: "full", reason: "x360recomp-profile-changed" });
+    return { success: true };
+  });
+  recompProfileUpdate = operation;
+  return operation;
+});
 
 ipcMain.handle("achievement:manual-state", async (_event, payload = {}) => {
   const configName = String(payload?.configName || "").trim();
@@ -37327,7 +38843,21 @@ async function flagPlatinumFromCacheOnBoot() {
   } catch {}
 }
 
-app.on("before-quit", () => {
+const deferQuitForAchievementRecorder = require("./utils/achievement-recorder-quit")
+  .createAchievementRecorderQuitGuard({
+    getController: () => achievementRecorderController,
+    resumeQuit: () => app.quit(),
+    reportError: (error) => recordLogger.warn("achievement-recorder:quit-drain-failed", {
+      error: error?.message || String(error),
+    }),
+  });
+
+app.on("before-quit", (event) => {
+  if (deferQuitForAchievementRecorder(event)) {
+    isQuitting = true;
+    pendingAchievementRecordQueue.clear("app-before-quit");
+    return;
+  }
   persistMainWindowState("before-quit");
   if (bootPlatinumAuditTimer) {
     clearTimeout(bootPlatinumAuditTimer);

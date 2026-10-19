@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.3.1-beta.2",
+  "version": "1.3.1",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -26,16 +26,18 @@
     "verify:packaged-hdr-screenshot": "node build/verify-hdr-screenshot.js --packaged",
     "verify:process-tree": "node build/run-electron-script.js build/verify-windows-process-tree.js",
     "verify:san-runtime": "node build/verify-san-runtime.js",
+    "build:x360-lzx": "node build/build-x360-lzx.js",
+    "verify:x360-lzx": "node build/verify-x360-lzx.js",
     "prepare:process-tree": "npm run verify:process-tree",
     "prepare:native:windows": "npm run build:recorder && npm run copy:recorder && npm run verify:recorder && npm run build:hdr-screenshot && npm run copy:hdr-screenshot && npm run verify:hdr-screenshot",
     "prepare:recorder:windows": "npm run prepare:native:windows",
     "prepare:recorder": "node build/prepare-recorder.js",
-    "pack": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --dir && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "pack": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --dir && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
     "dl-browsers": "node build/prepare-playwright-browsers.js",
-    "dist:self-signed": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && node build/build-self-signed.js && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
-    "dist": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64 --publish never && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
-    "dist:signed": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64 --publish never --config.forceCodeSigning=true && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
-    "dist:unsigned": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && electron-builder --win --x64 --publish never --config.win.signExecutable=false --config.forceCodeSigning=false && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot"
+    "dist:self-signed": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && node build/build-self-signed.js && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dist": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dist:signed": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never --config.forceCodeSigning=true && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dist:unsigned": "npm run prepare:recorder && npm run dl-browsers && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never --config.win.signExecutable=false --config.forceCodeSigning=false && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot"
   },
   "build": {
     "appId": "com.achievements.app",
@@ -145,6 +147,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Achievements"
     },
+    "beforePack": "build/beforePack.js",
     "afterPack": "build/afterPack.js",
     "afterSign": "build/afterSign.js",
     "artifactBuildCompleted": "build/verify-signed-artifact.js",
@@ -189,7 +192,7 @@
     }
   },
   "dependencies": {
-    "@vscode/windows-process-tree": ">=0.8.0",
+    "@vscode/windows-process-tree": "0.8.0",
     "@xboxreplay/xboxlive-auth": "^5.1.0",
     "adm-zip": "0.6.1",
     "axios": "1.20.0",
@@ -198,18 +201,19 @@
     "crc-32": "^1.2.2",
     "electron-updater": "^6.8.3",
     "ini": "6.0.0",
-    "koffi": "3.3.2",
-    "playwright": "1.63.0",
+    "koffi": "3.3.3",
+    "playwright": "1.64.1",
     "ps-list": "9.0.0",
-    "screenshot-desktop": "^1.15.6",
+    "screenshot-desktop": "1.15.7",
+    "smol-toml": "1.9.1",
     "tar-stream": "3.2.2",
     "uiohook-napi": "1.5.5"
   },
   "devDependencies": {
-    "electron": "44.5.1",
+    "electron": "44.9.0",
     "electron-builder": "^26.8.1",
     "jsdom": "29.1.1",
-    "resedit": "1.7.2"
+    "resedit": "3.1.0"
   },
   "overrides": {
     "minimatch": ">=10.2.1",
@@ -218,6 +222,18 @@
     },
     "glob": {
       "minimatch": ">=10.2.1"
+    },
+    "@electron/asar": "4.3.1",
+    "@electron/fuses": "2.1.3",
+    "app-builder-lib": {
+      "resedit": "3.1.0"
+    },
+    "@electron/get@3.1.0": {
+      "got": "16.1.0"
+    },
+    "fs-extra": "11.4.1",
+    "global-agent@3.0.0": {
+      "roarr": "3.3.0"
     }
   },
   "allowScripts": {

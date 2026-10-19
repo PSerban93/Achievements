@@ -11,6 +11,8 @@ ipcRenderer.on("show-notification", (_event, data) => {
   lastNotificationPayload = data;
 });
 
+let achievementTableStateRequestId = 0;
+
 function subscribeIpc(channel, callback, mapArgs = (_event, data) => [data]) {
   if (typeof callback !== "function") return () => {};
   const handler = (event, ...args) => callback(...mapArgs(event, ...args));
@@ -55,11 +57,13 @@ function getNotificationRarityTier(value) {
   return "bronze";
 }
 
-function getTrophyModeNotificationTier(value) {
+function getTrophyModeNotificationTier(value, data = {}) {
   const percent = parseNotificationRarityPercent(value);
   if (percent === null) return "bronze";
-  if (percent < 20) return "gold";
-  if (percent < 50) return "silver";
+  const gold = Number.isFinite(data.trophyModeGoldThreshold) ? data.trophyModeGoldThreshold : 20;
+  const silver = Number.isFinite(data.trophyModeSilverThreshold) ? data.trophyModeSilverThreshold : 50;
+  if (percent < gold) return "gold";
+  if (percent < silver) return "silver";
   return "bronze";
 }
 
@@ -498,7 +502,7 @@ function applyNotificationRarityBorder(data = {}) {
   const tier =
     getExplicitNotificationRarityTier(data) ||
     (data?.trophyModeEnabled === true
-      ? getTrophyModeNotificationTier(data?.rarityPct)
+      ? getTrophyModeNotificationTier(data?.rarityPct, data)
       : getNotificationRarityTier(data?.rarityPct));
   const showPercentage =
     data?.showRarityPercentage === true &&
@@ -813,6 +817,24 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.send("toggle-overlay", selectedConfig),
   syncAchievementTableViewState: (state) =>
     ipcRenderer.send("ach-table:view-state", state),
+  getAchievementTableViewState: () => new Promise((resolve) => {
+    // A renderer can be reloaded while the older main process is still alive.
+    // Event requests are harmless there; invoke() would log a missing handler.
+    const requestId = `${Date.now()}:${++achievementTableStateRequestId}`;
+    const replyChannel = "ach-table:view-state:response";
+    const finish = (state) => {
+      clearTimeout(timer);
+      ipcRenderer.removeListener(replyChannel, onReply);
+      resolve(state);
+    };
+    const onReply = (_event, reply) => {
+      if (reply?.requestId === requestId) finish(reply.state || null);
+    };
+    const timer = setTimeout(() => finish(null), 1000);
+    ipcRenderer.on(replyChannel, onReply);
+    try { ipcRenderer.send("ach-table:get-view-state", { requestId }); }
+    catch { finish(null); }
+  }),
   onLoadOverlayData: (callback) => {
     if (overlayDataHandler) {
       ipcRenderer.removeListener("load-overlay-data", overlayDataHandler);
@@ -870,11 +892,14 @@ contextBridge.exposeInMainWorld("api", {
     subscribeIpc("show-progress", callback, (_event, data) => [data]),
   closeNotificationWindow: () => ipcRenderer.send("close-notification-window"),
   notificationRenderReady: () => ipcRenderer.send("notification-render-ready"),
+  notificationScreenshotReady: (details) => ipcRenderer.send("notification-screenshot-ready", details),
   parseStatsBin: (filePath) => ipcRenderer.invoke("parse-stats-bin", filePath),
   selectFile: () => ipcRenderer.invoke("select-file"),
   selectImageFile: () => ipcRenderer.invoke("select-image-file"),
   readLocalImageDataUrl: (filePath) =>
     ipcRenderer.invoke("read-local-image-data-url", filePath),
+  getX360RecompArtworkUrls: (appid, variant = "portrait") => ipcRenderer.invoke("covers:x360recomp-art", appid, variant),
+  setX360RecompProfile: (configName, profile) => ipcRenderer.invoke("x360recomp:set-profile", { configName, profile }),
   getConfigByName: async (name) => {
     try {
       return await ipcRenderer.invoke("get-config-by-name", name);
@@ -912,17 +937,20 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.send("overlay:navigation-result", payload),
   checkLocalGameImage: (appid, platform) =>
     ipcRenderer.invoke("checkLocalGameImage", appid, platform),
+  checkLocalGameImageMeta: (appid, platform, configName = "") =>
+    ipcRenderer.invoke("checkLocalGameImageMeta", appid, platform, configName),
   checkLocalGameHeader: (appid, platform) =>
     ipcRenderer.invoke("checkLocalGameHeader", appid, platform),
   checkLocalGameHeaderMeta: (appid, platform, configName = "") =>
     ipcRenderer.invoke("checkLocalGameHeaderMeta", appid, platform, configName),
-  ensureGameHeader: (appid, platform, configName, displayName) =>
+  ensureGameHeader: (appid, platform, configName, displayName, options = {}) =>
     ipcRenderer.invoke(
       "ensureGameHeader",
       appid,
       platform,
       configName,
       displayName,
+      options,
     ),
   redownloadGameHeader: (payload) =>
     ipcRenderer.invoke("redownloadGameHeader", payload),
@@ -1152,6 +1180,7 @@ contextBridge.exposeInMainWorld("electron", {
         "selectExecutable",
         "launchExecutable",
         "checkLocalGameImage",
+        "checkLocalGameImageMeta",
         "checkLocalGameHeader",
         "ensureGameHeader",
         "redownloadGameHeader",

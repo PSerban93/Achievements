@@ -4,6 +4,7 @@ const path = require("path");
 const readline = require("readline");
 const { spawn } = require("child_process");
 const crypto = require("crypto");
+const { normalizeAchievementRecordFps } = require("./achievement-record-settings");
 
 const DEFAULT_RECORDER_TIMINGS = Object.freeze({
   preMs: 10_000,
@@ -12,7 +13,9 @@ const DEFAULT_RECORDER_TIMINGS = Object.freeze({
   fps: 30,
   hdrToneMapping: false,
 });
-const DEFAULT_FORCE_STOP_GRACE_MS = 4_000;
+// Native shutdown allows 3s for encoder drain and 60s for queued MP4 writes.
+// Keep the hard process kill outside that window.
+const DEFAULT_FORCE_STOP_GRACE_MS = 70_000;
 
 function getSafeOutputToken(value) {
   return String(value || "")
@@ -121,13 +124,20 @@ class AchievementRecorderController extends EventEmitter {
     this.spawnProcess = options.spawnProcess || spawn;
     this.enabled = false;
     this.child = null;
+    this.exitedChild = null;
+    this.childClosePromise = null;
+    this.exitDrainTimeoutMs = Math.max(100, Number(options.exitDrainTimeoutMs) || 2_000);
     this.ready = false;
     this.startPromise = null;
     this.startResolve = null;
     this.startReject = null;
     this.startTimer = null;
     this.restartTimer = null;
+    this.activityTimer = null;
+    this.nativeDrainUntil = 0;
+    this.activityTimeoutMs = Math.max(100, Number(options.activityTimeoutMs) || 15_000);
     this.restartAttempt = 0;
+    this.restartBlockedError = null;
     this.stopping = false;
     this.stopPromise = null;
     this.stopReason = null;
@@ -141,12 +151,37 @@ class AchievementRecorderController extends EventEmitter {
   get status() {
     return {
       enabled: this.enabled,
-      running: !!this.child && !this.child.killed,
+      running: !!this.child && !this.child.killed && this.exitedChild !== this.child,
+      closing: !!this.child && this.exitedChild === this.child,
       ready: this.ready,
       pid: this.child?.pid || null,
       stopping: this.stopping,
       pendingOutputs: this.pendingOutputs.size,
+      restartBlocked: !!this.restartBlockedError,
     };
+  }
+
+  clearActivityWatchdog() {
+    if (this.activityTimer) clearTimeout(this.activityTimer);
+    this.activityTimer = null;
+  }
+
+  armActivityWatchdog() {
+    this.clearActivityWatchdog();
+    const child = this.child;
+    if (!child || !this.ready || this.stopping) return;
+    this.activityTimer = setTimeout(() => {
+      this.activityTimer = null;
+      if (this.child !== child || this.stopping || !this.enabled) return;
+      const error = new Error("Achievement recorder stopped reporting progress");
+      error.code = "recorder-unresponsive";
+      this.emit("recorder-error", error);
+      // A driver call can block the native worker itself. Process termination
+      // is the bounded fallback; the existing exit handler preserves partial
+      // files and performs the normal restart with backoff.
+      try { child.kill(); } catch {}
+    }, Math.max(this.activityTimeoutMs, this.nativeDrainUntil - Date.now()));
+    this.activityTimer.unref?.();
   }
 
   updateTimings(nextTimings = {}) {
@@ -157,9 +192,10 @@ class AchievementRecorderController extends EventEmitter {
         1_000,
         Number(nextTimings.segmentMs) || this.timings.segmentMs,
       ),
-      fps: [30, 60].includes(Number(nextTimings.fps))
-        ? Number(nextTimings.fps)
-        : this.timings.fps,
+      fps: normalizeAchievementRecordFps(
+        nextTimings.fps === "unlocked" ? "unlocked" : Number(nextTimings.fps),
+        this.timings.fps,
+      ),
       hdrToneMapping: Object.prototype.hasOwnProperty.call(
         nextTimings,
         "hdrToneMapping",
@@ -171,6 +207,7 @@ class AchievementRecorderController extends EventEmitter {
       (key) => normalized[key] !== this.timings[key],
     );
     if (changed) {
+      this.restartBlockedError = null;
       const previous = { ...this.timings };
       this.timings = normalized;
       this.emit("timings-changed", { previous, current: { ...normalized } });
@@ -188,6 +225,7 @@ class AchievementRecorderController extends EventEmitter {
   setEnabled(enabled, reason = "unknown") {
     const wasEnabled = this.enabled;
     this.enabled = enabled === true;
+    if (this.enabled && !wasEnabled) this.restartBlockedError = null;
     if (!this.enabled) {
       this.restartAttempt = 0;
       return this.stop(reason);
@@ -203,6 +241,10 @@ class AchievementRecorderController extends EventEmitter {
 
   ensureStarted(reason = "unknown") {
     if (!this.enabled) return Promise.resolve(false);
+    if (this.restartBlockedError) return Promise.reject(this.restartBlockedError);
+    if (this.child && this.exitedChild === this.child) {
+      return this.childClosePromise.then(() => this.ensureStarted(`${reason}:after-close`));
+    }
     if (this.stopping && this.stopPromise) {
       return this.stopPromise.then(() =>
         this.enabled ? this.ensureStarted(`${reason}:after-stop`) : false,
@@ -212,6 +254,8 @@ class AchievementRecorderController extends EventEmitter {
       return Promise.resolve(true);
     }
     if (this.startPromise) return this.startPromise;
+    this.clearActivityWatchdog();
+    this.nativeDrainUntil = 0;
 
     const helper = resolveAchievementRecorderHelper({
       appDir: this.appDir,
@@ -256,6 +300,9 @@ class AchievementRecorderController extends EventEmitter {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
+    this.exitedChild = null;
+    let resolveClosed;
+    this.childClosePromise = new Promise((resolve) => { resolveClosed = resolve; });
     this.emit("starting", { reason, helper, pid: child.pid || null });
 
     const output = readline.createInterface({ input: child.stdout });
@@ -275,33 +322,56 @@ class AchievementRecorderController extends EventEmitter {
     child.stderr.on("data", (chunk) => {
       stderr = `${stderr}${chunk}`.slice(-4000);
     });
+    child.stdin?.on("error", (error) => {
+      if (this.child === child && this.exitedChild !== child && !this.stopping) {
+        this.emit("recorder-error", error);
+      }
+    });
     child.once("error", (error) => {
       if (this.child !== child) return;
       this.rejectStart(error);
       this.emit("recorder-error", error);
     });
-    child.once("exit", (code, signal) => {
+    let exitDetails = null;
+    let drainTimer = null;
+    let finalized = false;
+    const finishClose = (code, signal) => {
+      if (finalized) return;
+      finalized = true;
+      if (drainTimer) clearTimeout(drainTimer);
       output.close();
       const isCurrentChild = this.child === child;
-      const wasStopping = this.stopping;
-      const wasReady = isCurrentChild ? this.ready : false;
+      code = exitDetails?.code ?? code;
+      signal = exitDetails?.signal ?? signal;
+      const wasStopping = (exitDetails?.wasStopping ?? false) || (isCurrentChild && this.stopping);
+      const wasReady = exitDetails?.wasReady ?? (isCurrentChild ? this.ready : false);
       const error = new Error(
         `Achievement recorder exited (code=${code}, signal=${signal || ""})${
           stderr.trim() ? `: ${stderr.trim()}` : ""
         }`,
       );
       error.code = "recorder-exited";
+      // Exit code 2 is also authoritative if Windows delivers process exit
+      // before the last stdout protocol line has been consumed.
+      if (isCurrentChild && !wasStopping && code === 2 && !this.restartBlockedError) {
+        error.code = "recorder-unsupported-profile";
+        this.restartBlockedError = error;
+        this.emit("recorder-error", error);
+      }
       if (isCurrentChild) {
+        this.clearActivityWatchdog();
+        this.nativeDrainUntil = 0;
         const pendingReason = wasStopping
           ? this.stopReason || "helper-exit"
           : "helper-exit";
         this.stopReason = null;
         this.ready = false;
         this.child = null;
+        this.exitedChild = null;
         this.rejectStart(error);
         this.cleanupPendingOutputs(pendingReason);
         this.stopping = false;
-        if (this.enabled && !wasStopping) this.scheduleRestart();
+        if (this.enabled && !wasStopping && !this.restartBlockedError) this.scheduleRestart();
       }
       this.emit("exit", {
         code,
@@ -310,7 +380,29 @@ class AchievementRecorderController extends EventEmitter {
         expected: wasStopping || !isCurrentChild,
         stale: !isCurrentChild,
       });
+      resolveClosed(true);
+    };
+    child.once("exit", (code, signal) => {
+      exitDetails = { code, signal, wasStopping: this.stopping, wasReady: this.ready };
+      if (this.child === child) {
+        this.exitedChild = child;
+        this.ready = false;
+        this.clearActivityWatchdog();
+        if (this.startTimer) clearTimeout(this.startTimer);
+        this.startTimer = null;
+      }
+      // Process exit can precede the last stdout bytes. Retain pending jobs and
+      // accept their terminal messages until close, with a bounded pipe fallback.
+      drainTimer = setTimeout(() => {
+        this.emit("protocol-error", { error: "Recorder output streams did not close after exit",
+          code: "recorder-output-drain-timeout" });
+        child.stdout.destroy?.();
+        child.stderr.destroy?.();
+        finishClose(code, signal);
+      }, this.exitDrainTimeoutMs);
+      drainTimer.unref?.();
     });
+    child.once("close", finishClose);
     this.startTimer = setTimeout(() => {
       const error = new Error("Achievement recorder did not become ready in time");
       error.code = "recorder-start-timeout";
@@ -325,7 +417,15 @@ class AchievementRecorderController extends EventEmitter {
   }
 
   handleMessage(message) {
+    if (message.type === "save-draining") {
+      // The capture worker may already be unwinding after an encoder error.
+      // Its heartbeats stop, but the MP4 writer still has a bounded drain window.
+      this.nativeDrainUntil = Date.now()
+        + Math.min(60_000, Math.max(0, Number(message.timeoutMs) || 0)) + 5_000;
+    }
+    if (this.ready && this.exitedChild !== this.child) this.armActivityWatchdog();
     if (message.type === "ready") {
+      if (this.child && this.exitedChild === this.child) return;
       if (this.ready) {
         this.emit("duplicate-ready", message);
         return;
@@ -337,21 +437,33 @@ class AchievementRecorderController extends EventEmitter {
       this.clearStartPromise();
       resolve?.(true);
       this.emit("ready", message);
+      this.armActivityWatchdog();
       return;
     }
     if (message.type === "fatal") {
+      this.clearActivityWatchdog();
+      if (this.stopping) return;
       const error = new Error(message.error || "Achievement recorder failed");
-      error.code = "recorder-fatal";
+      error.code = message.errorCode || "recorder-fatal";
+      if (message.retryable === false) {
+        this.restartBlockedError = error;
+        if (this.restartTimer) clearTimeout(this.restartTimer);
+        this.restartTimer = null;
+      }
       this.rejectStart(error);
       this.emit("recorder-error", error);
       return;
     }
-    if (message.type === "segment-finalized" && this.restartAttempt > 0) {
+    const stableReplay = message.type === "capture-stats"
+      && message.pipeline === "continuous-encoded-replay"
+      && message.uptimeMs >= 5_000 && message.encodedFrames > 0
+      && message.pipelineStalled !== true;
+    if ((message.type === "segment-finalized" || stableReplay) && this.restartAttempt > 0) {
       const previousAttempt = this.restartAttempt;
       this.restartAttempt = 0;
       this.emit("restart-stabilized", {
         previousAttempt,
-        reason: "first-segment-finalized",
+        reason: stableReplay ? "continuous-encoding-stable" : "first-segment-finalized",
       });
     }
     if (message.type === "saved" || message.type === "failed") {
@@ -397,12 +509,9 @@ class AchievementRecorderController extends EventEmitter {
         return;
       }
 
-      try {
-        fs.rmSync(pending.stagingPath, { force: true });
-      } catch {}
-      removeEmptyFile(pending.outputPath);
+      const partialPath = preserveInterruptedOutput(pending.outputPath, pending.stagingPath, id);
       this.pendingOutputs.delete(id);
-      const failed = { ...message, outputPath: pending.outputPath };
+      const failed = { ...message, outputPath: pending.outputPath, partialPath };
       this.emit("failed", failed);
       this.emit("message", failed);
       return;
@@ -426,7 +535,7 @@ class AchievementRecorderController extends EventEmitter {
   }
 
   scheduleRestart() {
-    if (this.restartTimer || !this.enabled) return;
+    if (this.restartTimer || !this.enabled || this.restartBlockedError) return;
     const delays = [5_000, 15_000, 30_000, 60_000];
     const delay = delays[Math.min(this.restartAttempt, delays.length - 1)];
     this.restartAttempt += 1;
@@ -440,12 +549,20 @@ class AchievementRecorderController extends EventEmitter {
   }
 
   async trigger(payload = {}) {
+    const eventAtUnixMs = Number.isFinite(payload.eventAtUnixMs)
+      ? payload.eventAtUnixMs
+      : Date.now();
     if (!this.enabled) {
       const error = new Error("Achievement recorder is disabled");
       error.code = "recorder-disabled";
       throw error;
     }
     await this.ensureStarted("achievement-trigger");
+    if (!this.enabled || this.stopping || (this.child && this.exitedChild === this.child)) {
+      const error = new Error("Achievement recorder stopped before accepting the trigger");
+      error.code = "recorder-disabled";
+      throw error;
+    }
     const outputPath = String(payload.outputPath || "").trim();
     if (!outputPath) {
       throw new TypeError("Achievement recorder output path is required");
@@ -459,7 +576,7 @@ class AchievementRecorderController extends EventEmitter {
     const stagingPath = getStagingOutputPath(outputPath, id);
     const stagingFd = fs.openSync(stagingPath, "wx");
     fs.closeSync(stagingFd);
-    const command = JSON.stringify({ type: "trigger", id, outputPath: stagingPath });
+    const command = JSON.stringify({ type: "trigger", id, outputPath: stagingPath, eventAtUnixMs });
     this.pendingOutputs.set(id, { outputPath, stagingPath });
     try {
       this.child.stdin.write(`${command}\n`);
@@ -492,6 +609,7 @@ class AchievementRecorderController extends EventEmitter {
   }
 
   forceStop(reason = "unknown") {
+    this.clearActivityWatchdog();
     this.enabled = false;
     this.restartAttempt = 0;
     this.stopping = true;
@@ -534,6 +652,7 @@ class AchievementRecorderController extends EventEmitter {
   }
 
   stopChild(reason = "unknown") {
+    this.clearActivityWatchdog();
     if (this.restartTimer) clearTimeout(this.restartTimer);
     this.restartTimer = null;
     if (this.startTimer) clearTimeout(this.startTimer);
@@ -565,7 +684,7 @@ class AchievementRecorderController extends EventEmitter {
         this.stopPromise = null;
         resolve(true);
       };
-      child.once("exit", finish);
+      this.childClosePromise.then(finish);
       timer = setTimeout(() => {
         try {
           child.kill();

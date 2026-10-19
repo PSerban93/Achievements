@@ -7,13 +7,16 @@ publish = false
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = "1.0.154"
+windows-core = "0.62.2"
 windows = { version = "0.62.2", features = [
   "Foundation",
   "Media_Editing",
+  "Media_MediaProperties",
   "Media_Transcoding",
   "Storage",
   "Storage_Streams",
+  "Win32_Devices_Display",
   "Win32_Foundation",
   "Win32_Graphics_Direct3D",
   "Win32_Graphics_Direct3D_Fxc",
@@ -21,8 +24,14 @@ windows = { version = "0.62.2", features = [
   "Win32_Graphics_Dxgi",
   "Win32_Graphics_Dxgi_Common",
   "Win32_Media_Audio",
+  "Win32_Media_MediaFoundation",
+  "Win32_Security",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
+  "Win32_System_Ole",
+  "Win32_System_Performance",
+  "Win32_System_ProcessStatus",
+  "Win32_System_Threading",
   "Win32_System_Variant",
   "Win32_System_WinRT",
   "Win32_System_WinRT_Direct3D11",
@@ -36,5 +45,6 @@ windows-capture = { path = "../vendor/windows-capture" }
 codegen-units = 1
 lto = "thin"
 opt-level = "s"
-panic = "abort"
+# Worker boundaries catch Rust panics so an unrelated queued MP4 can finish.
+panic = "unwind"
 strip = "symbols"

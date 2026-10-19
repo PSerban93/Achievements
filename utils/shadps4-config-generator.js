@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { createLogger } = require("./logger");
+const { schemaHasNativePlatinum } = require("./platinum-summary");
 const {
   parsePs4TrophySetDir,
   buildSchemaFromPs4,
@@ -24,6 +25,7 @@ const PS4_CONFIG_FIELDS = [
   "displayName",
   "appid",
   "platform",
+  "native_platinum",
   "config_path",
   "save_path",
   "trophy_path",
@@ -670,6 +672,7 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     displayName: ensurePs4DisplayName(title),
     appid: String(baseAppId),
     platform: "shadps4",
+    native_platinum: schemaHasNativePlatinum(currentEntries),
     config_path: schemaDir,
     save_path: progressPath || trophyDir,
     trophy_path: trophyDir,

@@ -642,15 +642,24 @@ async function performXLiveLessNessRootDetection(rootPath, options = {}) {
     Math.min(20000, Number(options.maxDirectories ?? DISCOVERY_MAX_DIRECTORIES)),
   );
   const rootMtimeMs = rootStat.mtimeMs;
-  const cacheKey = `${normalizePathForComparison(root)}::${maxDepth}::${maxDirectories}`;
+  const scopedDiscovery = typeof options.shouldSkipDirectory === "function";
+  const cacheableScope = !scopedDiscovery || typeof options.discoveryScope === "string";
+  const cacheKey = `${normalizePathForComparison(root)}::${maxDepth}::${maxDirectories}${scopedDiscovery ? `::${options.discoveryScope}` : ""}`;
   const cached = asyncDiscoveryCache.get(cacheKey);
   if (
-    options.forceRefresh !== true &&
+    cacheableScope && options.forceRefresh !== true &&
     cached &&
     cached.rootMtimeMs === rootMtimeMs &&
     Date.now() - cached.createdAt <= DISCOVERY_CACHE_TTL_MS
   ) {
-    return cached.result;
+    // Revalidate cached exclusions and populate the caller's identification
+    // scope before reusing a result. A removed/changed installation restores
+    // generic discovery instead of remaining excluded until the cache expires.
+    let exclusionsValid = true;
+    if (scopedDiscovery) for (const directory of cached.result.excludedDirectories || []) {
+      if (!(await options.shouldSkipDirectory(directory))) { exclusionsValid = false; break; }
+    }
+    if (exclusionsValid) return cached.result;
   }
 
   const queue = [{ directoryPath: root, depth: 0 }];
@@ -659,12 +668,17 @@ async function performXLiveLessNessRootDetection(rootPath, options = {}) {
   const found = [];
   const rejected = [];
   let partial = false;
+  const excludedDirectories = [];
 
   while (queueIndex < queue.length && visited.size < maxDirectories) {
     const current = queue[queueIndex++];
     const key = normalizePathForComparison(current.directoryPath);
     if (!key || visited.has(key)) continue;
     visited.add(key);
+    if (scopedDiscovery && await options.shouldSkipDirectory(current.directoryPath)) {
+      excludedDirectories.push(current.directoryPath);
+      continue;
+    }
     const index = await readDirectoryIndexAsync(current.directoryPath);
     const hasXlive = index.get("xlive.dll")?.isFile() === true;
     const cfgEntries = Array.from(index.values()).filter(
@@ -744,8 +758,9 @@ async function performXLiveLessNessRootDetection(rootPath, options = {}) {
     limitReached: queueIndex < queue.length,
     rejected,
     scanDurationMs: Date.now() - startedAt,
+    ...(scopedDiscovery ? { excludedDirectories } : {}),
   };
-  asyncDiscoveryCache.set(cacheKey, {
+  if (cacheableScope) asyncDiscoveryCache.set(cacheKey, {
     rootMtimeMs,
     createdAt: Date.now(),
     result,
@@ -758,6 +773,11 @@ async function performXLiveLessNessRootDetection(rootPath, options = {}) {
 }
 
 function detectXLiveLessNessRootAsync(rootPath, options = {}) {
+  // A filtered traversal must not share cached/in-flight results with an
+  // unfiltered traversal of the same root, or with another exclusion scope.
+  if (typeof options.shouldSkipDirectory === "function") {
+    return performXLiveLessNessRootDetection(rootPath, options);
+  }
   let normalizedRoot = "";
   try {
     normalizedRoot = normalizePathForComparison(rootPath);

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "dependency": "lzxd@0.2.7",
+  "toolchain": "1.97.0",
+  "sha256": "5550a457cf881551752059d6ca5e8744dbd68a0f6da9d49449d4e2c7f334996a",
+  "sources": {
+    "Cargo.toml": "3c22bc97d450a9355bc4db95b0244ae49568c6a5136d3a09d7f7e7325908a319",
+    "Cargo.lock": "4591fd7593e5dc7dade25b04af9e958c48492a104eaf5327796ba5bf6141b89c",
+    "src/lib.rs": "aec0f628bf80c109e0639b7c3986b8cd37c24c67c1488a21329cd2e4f4f005fe",
+    "rust-toolchain.toml": "6574b8c404a1b01b8761fbec15615fbc57ac12bacef5e1a51ccdb45dcc020c05"
+  }
+}

@@ -39,9 +39,41 @@ function normalizeBlacklistConfigKey(value) {
   return `${appid}::${platform}`;
 }
 
+function createBlacklistState(preferences = {}) {
+  if (!preferences || typeof preferences !== "object") preferences = {};
+  const generationResults = {};
+  for (const [rawKey, value] of Object.entries(preferences.blacklistedGenerationResults || {})) {
+    const key = normalizeBlacklistConfigKey(rawKey);
+    if (key) generationResults[key] = value;
+  }
+  return {
+    appIds: new Set((Array.isArray(preferences.blacklistedAppIds) ? preferences.blacklistedAppIds : [])
+      .map(normalizeAppIdValue).filter(Boolean)),
+    configKeys: new Set((Array.isArray(preferences.blacklistedConfigKeys) ? preferences.blacklistedConfigKeys : [])
+      .map(normalizeBlacklistConfigKey).filter(Boolean)),
+    generationResults,
+  };
+}
+
+function getBlacklistMatch(appid, platform, state, aliases = []) {
+  if (!Array.isArray(aliases)) aliases = [];
+  const ids = [appid, ...aliases].map(normalizeAppIdValue).filter(Boolean);
+  if (ids.some((id) => state?.appIds?.has(id))) return { scope: "global" };
+  if (!String(platform || "").trim()) return null;
+  const matches = ids.map((id) => buildBlacklistConfigKey(id, platform)).filter((key) => state?.configKeys?.has(key));
+  if (!matches.length) return null;
+  const evidence = matches.map((key) => state.generationResults?.[key]);
+  const identified = evidence.some((entry) => entry?.status === "identified-no-achievements" && entry.identified === true);
+  const confirmedNotFound = evidence.every((entry) => entry?.status === "not-found");
+  return { scope: "platform", identified, confirmedNotFound,
+    status: identified ? "identified-no-achievements" : confirmedNotFound ? "not-found" : "unknown" };
+}
+
 module.exports = {
   buildBlacklistConfigKey,
   normalizeAppIdValue,
   normalizeBlacklistConfigKey,
   normalizeBlacklistPlatformValue,
+  createBlacklistState,
+  getBlacklistMatch,
 };

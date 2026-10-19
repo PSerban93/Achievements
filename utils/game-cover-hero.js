@@ -29,7 +29,7 @@ function normalizeGameCoverSearchTerm(value) {
   let normalized = String(value || "").trim();
   if (!normalized) return "";
   const suffixPattern =
-    /\s*\((?:steam|steam[-\s]?official|epic|epic[-\s]?official|uplay|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|gog|gog[-\s]?official|xbox(?:[-\s]?pc)?|retroachievements|xenia|rpcs3|ps4|shadps4|markerpatch|madnesspatch|xlivelessness)\)\s*$/i;
+    /\s*\((?:steam|steam[-\s]?official|epic|epic[-\s]?official|uplay|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|gog|gog[-\s]?official|xbox(?:[-\s]?pc)?|retroachievements|ps4 recomp|pc ports?|xbox 360 recomp|xenia|rpcs3|ps4|shadps4|ps5|kytyps5|markerpatch|madnesspatch|xlivelessness)\)\s*$/i;
   while (suffixPattern.test(normalized)) {
     normalized = normalized.replace(suffixPattern, "").trim();
   }
@@ -182,6 +182,15 @@ async function ensureGameCoverHero(options = {}) {
     return { ok: false, skipped: true, reason: "missing-identity" };
   }
 
+  if (platform === "x360recomp") {
+    const imageDir = getGameCoverHeroDirectory(userDataPath, platform, appid);
+    for (const url of require("./x360-recomp-art").artworkUrls(appid, "landscape")) {
+      try {
+        const savedPath = await downloadGameCoverHero(url, imageDir);
+        return { ok: true, existing: false, path: savedPath, url };
+      } catch {}
+    }
+  }
   gameCoverHeroLogger.info("game-cover-hero:fetch-start", {
     appid,
     platform,

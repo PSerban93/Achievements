@@ -2,17 +2,27 @@ const path = require("path");
 const fs = require("fs");
 
 module.exports = async (context) => {
-  if (context.electronPlatformName !== "win32") return;
-
+  require("./beforePack").restoreFilters(context);
   const appOutDir = context.appOutDir;
   if (!appOutDir) {
     throw new Error("afterPack: appOutDir is missing");
   }
+  const projectDir = context.packager?.projectDir || context.projectDir || process.cwd();
+  require("./verify-x360-lzx").verifyPackagedX360Lzx({
+    projectDir,
+    resourcesDir: context.packager.getResourcesDir(appOutDir),
+  });
+  if (context.electronPlatformName !== "win32") return;
 
   const requiredUnpackedUtilities = [
     ["Screenshot capture", "screenshot-capture-worker.js"],
     ["Native screenshot capture", "native/achievements-hdr-screenshot.exe"],
     ["XLiveLessNess", "xlivelessness-worker.js"],
+    ["Xbox recompilation metadata", "x360-recomp-xex-worker.js"],
+    ["re:Blue compiled achievement metadata", "x360-recomp-reblue.js"],
+    ["Xbox LZX decoder", "vendor/x360-lzx/decoder.wasm"],
+    ["Xbox LZX decoder manifest", "vendor/x360-lzx/manifest.json"],
+    ["Xbox LZX decoder license", "vendor/x360-lzx/LICENSE-MIT"],
     ["Game Bar named pipe", "gamebar-widget-pipe-worker.js"],
     ["Profile backup", "profile-backup-worker.js"],
     ["Profile backup runtime", "profile-backup.js"],
@@ -68,10 +78,28 @@ module.exports = async (context) => {
   );
   const { listPackage } = require("@electron/asar");
   const archive = path.join(appOutDir, "resources", "app.asar");
-  if (fs.existsSync(legacyCapturePath) || listPackage(archive).some((entry) =>
+  const archiveEntries = listPackage(archive).map((entry) => entry.replace(/\\/g, "/"));
+  if (archiveEntries.some((entry) => /^\/native\/[^/]+\/target(?:\/|$)/i.test(entry))) {
+    throw new Error("afterPack: Rust build artifacts were bundled in the application archive");
+  }
+  if (fs.existsSync(legacyCapturePath) || archiveEntries.some((entry) =>
     /\/node_modules\/screenshot-desktop\/lib\/win32(?:\/|$)/i.test(entry.replace(/\\/g, "/")),
   )) {
     throw new Error("afterPack: legacy Windows screenshot BAT was bundled");
+  }
+
+  if (context.arch === require("builder-util").Arch.x64) {
+    const vendorPath = path.join(
+      appOutDir, "resources", "app.asar.unpacked", "node_modules", "ps-list", "vendor",
+    );
+    if (fs.existsSync(path.join(vendorPath, "fastlist-0.3.0-x86.exe")) ||
+        archiveEntries.some((entry) => entry.endsWith("/node_modules/ps-list/vendor/fastlist-0.3.0-x86.exe"))) {
+      throw new Error("afterPack: unused x86 fastlist was bundled in the Windows x64 build");
+    }
+    if (!fs.existsSync(path.join(vendorPath, "fastlist-0.3.0-x64.exe")) ||
+        !archiveEntries.some((entry) => entry.endsWith("/node_modules/ps-list/vendor/fastlist-0.3.0-x64.exe"))) {
+      throw new Error("afterPack: required x64 fastlist is missing");
+    }
   }
 
   const exeName = context.packager?.appInfo?.productFilename
@@ -88,7 +116,6 @@ module.exports = async (context) => {
     exePath = path.join(appOutDir, exeCandidates[0]);
   }
 
-  const projectDir = context.projectDir || process.cwd();
   const manifestPath = path.join(projectDir, "build", "app.manifest");
   if (!fs.existsSync(manifestPath)) {
     throw new Error(`afterPack: manifest missing at ${manifestPath}`);

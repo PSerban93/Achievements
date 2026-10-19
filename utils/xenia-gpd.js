@@ -230,8 +230,8 @@ function parseAchievementPayload(buffer, endian = "be", entryId = null) {
   };
 }
 
-function parseGpdFile(filePath) {
-  const raw = fs.readFileSync(filePath);
+function parseGpdFile(filePath, buffer) {
+  const raw = buffer === undefined ? fs.readFileSync(filePath) : buffer;
   const entries = parseXdbfEntries(raw);
   const endian = entries.__endian || "le";
 

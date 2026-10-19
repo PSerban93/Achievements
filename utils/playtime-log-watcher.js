@@ -1,7 +1,8 @@
 // playtime-log-watcher.js
-const { ipcMain } = require("electron");
+const { ipcMain, nativeImage } = require("electron");
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
 const https = require("https");
 const crypto = require("crypto");
 const { preferencesPath } = require("./paths");
@@ -145,7 +146,13 @@ function isPlaytimeDisabled() {
 
 function downloadImage(url, dest) {
   return new Promise((resolve, reject) => {
+    // Validate before opening the temporary file; Xbox's official fallback
+    // includes HTTP as well as HTTPS.
+    const parsedUrl = new URL(url);
+    const transport = parsedUrl.protocol === "https:" ? https : parsedUrl.protocol === "http:" ? http : null;
+    if (!transport) { reject(new Error("Unsupported header image URL protocol")); return; }
     let settled = false;
+    let failing = false;
     let response = null;
     const finalize = (err) => {
       if (settled) return;
@@ -153,28 +160,27 @@ function downloadImage(url, dest) {
       if (err) reject(err);
       else resolve();
     };
-    const cleanupFile = () => {
-      try {
-        fs.unlink(dest, () => {});
-      } catch {}
-    };
     const handleError = (err) => {
+      if (settled || failing) return;
+      failing = true;
       try {
         if (response && typeof response.destroy === "function") {
           response.destroy();
         }
       } catch {}
-      try {
+      // The caller removes the temporary file after rejection. Wait for the
+      // stream to close first so Windows no longer holds an open file handle.
+      if (file.closed) finalize(err);
+      else {
+        file.once("close", () => finalize(err));
         file.destroy();
-      } catch {}
-      cleanupFile();
-      finalize(err);
+      }
     };
 
     const file = fs.createWriteStream(dest);
     file.on("error", handleError);
-    https
-      .get(url, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
+    transport
+      .get(parsedUrl, { headers: { "User-Agent": "Mozilla/5.0" } }, (res) => {
         response = res;
         if (res.statusCode !== 200) {
           res.resume();
@@ -182,14 +188,82 @@ function downloadImage(url, dest) {
           return;
         }
         res.on("error", handleError);
+        res.on("aborted", () => handleError(new Error("Image download aborted")));
+        let receivedBytes = 0;
+        res.on("data", (chunk) => {
+          receivedBytes += chunk.length;
+          if (receivedBytes > 20 * 1024 * 1024) {
+            handleError(new Error("Header image exceeds size limit"));
+          }
+        });
         res.pipe(file);
-        file.on("finish", () => file.close(() => finalize()));
+        file.on("finish", () => file.close(() => { if (!failing) finalize(); }));
       })
       .on("error", handleError)
       .setTimeout(15000, function () {
         this.destroy(new Error("Download timed out"));
       });
   });
+}
+
+async function downloadHeaderImageAtomic(url, headerPath) {
+  const tempPath = path.join(
+    path.dirname(headerPath),
+    `.header-${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`,
+  );
+  try {
+    await downloadImage(url, tempPath);
+    const stat = await fs.promises.stat(tempPath);
+    if (stat.size < 12 || stat.size > 20 * 1024 * 1024) {
+      throw new Error("Invalid header image size");
+    }
+    const handle = await fs.promises.open(tempPath, "r");
+    let signature;
+    try {
+      signature = Buffer.alloc(12);
+      await handle.read(signature, 0, signature.length, 0);
+    } finally {
+      await handle.close();
+    }
+    const isJpeg = signature[0] === 0xff && signature[1] === 0xd8;
+    const isPng = signature.subarray(0, 8).equals(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    const isWebp =
+      signature.toString("ascii", 0, 4) === "RIFF" &&
+      signature.toString("ascii", 8, 12) === "WEBP";
+    const isGif = ["GIF87a", "GIF89a"].includes(
+      signature.toString("ascii", 0, 6),
+    );
+    if (!isJpeg && !isPng && !isWebp && !isGif) {
+      throw new Error("Invalid header image format");
+    }
+    // nativeImage guarantees decoding for PNG/JPEG. Preserve Chromium's
+    // WebP/GIF support without treating a native decoder limitation as corruption.
+    if ((isJpeg || isPng) && nativeImage.createFromBuffer(await fs.promises.readFile(tempPath)).isEmpty()) {
+      throw new Error("Unreadable header image");
+    }
+    await fs.promises.rename(tempPath, headerPath);
+  } finally {
+    await fs.promises.unlink(tempPath).catch(() => {});
+  }
+}
+
+async function writeLandscapeSourceAtomic(imageDir, imageKind) {
+  const sourcePath = path.join(
+    imageDir,
+    GAME_COVER_LANDSCAPE_SOURCE_FILENAME,
+  );
+  const tempPath = path.join(
+    imageDir,
+    `.landscape-source-${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`,
+  );
+  try {
+    await fs.promises.writeFile(tempPath, imageKind, { flag: "wx" });
+    await fs.promises.rename(tempPath, sourcePath);
+  } finally {
+    await fs.promises.unlink(tempPath).catch(() => {});
+  }
 }
 
 let epicProductMapCache = null;
@@ -338,9 +412,27 @@ async function fetchEpicStoreHeaderUrl(
   }
 }
 
+function notifyHeaderImageUpdated(appid, platform) {
+  // Publish only after the image and its source selection have been saved.
+  // Consumers resolve the current local file, including custom image priority.
+  try {
+    ipcMain.emit("game-header:updated", null, {
+      appid: String(appid), platform, variant: "landscape",
+    });
+  } catch (error) {
+    coverLogger.warn("header:image:update-failed", {
+      appid: String(appid), platform, error: error.message,
+    });
+  }
+}
+
 async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
   const platform = normalizePlatform(options?.platform) || "steam";
+  const supportsHeroFallback = platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp";
   const preferLocalOnly =
+    platform === "ps4recomp" ||
+    platform === "pcports" ||
+    platform === "x360recomp" ||
     platform === "gog" ||
     platform === "gog-official" ||
     platform === "epic" ||
@@ -354,7 +446,7 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
   const headerPath = path.join(imageDir, "header.jpg");
   const localUrl = () => pathToFileURL(headerPath).toString();
   try {
-    if (fs.existsSync(headerPath)) {
+    if (!options.forceDownload && fs.existsSync(headerPath)) {
       const stats = fs.statSync(headerPath);
       if (stats.size === 0) {
         fs.unlinkSync(headerPath);
@@ -368,7 +460,7 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
     let out = String(name || "").trim();
     if (!out) return "";
     const rx =
-      /\s*\((?:steam|steam[-\s]?official|epic|epic[-\s]?official|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|xenia|rpcs3|ps4|shadps4)\)\s*$/i;
+      /\s*\((?:steam|steam[-\s]?official|epic|epic[-\s]?official|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|ps4 recomp|pc port|pc ports|xbox 360 recomp|xenia|rpcs3|ps4|shadps4|ps5|kytyps5)\)\s*$/i;
     while (rx.test(out)) out = out.replace(rx, "").trim();
     return out;
   };
@@ -376,13 +468,15 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
   const fallbackSize = STEAMGRID_GRID_LANDSCAPE_DIMENSIONS;
   const fallbackSizes = [fallbackSize].filter(Boolean);
   const downloadToLocal = async (url) => {
-    await downloadImage(url, headerPath);
+    await downloadHeaderImageAtomic(url, headerPath);
+    if (options.forceDownload || supportsHeroFallback) await writeLandscapeSourceAtomic(imageDir, "header");
     coverLogger.info("header:source-hit", {
       appid: String(appid),
       platform,
       source: activeHeaderSource || "remote",
       url,
     });
+    notifyHeaderImageUpdated(appid, platform);
     return { headerUrl: localUrl() };
   };
   let activeHeaderSource = "";
@@ -404,6 +498,10 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
     }
     return null;
   };
+  if (platform === "x360recomp") {
+    const official = await tryHeaderUrls("xbox360-marketplace", require("./x360-recomp-art").artworkUrls(appid, "landscape"));
+    if (official) return official;
+  }
   try {
     const productAssets = resolveSteamProductAssetUrls({
       appid: options?.steamAppId || appid,
@@ -479,12 +577,17 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
         const gridUrl = await fetchSteamGridDbImage(coverName, {
           size,
           assetType: "grids",
+          ...(supportsHeroFallback ? { appid: `${platform}:${appid}:header-landscape-grid` } : {}),
         });
         try {
           activeHeaderSource = "steamgriddb";
           return await downloadToLocal(gridUrl);
-        } catch {
-          return { headerUrl: gridUrl };
+        } catch (error) {
+          if (!supportsHeroFallback) return { headerUrl: gridUrl };
+          coverLogger.warn("header:source-miss", {
+            appid: String(appid), platform, source: "steamgriddb-landscape-grid", url: gridUrl,
+            error: error?.message || String(error),
+          });
         }
       } catch (gridErr) {
         if (size === fallbackSizes[fallbackSizes.length - 1]) {
@@ -494,6 +597,26 @@ async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
           );
         }
       }
+    }
+  }
+  if (supportsHeroFallback && coverName) {
+    try {
+      const heroUrl = await fetchSteamGridDbImage(coverName, {
+        size: STEAMGRID_HERO_DIMENSIONS,
+        assetType: "heroes",
+        appid: `${platform}:${appid}:header-hero-fallback`,
+      });
+      const heroPath = await downloadGameCoverHero(heroUrl, imageDir);
+      await writeLandscapeSourceAtomic(imageDir, "hero");
+      coverLogger.info("header:source-hit", {
+        appid: String(appid), platform, source: "steamgriddb-hero", url: heroUrl,
+      });
+      notifyHeaderImageUpdated(appid, platform);
+      return { headerUrl: pathToFileURL(heroPath).toString() };
+    } catch (error) {
+      coverLogger.warn("header:source-miss", {
+        appid: String(appid), platform, source: "steamgriddb-hero", error: error?.message || String(error),
+      });
     }
   }
   coverLogger.warn("header:all-sources-failed", {
@@ -509,29 +632,17 @@ async function redownloadHeaderImage(userDataDir, appid, options = {}) {
   const platform = normalizePlatform(options.platform) || "steam";
   const configData = options.configData || null;
   const gameName = String(options.gameName || "")
-    .replace(/\s*\((?:steam|steam-official|epic|epic-official|uplay|ubisoft|ubisoft-official|ea|ea-official|gog|gog-official|xbox-pc|retroachievements|xenia|rpcs3|ps4|shadps4|markerpatch|madnesspatch|xlivelessness)\)\s*$/i, "")
+    .replace(/\s*\((?:steam|steam-official|epic|epic-official|uplay|ubisoft|ubisoft-official|ea|ea-official|gog|gog-official|xbox-pc|retroachievements|ps4 recomp|pc port|pc ports|xbox 360 recomp|xenia|rpcs3|ps4|shadps4|ps5|kytyps5|markerpatch|madnesspatch|xlivelessness)\)\s*$/i, "")
     .trim();
   const imageDir = path.join(userDataDir, "images", platform, String(appid));
   const headerPath = path.join(imageDir, "header.jpg");
   const sources = [];
   const addSource = (id, resolveUrls, imageKind = "header") =>
     sources.push({ id, resolveUrls, imageKind });
-  const writeLandscapeSource = async (imageKind) => {
-    const sourcePath = path.join(
-      imageDir,
-      GAME_COVER_LANDSCAPE_SOURCE_FILENAME,
-    );
-    const tempPath = path.join(
-      imageDir,
-      `.landscape-source-${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`,
-    );
-    try {
-      await fs.promises.writeFile(tempPath, imageKind, { flag: "wx" });
-      await fs.promises.rename(tempPath, sourcePath);
-    } finally {
-      await fs.promises.unlink(tempPath).catch(() => {});
-    }
-  };
+  const writeLandscapeSource = (imageKind) =>
+    writeLandscapeSourceAtomic(imageDir, imageKind);
+  if (platform === "x360recomp") addSource("xbox360-marketplace", async () =>
+    require("./x360-recomp-art").artworkUrls(appid, "landscape"));
   const primarySteamPlatform = [
     "steam",
     "steam-official",
@@ -650,13 +761,6 @@ async function redownloadHeaderImage(userDataDir, appid, options = {}) {
         .map((url) => String(url || "").trim())
         .filter((url) => /^https:\/\//i.test(url));
       for (const url of urls) {
-        const tempPath =
-          source.imageKind === "hero"
-            ? ""
-            : path.join(
-                imageDir,
-                `.header-${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`,
-              );
         try {
           if (source.imageKind === "hero") {
             const heroPath = await downloadGameCoverHero(url, imageDir);
@@ -667,35 +771,10 @@ async function redownloadHeaderImage(userDataDir, appid, options = {}) {
               source: source.id,
               url,
             });
+            notifyHeaderImageUpdated(appid, platform);
             return { success: true, sourceId: source.id, path: heroPath };
           }
-          await downloadImage(url, tempPath);
-          const stat = await fs.promises.stat(tempPath);
-          if (stat.size < 12 || stat.size > 20 * 1024 * 1024) {
-            throw new Error("Invalid header image size");
-          }
-          const handle = await fs.promises.open(tempPath, "r");
-          let signature;
-          try {
-            signature = Buffer.alloc(12);
-            await handle.read(signature, 0, signature.length, 0);
-          } finally {
-            await handle.close();
-          }
-          const isJpeg = signature[0] === 0xff && signature[1] === 0xd8;
-          const isPng = signature.subarray(0, 8).equals(
-            Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-          );
-          const isWebp =
-            signature.toString("ascii", 0, 4) === "RIFF" &&
-            signature.toString("ascii", 8, 12) === "WEBP";
-          const isGif = ["GIF87a", "GIF89a"].includes(
-            signature.toString("ascii", 0, 6),
-          );
-          if (!isJpeg && !isPng && !isWebp && !isGif) {
-            throw new Error("Invalid header image format");
-          }
-          await fs.promises.rename(tempPath, headerPath);
+          await downloadHeaderImageAtomic(url, headerPath);
           await writeLandscapeSource("header");
           coverLogger.info("header:redownload:source-hit", {
             appid: String(appid),
@@ -703,6 +782,7 @@ async function redownloadHeaderImage(userDataDir, appid, options = {}) {
             source: source.id,
             url,
           });
+          notifyHeaderImageUpdated(appid, platform);
           return { success: true, sourceId: source.id, path: headerPath };
         } catch (error) {
           coverLogger.warn("header:redownload:source-miss", {
@@ -712,8 +792,6 @@ async function redownloadHeaderImage(userDataDir, appid, options = {}) {
             url,
             error: error?.message || String(error),
           });
-        } finally {
-          if (tempPath) await fs.promises.unlink(tempPath).catch(() => {});
         }
       }
     } catch (error) {
@@ -803,12 +881,13 @@ function formatDuration(ms) {
  * @param {{appid:number|string, name?:string, displayName?:string, process_name?:string|string[]}} configData
  * @returns {() => void}
  */
-function startPlaytimeLogWatcher(configData) {
+function startPlaytimeLogWatcher(configData, options = {}) {
   const appid = String(configData?.appid || "").trim();
   const processNames = normalizeProcessNameList(configData?.process_name);
   const platform = normalizePlatform(configData?.platform) || "steam";
+  const requiresPs4Runtime = platform === "ps4recomp";
   const isSteamGridOnly =
-    platform === "xenia" || platform === "rpcs3" || platform === "shadps4";
+    platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp" || platform === "xenia" || platform === "rpcs3" || platform === "shadps4" || platform === "kytyps5";
   const launchPid =
     Number.isFinite(Number(configData?.__launchPid)) &&
     Number(configData.__launchPid) > 0
@@ -838,7 +917,7 @@ function startPlaytimeLogWatcher(configData) {
     return () => {};
   }
 
-  if (!playtimeStartMap.has(appid)) {
+  if (!requiresPs4Runtime && !playtimeStartMap.has(appid)) {
     playtimeStartMap.set(appid, Date.now());
   }
 
@@ -892,6 +971,7 @@ function startPlaytimeLogWatcher(configData) {
   let startNotified = false;
   let lastHeaderUrl = null;
   let seenRunning = false;
+  let stopping = false;
   const startGraceUntil = Date.now() + 15000;
   const tracker = {
     playtimeKey:
@@ -920,6 +1000,7 @@ function startPlaytimeLogWatcher(configData) {
     if (!playtimeStartMap.has(appid)) {
       playtimeStartMap.set(appid, Date.now());
     }
+    if (requiresPs4Runtime) playtimeLogger.info("ps4recomp:session:start", { configName: tracker.playtimeKey, appid });
     lastHeaderUrl = headerUrl || lastHeaderUrl || null;
     if (!isPlaytimeDisabled()) {
       const desc = tUi("playtime.descStart", {}, "Start Playtime!");
@@ -936,6 +1017,7 @@ function startPlaytimeLogWatcher(configData) {
     const startedAt = playtimeStartMap.get(appid) || Date.now();
     const playedMs = Math.max(0, Date.now() - startedAt);
     const key = tracker.playtimeKey;
+    if (requiresPs4Runtime) playtimeLogger.info("ps4recomp:session:stop", { configName: key, appid, playedMs });
     let savedTotalMs = null;
     try {
       savedTotalMs = accumulatePlaytime(key, playedMs);
@@ -998,20 +1080,22 @@ function startPlaytimeLogWatcher(configData) {
   })
     .then(({ headerUrl }) => {
       if (closed) return;
-      sendStart(headerUrl || initialHeader || fallbackHeaderUrl);
+      lastHeaderUrl = headerUrl || initialHeader || fallbackHeaderUrl;
+      if (!requiresPs4Runtime || seenRunning && !stopping) sendStart(lastHeaderUrl);
     })
     .catch((err) => {
       notifyError(`Header cache failed: ${err.message}`);
-      if (!closed) {
+      if (!closed && (!requiresPs4Runtime || seenRunning && !stopping)) {
         sendStart(initialHeader || fallbackHeaderUrl);
       }
     });
 
   const handleSnapshot = (processes) => {
-    if (closed) return;
+    if (closed || requiresPs4Runtime && stopping) return;
     const list = Array.isArray(processes) ? processes : [];
     if (!list.length) return;
     const running = list.some((p) => {
+      if (platform === "ps4recomp") return require("./ps4-recomp").matchesProcess(configData, p);
       if (launchPid && p.pid === launchPid) return true;
       if (!normalizedProcessNames.length) return false;
       if (
@@ -1023,9 +1107,11 @@ function startPlaytimeLogWatcher(configData) {
     });
 
     if (!running) {
+      if (requiresPs4Runtime && !seenRunning) return;
       if (!seenRunning && Date.now() < startGraceUntil) {
         return;
       }
+      if (requiresPs4Runtime) stopping = true;
       (async () => {
         try {
           const headerPathNew = path.join(
@@ -1058,14 +1144,22 @@ function startPlaytimeLogWatcher(configData) {
     }
     if (running) {
       seenRunning = true;
+      if (requiresPs4Runtime) sendStart(lastHeaderUrl || initialHeader || fallbackHeaderUrl);
     }
   };
 
-  const initialSnapshot = processPoller.getSnapshot();
-  if (initialSnapshot && initialSnapshot.length) {
-    handleSnapshot(initialSnapshot);
+  if (requiresPs4Runtime) {
+    const onRuntimeProcesses = (_event, list) => handleSnapshot(list);
+    ipcMain.on("ps4recomp:runtime-processes", onRuntimeProcesses);
+    unsubscribe = () => ipcMain.removeListener("ps4recomp:runtime-processes", onRuntimeProcesses);
+    if (Array.isArray(options.initialProcesses)) handleSnapshot(options.initialProcesses);
+  } else {
+    const initialSnapshot = processPoller.getSnapshot();
+    if (initialSnapshot && initialSnapshot.length) {
+      handleSnapshot(initialSnapshot);
+    }
+    unsubscribe = processPoller.subscribe(handleSnapshot);
   }
-  unsubscribe = processPoller.subscribe(handleSnapshot);
 
   return cleanup;
 }

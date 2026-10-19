@@ -2092,7 +2092,7 @@ body.profile-importing #bootLoading {
 
 #notificationCustomisationEditor
   .notification-editor-controls
-  :is(button, input, select) {
+  :is(button, input, select, summary) {
   scroll-margin-top: var(--notification-sticky-stack-height, 0px);
 }
 
@@ -2160,6 +2160,34 @@ body.profile-importing #bootLoading {
 #notificationCustomisationEditor > .notification-editor-preview-shell {
   top: var(--notification-toolbar-height, 0px);
   margin: 0 0 14px;
+}
+
+/* Floating panels must hide controls scrolling underneath, even in glass themes. */
+#notificationCustomisationEditor
+  > :is(.customisation-editor-toolbar, .notification-editor-preview-shell) {
+  background: rgb(from var(--app-panel-bg) r g b / 1);
+}
+
+#notificationCustomisationEditor:not(.is-sticky-disabled)
+  > .notification-editor-preview-shell::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  left: -1px;
+  right: -1px;
+  height: 9px;
+  background: rgb(from var(--app-panel-bg) r g b / 1);
+  pointer-events: none;
+}
+
+/* Reserve space for editable controls when the Settings panel is short. */
+#notificationCustomisationEditor.is-sticky-disabled
+  > :is(.customisation-editor-toolbar, .notification-editor-preview-shell) {
+  position: static;
+  top: auto;
+  z-index: auto;
+  max-height: none;
+  overflow: visible;
 }
 
 .customisation-editor-grid {

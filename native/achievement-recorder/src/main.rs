@@ -1,69 +1,191 @@
 #![recursion_limit = "256"]
-
-use std::collections::{HashMap, VecDeque};
+use serde::Deserialize;
+use serde_json::json;
 use std::error::Error;
 use std::fs;
 use std::io::{self, BufRead, Write};
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::slice;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use serde::Deserialize;
-use serde_json::json;
-use windows::Foundation::TimeSpan;
-use windows::Media::Editing::{MediaClip, MediaComposition};
-use windows::Media::Transcoding::TranscodeFailureReason;
-use windows::Storage::StorageFile;
-use windows::Win32::Foundation::S_FALSE;
+use windows::Win32::Devices::Display::{
+    DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_HEADER,
+    DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
+    DisplayConfigGetDeviceInfo, GetDisplayConfigBufferSizes, QDC_ONLY_ACTIVE_PATHS,
+    QueryDisplayConfig,
+};
 use windows::Win32::Media::Audio::{
-    AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM,
-    AUDCLNT_STREAMFLAGS_LOOPBACK, AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioCaptureClient,
-    IAudioClient, IMMDeviceEnumerator, MMDeviceEnumerator, WAVE_FORMAT_PCM, WAVEFORMATEX, eConsole,
-    eRender,
+    AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, AUDCLNT_BUFFERFLAGS_SILENT,
+    AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR, AUDCLNT_SHAREMODE_SHARED,
+    AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_LOOPBACK,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, IAudioCaptureClient, IAudioClient, IMMDevice,
+    IMMDeviceEnumerator, MMDeviceEnumerator, WAVE_FORMAT_PCM, WAVEFORMATEX, eConsole, eRender,
 };
 use windows::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
+    CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
+    CoUninitialize,
 };
-use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize, RoUninitialize};
-use windows::core::HSTRING;
-use windows_capture::capture::{Context, GraphicsCaptureApiError, GraphicsCaptureApiHandler};
-use windows_capture::encoder::{
-    AudioSettingsBuilder, ContainerSettingsBuilder, VideoEncoder, VideoSettingsBuilder,
-    VideoSettingsSubType,
-};
-use windows_capture::frame::Frame;
-use windows_capture::graphics_capture_api::{
-    Error as GraphicsCaptureError, InternalCaptureControl,
-};
+use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+use windows_capture::capture::{GraphicsCaptureApiError, GraphicsCaptureApiHandler};
+use windows_capture::graphics_capture_api::Error as GraphicsCaptureError;
 use windows_capture::monitor::Monitor;
 use windows_capture::settings::{
     ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
     GraphicsCaptureItemType, MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
 };
-
+mod media_encoder;
+mod performance;
+mod recording;
+mod replay;
 mod tone_mapper;
-use tone_mapper::ToneMapper;
-
+use recording::Capture;
 type AnyError = Box<dyn Error + Send + Sync>;
+#[derive(Debug)]
+struct UnsupportedRecorderProfile(String);
+impl std::fmt::Display for UnsupportedRecorderProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+impl Error for UnsupportedRecorderProfile {}
+struct PipelineFailure {
+    message: String,
+    unsupported: bool,
+}
 const TICKS_PER_MILLISECOND: i64 = 10_000;
 const AUDIO_SAMPLE_RATE: u32 = 48_000;
 const AUDIO_CHANNELS: u16 = 2;
 const AUDIO_BITS_PER_SAMPLE: u16 = 16;
-const AUDIO_BLOCK_ALIGN: u16 = AUDIO_CHANNELS * (AUDIO_BITS_PER_SAMPLE / 8);
-const AUDIO_BITRATE: u32 = 192_000;
-const MAX_FAILED_SEGMENTS: usize = 256;
-const MAX_FAILED_ERROR_CHARS: usize = 1_000;
-const PENDING_JOB_FINALIZE_GRACE_MS: u64 = 120_000;
-const MAX_CONCURRENT_FINALIZERS: usize = 1;
-const PIPELINE_SLOW_MS: u64 = 1_000;
-const PIPELINE_STALLED_MS: u64 = 10_000;
-const RENDER_STALLED_MS: u64 = 60_000;
-const MAX_ENCODER_AUDIO_PACKETS: usize = 256;
+const AUDIO_BLOCK_ALIGN: u16 = 4;
+fn qpc_ticks() -> i64 {
+    static FREQUENCY: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+    let frequency = *FREQUENCY.get_or_init(|| {
+        let mut n = 0;
+        unsafe {
+            QueryPerformanceFrequency(&mut n).expect("QPC frequency");
+        }
+        n
+    });
+    let mut counter = 0;
+    unsafe {
+        QueryPerformanceCounter(&mut counter).expect("QPC clock");
+    }
+    (i128::from(counter) * 10_000_000 / i128::from(frequency)) as i64
+}
+#[derive(Clone, Copy, Debug, Eq)]
+struct FrameRate {
+    numerator: u32,
+    denominator: u32,
+}
+
+impl PartialEq for FrameRate {
+    fn eq(&self, other: &Self) -> bool {
+        u64::from(self.numerator) * u64::from(other.denominator)
+            == u64::from(other.numerator) * u64::from(self.denominator)
+    }
+}
+
+impl FrameRate {
+    fn fixed(fps: u32) -> Self {
+        Self {
+            numerator: fps,
+            denominator: 1,
+        }
+    }
+
+    fn ceil_fps(self) -> u32 {
+        self.numerator.div_ceil(self.denominator.max(1)).max(1)
+    }
+}
+
+fn monitor_frame_rate(monitor: &Monitor) -> Result<FrameRate, AnyError> {
+    display_frame_rate(&monitor.device_name()?)
+}
+
+fn display_frame_rate(device_name: &str) -> Result<FrameRate, AnyError> {
+    // Display configuration can change between sizing and reading the arrays.
+    for _ in 0..3 {
+        let mut path_count = 0;
+        let mut mode_count = 0;
+        unsafe {
+            GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &mut path_count, &mut mode_count)
+        }
+        .ok()?;
+        let mut paths = vec![DISPLAYCONFIG_PATH_INFO::default(); path_count as usize];
+        let mut modes = vec![DISPLAYCONFIG_MODE_INFO::default(); mode_count as usize];
+        let result = unsafe {
+            QueryDisplayConfig(
+                QDC_ONLY_ACTIVE_PATHS,
+                &mut path_count,
+                paths.as_mut_ptr(),
+                &mut mode_count,
+                modes.as_mut_ptr(),
+                None,
+            )
+        };
+        if result == windows::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER {
+            continue;
+        }
+        result.ok()?;
+        for path in paths.iter().take(path_count as usize) {
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: std::mem::size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..Default::default()
+            };
+            if unsafe { DisplayConfigGetDeviceInfo(&mut source.header) } != 0 {
+                continue;
+            }
+            let end = source
+                .viewGdiDeviceName
+                .iter()
+                .position(|unit| *unit == 0)
+                .unwrap_or(source.viewGdiDeviceName.len());
+            if !String::from_utf16_lossy(&source.viewGdiDeviceName[..end])
+                .eq_ignore_ascii_case(device_name)
+            {
+                continue;
+            }
+            let rate = path.targetInfo.refreshRate;
+            if rate.Numerator > 0 && rate.Denominator > 0 && rate.Numerator >= rate.Denominator {
+                return Ok(FrameRate {
+                    numerator: rate.Numerator,
+                    denominator: rate.Denominator,
+                });
+            }
+        }
+        break;
+    }
+    Err("The captured monitor's refresh rate could not be read".into())
+}
+
+fn encoding_frame_rate(monitor: &Monitor, fps: u32, unlocked: bool) -> FrameRate {
+    if !unlocked {
+        return FrameRate::fixed(fps);
+    }
+    match monitor_frame_rate(monitor) {
+        Ok(rate) => rate,
+        Err(error) => {
+            // This is a nominal encoder rate only; capture remains unrestricted.
+            let nominal_fps = monitor
+                .refresh_rate()
+                .ok()
+                .filter(|rate| *rate > 1)
+                .unwrap_or(60);
+            emit(
+                json!({ "type": "nominal-rate-fallback", "fps": nominal_fps, "error": error.to_string() }),
+            );
+            FrameRate::fixed(nominal_fps)
+        }
+    }
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -72,18 +194,23 @@ enum Command {
         id: String,
         #[serde(rename = "outputPath")]
         output_path: String,
+        #[serde(default, rename = "eventAtUnixMs")]
+        event_at_unix_ms: Option<u64>,
     },
     Shutdown,
 }
 
 #[derive(Clone)]
-struct CaptureFlags {
+pub(crate) struct CaptureFlags {
     command_rx: Arc<Mutex<Receiver<Command>>>,
     session_dir: PathBuf,
     pre_ms: u64,
     post_ms: u64,
     segment_ms: u64,
     fps: u32,
+    frame_rate: FrameRate,
+    unlocked: bool,
+    monitor_device_name: String,
     width: u32,
     height: u32,
     hdr_tone_map: bool,
@@ -92,139 +219,18 @@ struct CaptureFlags {
     capture_interval_mode: &'static str,
     capture_interval_ms: f64,
     ready_signal: Arc<AtomicBool>,
+    runtime_error: Arc<Mutex<Option<PipelineFailure>>>,
 }
 
-struct ActiveSegment {
-    encoder: VideoEncoder,
-    path: PathBuf,
-    start_ms: u64,
-    frames: u64,
+struct AudioPacket {
+    bytes: Vec<u8>,
+    timestamp: i64,
 }
-
-struct PreparedSegment {
-    encoder: VideoEncoder,
-    path: PathBuf,
-    audio_enabled: bool,
-}
-
 struct AudioLoopback {
-    receiver: Receiver<Vec<u8>>,
+    receiver: Receiver<AudioPacket>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
-
-#[derive(Clone, Debug)]
-struct Segment {
-    path: PathBuf,
-    start_ms: u64,
-    end_ms: u64,
-}
-
-struct PendingJob {
-    id: String,
-    output_path: PathBuf,
-    event_ms: u64,
-    due_ms: u64,
-    expires_ms: u64,
-    boundary_requested: bool,
-}
-
-struct RenderResult {
-    generation: u64,
-    segment_paths: Vec<PathBuf>,
-    render_ms: u64,
-}
-
-struct PrepareResult {
-    segment: Result<PreparedSegment, String>,
-    prepare_ms: u64,
-}
-
-struct FinalizeResult {
-    path: PathBuf,
-    start_ms: u64,
-    end_ms: u64,
-    frames: u64,
-    finalize_ms: u64,
-    result: Result<(), String>,
-}
-
-#[derive(Clone, Copy)]
-struct FinalizingRange {
-    start_ms: u64,
-    end_ms: u64,
-    started_ms: u64,
-}
-
-#[derive(Clone, Debug)]
-struct FailedSegment {
-    start_ms: u64,
-    end_ms: u64,
-    error: String,
-}
-
-struct Capture {
-    flags: CaptureFlags,
-    started_at: Instant,
-    active: Option<ActiveSegment>,
-    prepared: Option<PreparedSegment>,
-    preparing: bool,
-    compatibility_mode: bool,
-    prepare_failures: u32,
-    prepare_retry_after_ms: u64,
-    segments: VecDeque<Segment>,
-    failed_segments: VecDeque<FailedSegment>,
-    pending_jobs: Vec<PendingJob>,
-    in_use: HashMap<PathBuf, usize>,
-    next_segment_id: u64,
-    last_frame_ms: Option<u64>,
-    last_capture_timestamp: Option<i64>,
-    captured_frames: u64,
-    encoded_frames: u64,
-    estimated_dropped_frames: u64,
-    rate_limited_frames: u64,
-    max_frame_gap_ms: f64,
-    last_stats_ms: u64,
-    last_stats_captured_frames: u64,
-    last_stats_encoded_frames: u64,
-    last_stats_estimated_dropped_frames: u64,
-    last_stats_rate_limited_frames: u64,
-    rotation_count: u64,
-    rotation_delay_reported: bool,
-    prepare_started_ms: Option<u64>,
-    prepare_completed: u64,
-    prepare_total_ms: u64,
-    prepare_last_ms: u64,
-    prepare_max_ms: u64,
-    finalize_completed: u64,
-    finalize_total_ms: u64,
-    finalize_last_ms: u64,
-    finalize_max_ms: u64,
-    audio_backpressure_drops: u64,
-    prepare_tx: Sender<PrepareResult>,
-    prepare_rx: Receiver<PrepareResult>,
-    finalize_tx: Sender<FinalizeResult>,
-    finalize_rx: Receiver<FinalizeResult>,
-    finalizing: usize,
-    finalizing_ranges: Vec<FinalizingRange>,
-    worker_handles: Vec<thread::JoinHandle<()>>,
-    render_tx: Sender<RenderResult>,
-    render_rx: Receiver<RenderResult>,
-    rendering: bool,
-    render_started_ms: Option<u64>,
-    render_generation: u64,
-    active_render_generation: Option<u64>,
-    render_completed: u64,
-    render_total_ms: u64,
-    render_last_ms: u64,
-    render_max_ms: u64,
-    audio: Option<AudioLoopback>,
-    audio_error: Option<String>,
-    tone_mapper: Option<ToneMapper>,
-    ready_emitted: bool,
-    shutdown_requested: bool,
-}
-
 fn emit(value: serde_json::Value) {
     println!("{value}");
     let _ = io::stdout().flush();
@@ -238,52 +244,35 @@ fn even_dimension(value: u32) -> u32 {
     }
 }
 
+fn ms_to_ticks(value: u64) -> i64 {
+    i64::try_from(value)
+        .unwrap_or(i64::MAX)
+        .saturating_mul(TICKS_PER_MILLISECOND)
+}
+
+fn ticks_to_ms(value: i64) -> u64 {
+    (value.max(0) / TICKS_PER_MILLISECOND) as u64
+}
+
 fn recorder_bitrate(width: u32, height: u32, fps: u32) -> u32 {
     let pixels = u64::from(width) * u64::from(height);
     let scaled = 8_000_000_u64.saturating_mul(pixels) / 2_073_600;
     let base_30_fps = scaled.clamp(5_000_000, 20_000_000);
-    if fps >= 60 {
+    if fps > 60 {
+        // Keep existing 30/60 settings exactly; scale higher rates with a
+        // bounded bitrate rather than silently giving 240 FPS a 60 FPS budget.
+        base_30_fps
+            .saturating_mul(7)
+            .saturating_mul(u64::from(fps))
+            .saturating_div(240)
+            .clamp(8_000_000, 100_000_000) as u32
+    } else if fps >= 60 {
         base_30_fps
             .saturating_mul(7)
             .saturating_div(4)
             .clamp(8_000_000, 35_000_000) as u32
     } else {
         base_30_fps as u32
-    }
-}
-
-fn estimate_missing_frames(delta_ticks: i64, fps: u32) -> u64 {
-    let expected = 10_000_000_i64 / i64::from(fps.max(1));
-    if expected <= 0 || delta_ticks <= expected.saturating_mul(3) / 2 {
-        return 0;
-    }
-    (delta_ticks / expected).saturating_sub(1).max(0) as u64
-}
-
-fn truncate_error(value: &str) -> String {
-    let mut chars = value.chars();
-    let truncated = chars
-        .by_ref()
-        .take(MAX_FAILED_ERROR_CHARS)
-        .collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}…")
-    } else {
-        truncated
-    }
-}
-
-fn pending_job_expiry(due_ms: u64) -> u64 {
-    due_ms.saturating_add(PENDING_JOB_FINALIZE_GRACE_MS)
-}
-
-fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<&str>() {
-        (*message).to_string()
-    } else if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else {
-        "unknown panic".to_string()
     }
 }
 
@@ -348,34 +337,26 @@ impl AudioLoopback {
         let worker = thread::Builder::new()
             .name("achievement-audio-loopback".to_string())
             .spawn(move || {
-                let result = run_audio_loopback(audio_tx, Arc::clone(&worker_stop), init_tx);
-                if let Err(error) = result {
-                    emit(json!({
-                        "type": "audio-capture-failed",
-                        "error": error,
-                    }));
-                }
+                let mut initial_status = Some(init_tx);
+                supervise_audio_recovery(&worker_stop,
+                    || run_audio_loopback(audio_tx.clone(), Arc::clone(&worker_stop), initial_status.take()),
+                    |attempt, delay, error| {
+                        emit(json!({"type":"audio-capture-failed", "error":error}));
+                        emit(json!({"type":"audio-capture-retry", "attempt":attempt, "delayMs":delay.as_millis()}));
+                        wait_for_audio_retry(&worker_stop, delay)
+                    },
+                );
             })
             .map_err(|error| error.to_string())?;
 
         match init_rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(Ok(())) => Ok(Self {
+            // A missing/disconnected device is recoverable in the worker. Keep
+            // the PCM/AAC timeline alive with silence while it reconnects.
+            Ok(_) | Err(_) => Ok(Self {
                 receiver: audio_rx,
                 stop,
                 worker: Some(worker),
             }),
-            Ok(Err(error)) => {
-                stop.store(true, Ordering::Release);
-                let _ = worker.join();
-                Err(error)
-            }
-            Err(error) => {
-                stop.store(true, Ordering::Release);
-                let _ = worker.join();
-                Err(format!(
-                    "Timed out while initializing system audio capture: {error}"
-                ))
-            }
         }
     }
 
@@ -387,6 +368,53 @@ impl AudioLoopback {
     }
 }
 
+fn wait_for_audio_retry(stop: &AtomicBool, delay: Duration) -> bool {
+    let until = Instant::now() + delay;
+    while !stop.load(Ordering::Acquire) && Instant::now() < until {
+        thread::sleep(
+            until
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(10)),
+        );
+    }
+    !stop.load(Ordering::Acquire)
+}
+
+fn supervise_audio_recovery(
+    stop: &AtomicBool,
+    mut capture: impl FnMut() -> Result<(), String>,
+    mut retry: impl FnMut(usize, Duration, &str) -> bool,
+) {
+    let mut attempt = 0usize;
+    while !stop.load(Ordering::Acquire) {
+        let started = Instant::now();
+        let result = capture();
+        if stop.load(Ordering::Acquire) {
+            break;
+        }
+        if started.elapsed() > Duration::from_secs(5) {
+            attempt = 0;
+        }
+        let Err(error) = result else {
+            break;
+        };
+        let delay = Duration::from_secs([1, 2, 5][attempt.min(2)]);
+        attempt = attempt.saturating_add(1);
+        if !retry(attempt, delay, &error) {
+            break;
+        }
+    }
+}
+
+fn audio_endpoint_id(device: &IMMDevice) -> windows::core::Result<String> {
+    unsafe {
+        let id = device.GetId()?;
+        let text = id.to_string();
+        CoTaskMemFree(Some(id.0.cast()));
+        Ok(text?)
+    }
+}
+
 impl Drop for AudioLoopback {
     fn drop(&mut self) {
         self.stop_and_join();
@@ -394,9 +422,9 @@ impl Drop for AudioLoopback {
 }
 
 fn run_audio_loopback(
-    audio_tx: mpsc::SyncSender<Vec<u8>>,
+    audio_tx: mpsc::SyncSender<AudioPacket>,
     stop: Arc<AtomicBool>,
-    init_tx: mpsc::SyncSender<Result<(), String>>,
+    init_tx: Option<mpsc::SyncSender<Result<(), String>>>,
 ) -> Result<(), String> {
     struct ComGuard;
     impl Drop for ComGuard {
@@ -408,15 +436,18 @@ fn run_audio_loopback(
     let initialized = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     if initialized.is_err() {
         let error = format!("Could not initialize COM for system audio capture: {initialized:?}");
-        let _ = init_tx.send(Err(error.clone()));
+        if let Some(tx) = &init_tx {
+            let _ = tx.send(Err(error.clone()));
+        }
         return Err(error);
     }
     let _com = ComGuard;
 
-    let setup = (|| -> windows::core::Result<(IAudioClient, IAudioCaptureClient)> {
+    let setup = (|| -> windows::core::Result<(IAudioClient, IAudioCaptureClient, IMMDeviceEnumerator, String)> {
         let enumerator: IMMDeviceEnumerator =
             unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)? };
         let device = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole)? };
+        let device_id = audio_endpoint_id(&device)?;
         let audio_client: IAudioClient = unsafe { device.Activate(CLSCTX_ALL, None)? };
         let format = audio_wave_format();
         let flags = AUDCLNT_STREAMFLAGS_LOOPBACK
@@ -434,26 +465,42 @@ fn run_audio_loopback(
         }
         let capture_client: IAudioCaptureClient = unsafe { audio_client.GetService()? };
         unsafe { audio_client.Start()? };
-        Ok((audio_client, capture_client))
+        Ok((audio_client, capture_client, enumerator, device_id))
     })();
 
-    let (audio_client, capture_client) = match setup {
+    let (audio_client, capture_client, enumerator, device_id) = match setup {
         Ok(value) => value,
         Err(error) => {
             let message = format!("Could not start WASAPI loopback capture: {error}");
-            let _ = init_tx.send(Err(message.clone()));
+            if let Some(tx) = &init_tx {
+                let _ = tx.send(Err(message.clone()));
+            }
             return Err(message);
         }
     };
-    if init_tx.send(Ok(())).is_err() {
-        let _ = unsafe { audio_client.Stop() };
-        return Ok(());
+    emit(json!({"type":"audio-capture-started", "recovered":init_tx.is_none()}));
+    if let Some(tx) = init_tx {
+        let _ = tx.send(Ok(()));
     }
 
     let capture_result = (|| -> Result<(), String> {
         let mut overflow_reported = false;
+        let mut previous_audio_timestamp = None;
+        let mut next_device_check = Instant::now() + Duration::from_secs(1);
         while !stop.load(Ordering::Acquire) {
+            if Instant::now() >= next_device_check {
+                let current = unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }
+                    .and_then(|device| audio_endpoint_id(&device))
+                    .map_err(|error| format!("Could not check the audio output device: {error}"))?;
+                if current != device_id {
+                    return Err("The default audio output device changed".into());
+                }
+                next_device_check = Instant::now() + Duration::from_secs(1);
+            }
             loop {
+                if stop.load(Ordering::Acquire) {
+                    break;
+                }
                 let packet_frames = unsafe { capture_client.GetNextPacketSize() }
                     .map_err(|error| format!("Could not query the WASAPI packet size: {error}"))?;
                 if packet_frames == 0 {
@@ -463,15 +510,25 @@ fn run_audio_loopback(
                 let mut data = std::ptr::null_mut();
                 let mut frame_count = 0_u32;
                 let mut flags = 0_u32;
+                let mut device_position = 0u64;
+                let mut timestamp = 0u64;
                 unsafe {
                     capture_client
-                        .GetBuffer(&mut data, &mut frame_count, &mut flags, None, None)
+                        .GetBuffer(
+                            &mut data,
+                            &mut frame_count,
+                            &mut flags,
+                            Some(&mut device_position),
+                            Some(&mut timestamp),
+                        )
                         .map_err(|error| format!("Could not read a WASAPI packet: {error}"))?;
                 }
                 let byte_count = usize::try_from(frame_count)
                     .unwrap_or(usize::MAX)
                     .saturating_mul(usize::from(AUDIO_BLOCK_ALIGN));
-                let packet = if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 {
+                let packet = if byte_count == 0 {
+                    Vec::new()
+                } else if flags & (AUDCLNT_BUFFERFLAGS_SILENT.0 as u32) != 0 {
                     vec![0; byte_count]
                 } else if data.is_null() && byte_count > 0 {
                     let _ = unsafe { capture_client.ReleaseBuffer(frame_count) };
@@ -485,7 +542,34 @@ fn run_audio_loopback(
                         .map_err(|error| format!("Could not release a WASAPI packet: {error}"))?;
                 }
                 if !packet.is_empty() {
-                    match audio_tx.try_send(packet) {
+                    if flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR.0 as u32 != 0 {
+                        // Device position remains useful when a QPC timestamp is unavailable.
+                        timestamp = previous_audio_timestamp
+                            .map(|(p, t): (u64, u64)| {
+                                t.saturating_add(
+                                    device_position.saturating_sub(p) * 10_000_000
+                                        / u64::from(AUDIO_SAMPLE_RATE),
+                                )
+                            })
+                            .unwrap_or_else(|| {
+                                qpc_ticks()
+                                    .saturating_sub(
+                                        i64::from(frame_count) * 10_000_000
+                                            / i64::from(AUDIO_SAMPLE_RATE),
+                                    )
+                                    .max(0) as u64
+                            });
+                    }
+                    previous_audio_timestamp = Some((device_position, timestamp));
+                    if flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY.0 as u32 != 0 {
+                        emit(
+                            json!({"type":"audio-discontinuity", "devicePosition":device_position, "timestamp":timestamp}),
+                        );
+                    }
+                    match audio_tx.try_send(AudioPacket {
+                        bytes: packet,
+                        timestamp: timestamp as i64,
+                    }) {
                         Ok(()) => overflow_reported = false,
                         Err(mpsc::TrySendError::Full(_)) => {
                             if !overflow_reported {
@@ -511,1203 +595,29 @@ fn run_audio_loopback(
     Ok(())
 }
 
-fn create_segment_encoder(
-    path: &Path,
-    width: u32,
-    height: u32,
-    fps: u32,
-    audio_enabled: bool,
-) -> Result<VideoEncoder, AnyError> {
-    Ok(VideoEncoder::new(
-        VideoSettingsBuilder::new(even_dimension(width), even_dimension(height))
-            .sub_type(VideoSettingsSubType::H264)
-            .bitrate(recorder_bitrate(width, height, fps))
-            .frame_rate(fps),
-        AudioSettingsBuilder::new()
-            .bitrate(AUDIO_BITRATE)
-            .channel_count(u32::from(AUDIO_CHANNELS))
-            .sample_rate(AUDIO_SAMPLE_RATE)
-            .bit_per_sample(u32::from(AUDIO_BITS_PER_SAMPLE))
-            .disabled(!audio_enabled),
-        ContainerSettingsBuilder::default(),
-        path,
-    )?)
-}
-
-impl Capture {
-    fn elapsed_ms(&self) -> u64 {
-        self.started_at
-            .elapsed()
-            .as_millis()
-            .min(u128::from(u64::MAX)) as u64
-    }
-
-    fn allocate_segment_path(&mut self) -> PathBuf {
-        self.next_segment_id = self.next_segment_id.saturating_add(1);
-        self.flags
-            .session_dir
-            .join(format!("segment-{:08}.mp4", self.next_segment_id))
-    }
-
-    fn emit_ready(&mut self) {
-        if self.ready_emitted {
-            return;
-        }
-        self.ready_emitted = true;
-        self.flags.ready_signal.store(true, Ordering::Release);
-        emit(json!({
-            "type": "capture-border-mode",
-            "requested": "without-border",
-            "effective": self.flags.border_mode,
-            "fallback": self.flags.border_fallback,
-        }));
-        emit(json!({
-            "type": "ready",
-            "width": self.flags.width,
-            "height": self.flags.height,
-            "fps": self.flags.fps,
-            "preMs": self.flags.pre_ms,
-            "postMs": self.flags.post_ms,
-            "segmentMs": self.flags.segment_ms,
-            "audioEnabled": self.audio.is_some(),
-            "audioSampleRate": self.audio.as_ref().map(|_| AUDIO_SAMPLE_RATE),
-            "audioChannels": self.audio.as_ref().map(|_| AUDIO_CHANNELS),
-            "audioError": self.audio_error.clone(),
-            "captureBackend": if self.tone_mapper.is_some() { "hdr-to-sdr-gpu" } else { "sdr" },
-            "hdrToneMapping": self.tone_mapper.is_some(),
-            "borderMode": self.flags.border_mode,
-            "borderFallback": self.flags.border_fallback,
-            "captureIntervalMode": self.flags.capture_interval_mode,
-            "captureIntervalMs": self.flags.capture_interval_ms,
-            "pipeline": "precreated-segments-async-finalize",
-        }));
-    }
-
-    fn fail_jobs_overlapping_segment(&mut self, failed: &FailedSegment) {
-        let mut index = 0;
-        while index < self.pending_jobs.len() {
-            let target_start = self.pending_jobs[index]
-                .event_ms
-                .saturating_sub(self.flags.pre_ms);
-            let target_end = self.pending_jobs[index].due_ms;
-            if failed.end_ms > target_start && failed.start_ms < target_end {
-                let job = self.pending_jobs.remove(index);
-                let _ = fs::remove_file(&job.output_path);
-                emit(json!({
-                    "type": "failed",
-                    "id": job.id,
-                    "outputPath": job.output_path,
-                    "error": format!("A rolling video segment could not be finalized: {}", failed.error),
-                }));
-            } else {
-                index += 1;
-            }
-        }
-    }
-
-    fn push_failed_segment(&mut self, start_ms: u64, end_ms: u64, error: &str) {
-        let failed = FailedSegment {
-            start_ms,
-            end_ms,
-            error: truncate_error(error),
-        };
-        self.fail_jobs_overlapping_segment(&failed);
-        self.failed_segments.push_back(failed);
-        while self.failed_segments.len() > MAX_FAILED_SEGMENTS {
-            self.failed_segments.pop_front();
-        }
-    }
-
-    fn request_prepared_segment(&mut self, now_ms: u64) {
-        if self.shutdown_requested
-            || self.compatibility_mode
-            || self.preparing
-            || self.prepared.is_some()
-            || now_ms < self.prepare_retry_after_ms
-        {
-            return;
-        }
-        let path = self.allocate_segment_path();
-        let width = self.flags.width;
-        let height = self.flags.height;
-        let fps = self.flags.fps;
-        let audio_enabled = self.audio.is_some();
-        let tx = self.prepare_tx.clone();
-        self.preparing = true;
-        self.prepare_started_ms = Some(now_ms);
-        self.worker_handles.push(thread::spawn(move || {
-            let started = Instant::now();
-            let segment = catch_unwind(AssertUnwindSafe(|| {
-                create_segment_encoder(&path, width, height, fps, audio_enabled)
-            }))
-            .map_err(|payload| {
-                format!(
-                    "Segment encoder preparation panicked: {}",
-                    panic_payload_message(payload)
-                )
-            })
-            .and_then(|result| result.map_err(|error| error.to_string()))
-            .map(|encoder| PreparedSegment {
-                encoder,
-                path,
-                audio_enabled,
-            });
-            let prepare_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-            let _ = tx.send(PrepareResult {
-                segment,
-                prepare_ms,
-            });
-        }));
-    }
-
-    fn drain_audio(&mut self) -> Result<bool, AnyError> {
-        let Some(audio) = self.audio.as_ref() else {
-            return Ok(true);
-        };
-        loop {
-            match audio.receiver.try_recv() {
-                Ok(packet) => {
-                    if let Some(active) = self.active.as_mut() {
-                        if active.encoder.pending_audio_samples() >= MAX_ENCODER_AUDIO_PACKETS {
-                            self.audio_backpressure_drops =
-                                self.audio_backpressure_drops.saturating_add(1);
-                            active.encoder.skip_audio_buffer(&packet);
-                        } else {
-                            active.encoder.send_audio_buffer(&packet, 0)?;
-                        }
-                    }
-                }
-                Err(mpsc::TryRecvError::Empty) => return Ok(true),
-                Err(mpsc::TryRecvError::Disconnected) => return Ok(false),
-            }
-        }
-    }
-
-    fn stop_audio(&mut self) -> Result<(), AnyError> {
-        if let Some(audio) = self.audio.as_mut() {
-            audio.stop_and_join();
-        }
-        let _ = self.drain_audio()?;
-        self.audio = None;
-        Ok(())
-    }
-
-    fn handle_audio_failure(&mut self, now_ms: u64) -> Result<(), AnyError> {
-        emit(json!({
-            "type": "audio-capture-disabled",
-            "reason": "WASAPI loopback stream ended; continuing with video only",
-        }));
-        self.stop_audio()?;
-        if let Some(prepared) = self.prepared.take() {
-            let path = prepared.path.clone();
-            self.worker_handles.push(thread::spawn(move || {
-                let _ = prepared.encoder.finish();
-                let _ = fs::remove_file(path);
-            }));
-        }
-        self.prepare_retry_after_ms = now_ms;
-        self.request_prepared_segment(now_ms);
-        Ok(())
-    }
-
-    fn spawn_finalize(&mut self, active: ActiveSegment, end_ms: u64) {
-        let tx = self.finalize_tx.clone();
-        self.finalizing = self.finalizing.saturating_add(1);
-        self.finalizing_ranges.push(FinalizingRange {
-            start_ms: active.start_ms,
-            end_ms,
-            started_ms: end_ms,
-        });
-        emit(json!({
-            "type": "segment-finalizer-started",
-            "startMs": active.start_ms,
-            "endMs": end_ms,
-        }));
-        self.worker_handles.push(thread::spawn(move || {
-            let ActiveSegment {
-                encoder,
-                path,
-                start_ms,
-                frames,
-            } = active;
-            let started = Instant::now();
-            let result = catch_unwind(AssertUnwindSafe(|| encoder.finish()))
-                .map_err(|payload| {
-                    format!(
-                        "Segment finalization panicked: {}",
-                        panic_payload_message(payload)
-                    )
-                })
-                .and_then(|result| result.map_err(|error| error.to_string()));
-            let finalize_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
-            let _ = tx.send(FinalizeResult {
-                path,
-                start_ms,
-                end_ms,
-                frames,
-                finalize_ms,
-                result,
-            });
-        }));
-    }
-
-    fn rotate_active(&mut self, now_ms: u64) -> Result<bool, AnyError> {
-        if self.finalizing >= MAX_CONCURRENT_FINALIZERS {
-            if !self.rotation_delay_reported {
-                self.rotation_delay_reported = true;
-                emit(json!({
-                    "type": "segment-rotation-delayed",
-                    "atMs": now_ms,
-                    "reason": "finalizer-backpressure",
-                    "finalizersActive": self.finalizing,
-                }));
-            }
-            return Ok(false);
-        }
-        let Some(prepared) = self.prepared.take() else {
-            if self.compatibility_mode || (!self.preparing && self.prepare_failures >= 3) {
-                if !self.compatibility_mode {
-                    self.compatibility_mode = true;
-                    emit(json!({
-                        "type": "pipeline-compatibility-fallback",
-                        "atMs": now_ms,
-                        "prepareFailures": self.prepare_failures,
-                        "reason": "parallel-encoder-unavailable",
-                    }));
-                }
-                self.finish_active_blocking(now_ms)?;
-                let path = self.allocate_segment_path();
-                let encoder = create_segment_encoder(
-                    &path,
-                    self.flags.width,
-                    self.flags.height,
-                    self.flags.fps,
-                    self.audio.is_some(),
-                )?;
-                self.active = Some(ActiveSegment {
-                    encoder,
-                    path,
-                    start_ms: now_ms,
-                    frames: 0,
-                });
-                self.rotation_count = self.rotation_count.saturating_add(1);
-                self.rotation_delay_reported = false;
-                return Ok(true);
-            }
-            if !self.rotation_delay_reported {
-                self.rotation_delay_reported = true;
-                emit(json!({
-                    "type": "segment-rotation-delayed",
-                    "atMs": now_ms,
-                    "reason": if self.preparing { "encoder-preparing" } else { "encoder-unavailable" },
-                }));
-            }
-            self.request_prepared_segment(now_ms);
-            return Ok(false);
-        };
-        if prepared.audio_enabled != self.audio.is_some() {
-            let path = prepared.path.clone();
-            self.worker_handles.push(thread::spawn(move || {
-                let _ = prepared.encoder.finish();
-                let _ = fs::remove_file(path);
-            }));
-            self.request_prepared_segment(now_ms);
-            return Ok(false);
-        }
-        let next = ActiveSegment {
-            encoder: prepared.encoder,
-            path: prepared.path,
-            start_ms: now_ms,
-            frames: 0,
-        };
-        if let Some(previous) = self.active.replace(next) {
-            self.spawn_finalize(previous, now_ms);
-        }
-        self.rotation_count = self.rotation_count.saturating_add(1);
-        self.rotation_delay_reported = false;
-        self.request_prepared_segment(now_ms);
-        Ok(true)
-    }
-
-    fn finish_active_blocking(&mut self, now_ms: u64) -> Result<(), AnyError> {
-        let Some(active) = self.active.take() else {
-            return Ok(());
-        };
-        let ActiveSegment {
-            encoder,
-            path,
-            start_ms,
-            frames,
-        } = active;
-        encoder.finish()?;
-        if frames > 0 && now_ms > start_ms && path.exists() {
-            let segment = Segment {
-                path,
-                start_ms,
-                end_ms: now_ms,
-            };
-            let insert_at = self
-                .segments
-                .iter()
-                .position(|existing| existing.start_ms > segment.start_ms)
-                .unwrap_or(self.segments.len());
-            self.segments.insert(insert_at, segment);
-        } else {
-            let _ = fs::remove_file(path);
-        }
-        Ok(())
-    }
-
-    fn shutdown_pipeline(&mut self, now_ms: u64) -> Result<(), AnyError> {
-        self.stop_audio()?;
-        self.finish_active_blocking(now_ms)?;
-        while let Some(handle) = self.worker_handles.pop() {
-            let _ = handle.join();
-        }
-        self.process_pipeline_results(now_ms);
-        if let Some(prepared) = self.prepared.take() {
-            let path = prepared.path.clone();
-            let _ = prepared.encoder.finish();
-            let _ = fs::remove_file(path);
-        }
-        self.process_render_results();
-        Ok(())
-    }
-
-    fn process_commands(&mut self) {
-        loop {
-            let command = {
-                let Ok(receiver) = self.flags.command_rx.lock() else {
-                    self.shutdown_requested = true;
-                    return;
-                };
-                receiver.try_recv()
-            };
-            match command {
-                Ok(Command::Trigger { id, output_path }) => {
-                    let event_ms = self.elapsed_ms();
-                    let output_path = PathBuf::from(output_path);
-                    let due_ms = event_ms.saturating_add(self.flags.post_ms);
-                    self.pending_jobs.push(PendingJob {
-                        id: id.clone(),
-                        output_path: output_path.clone(),
-                        event_ms,
-                        due_ms,
-                        expires_ms: pending_job_expiry(due_ms),
-                        boundary_requested: false,
-                    });
-                    emit(json!({
-                        "type": "triggered",
-                        "id": id,
-                        "outputPath": output_path,
-                        "eventMs": event_ms,
-                        "availablePreMs": event_ms.min(self.flags.pre_ms),
-                    }));
-                }
-                Ok(Command::Shutdown) => {
-                    self.shutdown_requested = true;
-                }
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.shutdown_requested = true;
-                    break;
-                }
-            }
-        }
-    }
-
-    fn reap_worker_handles(&mut self) {
-        let mut index = 0;
-        while index < self.worker_handles.len() {
-            if self.worker_handles[index].is_finished() {
-                let handle = self.worker_handles.swap_remove(index);
-                let _ = handle.join();
-            } else {
-                index += 1;
-            }
-        }
-    }
-
-    fn process_pipeline_results(&mut self, now_ms: u64) {
-        while let Ok(result) = self.prepare_rx.try_recv() {
-            self.preparing = false;
-            self.prepare_started_ms = None;
-            self.prepare_completed = self.prepare_completed.saturating_add(1);
-            self.prepare_total_ms = self.prepare_total_ms.saturating_add(result.prepare_ms);
-            self.prepare_last_ms = result.prepare_ms;
-            self.prepare_max_ms = self.prepare_max_ms.max(result.prepare_ms);
-            match result.segment {
-                Ok(segment) if segment.audio_enabled == self.audio.is_some() => {
-                    emit(json!({
-                        "type": "segment-prepared",
-                        "prepareMs": result.prepare_ms,
-                        "slow": result.prepare_ms >= PIPELINE_SLOW_MS,
-                        "path": segment.path,
-                    }));
-                    self.prepared = Some(segment);
-                    self.prepare_failures = 0;
-                    self.prepare_retry_after_ms = 0;
-                }
-                Ok(segment) => {
-                    let path = segment.path.clone();
-                    self.worker_handles.push(thread::spawn(move || {
-                        let _ = segment.encoder.finish();
-                        let _ = fs::remove_file(path);
-                    }));
-                    self.prepare_retry_after_ms = now_ms;
-                }
-                Err(error) => {
-                    self.prepare_failures = self.prepare_failures.saturating_add(1);
-                    emit(json!({
-                        "type": "segment-prepare-failed",
-                        "error": error,
-                        "retryMs": 1_000,
-                    }));
-                    self.prepare_retry_after_ms = now_ms.saturating_add(1_000);
-                }
-            }
-        }
-
-        while let Ok(result) = self.finalize_rx.try_recv() {
-            self.finalizing = self.finalizing.saturating_sub(1);
-            if let Some(index) = self.finalizing_ranges.iter().position(|range| {
-                range.start_ms == result.start_ms && range.end_ms == result.end_ms
-            }) {
-                self.finalizing_ranges.swap_remove(index);
-            }
-            self.finalize_completed = self.finalize_completed.saturating_add(1);
-            self.finalize_total_ms = self.finalize_total_ms.saturating_add(result.finalize_ms);
-            self.finalize_last_ms = result.finalize_ms;
-            self.finalize_max_ms = self.finalize_max_ms.max(result.finalize_ms);
-            emit(json!({
-                "type": "segment-finalizer-completed",
-                "startMs": result.start_ms,
-                "endMs": result.end_ms,
-                "finalizeMs": result.finalize_ms,
-            }));
-            match result.result {
-                Ok(())
-                    if result.frames > 0
-                        && result.end_ms > result.start_ms
-                        && result.path.exists() =>
-                {
-                    let segment = Segment {
-                        path: result.path.clone(),
-                        start_ms: result.start_ms,
-                        end_ms: result.end_ms,
-                    };
-                    let insert_at = self
-                        .segments
-                        .iter()
-                        .position(|existing| existing.start_ms > segment.start_ms)
-                        .unwrap_or(self.segments.len());
-                    self.segments.insert(insert_at, segment);
-                    emit(json!({
-                        "type": "segment-finalized",
-                        "path": result.path,
-                        "startMs": result.start_ms,
-                        "endMs": result.end_ms,
-                        "frames": result.frames,
-                        "finalizeMs": result.finalize_ms,
-                        "slow": result.finalize_ms >= PIPELINE_SLOW_MS,
-                        "pendingFinalizers": self.finalizing,
-                    }));
-                }
-                Ok(()) => {
-                    let _ = fs::remove_file(&result.path);
-                }
-                Err(error) => {
-                    let _ = fs::remove_file(&result.path);
-                    self.push_failed_segment(result.start_ms, result.end_ms, &error);
-                    emit(json!({
-                        "type": "segment-finalize-failed",
-                        "path": result.path,
-                        "startMs": result.start_ms,
-                        "endMs": result.end_ms,
-                        "frames": result.frames,
-                        "finalizeMs": result.finalize_ms,
-                        "error": error,
-                    }));
-                }
-            }
-        }
-        self.reap_worker_handles();
-        self.request_prepared_segment(now_ms);
-    }
-
-    fn observe_capture_frame(&mut self, timestamp: i64) {
-        self.captured_frames = self.captured_frames.saturating_add(1);
-        if let Some(previous) = self.last_capture_timestamp {
-            let delta = timestamp.saturating_sub(previous);
-            if delta > 0 {
-                let gap_ms = delta as f64 / 10_000.0;
-                self.max_frame_gap_ms = self.max_frame_gap_ms.max(gap_ms);
-                self.estimated_dropped_frames = self
-                    .estimated_dropped_frames
-                    .saturating_add(estimate_missing_frames(delta, self.flags.fps));
-            }
-        }
-        self.last_capture_timestamp = Some(timestamp);
-    }
-
-    fn emit_capture_stats_if_due(&mut self, now_ms: u64) {
-        if now_ms.saturating_sub(self.last_stats_ms) < 30_000 {
-            return;
-        }
-        let interval_ms = now_ms.saturating_sub(self.last_stats_ms).max(1);
-        let interval_captured_frames = self
-            .captured_frames
-            .saturating_sub(self.last_stats_captured_frames);
-        let interval_encoded_frames = self
-            .encoded_frames
-            .saturating_sub(self.last_stats_encoded_frames);
-        let interval_estimated_dropped_frames = self
-            .estimated_dropped_frames
-            .saturating_sub(self.last_stats_estimated_dropped_frames);
-        let interval_rate_limited_frames = self
-            .rate_limited_frames
-            .saturating_sub(self.last_stats_rate_limited_frames);
-        let capture_fps = interval_captured_frames as f64 * 1_000.0 / interval_ms as f64;
-        let encoded_fps = interval_encoded_frames as f64 * 1_000.0 / interval_ms as f64;
-        self.last_stats_ms = now_ms;
-        self.last_stats_captured_frames = self.captured_frames;
-        self.last_stats_encoded_frames = self.encoded_frames;
-        self.last_stats_estimated_dropped_frames = self.estimated_dropped_frames;
-        self.last_stats_rate_limited_frames = self.rate_limited_frames;
-        let prepare_age_ms = self
-            .prepare_started_ms
-            .map(|started| now_ms.saturating_sub(started))
-            .unwrap_or(0);
-        let oldest_finalizer_age_ms = self
-            .finalizing_ranges
-            .iter()
-            .map(|range| now_ms.saturating_sub(range.started_ms))
-            .max()
-            .unwrap_or(0);
-        let active_video_queue = self
-            .active
-            .as_ref()
-            .map(|active| active.encoder.pending_video_samples())
-            .unwrap_or(0);
-        let active_audio_queue = self
-            .active
-            .as_ref()
-            .map(|active| active.encoder.pending_audio_samples())
-            .unwrap_or(0);
-        let render_age_ms = self
-            .render_started_ms
-            .map(|started| now_ms.saturating_sub(started))
-            .unwrap_or(0);
-        emit(json!({
-            "type": "capture-stats",
-            "uptimeMs": now_ms,
-            "capturedFrames": self.captured_frames,
-            "encodedFrames": self.encoded_frames,
-            "estimatedDroppedFrames": self.estimated_dropped_frames,
-            "rateLimitedFrames": self.rate_limited_frames,
-            "intervalMs": interval_ms,
-            "intervalCapturedFrames": interval_captured_frames,
-            "intervalEncodedFrames": interval_encoded_frames,
-            "intervalEstimatedDroppedFrames": interval_estimated_dropped_frames,
-            "intervalRateLimitedFrames": interval_rate_limited_frames,
-            "captureFps": capture_fps,
-            "encodedFps": encoded_fps,
-            "maxFrameGapMs": self.max_frame_gap_ms,
-            "rotationCount": self.rotation_count,
-            "segmentsReady": self.segments.len(),
-            "finalizersActive": self.finalizing,
-            "encoderPrepared": self.prepared.is_some(),
-            "encoderPreparing": self.preparing,
-            "encoderPrepareAgeMs": prepare_age_ms,
-            "prepareCompleted": self.prepare_completed,
-            "prepareLastMs": self.prepare_last_ms,
-            "prepareAverageMs": if self.prepare_completed > 0 {
-                self.prepare_total_ms / self.prepare_completed
-            } else {
-                0
-            },
-            "prepareMaxMs": self.prepare_max_ms,
-            "finalizeCompleted": self.finalize_completed,
-            "finalizeLastMs": self.finalize_last_ms,
-            "finalizeAverageMs": if self.finalize_completed > 0 {
-                self.finalize_total_ms / self.finalize_completed
-            } else {
-                0
-            },
-            "finalizeMaxMs": self.finalize_max_ms,
-            "oldestFinalizerAgeMs": oldest_finalizer_age_ms,
-            "pipelineStalled": prepare_age_ms >= PIPELINE_STALLED_MS
-                || oldest_finalizer_age_ms >= PIPELINE_STALLED_MS,
-            "activeVideoQueue": active_video_queue,
-            "activeAudioQueue": active_audio_queue,
-            "audioBackpressureDrops": self.audio_backpressure_drops,
-            "rendering": self.rendering,
-            "renderAgeMs": render_age_ms,
-            "renderCompleted": self.render_completed,
-            "renderLastMs": self.render_last_ms,
-            "renderAverageMs": if self.render_completed > 0 {
-                self.render_total_ms / self.render_completed
-            } else {
-                0
-            },
-            "renderMaxMs": self.render_max_ms,
-            "pendingRecords": self.pending_jobs.len(),
-            "failedSegments": self.failed_segments.len(),
-            "oldestFailedSegmentAgeMs": self
-                .failed_segments
-                .front()
-                .map(|failed| now_ms.saturating_sub(failed.end_ms))
-                .unwrap_or(0),
-        }));
-    }
-
-    fn process_render_results(&mut self) {
-        while let Ok(result) = self.render_rx.try_recv() {
-            if self.active_render_generation == Some(result.generation) {
-                self.rendering = false;
-                self.render_started_ms = None;
-                self.active_render_generation = None;
-            }
-            self.render_completed = self.render_completed.saturating_add(1);
-            self.render_total_ms = self.render_total_ms.saturating_add(result.render_ms);
-            self.render_last_ms = result.render_ms;
-            self.render_max_ms = self.render_max_ms.max(result.render_ms);
-            for path in result.segment_paths {
-                if let Some(count) = self.in_use.get_mut(&path) {
-                    *count = count.saturating_sub(1);
-                    if *count == 0 {
-                        self.in_use.remove(&path);
-                    }
-                }
-            }
-        }
-    }
-
-    fn schedule_due_jobs(&mut self, now_ms: u64) {
-        let mut index = 0;
-        while index < self.pending_jobs.len() {
-            if now_ms >= self.pending_jobs[index].expires_ms {
-                let job = self.pending_jobs.remove(index);
-                let _ = fs::remove_file(&job.output_path);
-                emit(json!({
-                    "type": "failed",
-                    "id": job.id,
-                    "outputPath": job.output_path,
-                    "error": "Timed out waiting for rolling video segments to finalize",
-                }));
-                continue;
-            }
-            index += 1;
-        }
-        if self.rendering {
-            return;
-        }
-
-        let mut index = 0;
-        while index < self.pending_jobs.len() {
-            if self.pending_jobs[index].due_ms > now_ms {
-                index += 1;
-                continue;
-            }
-            let target_start = self.pending_jobs[index]
-                .event_ms
-                .saturating_sub(self.flags.pre_ms);
-            let target_end = self.pending_jobs[index].due_ms;
-            if let Some(failed) = self
-                .failed_segments
-                .iter()
-                .find(|failed| failed.end_ms > target_start && failed.start_ms < target_end)
-            {
-                let job = self.pending_jobs.remove(index);
-                let _ = fs::remove_file(&job.output_path);
-                emit(json!({
-                    "type": "failed",
-                    "id": job.id,
-                    "outputPath": job.output_path,
-                    "error": format!("A rolling video segment could not be finalized: {}", failed.error),
-                }));
-                continue;
-            }
-            let finalized_through = self
-                .segments
-                .iter()
-                .map(|segment| segment.end_ms)
-                .max()
-                .unwrap_or(0);
-            let overlapping_finalizer = self
-                .finalizing_ranges
-                .iter()
-                .any(|range| range.end_ms > target_start && range.start_ms < target_end);
-            if finalized_through < target_end || overlapping_finalizer {
-                index += 1;
-                continue;
-            }
-            let anchor = self.pending_jobs.remove(index);
-            let mut jobs = vec![anchor];
-            for candidate_index in (0..self.pending_jobs.len()).rev() {
-                let candidate = &self.pending_jobs[candidate_index];
-                if candidate.due_ms <= now_ms
-                    && candidate.event_ms.abs_diff(jobs[0].event_ms) <= 500
-                {
-                    jobs.push(self.pending_jobs.remove(candidate_index));
-                }
-            }
-            let target_start = jobs[0].event_ms.saturating_sub(self.flags.pre_ms);
-            let target_end = jobs[0].due_ms;
-            let selected = self
-                .segments
-                .iter()
-                .filter(|segment| segment.end_ms > target_start && segment.start_ms < target_end)
-                .cloned()
-                .collect::<Vec<_>>();
-            if selected.is_empty() {
-                for job in jobs {
-                    let _ = fs::remove_file(&job.output_path);
-                    emit(json!({
-                        "type": "failed",
-                        "id": job.id,
-                        "outputPath": job.output_path,
-                        "error": "No captured segments were available for this achievement",
-                    }));
-                }
-                continue;
-            }
-            self.render_generation = self.render_generation.saturating_add(1).max(1);
-            let generation = self.render_generation;
-            self.active_render_generation = Some(generation);
-            emit(json!({
-                "type": "render-started",
-                "generation": generation,
-                "timeoutMs": RENDER_STALLED_MS,
-                "jobCount": jobs.len(),
-            }));
-            let segment_paths = selected
-                .iter()
-                .map(|segment| segment.path.clone())
-                .collect::<Vec<_>>();
-            for path in &segment_paths {
-                *self.in_use.entry(path.clone()).or_insert(0) += 1;
-            }
-            let tx = self.render_tx.clone();
-            let handle = thread::spawn(move || {
-                let render_started = Instant::now();
-                let primary_output = jobs[0].output_path.clone();
-                let result = catch_unwind(AssertUnwindSafe(|| {
-                    render_record(&selected, target_start, target_end, &primary_output)
-                }))
-                .map_err(|payload| format!("Render panicked: {}", panic_payload_message(payload)))
-                .and_then(|result| result.map_err(|error| error.to_string()));
-                let render_succeeded = result.is_ok();
-                match result {
-                    Ok(()) => {
-                        let mut outcomes = Vec::with_capacity(jobs.len());
-                        for (job_index, job) in jobs.into_iter().enumerate() {
-                            let copy_result = if job_index == 0 {
-                                Ok(())
-                            } else {
-                                fs::copy(&primary_output, &job.output_path).map(|_| ())
-                            };
-                            outcomes.push((job, copy_result.map_err(|error| error.to_string())));
-                        }
-                        for (job, copy_result) in outcomes {
-                            match copy_result {
-                                Ok(()) => emit(json!({
-                                    "type": "saved",
-                                    "id": job.id,
-                                    "outputPath": job.output_path,
-                                })),
-                                Err(error) => {
-                                    let _ = fs::remove_file(&job.output_path);
-                                    emit(json!({
-                                        "type": "failed",
-                                        "id": job.id,
-                                        "outputPath": job.output_path,
-                                        "error": error,
-                                    }));
-                                }
-                            }
-                        }
-                    }
-                    Err(error) => {
-                        for job in jobs {
-                            let _ = fs::remove_file(&job.output_path);
-                            emit(json!({
-                                "type": "failed",
-                                "id": job.id,
-                                "outputPath": job.output_path,
-                                "error": error,
-                            }));
-                        }
-                    }
-                }
-                let render_ms = render_started
-                    .elapsed()
-                    .as_millis()
-                    .min(u128::from(u64::MAX)) as u64;
-                emit(json!({
-                    "type": "render-completed",
-                    "generation": generation,
-                    "renderMs": render_ms,
-                    "success": render_succeeded,
-                }));
-                let _ = tx.send(RenderResult {
-                    generation,
-                    segment_paths,
-                    render_ms,
-                });
-            });
-            self.rendering = true;
-            self.render_started_ms = Some(now_ms);
-            self.worker_handles.push(handle);
-            break;
-        }
-    }
-
-    fn cleanup_old_segments(&mut self, now_ms: u64) {
-        let keep_ms = self.flags.pre_ms.saturating_add(self.flags.segment_ms * 3);
-        let oldest_needed = self
-            .pending_jobs
-            .iter()
-            .map(|job| job.event_ms.saturating_sub(self.flags.pre_ms))
-            .min()
-            .unwrap_or_else(|| now_ms.saturating_sub(keep_ms));
-        while let Some(segment) = self.segments.front() {
-            if segment.end_ms >= oldest_needed || self.in_use.contains_key(&segment.path) {
-                break;
-            }
-            let segment = self
-                .segments
-                .pop_front()
-                .expect("front segment disappeared");
-            let _ = fs::remove_file(segment.path);
-        }
-        while self
-            .failed_segments
-            .front()
-            .is_some_and(|failed| failed.end_ms < oldest_needed)
-        {
-            self.failed_segments.pop_front();
-        }
-    }
-}
-
-impl GraphicsCaptureApiHandler for Capture {
-    type Flags = CaptureFlags;
-    type Error = AnyError;
-
-    fn new(ctx: Context<Self::Flags>) -> Result<Self, Self::Error> {
-        let (render_tx, render_rx) = mpsc::channel();
-        let (prepare_tx, prepare_rx) = mpsc::channel();
-        let (finalize_tx, finalize_rx) = mpsc::channel();
-        let tone_mapper = if ctx.flags.hdr_tone_map {
-            Some(ToneMapper::new(
-                ctx.device.clone(),
-                ctx.device_context.clone(),
-                ctx.flags.width,
-                ctx.flags.height,
-                even_dimension(ctx.flags.width),
-                even_dimension(ctx.flags.height),
-            )?)
-        } else {
-            None
-        };
-        let (audio, audio_error) = match AudioLoopback::start() {
-            Ok(audio) => (Some(audio), None),
-            Err(error) => (None, Some(error)),
-        };
-        let first_path = ctx.flags.session_dir.join("segment-00000001.mp4");
-        let first_encoder = create_segment_encoder(
-            &first_path,
-            ctx.flags.width,
-            ctx.flags.height,
-            ctx.flags.fps,
-            audio.is_some(),
-        )?;
-        let capture = Self {
-            flags: ctx.flags,
-            started_at: Instant::now(),
-            active: Some(ActiveSegment {
-                encoder: first_encoder,
-                path: first_path,
-                start_ms: 0,
-                frames: 0,
-            }),
-            prepared: None,
-            preparing: false,
-            compatibility_mode: false,
-            prepare_failures: 0,
-            prepare_retry_after_ms: 0,
-            segments: VecDeque::new(),
-            failed_segments: VecDeque::new(),
-            pending_jobs: Vec::new(),
-            in_use: HashMap::new(),
-            next_segment_id: 1,
-            last_frame_ms: None,
-            last_capture_timestamp: None,
-            captured_frames: 0,
-            encoded_frames: 0,
-            estimated_dropped_frames: 0,
-            rate_limited_frames: 0,
-            max_frame_gap_ms: 0.0,
-            last_stats_ms: 0,
-            last_stats_captured_frames: 0,
-            last_stats_encoded_frames: 0,
-            last_stats_estimated_dropped_frames: 0,
-            last_stats_rate_limited_frames: 0,
-            rotation_count: 0,
-            rotation_delay_reported: false,
-            prepare_started_ms: None,
-            prepare_completed: 0,
-            prepare_total_ms: 0,
-            prepare_last_ms: 0,
-            prepare_max_ms: 0,
-            finalize_completed: 0,
-            finalize_total_ms: 0,
-            finalize_last_ms: 0,
-            finalize_max_ms: 0,
-            audio_backpressure_drops: 0,
-            prepare_tx,
-            prepare_rx,
-            finalize_tx,
-            finalize_rx,
-            finalizing: 0,
-            finalizing_ranges: Vec::new(),
-            worker_handles: Vec::new(),
-            render_tx,
-            render_rx,
-            rendering: false,
-            render_started_ms: None,
-            render_generation: 0,
-            active_render_generation: None,
-            render_completed: 0,
-            render_total_ms: 0,
-            render_last_ms: 0,
-            render_max_ms: 0,
-            audio,
-            audio_error,
-            tone_mapper,
-            ready_emitted: false,
-            shutdown_requested: false,
-        };
-        Ok(capture)
-    }
-
-    fn on_frame_arrived(
-        &mut self,
-        frame: &mut Frame,
-        capture_control: InternalCaptureControl,
-    ) -> Result<(), Self::Error> {
-        let now_ms = self.elapsed_ms();
-        self.process_pipeline_results(now_ms);
-        self.process_render_results();
-        self.process_commands();
-
-        if self.shutdown_requested {
-            self.shutdown_pipeline(now_ms)?;
-            capture_control.stop();
-            return Ok(());
-        }
-
-        if !self.drain_audio()? {
-            self.handle_audio_failure(now_ms)?;
-        }
-
-        let frame_timestamp = frame.timestamp()?.Duration;
-        self.observe_capture_frame(frame_timestamp);
-        let frame_interval_ms = (1000_u64 / u64::from(self.flags.fps.max(1))).max(1);
-        let should_send = self
-            .last_frame_ms
-            .is_none_or(|last| now_ms.saturating_sub(last) >= frame_interval_ms);
-        let mut encoded_this_frame = false;
-        if should_send {
-            if let Some(active) = self.active.as_mut() {
-                if let Some(tone_mapper) = self.tone_mapper.as_ref() {
-                    let surface = tone_mapper.convert(frame).map_err(|error| {
-                        std::io::Error::other(format!(
-                            "HDR tone-map frame conversion failed: {error}"
-                        ))
-                    })?;
-                    active
-                        .encoder
-                        .send_surface(surface, frame_timestamp)
-                        .map_err(|error| {
-                            std::io::Error::other(format!(
-                                "HDR encoded-surface submission failed: {error}"
-                            ))
-                        })?;
-                } else {
-                    active.encoder.send_frame(frame)?;
-                }
-                active.frames = active.frames.saturating_add(1);
-                self.encoded_frames = self.encoded_frames.saturating_add(1);
-                encoded_this_frame = true;
-            }
-            self.last_frame_ms = Some(now_ms);
-        } else {
-            self.rate_limited_frames = self.rate_limited_frames.saturating_add(1);
-        }
-        if encoded_this_frame {
-            self.emit_ready();
-        }
-
-        let segment_due = self
-            .active
-            .as_ref()
-            .is_some_and(|active| now_ms.saturating_sub(active.start_ms) >= self.flags.segment_ms);
-        for job in &mut self.pending_jobs {
-            if !job.boundary_requested
-                && job.due_ms <= now_ms
-                && self
-                    .active
-                    .as_ref()
-                    .is_some_and(|active| active.start_ms >= job.due_ms)
-            {
-                job.boundary_requested = true;
-            }
-        }
-        let record_due = self
-            .pending_jobs
-            .iter()
-            .any(|job| job.due_ms <= now_ms && !job.boundary_requested);
-        if segment_due || record_due {
-            if !self.drain_audio()? {
-                self.handle_audio_failure(now_ms)?;
-            }
-            if self.rotate_active(now_ms)? {
-                for job in &mut self.pending_jobs {
-                    if job.due_ms <= now_ms {
-                        job.boundary_requested = true;
-                    }
-                }
-            }
-        }
-        self.schedule_due_jobs(now_ms);
-        self.cleanup_old_segments(now_ms);
-        self.emit_capture_stats_if_due(now_ms);
-        Ok(())
-    }
-
-    fn on_closed(&mut self) -> Result<(), Self::Error> {
-        let now_ms = self.elapsed_ms();
-        self.shutdown_requested = true;
-        self.shutdown_pipeline(now_ms)?;
-        Ok(())
-    }
-}
-
-fn render_record(
-    segments: &[Segment],
-    target_start_ms: u64,
-    target_end_ms: u64,
-    output_path: &Path,
-) -> Result<(), AnyError> {
-    struct WinRtGuard;
-    impl Drop for WinRtGuard {
-        fn drop(&mut self) {
-            unsafe { RoUninitialize() };
-        }
-    }
-    if let Err(error) = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }
-        && error.code() != S_FALSE
-    {
-        return Err(error.into());
-    }
-    let _winrt = WinRtGuard;
-    if let Some(parent) = output_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    if !output_path.exists() {
-        fs::File::create(output_path)?;
-    }
-    let composition = MediaComposition::new()?;
-    let clips = composition.Clips()?;
-
-    for segment in segments {
-        let segment_path = HSTRING::from(segment.path.to_string_lossy().as_ref());
-        let storage_file = StorageFile::GetFileFromPathAsync(&segment_path)?.join()?;
-        let clip = MediaClip::CreateFromFileAsync(&storage_file)?.join()?;
-        let duration_ticks = clip.OriginalDuration()?.Duration.max(0);
-        let trim_start_ms = target_start_ms.saturating_sub(segment.start_ms);
-        let trim_end_ms = segment.end_ms.saturating_sub(target_end_ms);
-        let mut trim_start_ticks = i64::try_from(trim_start_ms)
-            .unwrap_or(i64::MAX)
-            .saturating_mul(TICKS_PER_MILLISECOND)
-            .min(duration_ticks);
-        let mut trim_end_ticks = i64::try_from(trim_end_ms)
-            .unwrap_or(i64::MAX)
-            .saturating_mul(TICKS_PER_MILLISECOND)
-            .min(duration_ticks);
-        if trim_start_ticks.saturating_add(trim_end_ticks) >= duration_ticks {
-            if duration_ticks <= 1 {
-                continue;
-            }
-            let overflow = trim_start_ticks
-                .saturating_add(trim_end_ticks)
-                .saturating_sub(duration_ticks - 1);
-            if trim_end_ticks >= overflow {
-                trim_end_ticks -= overflow;
-            } else {
-                trim_start_ticks = trim_start_ticks.saturating_sub(overflow - trim_end_ticks);
-                trim_end_ticks = 0;
-            }
-        }
-        if trim_start_ticks > 0 {
-            clip.SetTrimTimeFromStart(TimeSpan {
-                Duration: trim_start_ticks,
-            })?;
-        }
-        if trim_end_ticks > 0 {
-            clip.SetTrimTimeFromEnd(TimeSpan {
-                Duration: trim_end_ticks,
-            })?;
-        }
-        clips.Append(&clip)?;
-    }
-
-    if clips.Size()? == 0 {
-        return Err("All captured segments were empty after trimming".into());
-    }
-    let destination_path = HSTRING::from(output_path.to_string_lossy().as_ref());
-    let destination = StorageFile::GetFileFromPathAsync(&destination_path)?.join()?;
-    let reason = composition.RenderToFileAsync(&destination)?.join()?;
-    if reason != TranscodeFailureReason::None {
-        return Err(format!("Windows MediaComposition failed: {reason:?}").into());
-    }
-    if fs::metadata(output_path)?.len() == 0 {
-        return Err("Windows MediaComposition produced an empty MP4".into());
-    }
-    Ok(())
-}
-
 fn read_commands(tx: Sender<Command>) {
-    let stdin = io::stdin();
-    for line in stdin.lock().lines() {
-        let Ok(line) = line else { break };
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        match serde_json::from_str::<Command>(trimmed) {
-            Ok(command) => {
-                let shutdown = matches!(command, Command::Shutdown);
-                if tx.send(command).is_err() || shutdown {
-                    break;
+    for line in io::stdin().lock().lines() {
+        match line {
+            Ok(line) => match serde_json::from_str::<Command>(&line) {
+                Ok(command) => {
+                    if tx.send(command).is_err() {
+                        return;
+                    }
                 }
-            }
-            Err(error) => emit(json!({
-                "type": "protocol-error",
-                "error": error.to_string(),
-            })),
+                Err(error) => emit(json!({"type":"protocol-error", "error":error.to_string()})),
+            },
+            Err(_) => break,
         }
     }
+    let _ = tx.send(Command::Shutdown);
 }
-
 struct Options {
     buffer_dir: PathBuf,
     pre_ms: u64,
     post_ms: u64,
     segment_ms: u64,
     fps: u32,
+    unlocked: bool,
     hdr_tone_map: bool,
 }
 
@@ -1726,6 +636,7 @@ fn parse_options() -> Result<Options, AnyError> {
     let mut post_ms = 10_000;
     let mut segment_ms = 5_000;
     let mut fps = 30;
+    let mut unlocked = false;
     let mut hdr_tone_map = false;
     while let Some(raw) = args.next() {
         let key = raw.to_string_lossy();
@@ -1737,7 +648,12 @@ fn parse_options() -> Result<Options, AnyError> {
             "--pre-ms" => pre_ms = value.to_string_lossy().parse()?,
             "--post-ms" => post_ms = value.to_string_lossy().parse()?,
             "--segment-ms" => segment_ms = value.to_string_lossy().parse()?,
-            "--fps" => fps = value.to_string_lossy().parse()?,
+            "--fps" => {
+                unlocked = value == "unlocked";
+                if !unlocked {
+                    fps = value.to_string_lossy().parse()?;
+                }
+            }
             "--hdr-tone-map" => hdr_tone_map = parse_bool_arg(&value)?,
             _ => return Err(format!("Unknown argument: {key}").into()),
         }
@@ -1748,7 +664,9 @@ fn parse_options() -> Result<Options, AnyError> {
         pre_ms: pre_ms.clamp(1_000, 60_000),
         post_ms: post_ms.clamp(1_000, 60_000),
         segment_ms: segment_ms.clamp(1_000, 5_000),
+        // Unlocked ignores this fixed-rate argument and queries the monitor.
         fps: fps.clamp(10, 60),
+        unlocked,
         hdr_tone_map,
     })
 }
@@ -1848,13 +766,17 @@ fn try_capture_with_rate_limit_fallback<T>(
 where
     T: TryInto<GraphicsCaptureItemType> + Clone,
 {
-    let interval_nanos = 1_000_000_000_u64 / u64::from(flags.fps.max(1));
+    let interval_nanos = if flags.unlocked {
+        0
+    } else {
+        1_000_000_000_u64 / u64::from(flags.fps.max(1))
+    };
     let interval = Duration::from_nanos(interval_nanos);
-    flags.capture_interval_mode = "os";
+    flags.capture_interval_mode = if flags.unlocked { "unlocked" } else { "os" };
     flags.capture_interval_ms = interval.as_secs_f64() * 1_000.0;
     emit(json!({
         "type": "capture-rate-limit-attempt",
-        "requested": "os",
+        "requested": flags.capture_interval_mode,
         "intervalMs": flags.capture_interval_ms,
         "fps": flags.fps,
     }));
@@ -1873,8 +795,8 @@ where
     {
         emit(json!({
             "type": "capture-rate-limit-fallback",
-            "requested": "os",
-            "effective": "callback",
+            "requested": if flags.unlocked { "unlocked" } else { "os" },
+            "effective": if flags.unlocked { "unlocked" } else { "callback" },
             "reason": "minimum-update-interval-unsupported",
             "intervalMs": flags.capture_interval_ms,
             "fps": flags.fps,
@@ -1889,7 +811,11 @@ where
             GraphicsCaptureApiError::NewHandlerError(Box::new(error) as AnyError)
         })?;
         flags.session_dir = fallback_session_dir;
-        flags.capture_interval_mode = "callback";
+        flags.capture_interval_mode = if flags.unlocked {
+            "unlocked"
+        } else {
+            "callback"
+        };
         return try_capture_with_border_fallback(
             monitor,
             cursor_capture_settings,
@@ -1906,7 +832,6 @@ where
 fn run() -> Result<(), AnyError> {
     let options = parse_options()?;
     fs::create_dir_all(&options.buffer_dir)?;
-    cleanup_stale_session_dirs(&options.buffer_dir);
     let session_dir = options
         .buffer_dir
         .join(format!("session-{}", std::process::id()));
@@ -1918,10 +843,12 @@ fn run() -> Result<(), AnyError> {
     let monitor = Monitor::primary()?;
     let width = monitor.width()?;
     let height = monitor.height()?;
+    let frame_rate = encoding_frame_rate(&monitor, options.fps, options.unlocked);
     let (command_tx, command_rx) = mpsc::channel();
     thread::spawn(move || read_commands(command_tx));
     let command_rx = Arc::new(Mutex::new(command_rx));
     let ready_signal = Arc::new(AtomicBool::new(false));
+    let runtime_error = Arc::new(Mutex::new(None));
 
     let color_format = if options.hdr_tone_map {
         ColorFormat::Rgba16F
@@ -1935,15 +862,23 @@ fn run() -> Result<(), AnyError> {
         pre_ms: options.pre_ms,
         post_ms: options.post_ms,
         segment_ms: options.segment_ms,
-        fps: options.fps,
+        fps: frame_rate.ceil_fps(),
+        frame_rate,
+        unlocked: options.unlocked,
+        monitor_device_name: monitor.device_name()?,
         width,
         height,
         hdr_tone_map: options.hdr_tone_map,
         border_mode: "without-border",
         border_fallback: false,
         capture_interval_mode: "callback",
-        capture_interval_ms: 1_000.0 / f64::from(options.fps.max(1)),
+        capture_interval_ms: if options.unlocked {
+            0.0
+        } else {
+            1_000.0 / f64::from(options.fps.max(1))
+        },
         ready_signal: Arc::clone(&ready_signal),
+        runtime_error: runtime_error.clone(),
     };
 
     let mut capture_result = try_capture_with_rate_limit_fallback(
@@ -1969,7 +904,10 @@ fn run() -> Result<(), AnyError> {
         let fallback_monitor = Monitor::primary()?;
         let fallback_width = fallback_monitor.width()?;
         let fallback_height = fallback_monitor.height()?;
+        let fallback_frame_rate =
+            encoding_frame_rate(&fallback_monitor, options.fps, options.unlocked);
         ready_signal.store(false, Ordering::Release);
+        *runtime_error.lock().unwrap() = None;
         let fallback_session_dir = session_dir.join("sdr-fallback");
         if fallback_session_dir.exists() {
             fs::remove_dir_all(&fallback_session_dir)?;
@@ -1982,15 +920,23 @@ fn run() -> Result<(), AnyError> {
             pre_ms: options.pre_ms,
             post_ms: options.post_ms,
             segment_ms: options.segment_ms,
-            fps: options.fps,
+            fps: fallback_frame_rate.ceil_fps(),
+            frame_rate: fallback_frame_rate,
+            unlocked: options.unlocked,
+            monitor_device_name: fallback_monitor.device_name()?,
             width: fallback_width,
             height: fallback_height,
             hdr_tone_map: false,
             border_mode: "without-border",
             border_fallback: false,
             capture_interval_mode: "callback",
-            capture_interval_ms: 1_000.0 / f64::from(options.fps.max(1)),
+            capture_interval_ms: if options.unlocked {
+                0.0
+            } else {
+                1_000.0 / f64::from(options.fps.max(1))
+            },
             ready_signal,
+            runtime_error: runtime_error.clone(),
         };
 
         capture_result = try_capture_with_rate_limit_fallback(
@@ -2005,169 +951,100 @@ fn run() -> Result<(), AnyError> {
 
     let _ = fs::remove_dir_all(&session_dir);
     capture_result?;
+    if let Some(error) = runtime_error.lock().unwrap().take() {
+        return Err(if error.unsupported {
+            Box::new(UnsupportedRecorderProfile(error.message)) as AnyError
+        } else {
+            error.message.into()
+        });
+    }
     emit(json!({ "type": "stopped" }));
     Ok(())
 }
 
-fn cleanup_stale_session_dirs(buffer_dir: &Path) {
-    let Ok(entries) = fs::read_dir(buffer_dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let file_name = entry.file_name();
-        let name = file_name.to_string_lossy();
-        let Some(pid) = name.strip_prefix("session-") else {
-            continue;
-        };
-        if pid.is_empty() || !pid.bytes().all(|byte| byte.is_ascii_digit()) {
-            continue;
-        }
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            let _ = fs::remove_dir_all(entry.path());
-        }
-    }
-}
-
 fn main() {
     if let Err(error) = run() {
-        emit(json!({
-            "type": "fatal",
-            "error": error.to_string(),
-        }));
-        std::process::exit(1);
+        let unsupported = error.is::<UnsupportedRecorderProfile>();
+        emit(
+            json!({"type":"fatal", "error":error.to_string(), "retryable":!unsupported,
+            "errorCode":if unsupported {"recorder-unsupported-profile"} else {"recorder-fatal"}}),
+        );
+        std::process::exit(if unsupported { 2 } else { 1 });
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn audio_format_matches_encoder_input() {
-        let format = audio_wave_format();
-        let format_tag = format.wFormatTag;
-        let channels = format.nChannels;
-        let sample_rate = format.nSamplesPerSec;
-        let average_bytes = format.nAvgBytesPerSec;
-        let block_align = format.nBlockAlign;
-        let bits_per_sample = format.wBitsPerSample;
-        let extra_size = format.cbSize;
-        assert_eq!(format_tag, WAVE_FORMAT_PCM as u16);
-        assert_eq!(channels, AUDIO_CHANNELS);
-        assert_eq!(sample_rate, AUDIO_SAMPLE_RATE);
-        assert_eq!(
-            average_bytes,
-            AUDIO_SAMPLE_RATE * u32::from(AUDIO_BLOCK_ALIGN)
+    fn audio_recovery_retries_with_bounded_backoff_then_resumes() {
+        let stop = AtomicBool::new(false);
+        let mut calls = 0;
+        let mut retries = Vec::new();
+        supervise_audio_recovery(
+            &stop,
+            || {
+                calls += 1;
+                if calls < 6 {
+                    Err("device unavailable".into())
+                } else {
+                    Ok(())
+                }
+            },
+            |attempt, delay, _| {
+                retries.push((attempt, delay.as_secs()));
+                true
+            },
         );
-        assert_eq!(block_align, AUDIO_BLOCK_ALIGN);
-        assert_eq!(bits_per_sample, AUDIO_BITS_PER_SAMPLE);
-        assert_eq!(extra_size, 0);
+        assert_eq!(calls, 6);
+        assert_eq!(retries, vec![(1, 1), (2, 2), (3, 5), (4, 5), (5, 5)]);
     }
-
     #[test]
-    fn recorder_bitrate_scales_for_sixty_fps() {
-        let bitrate_30 = recorder_bitrate(1920, 1080, 30);
-        let bitrate_60 = recorder_bitrate(1920, 1080, 60);
-        assert_eq!(bitrate_30, 8_000_000);
-        assert_eq!(bitrate_60, 14_000_000);
+    fn stopping_during_audio_retry_does_not_open_another_device() {
+        let stop = AtomicBool::new(false);
+        let mut calls = 0;
+        supervise_audio_recovery(
+            &stop,
+            || {
+                calls += 1;
+                Err("device lost".into())
+            },
+            |_, _, _| {
+                stop.store(true, Ordering::Release);
+                true
+            },
+        );
+        assert_eq!(calls, 1);
+        assert!(!wait_for_audio_retry(&stop, Duration::from_secs(5)));
     }
-
     #[test]
-    fn encoder_dimensions_are_always_even() {
-        assert_eq!(even_dimension(1920), 1920);
+    fn fractional_frame_rates_compare_by_value() {
+        assert_eq!(
+            FrameRate {
+                numerator: 60000,
+                denominator: 1000
+            },
+            FrameRate::fixed(60)
+        );
+    }
+    #[test]
+    fn encoding_dimensions_are_even() {
         assert_eq!(even_dimension(1919), 1920);
+        assert_eq!(even_dimension(1080), 1080);
     }
-
     #[test]
-    fn dropped_frame_estimate_uses_capture_timestamps() {
-        assert_eq!(estimate_missing_frames(166_667, 60), 0);
-        assert_eq!(estimate_missing_frames(333_334, 60), 1);
-        assert_eq!(estimate_missing_frames(500_001, 60), 2);
-        assert_eq!(estimate_missing_frames(666_667, 30), 1);
+    fn wasapi_format_matches_encoder() {
+        let f = audio_wave_format();
+        let sample_rate = f.nSamplesPerSec;
+        assert_eq!(sample_rate, 48000);
+        let align = f.nBlockAlign;
+        assert_eq!(align, 4);
     }
-
     #[test]
-    fn boolean_argument_accepts_supported_values() {
-        assert!(parse_bool_arg(std::ffi::OsStr::new("true")).unwrap());
-        assert!(!parse_bool_arg(std::ffi::OsStr::new("off")).unwrap());
-        assert!(parse_bool_arg(std::ffi::OsStr::new("invalid")).is_err());
-    }
-
-    #[test]
-    fn border_fallback_recognizes_typed_windows_error() {
-        let error = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
-            GraphicsCaptureError::BorderConfigUnsupported,
-        );
-        assert!(is_border_unsupported(&error));
-    }
-
-    #[test]
-    fn rate_limit_fallback_only_recognizes_its_typed_error() {
-        let minimum_interval = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
-            GraphicsCaptureError::MinimumUpdateIntervalUnsupported,
-        );
-        let border = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
-            GraphicsCaptureError::BorderConfigUnsupported,
-        );
-        assert!(is_minimum_interval_unsupported(&minimum_interval));
-        assert!(!is_minimum_interval_unsupported(&border));
-    }
-
-    #[test]
-    fn hdr_fallback_does_not_mask_unrelated_optional_setting_errors() {
-        let minimum_interval = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
-            GraphicsCaptureError::MinimumUpdateIntervalUnsupported,
-        );
-        let border = GraphicsCaptureApiError::<AnyError>::GraphicsCaptureApiError(
-            GraphicsCaptureError::BorderConfigUnsupported,
-        );
-        let tone_mapper = GraphicsCaptureApiError::<AnyError>::NewHandlerError(
-            std::io::Error::other("HDR tone-map initialization failed").into(),
-        );
-        assert!(!should_retry_sdr(&minimum_interval));
-        assert!(!should_retry_sdr(&border));
-        assert!(should_retry_sdr(&tone_mapper));
-    }
-
-    #[test]
-    fn failed_segment_errors_and_pending_deadlines_are_bounded() {
-        let long_error = "é".repeat(MAX_FAILED_ERROR_CHARS + 5);
-        let truncated = truncate_error(&long_error);
-        assert_eq!(truncated.chars().count(), MAX_FAILED_ERROR_CHARS + 1);
-        assert!(truncated.ends_with('…'));
-        assert_eq!(
-            pending_job_expiry(5_000),
-            5_000 + PENDING_JOB_FINALIZE_GRACE_MS
-        );
-        assert_eq!(pending_job_expiry(u64::MAX), u64::MAX);
-    }
-
-    #[test]
-    fn stale_recorder_sessions_are_removed_without_touching_other_entries() {
-        let root = std::env::temp_dir().join(format!(
-            "achievements-recorder-cleanup-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let stale_session = root.join("session-12345");
-        let unrelated = root.join("keep-me");
-        let malformed_session = root.join("session-not-a-pid");
-        fs::create_dir_all(&stale_session).unwrap();
-        fs::create_dir_all(&unrelated).unwrap();
-        fs::create_dir_all(&malformed_session).unwrap();
-        fs::write(stale_session.join("segment.mp4"), b"test").unwrap();
-
-        cleanup_stale_session_dirs(&root);
-
-        assert!(!stale_session.exists());
-        assert!(unrelated.exists());
-        assert!(malformed_session.exists());
-        let _ = fs::remove_dir_all(root);
+    fn qpc_has_the_same_units_as_wasapi_and_wgc() {
+        let a = qpc_ticks();
+        std::thread::sleep(Duration::from_millis(10));
+        let b = qpc_ticks();
+        assert!(b - a >= 50_000 && b - a < 10_000_000);
     }
 }

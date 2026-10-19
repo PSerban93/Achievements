@@ -4,7 +4,9 @@ const crypto = require("crypto");
 const { execFile, spawn } = require("child_process");
 const { promisify } = require("util");
 const { watchGenerationProcess } = require("./generation-process-timeout");
+const { coordinateSchemaParse } = require("./schema-parse-coordinator");
 const { createLogger } = require("./logger");
+const { schemaConnectionFailure } = require("./schema-download-warning");
 const { updateTopOwnersIds } = require("./update-top-owners");
 const {
   readSchemaParseLaunchMetadata,
@@ -267,9 +269,14 @@ function normalizeAchievementTextObject(value) {
   return text ? { english: text } : {};
 }
 
-function delay(ms = 0) {
+function delay(ms = 0, signal = null) {
   const timeout = Math.max(0, Number(ms) || 0);
-  return new Promise((resolve) => setTimeout(resolve, timeout));
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(signal.reason); return; }
+    const abort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => { signal?.removeEventListener("abort", abort); resolve(); }, timeout);
+    signal?.addEventListener("abort", abort, { once: true });
+  });
 }
 
 function buildSchemaParseErrorText(err = null) {
@@ -563,7 +570,8 @@ function getSchemaParseBootPreparationStatus() {
   };
 }
 
-async function runGenerateEmuConfig(runtimeDir, appid) {
+async function runGenerateEmuConfig(runtimeDir, appid, options = {}) {
+  options.signal?.throwIfAborted();
   const exePath = resolveSchemaParseExecutable(runtimeDir);
   cleanupGeneratedAppArtifacts(runtimeDir, appid, { log: false });
   logger.info("schema-parse:run:start", { appid, runtimeDir });
@@ -584,7 +592,7 @@ async function runGenerateEmuConfig(runtimeDir, appid) {
     pending.child.stderr?.setEncoding("utf8");
     pending.child.stdout?.on("data", (chunk) => { streamedStdout += chunk; });
     pending.child.stderr?.on("data", (chunk) => { streamedStderr += chunk; });
-    const deadline = watchGenerationProcess(pending.child, SCHEMA_PARSE_GAME_TIMEOUT_MS);
+    const deadline = watchGenerationProcess(pending.child, SCHEMA_PARSE_GAME_TIMEOUT_MS, { signal: options.signal });
     try {
       result = await pending;
       if (deadline.error) throw deadline.error;
@@ -628,7 +636,32 @@ async function runGenerateEmuConfig(runtimeDir, appid) {
   };
 }
 
-function classifySchemaParseResult(appid, result, stdout = "") {
+function schemaRequestWarnings(appid, stdout = "", stderr = "", single = false) {
+  const id = String(appid).replace(/^0+(?=\d)/, "");
+  const text = String(stdout);
+  const starts = [...text.matchAll(/(?:\*+\s*generating info for app id|\*+\s*STARTED config for app id)\s+(\d+)/gi)];
+  const blocks = starts.flatMap((match, index) =>
+    match[1].replace(/^0+(?=\d)/, "") === id
+      ? [text.slice(match.index, starts[index + 1]?.index ?? text.length)] : []);
+  // Without a game boundary, batch stderr cannot be assigned to an AppID.
+  if (single && !starts.length) blocks.push(text);
+  // Images, inventory and playtime are downloaded by the same executable.
+  // Their failures must not become schema-download notifications.
+  const candidates = blocks.flatMap((block) => block.split(/^(?:downloading|saving|finding)\s+(?:achievement\s+)?(?:images|icons|inventory)\b|^inventory definitions\b|^(?:downloading|finding)\s+playtime\b/imu)[0].split(/\r?\n/));
+  const assetOrRarity = /\b(?:images?|icons?|inventory|playtime|rarity|percentages?)\b|(?:download|save|fetch|get)_[a-z_]*(?:image|icon|inventory|playtime|percentage)|\.(?:png|jpe?g|webp|gif)(?:[?\s'"]|$)/i;
+  const stderrBlocks = String(stderr).split(/(?=Traceback \(most recent call last\):)/);
+  for (const block of stderrBlocks) {
+    if ((single || new RegExp(`\\b${id}\\b`).test(block)) &&
+        !assetOrRarity.test(block)) {
+      candidates.push(...block.split(/\r?\n/));
+    }
+  }
+  return candidates.filter((line) => !assetOrRarity.test(line) && schemaConnectionFailure(line))
+    .slice(0, 8).map((line) => line.trim().slice(0, 512));
+}
+
+function classifySchemaParseResult(appid, result, stdout = "", stderr = "") {
+  result = { ...result, downloadWarnings: schemaRequestWarnings(appid, stdout, stderr) };
   if (result.ok) return result;
   const steamId = String(appid).replace(/^0+(?=\d)/, "");
   const text = String(stdout);
@@ -660,36 +693,41 @@ function classifySchemaParseResult(appid, result, stdout = "") {
   return { ...result, displayName };
 }
 
-async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
+async function executeSchemaParseSingle(runtimeDir, appid, outDir, options = {}) {
   let runResult = null;
   let runError = null;
   const maxAttempts = 2;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      runResult = await runGenerateEmuConfig(runtimeDir, appid);
-      runError = null;
-      break;
-    } catch (err) {
-      runError = err;
-      runResult = {
-        appOutputDir: resolveSchemaParseAppOutputDir(runtimeDir, appid),
-        stdout: String(err?.stdout || ""),
-        stderr: String(err?.stderr || ""),
-      };
-      if (attempt >= maxAttempts || !isSchemaParseAuthError(err)) {
-        break;
-      }
-      logger.warn("schema-parse:run:auth-retry", {
-        appid,
-        attempt,
-        delayMs: SCHEMA_PARSE_AUTH_RETRY_DELAY_MS,
-      });
-      await delay(SCHEMA_PARSE_AUTH_RETRY_DELAY_MS);
-    }
-  }
+  const downloadWarnings = [];
   try {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        runResult = await runGenerateEmuConfig(runtimeDir, appid, options);
+        downloadWarnings.push(...schemaRequestWarnings(appid, runResult.stdout, runResult.stderr, true));
+        runError = null;
+        break;
+      } catch (err) {
+        runError = err;
+        downloadWarnings.push(...schemaRequestWarnings(appid, err.stdout, err.stderr, true));
+        runResult = {
+          appOutputDir: resolveSchemaParseAppOutputDir(runtimeDir, appid),
+          stdout: String(err?.stdout || ""),
+          stderr: String(err?.stderr || ""),
+        };
+        if (attempt >= maxAttempts || !isSchemaParseAuthError(err)) {
+          break;
+        }
+        logger.warn("schema-parse:run:auth-retry", {
+          appid,
+          attempt,
+          delayMs: SCHEMA_PARSE_AUTH_RETRY_DELAY_MS,
+        });
+        await delay(SCHEMA_PARSE_AUTH_RETRY_DELAY_MS, options.signal);
+      }
+    }
+    options.signal?.throwIfAborted();
     const result = classifySchemaParseResult(appid,
       readSchemaParseGeneratedResult(appid, runResult.appOutputDir, outDir), runResult.stdout);
+    result.downloadWarnings = [...new Set([...downloadWarnings, ...result.downloadWarnings])];
     if (result?.ok) {
       if (runError) {
         logger.warn("schema-parse:run:partial-success", {
@@ -707,6 +745,7 @@ async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
     // Inventory/download failures must not erase an explicit achievements result.
     if (["identified-no-achievements", "not-found"].includes(result.status)) return result;
     if (runError) {
+      runError.downloadWarnings = result.downloadWarnings;
       throw runError;
     }
     return result;
@@ -716,6 +755,7 @@ async function executeSchemaParseSingle(runtimeDir, appid, outDir) {
 }
 
 async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) {
+  options.signal?.throwIfAborted();
   const exePath = resolveSchemaParseExecutable(runtimeDir);
   const normalizedAppIds = Array.from(
     new Set(
@@ -745,7 +785,7 @@ async function runGenerateEmuConfigBatch(runtimeDir, appids = [], options = {}) 
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
-    const deadline = watchGenerationProcess(cp, SCHEMA_PARSE_GAME_TIMEOUT_MS);
+    const deadline = watchGenerationProcess(cp, SCHEMA_PARSE_GAME_TIMEOUT_MS, { signal: options.signal });
     let deadlineProgress = -1;
     let stdout = "";
     let stdoutLineBuffer = "";
@@ -1037,7 +1077,7 @@ function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
   };
 }
 
-async function generateSteamSchemaWithSchemaParse(options = {}) {
+async function generateSteamSchemaWithSchemaParseUncoordinated(options = {}) {
   const appid = String(options.appid || "").trim().replace(/^0+(?=\d)/, "");
   const outDir = path.resolve(String(options.outDir || "").trim());
   const userDataDir = normalizeUserDataDir(options.userDataDir);
@@ -1053,10 +1093,10 @@ async function generateSteamSchemaWithSchemaParse(options = {}) {
     userDataDir,
     reason: options.reason || "generate",
   }));
-  return executeSchemaParseSingle(runtime.runtimeDir, appid, outDir);
+  return executeSchemaParseSingle(runtime.runtimeDir, appid, outDir, options);
 }
 
-async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
+async function generateSteamSchemasWithSchemaParseBatchUncoordinated(options = {}) {
   const items = Array.isArray(options.items) ? options.items : [];
   const normalizedItems = items
     .map((item) => ({
@@ -1080,171 +1120,191 @@ async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
     userDataDir: normalizeUserDataDir(options.userDataDir),
     reason: options.reason || "generate-batch",
   }));
-  const chunkedItems = chunkArray(
-    normalizedItems,
-    options.chunkSize || SCHEMA_PARSE_BATCH_CHUNK_SIZE,
-  );
-  const batchErrors = [];
-  let batchStdout = "";
-  let completedBeforeChunk = 0;
-  for (let chunkIndex = 0; chunkIndex < chunkedItems.length; chunkIndex += 1) {
-    const chunk = chunkedItems[chunkIndex];
-    const chunkAppIds = chunk.map((item) => item.appid);
-    const runChunk = async (attemptAppIds = chunkAppIds, attemptStartIndex = 0) => {
-      try {
-        const result = await runGenerateEmuConfigBatch(runtime.runtimeDir, attemptAppIds, {
-          ...options,
-          onProgress:
-            typeof options.onProgress === "function"
-              ? (progress = {}) => {
-                  const current =
-                    Number.isFinite(Number(progress.current)) &&
-                    Number(progress.current) >= 0
-                      ? Number(progress.current)
-                      : 0;
-                  options.onProgress({
-                    ...progress,
-                    current: completedBeforeChunk + attemptStartIndex + current,
-                    total: normalizedItems.length,
-                    percent:
-                      Number.isFinite(Number(progress.percent)) &&
-                      Number(progress.percent) >= 0
-                        ? Math.max(
-                            0,
-                            Math.min(
-                              78,
-                              Math.round(
-                                ((completedBeforeChunk + attemptStartIndex + current) /
-                                  Math.max(normalizedItems.length, 1)) *
-                                  78,
+  try {
+    const chunkedItems = chunkArray(
+      normalizedItems,
+      options.chunkSize || SCHEMA_PARSE_BATCH_CHUNK_SIZE,
+    );
+    const batchErrors = [];
+    let batchStdout = "";
+    let batchStderr = "";
+    let completedBeforeChunk = 0;
+    for (let chunkIndex = 0; chunkIndex < chunkedItems.length; chunkIndex += 1) {
+      options.signal?.throwIfAborted();
+      const chunk = chunkedItems[chunkIndex];
+      const chunkAppIds = chunk.map((item) => item.appid);
+      const runChunk = async (attemptAppIds = chunkAppIds, attemptStartIndex = 0) => {
+        try {
+          const result = await runGenerateEmuConfigBatch(runtime.runtimeDir, attemptAppIds, {
+            ...options,
+            onProgress:
+              typeof options.onProgress === "function"
+                ? (progress = {}) => {
+                    const current =
+                      Number.isFinite(Number(progress.current)) &&
+                      Number(progress.current) >= 0
+                        ? Number(progress.current)
+                        : 0;
+                    options.onProgress({
+                      ...progress,
+                      current: completedBeforeChunk + attemptStartIndex + current,
+                      total: normalizedItems.length,
+                      percent:
+                        Number.isFinite(Number(progress.percent)) &&
+                        Number(progress.percent) >= 0
+                          ? Math.max(
+                              0,
+                              Math.min(
+                                78,
+                                Math.round(
+                                  ((completedBeforeChunk + attemptStartIndex + current) /
+                                    Math.max(normalizedItems.length, 1)) *
+                                    78,
+                                ),
                               ),
-                            ),
-                          )
-                        : 0,
-                  });
-                }
-              : null,
-        });
-        batchStdout += result.stdout || "";
-        return result;
-      } catch (error) {
-        batchStdout += error.stdout || "";
-        throw error;
-      }
-    };
-    let chunkError = null;
-    try {
-      await runChunk();
-    } catch (err) {
-      chunkError = err;
-      batchErrors.push(err);
-      if (isSchemaParseAuthError(err)) {
-        const retryStartIndex = findFirstMissingSchemaParseOutputIndex(
-          runtime.runtimeDir,
-          chunkAppIds,
-        );
-        const retryAppIds = chunkAppIds.slice(retryStartIndex);
-        logger.warn("schema-parse:batch:auth-retry", {
-          chunkIndex: chunkIndex + 1,
-          chunkCount: chunkedItems.length,
-          count: chunkAppIds.length,
-          retryStartIndex,
-          retryCount: retryAppIds.length,
-          retryFromAppId: retryAppIds[0] || null,
-          delayMs: SCHEMA_PARSE_AUTH_RETRY_DELAY_MS,
-        });
-        if (retryAppIds.length > 0) {
-          await delay(SCHEMA_PARSE_AUTH_RETRY_DELAY_MS);
-          try {
-            await runChunk(retryAppIds, retryStartIndex);
+                            )
+                          : 0,
+                    });
+                  }
+                : null,
+          });
+          batchStdout += result.stdout || "";
+          batchStderr += result.stderr || "";
+          return result;
+        } catch (error) {
+          batchStdout += error.stdout || "";
+          batchStderr += error.stderr || "";
+          throw error;
+        }
+      };
+      let chunkError = null;
+      try {
+        await runChunk();
+      } catch (err) {
+        chunkError = err;
+        batchErrors.push(err);
+        if (isSchemaParseAuthError(err)) {
+          const retryStartIndex = findFirstMissingSchemaParseOutputIndex(
+            runtime.runtimeDir,
+            chunkAppIds,
+          );
+          const retryAppIds = chunkAppIds.slice(retryStartIndex);
+          logger.warn("schema-parse:batch:auth-retry", {
+            chunkIndex: chunkIndex + 1,
+            chunkCount: chunkedItems.length,
+            count: chunkAppIds.length,
+            retryStartIndex,
+            retryCount: retryAppIds.length,
+            retryFromAppId: retryAppIds[0] || null,
+            delayMs: SCHEMA_PARSE_AUTH_RETRY_DELAY_MS,
+          });
+          if (retryAppIds.length > 0) {
+            await delay(SCHEMA_PARSE_AUTH_RETRY_DELAY_MS, options.signal);
+            try {
+              await runChunk(retryAppIds, retryStartIndex);
+              chunkError = null;
+              batchErrors.pop();
+            } catch (retryErr) {
+              chunkError = retryErr;
+              batchErrors[batchErrors.length - 1] = retryErr;
+            }
+          } else {
             chunkError = null;
             batchErrors.pop();
-          } catch (retryErr) {
-            chunkError = retryErr;
-            batchErrors[batchErrors.length - 1] = retryErr;
           }
-        } else {
-          chunkError = null;
-          batchErrors.pop();
         }
       }
-    }
-    completedBeforeChunk += chunk.length;
-    if (chunkIndex < chunkedItems.length - 1) {
-      await delay(SCHEMA_PARSE_CHUNK_DELAY_MS);
-    }
-  }
-
-  for (const item of normalizedItems) {
-    const appOutputDir = resolveSchemaParseAppOutputDir(
-      runtime.runtimeDir,
-      item.appid,
-    );
-    const shouldRetrySingle =
-      batchErrors.length > 0 &&
-      !hasSchemaParseGeneratedAchievements(runtime.runtimeDir, item.appid);
-    try {
-      const generatedResult = classifySchemaParseResult(item.appid,
-        readSchemaParseGeneratedResult(item.appid, appOutputDir, item.outDir), batchStdout);
-      if (generatedResult.ok || ["identified-no-achievements", "not-found"].includes(generatedResult.status)) {
-        results.set(item.resultKey, generatedResult);
-        continue;
+      completedBeforeChunk += chunk.length;
+      if (chunkIndex < chunkedItems.length - 1) {
+        await delay(SCHEMA_PARSE_CHUNK_DELAY_MS, options.signal);
       }
-      if (shouldRetrySingle) {
-        logger.info("schema-parse:batch:retry-single", {
-          appid: item.appid,
-          resultKey: item.resultKey,
-        });
-        try {
-          results.set(
-            item.resultKey,
-            await executeSchemaParseSingle(runtime.runtimeDir, item.appid, item.outDir),
-          );
+    }
+
+    for (const item of normalizedItems) {
+      options.signal?.throwIfAborted();
+      const appOutputDir = resolveSchemaParseAppOutputDir(
+        runtime.runtimeDir,
+        item.appid,
+      );
+      const shouldRetrySingle =
+        batchErrors.length > 0 &&
+        !hasSchemaParseGeneratedAchievements(runtime.runtimeDir, item.appid);
+      try {
+        const generatedResult = classifySchemaParseResult(item.appid,
+          readSchemaParseGeneratedResult(item.appid, appOutputDir, item.outDir), batchStdout, batchStderr);
+        if (generatedResult.ok || ["identified-no-achievements", "not-found"].includes(generatedResult.status)) {
+          results.set(item.resultKey, generatedResult);
           continue;
-        } catch (err) {
-          logger.warn("schema-parse:batch:retry-single-failed", {
+        }
+        if (shouldRetrySingle) {
+          logger.info("schema-parse:batch:retry-single", {
             appid: item.appid,
             resultKey: item.resultKey,
-            error: err?.message || String(err),
-            code:
-              Number.isFinite(Number(err?.code)) || typeof err?.code === "string"
-                ? err.code
-                : null,
-            hasStdout: !!String(err?.stdout || "").trim(),
-            hasStderr: !!String(err?.stderr || "").trim(),
-            stdoutPreview: String(err?.stdout || "").trim().slice(0, 4000) || null,
-            stderrPreview: String(err?.stderr || "").trim().slice(0, 4000) || null,
           });
-          results.set(item.resultKey, {
-            ok: false,
-            reason: "retry-single-failed",
-            status: "technical-error",
-            error: String(err?.message || err),
-          });
-          continue;
+          try {
+            const retried = await executeSchemaParseSingle(runtime.runtimeDir, item.appid, item.outDir, options);
+            results.set(item.resultKey, { ...retried,
+              downloadWarnings: [...generatedResult.downloadWarnings, ...(retried.downloadWarnings || [])] });
+            continue;
+          } catch (err) {
+            options.signal?.throwIfAborted();
+            logger.warn("schema-parse:batch:retry-single-failed", {
+              appid: item.appid,
+              resultKey: item.resultKey,
+              error: err?.message || String(err),
+              code:
+                Number.isFinite(Number(err?.code)) || typeof err?.code === "string"
+                  ? err.code
+                  : null,
+              hasStdout: !!String(err?.stdout || "").trim(),
+              hasStderr: !!String(err?.stderr || "").trim(),
+              stdoutPreview: String(err?.stdout || "").trim().slice(0, 4000) || null,
+              stderrPreview: String(err?.stderr || "").trim().slice(0, 4000) || null,
+            });
+            results.set(item.resultKey, {
+              ok: false,
+              reason: "retry-single-failed",
+              status: "technical-error",
+              error: String(err?.message || err),
+              downloadWarnings: [...generatedResult.downloadWarnings, ...(err.downloadWarnings || [])],
+            });
+            continue;
+          }
         }
+        results.set(
+          item.resultKey,
+          generatedResult,
+        );
+      } finally {
+        cleanupGeneratedAppArtifacts(runtime.runtimeDir, item.appid);
       }
-      results.set(
-        item.resultKey,
-        generatedResult,
-      );
-    } finally {
-      cleanupGeneratedAppArtifacts(runtime.runtimeDir, item.appid);
+    }
+    logger.info("schema-parse:batch:results", {
+      count: normalizedItems.length,
+      successCount: Array.from(results.values()).filter((entry) => entry?.ok)
+        .length,
+      partial: batchErrors.length > 0,
+    });
+    return {
+      ok: batchErrors.length === 0,
+      runtimeDir: runtime.runtimeDir,
+      batchError: batchErrors[0] || null,
+      batchErrors,
+      results,
+    };
+  } finally {
+    if (options.signal?.aborted) {
+      for (const item of normalizedItems) cleanupGeneratedAppArtifacts(runtime.runtimeDir, item.appid);
     }
   }
-  logger.info("schema-parse:batch:results", {
-    count: normalizedItems.length,
-    successCount: Array.from(results.values()).filter((entry) => entry?.ok)
-      .length,
-    partial: batchErrors.length > 0,
-  });
-  return {
-    ok: batchErrors.length === 0,
-    runtimeDir: runtime.runtimeDir,
-    batchError: batchErrors[0] || null,
-    batchErrors,
-    results,
-  };
+}
+
+function generateSteamSchemaWithSchemaParse(options = {}) {
+  return coordinateSchemaParse("single", options, () => generateSteamSchemaWithSchemaParseUncoordinated(options));
+}
+
+function generateSteamSchemasWithSchemaParseBatch(options = {}) {
+  return coordinateSchemaParse("batch", options, () => generateSteamSchemasWithSchemaParseBatchUncoordinated(options));
 }
 
 module.exports = {

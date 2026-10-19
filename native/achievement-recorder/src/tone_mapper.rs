@@ -1,21 +1,16 @@
 use std::error::Error;
 use std::slice;
 
-use windows::Graphics::DirectX::Direct3D11::IDirect3DSurface;
 use windows::Win32::Graphics::Direct3D::Fxc::{D3DCOMPILE_ENABLE_STRICTNESS, D3DCompile};
 use windows::Win32::Graphics::Direct3D::{D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST, ID3DBlob};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
-    D3D11_BUFFER_DESC, D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-    D3D11_VIEWPORT, ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_SHADER_RESOURCE, D3D11_BUFFER_DESC,
+    D3D11_SUBRESOURCE_DATA, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
+    ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RenderTargetView,
     ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader,
 };
-use windows::Win32::Graphics::Dxgi::Common::{
-    DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC,
-};
-use windows::Win32::Graphics::Dxgi::IDXGISurface;
-use windows::Win32::System::WinRT::Direct3D11::CreateDirect3D11SurfaceFromDXGISurface;
-use windows::core::{Interface, PCSTR};
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_SAMPLE_DESC};
+use windows::core::PCSTR;
 use windows_capture::frame::Frame;
 use windows_capture::settings::ColorFormat;
 
@@ -154,6 +149,7 @@ pub struct ToneMapper {
     vertex_shader: ID3D11VertexShader,
     pixel_shader: ID3D11PixelShader,
     constants: ID3D11Buffer,
+    output_views: Vec<(ID3D11Texture2D, ID3D11RenderTargetView)>,
 }
 
 impl ToneMapper {
@@ -232,10 +228,15 @@ impl ToneMapper {
             vertex_shader,
             pixel_shader,
             constants: constant_buffer,
+            output_views: Vec::new(),
         })
     }
 
-    pub fn convert(&self, frame: &Frame) -> Result<IDirect3DSurface, ToneMapError> {
+    pub fn convert_into(
+        &mut self,
+        frame: &Frame,
+        output_texture: &ID3D11Texture2D,
+    ) -> Result<(), ToneMapError> {
         if frame.color_format() != ColorFormat::Rgba16F {
             return Err("HDR tone mapper received a non-FP16 capture frame".into());
         }
@@ -243,33 +244,23 @@ impl ToneMapper {
             return Err("HDR capture dimensions changed while recording".into());
         }
 
-        let output_desc = D3D11_TEXTURE2D_DESC {
-            Width: self.output_width,
-            Height: self.output_height,
-            MipLevels: 1,
-            ArraySize: 1,
-            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
-            CPUAccessFlags: 0,
-            MiscFlags: 0,
+        let render_target = if let Some((_, view)) = self
+            .output_views
+            .iter()
+            .find(|(texture, _)| texture == output_texture)
+        {
+            view.clone()
+        } else {
+            let mut view = None;
+            unsafe {
+                self.device
+                    .CreateRenderTargetView(output_texture, None, Some(&mut view))?;
+            }
+            let view = view.ok_or("D3D11 returned no SDR render-target view")?;
+            self.output_views
+                .push((output_texture.clone(), view.clone()));
+            view
         };
-        let mut output_texture = None;
-        unsafe {
-            self.device
-                .CreateTexture2D(&output_desc, None, Some(&mut output_texture))?
-        };
-        let output_texture = output_texture.ok_or("D3D11 returned no SDR output texture")?;
-        let mut render_target = None;
-        unsafe {
-            self.device
-                .CreateRenderTargetView(&output_texture, None, Some(&mut render_target))?
-        };
-        let render_target = render_target.ok_or("D3D11 returned no SDR render-target view")?;
 
         unsafe {
             self.context
@@ -294,12 +285,11 @@ impl ToneMapper {
                 MaxDepth: 1.0,
             }]));
             self.context.Draw(3, 0);
-            self.context.ClearState();
+            self.context.PSSetShaderResources(0, Some(&[None]));
+            self.context.OMSetRenderTargets(None, None);
             self.context.Flush();
         }
 
-        let dxgi_surface: IDXGISurface = output_texture.cast()?;
-        let inspectable = unsafe { CreateDirect3D11SurfaceFromDXGISurface(&dxgi_surface)? };
-        Ok(inspectable.cast()?)
+        Ok(())
     }
 }

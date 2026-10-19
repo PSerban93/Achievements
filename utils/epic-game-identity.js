@@ -1,4 +1,6 @@
 const axios = require("axios");
+const { reportSchemaDownloadError } = require("./schema-download-warning");
+const { isEpicGameId } = require("./emulator-generation-result");
 const {
   epicGraphQL,
   fetchEpicAchievementSchemaBySandbox,
@@ -369,6 +371,9 @@ async function resolveUncached(sourceId, diagnostics = null) {
   const values = probes.map((result) =>
     result.status === "fulfilled" ? result.value : null,
   );
+  for (const result of probes) {
+    if (result.status === "rejected") reportSchemaDownloadError(result.reason, "epic-catalog");
+  }
   if (diagnostics) {
     for (const result of probes) {
       if (result.status === "rejected") diagnostics.errors.push(String(result.reason?.message || result.reason));
@@ -428,7 +433,7 @@ async function resolveUncached(sourceId, diagnostics = null) {
         ) {
           matches.push(candidate);
         }
-      } catch {}
+      } catch (error) { reportSchemaDownloadError(error, "epic-schema"); }
     }
     if (matches.length !== 1) {
       if (diagnostics) diagnostics.ambiguous = true;
@@ -447,13 +452,14 @@ async function resolveUncached(sourceId, diagnostics = null) {
         locale: "en-US",
       });
       if (result.achievements.length) productId = clean(result.productId);
-    } catch {
+    } catch (error) {
+      reportSchemaDownloadError(error, "epic-schema");
       try {
         const result = await fetchEpicAchievementSchemaBySandbox(namespace, {
           locale: "en-US",
         });
         if (result.achievements.length) productId = clean(result.productId);
-      } catch {}
+      } catch (error) { reportSchemaDownloadError(error, "epic-schema"); }
     }
   }
 
@@ -601,7 +607,7 @@ async function resolveEpicGameIdentity(sourceId, options = {}) {
 // Keep the existing nullable API and its cache unchanged for other consumers.
 async function resolveEpicGameIdentityDetailed(sourceId) {
   const id = clean(sourceId);
-  if (!/^[0-9a-fA-F]{32}$/.test(id)) return { status: "not-applicable", identity: null };
+  if (!isEpicGameId(id)) return { status: "not-applicable", identity: null };
   const diagnostics = { errors: [], ambiguous: false };
   try {
     const identity = await resolveUncached(id, diagnostics);

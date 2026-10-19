@@ -1,6 +1,7 @@
 const path = require("path");
 const { spawnSync } = require("child_process");
-const { getNameIndexFromConfigPath } = require("./achievement-data");
+const { getNameIndexFromConfigPath, alignUplaySnapshotToConfig } = require("./achievement-data");
+const { mergeUplaySnapshotEntries } = require("./uplay-achievement-identity");
 const {
   subscribeLumaPlayRegistryEvents,
 } = require("./lumaplay-event-watcher");
@@ -390,6 +391,7 @@ function getNameCandidates(rawName) {
 }
 
 function resolveCanonicalName(rawName, nameIndex) {
+  if (nameIndex?.resolveUplayName) return nameIndex.resolveUplayName(rawName) || String(rawName || "").trim();
   const candidates = getNameCandidates(rawName);
   for (const candidate of candidates) {
     const key = normalizeNameKey(candidate);
@@ -411,7 +413,7 @@ function readLumaPlayAchievementsSnapshot(options = {}) {
   const appid = String(options.appid || "").trim();
   const configPath =
     typeof options.configPath === "string" ? options.configPath : "";
-  const previousSnapshot =
+  const previousSnapshotRaw =
     options.previousSnapshot && typeof options.previousSnapshot === "object"
       ? options.previousSnapshot
       : {};
@@ -450,7 +452,8 @@ function readLumaPlayAchievementsSnapshot(options = {}) {
     };
   }
 
-  const nameIndex = getNameIndexFromConfigPath(configPath, null, appid);
+  const nameIndex = getNameIndexFromConfigPath(configPath, null, appid, { platform: "uplay" });
+  const previousSnapshot = alignUplaySnapshotToConfig(previousSnapshotRaw, { platform: "uplay", config_path: configPath, appid });
   const values = parseRegistryValueLines(resolved.query.stdout);
   const snapshot = {};
   for (const entry of values) {
@@ -463,10 +466,12 @@ function readLumaPlayAchievementsSnapshot(options = {}) {
     const prevEarned = prevEntry?.earned === true || prevEntry?.earned === 1;
     const prevTime = Number(prevEntry?.earned_time) || 0;
     const earned = entry.earned === true;
-    snapshot[canonical] = {
+    const value = {
       earned,
       earned_time: earned && prevEarned && prevTime > 0 ? prevTime : 0,
     };
+    snapshot[canonical] = Object.hasOwn(snapshot, canonical)
+      ? mergeUplaySnapshotEntries(snapshot[canonical], value) : value;
   }
 
   return {

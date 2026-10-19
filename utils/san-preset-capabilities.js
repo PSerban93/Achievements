@@ -15,6 +15,12 @@
     specialIconAnimation: true, platinumImage: true,
     decorationShadow: true,
   };
+  function getRareThreshold(customisation = {}) {
+    const raw = customisation.rarethreshold;
+    if (raw === null || raw === undefined || raw === "") return 10;
+    const value = Number(raw);
+    return Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 10;
+  }
   function definition(key, options = {}) {
     return Object.freeze({
       key,
@@ -198,6 +204,7 @@
   rule(["logoImage", "logoscale", "replacelogo"], { feature: "logo" });
   rule(["tertiarycolor"], { feature: "tertiaryColour" });
   rule(["showdecoration"], { feature: "decoration" });
+  rule(["decorationImageMode"], { feature: "decoration" });
   rule(["decorationpos"], { feature: "decoration", requires: ["showdecoration"] });
   rule(["decorationscale"], { feature: "decorationScale", requires: ["showdecoration"] });
   rule(["decorationshadow"], { feature: "decorationShadow", requires: ["showdecoration", "fontshadow"] });
@@ -205,7 +212,10 @@
   rule(["gameIconImage"], { requires: ["usegameicon"], excludes: ["usecustomimgicon"] });
   rule(["achievementImage"], { requires: ["usecustomimgicon"] });
   rule(["iconanim"], { states: ["rare", "platinum"] });
-  rule(["iconshadowcolor", "iconanimcolor"], { requires: ["iconanim"], states: ["rare", "platinum"] });
+  rule(["rarethreshold"], { states: ["rare"] });
+  rule(["iconanimrarity"], { requires: ["iconanim"], states: ["rare"] });
+  rule(["iconshadowcolor", "iconanimcolor"], { requires: ["iconanim"], states: ["rare", "platinum"], singleIconColour: true });
+  rule(["iconshadowcolorbronze", "iconshadowcolorsilver", "iconshadowcolorgold", "iconanimcolorbronze", "iconanimcolorsilver", "iconanimcolorgold"], { requires: ["iconanim", "iconanimrarity"], states: ["rare"] });
   rule(["platinumImage"], { states: ["platinum"], values: { imageSource: ["original"] } });
   rule(["iconborderrarity", "iconBorderImage", "iconborderpos", "iconborderscale", "iconborderx", "iconbordery"], { requires: ["showiconborder"] });
   rule(["iconBorderBronzeImage", "iconBorderSilverImage"], { requires: ["showiconborder", "iconborderrarity"] });
@@ -215,7 +225,7 @@
   rule(["glowspeed"], { requires: ["glow"], values: { glowanim: ["pulse", "double", "focus", "orbit", "fluorescent", "rainbow"] } });
   rule(["glowcolor"], { requires: ["glow"], excludes: ["glowrarity"] });
   rule(["glowcolorbronze", "glowcolorsilver", "glowcolorgold"], { requires: ["glow", "glowrarity"] });
-  rule(["outlinecolor", "outlinewidth"], { requires: ["useoutline"] });
+  rule(["outline", "outlinecolor", "outlinewidth"], { requires: ["useoutline"] });
   rule(["fontshadowcolor", "fontshadowx", "fontshadowy", "fontshadowscale"], { requires: ["fontshadow"] });
   rule(["fontoutlinecolor", "fontoutlinescale"], { requires: ["fontoutline"] });
   rule(["unlockmsgfontsize", "titlefontsize", "descfontsize"], { requires: ["usecustomfontsizes"] });
@@ -240,7 +250,8 @@
   rule(["usepercent"], { points: true });
   rule(["pointsDisplay"], { feature: "points" });
   rule(["percentpos"], { values: { showpercent: ["rare", "rareonly", "all"] } });
-  rule(["decorationImage"], { decorationAsset: true });
+  rule(["decorationImage"], { decorationAsset: true, values: { decorationImageMode: ["single"] } });
+  rule(["decorationBronzeImage", "decorationSilverImage", "decorationGoldImage"], { decorationAsset: true, values: { decorationImageMode: ["rarity"] } });
   const controlRules = Object.freeze(rules);
   function getControlStates(preset, customisation = {}, context = {}) {
     const profile = getPresetDefinition(preset);
@@ -262,8 +273,12 @@
         if (missing) reason = `requires:${missing}`;
         else if (excluded) reason = `overridden-by:${excluded}`;
         else if (wrongValue) reason = `requires-value:${wrongValue[0]}`;
+        // Platinum keeps fixed colours even when this archive uses tier colours on Rare.
+        else if (spec.singleIconColour && state === "rare" && customisation.iconanimrarity === true)
+          reason = "overridden-by:iconanimrarity";
       }
       const dependencies = [...(spec.requires || []), ...(spec.excludes || []), ...Object.keys(spec.values || {})];
+      if (spec.singleIconColour) dependencies.push("iconanimrarity");
       if (spec.points && profile.points.rule !== "dedicated-points-area" && profile.points.supported)
         dependencies.push("showdecoration", "decorationpos", "elementsLayout");
       if (spec.decorationAsset && !["text", "points"].includes(profile.features.decoration))
@@ -273,5 +288,5 @@
     return result;
   }
   return Object.freeze({ version: 1, presets, controlRules, getPresetDefinition, getTransitionLimit,
-    getTextLayout, getTextRows, getDecorationPosition, getPointsAvailability, getControlStates });
+    getTextLayout, getTextRows, getDecorationPosition, getPointsAvailability, getControlStates, getRareThreshold });
 });

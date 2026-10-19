@@ -1,6 +1,35 @@
 const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
+let requireFrameValidation = false;
+
+function validateCaptureFrame() {
+  if (!requireFrameValidation) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const finish = (error) => {
+      clearTimeout(timer);
+      process.removeListener("message", handler);
+      process.channel?.unref();
+      if (error) reject(error); else resolve();
+    };
+    const handler = (message) => {
+      if (message?.type !== "capture:frame-valid") return;
+      if (message.valid === true) finish();
+      else {
+        const error = new Error(message.error || "Notification frame is no longer available");
+        error.code = "capture-frame-unavailable";
+        finish(error);
+      }
+    };
+    const timer = setTimeout(() => {
+      const error = new Error("Notification frame validation timed out");
+      error.code = "capture-frame-unavailable";
+      finish(error);
+    }, 1500);
+    process.on("message", handler);
+    send({ type: "capture:validate-frame" });
+  });
+}
 
 function send(message) {
   try {
@@ -48,7 +77,8 @@ function captureHdrWindows(outputPath, timeoutMs) {
   return captureNativeWindows(outputPath, timeoutMs, true);
 }
 
-function captureNativeWindows(outputPath, timeoutMs, hdr) {
+async function captureNativeWindows(outputPath, timeoutMs, hdr) {
+  await validateCaptureFrame();
   return new Promise((resolve, reject) => {
     const helper = resolveCaptureHelper();
     const prefix = hdr ? "hdr-capture" : "capture";
@@ -96,6 +126,7 @@ function captureNativeWindows(outputPath, timeoutMs, hdr) {
 }
 
 async function captureGeneric(outputPath) {
+  await validateCaptureFrame();
   const screenshot = require("screenshot-desktop");
   const buf = await screenshot({ format: "png" });
   fs.writeFileSync(outputPath, buf);
@@ -108,6 +139,7 @@ async function captureGeneric(outputPath) {
     const outputPath = String(payload.outputPath || "").trim();
     const timeoutMs = Math.max(1000, Number(payload.timeoutMs) || 8000);
     const hdrRequested = payload.enableHdrScreenshots === true;
+    requireFrameValidation = payload.validateFrame === true;
     if (!outputPath) {
       throw new Error("Missing outputPath");
     }
@@ -125,6 +157,7 @@ async function captureGeneric(outputPath) {
         await captureHdrWindows(outputPath, hdrTimeoutMs);
         captureMode = "windows-graphics-capture-fp16";
       } catch (err) {
+        if (err?.code === "capture-frame-unavailable") throw err;
         fallbackError = err?.message || String(err);
         const remainingMs = Math.max(1000, timeoutMs - (Date.now() - startedAt));
         await captureWindows(outputPath, remainingMs);

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SAN Notification</title>
     <script src="utils/san-preset-capabilities.js"></script>
+    <script src="utils/trophy-mode.js"></script>
     <style>
       html,
       body {
@@ -73,6 +74,32 @@
       #achcontent > [data-san-points-hidden]::before {
         content: none !important;
         display: none !important;
+      }
+      /* Native PS trophies can animate without a percentage. Keep this separate
+         from [rare], which also controls preset content and text visibility. */
+      body[data-san-native-icon-animation]:not([noiconanim]) .wrapper#achiconwrapper {
+        filter: var(--iconshadow);
+      }
+      body[data-san-native-icon-animation]:not([noiconanim]) .wrapper#achiconwrapper::before {
+        background-image: var(--iconbefore);
+        overflow: hidden;
+        z-index: -1;
+        animation: steamrotate calc(var(--anim) * 18) linear infinite reverse;
+      }
+      body[data-san-native-icon-animation]:not([noiconanim]) .wrapper#achiconwrapper::after {
+        animation: steamrotate calc(var(--anim) * 6) linear infinite;
+        mix-blend-mode: overlay;
+        background: var(--iconafter);
+        overflow: hidden;
+        z-index: -1;
+        filter: blur(1rem);
+      }
+      body[data-san-native-icon-animation]:not([noiconanim]) .wrapper#achiconwrapper::before,
+      body[data-san-native-icon-animation]:not([noiconanim]) .wrapper#achiconwrapper::after {
+        display: grid;
+        place-self: center;
+        grid-column-start: 1;
+        grid-row-start: 1;
       }
     </style>
   </head>
@@ -160,8 +187,9 @@
         const hasPercent = Number.isFinite(raw);
         const trophyModeEnabled = payload?.trophyModeEnabled === true;
         const value = hasPercent ? Math.max(raw, 0.1) : 50;
-        const rarity = trophyModeEnabled ? 20 : 1;
-        const semirarity = trophyModeEnabled ? 50 : 5;
+        const thresholds = TrophyMode.normalizeTrophyModeThresholds(payload);
+        const rarity = trophyModeEnabled ? thresholds.trophyModeGoldThreshold : 1;
+        const semirarity = trophyModeEnabled ? thresholds.trophyModeSilverThreshold : 5;
         const tier =
           tierFromPayload ||
           (trophyModeEnabled
@@ -178,6 +206,18 @@
         return { value, rarity, semirarity, tier, hasPercent };
       }
 
+      function hasNativePlayStationTrophy(payload) {
+        const platform = String(payload?.platform || "").trim().toLowerCase();
+        const trophyType = String(payload?.trophyType || "").trim().toLowerCase();
+        return ["ps4recomp", "rpcs3", "shadps4", "kytyps5"].includes(platform) &&
+          ["bronze", "silver", "gold"].includes(trophyType);
+      }
+
+      function shouldUseNativeTrophyIconAnimation(payload) {
+        return !payload?.isPlatinum && hasNativePlayStationTrophy(payload) &&
+          !getPercentInfo(payload).hasPercent;
+      }
+
       function shouldShowSanPercent(payload, customisation) {
         if (!getPercentInfo(payload).hasPercent) return false;
         // usepercent replaces XP/G; text rows and badges are independent.
@@ -188,9 +228,12 @@
         return payload?.showRarityPercentage !== false;
       }
 
-      function pickRarityAsset(value, tier) {
+      function pickRarityAsset(value, tier, keepEmptyTier = false) {
         if (Array.isArray(value)) {
           const index = tier === "gold" ? 2 : tier === "silver" ? 1 : 0;
+          // An explicitly cleared tier stays empty; legacy missing entries keep
+          // their existing fallback to the first image.
+          if (keepEmptyTier && value[index] === "") return "";
           return value[index] || value[0] || "";
         }
         return value || "";
@@ -332,6 +375,7 @@
         if (payload?.isRare) body.setAttribute("rare", "");
         if (payload?.isPlatinum) body.setAttribute("plat", "");
         body.setAttribute(payload?.isPlatinum ? "plat" : payload?.isRare ? "rare" : "main", "");
+        body.toggleAttribute("data-san-native-icon-animation", shouldUseNativeTrophyIconAnimation(payload));
         body.toggleAttribute("notify1line", Boolean(payload?.notify1line));
         body.toggleAttribute("nodecorationshadow", !customisation.decorationshadow);
         const fastDurationBelow = window.AchievementsSanCapabilities
@@ -408,6 +452,9 @@
           const pos = row.position;
           const hiddenRow = row.omitted;
           const typeValue = row.content;
+          // Capture follows the semantic content even when a custom theme
+          // moves the achievement title/description to different text rows.
+          el.dataset.notificationContent = hiddenRow ? "" : typeValue || "";
           const decoration = !hiddenRow && customisation.showdecoration === true && pos === decorationPosition;
           const hiddenIcon =
             !hiddenRow && customisation.showhiddenicon && payload?.hidden === true &&
@@ -437,14 +484,18 @@
       }
 
       function setBadge(payload, customisation, percent) {
-        if (!isSanBadgeEnabled(payload, customisation) || !percent.hasPercent) {
+        const usesBadgeImage = Boolean(getActiveSanBadgeValue(payload, customisation, "percentbadgeimg"));
+        const hasNativeTrophy = hasNativePlayStationTrophy(payload);
+        // A native trophy image needs its grade, not an Exophase percentage.
+        // Text badges still require a real percentage; never display the fallback value.
+        if (!isSanBadgeEnabled(payload, customisation) ||
+            (!percent.hasPercent && !(usesBadgeImage && hasNativeTrophy))) {
           document.querySelectorAll("#achiconwrapper #badge").forEach((badge) => badge.remove());
           return;
         }
         for (const wrapper of document.querySelectorAll("#achiconwrapper")) {
         const badge = wrapper.querySelector("#badge") || document.createElement("span");
         badge.id = "badge";
-        const usesBadgeImage = Boolean(getActiveSanBadgeValue(payload, customisation, "percentbadgeimg"));
         badge.toggleAttribute("badgeimg", usesBadgeImage);
         const badgeText = usesBadgeImage ? "" : `${percent.value.toFixed(1)}%`;
         if (badge.textContent !== badgeText) badge.textContent = badgeText;
@@ -488,7 +539,7 @@
         const scale = Math.max(0.1, safeNumber(customisation.scale, 100) / 100);
         const percent = getPercentInfo(payload);
         const icons = getPresetIcons(customisation);
-        const decoration = pickRarityAsset(icons.decoration || "", percent.tier);
+        const decoration = pickRarityAsset(icons.decoration || "", percent.tier, true);
         const gameIcon =
           (customisation.usecustomgameicon && customisation.gameicon) ||
           payload?.gameIconPath ||
@@ -500,6 +551,7 @@
             ? icons.decoration
             : icons.logo || customisation.logo || "",
           percent.tier,
+          Boolean(customisation.replacelogo && icons.decoration),
         );
         const bgImage =
           customisation.bgstyle === "gameart"
@@ -546,8 +598,15 @@
             ? `drop-shadow(${safeNumber(customisation.fontshadowx, 0)}px ${safeNumber(customisation.fontshadowy, 0)}px ${scale * safeNumber(customisation.fontshadowscale, 1)}px ${customisation.fontshadowcolor || "#000"}) `.repeat(3)
             : "none",
         );
-        setVar("--iconanimcolor", customisation.iconanimcolor || "#ffb84e");
-        setVar("--iconshadowcolor", customisation.iconshadowcolor || "#ffb84e99");
+        // Native grades also select tier colours when their percentage is absent.
+        // Platinum always retains its fixed colours.
+        const useIconTierColours = (payload?.isRare === true || shouldUseNativeTrophyIconAnimation(payload)) &&
+          !payload?.isPlatinum && customisation.iconanimrarity === true;
+        const iconColour = (prefix, fallback) => useIconTierColours
+          ? getSanTierValue(customisation, "iconanimrarity", prefix, fallback, percent.tier)
+          : fallback;
+        setVar("--iconanimcolor", iconColour("iconanimcolor", customisation.iconanimcolor || "#ffb84e"));
+        setVar("--iconshadowcolor", iconColour("iconshadowcolor", customisation.iconshadowcolor || "#ffb84e99"));
         setVar("--logo", cssUrl(logo));
         setVar("--decoration", customisation.showdecoration === true ? cssUrl(decoration) : "none");
         const decorationPosition = getSanDecorationPosition(payload, customisation);
@@ -565,12 +624,18 @@
         setVar("--secondarycolor", customisation.secondarycolor || "#0c2a66");
         setVar("--tertiarycolor", customisation.tertiarycolor || "#ffffff");
         setVar("--fontcolor", customisation.fontcolor || "#ffffff");
-        const points = customisation.usepercent
-          ? percent.value.toFixed(1)
-          : String(100 - Math.round(percent.value / 5) * 5);
         const pointsCapability = window.AchievementsSanCapabilities
           .getPresetDefinition(customisation.preset).points;
-        const unit = customisation.usepercent ? "%" : pointsCapability.unit;
+        // Only previews/tests may use the demo percentage when rarity is absent.
+        // XP/G keeps SAN's existing simulated-points behaviour.
+        const missingPointsPercentage = pointsCapability.supported && Boolean(customisation.usepercent) &&
+          !percent.hasPercent && payload?.isTest !== true && payload?.testPreset !== true;
+        const nativeGamerscore = payload?.platform === "x360recomp" && pointsCapability.unit === "G" &&
+          payload.points != null && Number.isFinite(Number(payload.points)) && Number(payload.points) >= 0;
+        const points = customisation.usepercent
+          ? missingPointsPercentage ? "" : percent.value.toFixed(1)
+          : nativeGamerscore ? String(Number(payload.points)) : String(100 - Math.round(percent.value / 5) * 5);
+        const unit = missingPointsPercentage ? "" : customisation.usepercent ? "%" : pointsCapability.unit;
         setVar("--gs", points);
         setVar("--unit", unit);
         setVar("--raritycolor", { bronze: "#a05526", silver: "#828282", gold: "#b4904a" }[percent.tier] || "#a05526");
@@ -728,7 +793,9 @@
           customisation.preset, customisation,
           { matchesSelector: (selector) => Boolean(document.querySelector(selector)) },
         );
-        document.body.dataset.sanPointsStatus = pointsAvailability.reason || "available";
+        const pointsAvailable = pointsAvailability.available && !missingPointsPercentage;
+        document.body.dataset.sanPointsStatus = pointsAvailability.available && missingPointsPercentage
+          ? "rarity-percentage-unavailable" : pointsAvailability.reason || "available";
         const pointsProfile = window.AchievementsSanCapabilities.getPresetDefinition(customisation.preset);
         const pointsRows = window.AchievementsSanCapabilities.getTextRows(customisation.preset, customisation,
           { screenshotMode: isScreenshotSanMode(payload, customisation) });
@@ -739,14 +806,15 @@
         for (const id of ["unlockmsg", "title", "desc"]) {
           const el = document.getElementById(id);
           if (!el) continue;
-          const active = customisation.showpoints === true && pointsAvailability.available && pointsProfile.points.supported &&
+          const active = customisation.showpoints === true && pointsAvailable && pointsProfile.points.supported &&
             customisation.preset !== "epicgames" && id === pointsRow?.elementId;
           el.toggleAttribute("data-san-points", active);
-          el.toggleAttribute("data-san-points-hidden", typeof customisation.showpoints === "boolean" && !active);
+          el.toggleAttribute("data-san-points-hidden", missingPointsPercentage ||
+            (typeof customisation.showpoints === "boolean" && !active));
           if (active) { el.setAttribute("gs", points); el.setAttribute("unit", unit); }
         }
         const xpArea = document.getElementById("xpwrapper");
-        if (xpArea) xpArea.style.display = pointsAvailability.available ? "" : "none";
+        if (xpArea) xpArea.style.display = pointsAvailable ? "" : "none";
         setBadge(payload, customisation, percent);
       }
 

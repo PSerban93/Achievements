@@ -19,9 +19,12 @@ const DEFAULT_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
 
 const EXOPHASE_PLATFORM_MAP = {
+  x360recomp: "xbox-360",
   xenia: "xbox-360",
   rpcs3: "ps3",
+  ps4recomp: "ps4",
   shadps4: "ps4",
+  kytyps5: "ps5",
 };
 
 const EXOPHASE_LANG_MAP = {
@@ -376,14 +379,20 @@ async function looksBlocked(page) {
   return false;
 }
 
-async function loadAwardsPage(page, url) {
+async function loadAwardsPage(page, url, deadline = Infinity) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error("Exophase lookup deadline exceeded");
   const resp = await page.goto(url, {
     waitUntil: "domcontentloaded",
-    timeout: DEFAULT_WAIT_MS,
+    timeout: Math.min(DEFAULT_WAIT_MS, remaining),
   });
+  if (Number.isFinite(deadline) && resp && resp.status() >= 400) {
+    throw new Error(`Exophase HTTP ${resp.status()}`);
+  }
+  if (Date.now() >= deadline) throw new Error("Exophase lookup deadline exceeded");
   await page
     .waitForSelector("[class*=award-detail]", {
-      timeout: 15000,
+      timeout: Math.max(1, Math.min(15000, deadline - Date.now())),
     })
     .catch(() => {});
   const html = await page.content();
@@ -541,34 +550,51 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
   }
 
   try {
+    // Bound optional PS5 enrichment without changing existing platform lookups.
+    const deadline = platform === "ps5" ? Date.now() + 60000 : Infinity;
     let baseUrl = null;
     let firstErr = null;
     let baseItems = [];
+    let selectedHtml = "";
     for (const slug of slugCandidates) {
+      if (Date.now() >= deadline) break;
       const candidateBase =
-        platform === "ps3" || platform === "ps4"
+        platform === "ps3" || platform === "ps4" || platform === "ps5"
           ? `${BASE_EXOPHASE_URL}${slug}/trophies/`
           : `${BASE_EXOPHASE_URL}${slug}-${platform}/achievements/`;
       const testUrl = ensureLangUrl(candidateBase, langMap.english);
       try {
-        const { html } = await loadAwardsPage(page, testUrl);
+        const { html } = await loadAwardsPage(page, testUrl, deadline);
+        if (platform === "ps5") {
+          const documentTitle = cheerio.load(html)("title").text();
+          if (!/[-|]\s*PS5\s*[-|]\s*Exophase\.com/i.test(documentTitle)) {
+            throw new Error("Exophase page is not a PS5 trophy list");
+          }
+        }
         const items = extractAchievementsFromHtml(html, testUrl);
         if (items.length) {
           baseUrl = candidateBase;
           baseItems = items;
+          selectedHtml = html;
           break;
         }
       } catch (err) {
+        if (platform === "ps5") logger?.info("exophase:ps5:candidate-failed", {
+          slug, error: err?.message || String(err),
+        });
         firstErr = firstErr || err;
         continue;
       }
     }
     if (!baseUrl) {
+      if (Date.now() >= deadline) throw new Error("Exophase lookup deadline exceeded");
       throw firstErr || new Error("No working Exophase URL");
     }
 
     const englishUrl = ensureLangUrl(baseUrl, langMap.english);
-    const { html: baseHtml } = await loadAwardsPage(page, englishUrl);
+    const baseHtml = platform === "ps5"
+      ? selectedHtml
+      : (await loadAwardsPage(page, englishUrl)).html;
     const gameTitle =
       (await page
         .locator("h1, h2")

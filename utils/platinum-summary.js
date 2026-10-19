@@ -10,6 +10,15 @@ const ACCOUNT_SCOPED_PLATFORMS = new Set([
   "xbox-pc",
 ]);
 
+function schemaHasNativePlatinum(entries) {
+  return Array.isArray(entries) && entries.some((entry) => {
+    const type = String(entry?.trophyType || entry?.trophy_type || "")
+      .trim()
+      .toLowerCase();
+    return type === "platinum" || type === "p";
+  });
+}
+
 function normalizeSummaryProgress(raw = null) {
   if (!raw || typeof raw !== "object") return null;
   const total = Math.max(0, Math.floor(Number(raw.total) || 0));
@@ -150,6 +159,7 @@ function shouldResetPlatinumFromSummary(options = {}) {
 
 module.exports = {
   ACCOUNT_SCOPED_PLATFORMS,
+  schemaHasNativePlatinum,
   fingerprintPartsEqual,
   isPlatinumFlagEnabled,
   isPlatinumSummarySynchronized,

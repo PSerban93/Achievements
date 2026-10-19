@@ -7,6 +7,7 @@
   "use strict";
   const modeFields = Object.freeze({
     glowrarity: ["single", "rarity"], iconborderrarity: ["single", "rarity"],
+    iconanimrarity: ["single", "rarity"],
     percentbadgeimg: ["percentage", "image"],
     usecustomfontsizes: ["uniform", "rows"], usecustomfontcolors: ["uniform", "rows"],
   });
@@ -16,12 +17,12 @@
     ["sanImage", ["imageSource", "achievementImage", "gameIconImage", "iconscale", "iconroundness"]],
     ["imageBorder", ["showiconborder", "iconborderrarity", "iconBorderImage", "iconBorderBronzeImage", "iconBorderSilverImage", "iconborderpos", "iconborderscale", "iconborderx", "iconbordery"]],
     ["logo", ["replacelogo", "logoImage", "logoscale"]],
-    ["decoration", ["showdecoration", "decorationImage", "decorationpos", "decorationscale"]],
+    ["decoration", ["showdecoration", "decorationImageMode", "decorationImage", "decorationBronzeImage", "decorationSilverImage", "decorationGoldImage", "decorationpos", "decorationscale"]],
     ["text", ["elementsLayout", "unlockSource", "customtextunlockmsg", "titleSource", "customtexttitle", "descriptionSource", "customtextdesc", "fontfamily", "customFont", "usecustomfontsizes", "fontsize", "unlockmsgfontsize", "titlefontsize", "descfontsize", "usecustomfontcolors", "fontcolor", "unlockmsgfontcolor", "titlefontcolor", "descfontcolor", "textvspace", "showhiddenicon", "hiddeniconpos", "hiddenIndicatorImage"]],
-    ["rarity", ["pointsDisplay", "showpercent", "percentpos"]],
+    ["rarity", ["rarethreshold", "pointsDisplay", "showpercent", "percentpos"]],
     ["badge", ["percentbadge", "percentbadgeimg", "rarityBronzeImage", "raritySilverImage", "rarityGoldImage", "percentbadgecolor", "percentbadgefontcolor", "percentbadgefontsize", "percentbadgeroundness", "percentbadgepos", "percentbadgex", "percentbadgey"]],
-    ["effects", ["useoutline", "outlinecolor", "outlinewidth", "glow", "glowrarity", "glowcolor", "glowcolorbronze", "glowcolorsilver", "glowcolorgold", "glowsize", "glowx", "glowy", "glowanim", "glowspeed", "fontoutline", "fontoutlinecolor", "fontoutlinescale", "fontshadow", "fontshadowcolor", "fontshadowscale", "fontshadowx", "fontshadowy", "decorationshadow"]],
-    ["special", ["iconanim", "iconshadowcolor", "iconanimcolor", "platinumImage"]],
+    ["effects", ["useoutline", "outline", "outlinecolor", "outlinewidth", "glow", "glowrarity", "glowcolor", "glowcolorbronze", "glowcolorsilver", "glowcolorgold", "glowsize", "glowx", "glowy", "glowanim", "glowspeed", "fontoutline", "fontoutlinecolor", "fontoutlinescale", "fontshadow", "fontshadowcolor", "fontshadowscale", "fontshadowx", "fontshadowy", "decorationshadow"]],
+    ["special", ["iconanim", "iconanimrarity", "iconshadowcolor", "iconanimcolor", "iconshadowcolorbronze", "iconanimcolorbronze", "iconshadowcolorsilver", "iconanimcolorsilver", "iconshadowcolorgold", "iconanimcolorgold", "platinumImage"]],
   ];
   const removed = new Set(["usepercent", "usegameicon", "usecustomimgicon", "bgachicon", "customtext", "usegametitle", "usecustomtext", "usegametitleunlockmsg", "usegametitletitle", "usegametitledesc"]);
   const labelAliases = Object.freeze({ scale: "sanScale", roundness: "sanRoundness",
@@ -35,6 +36,15 @@
     const byKey = new Map(definitions.filter((item) => !removed.has(item[1])).map((item) => [item[1], item]));
     // SAN-only fields stay out of the shared native effects definitions.
     for (const definition of [
+      ["decoration", "decorationImageMode", "Decoration image mode", "select", [["Single image", "single"], ["By rarity", "rarity"]]],
+      ...["Bronze", "Silver", "Gold"].map((tier) => ["decoration", `decoration${tier}Image`, "Decoration image", "asset"]),
+      ["effects", "outline", "Notification border style", "select", [["Solid", "solid"], ["Dashed", "dashed"], ["Dotted", "dotted"]]],
+      ["special", "iconanimrarity", "Icon animation colour mode", "boolean"],
+      ...["bronze", "silver", "gold"].flatMap((tier) => [
+        ["special", `iconshadowcolor${tier}`, "Icon shadow colour", "coloralpha"],
+        ["special", `iconanimcolor${tier}`, "Icon animation colour", "color"],
+      ]),
+      ["rarity", "rarethreshold", "Rare notification threshold", "range", [0, 100, 0.1, "%"]],
       ["background", "bgonly", "Apply opacity only to the background", "boolean"],
       ["effects", "glowx", "Glow offset X", "range", [-300, 300, 1, ""]],
       ["effects", "glowy", "Glow offset Y", "range", [-300, 300, 1, ""]],
@@ -121,7 +131,8 @@
     if (!profile?.points?.supported) return null;
     const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
     const changesLayout = legacyPointsFields.some((field) => has(patch, field));
-    if (!has(patch, "showpoints") && !changesLayout && !has(assets, "decorationImage")) return null;
+    if (!has(patch, "showpoints") && !changesLayout &&
+        !["decorationImage", "decorationBronzeImage", "decorationSilverImage", "decorationGoldImage"].some((key) => has(assets, key))) return null;
     return patchForField("pointsDisplay", values);
   }
   return Object.freeze({ buildDefinitions, toEditorValues, toSanValues, patchForField,

@@ -1,6 +1,6 @@
 use std::fs::{self, File};
 use std::path::Path;
-use std::sync::atomic::{self, AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -17,7 +17,7 @@ use windows::Media::MediaProperties::{
     AudioEncodingProperties, ContainerEncodingProperties, MediaEncodingProfile, MediaEncodingSubtypes,
     VideoEncodingProperties,
 };
-use windows::Media::Transcoding::MediaTranscoder;
+use windows::Media::Transcoding::{MediaTranscoder, TranscodeFailureReason};
 use windows::Security::Cryptography::CryptographicBuffer;
 use windows::Storage::Streams::{DataReader, IRandomAccessStream, InMemoryRandomAccessStream};
 use windows::Storage::{FileAccessMode, StorageFile};
@@ -183,6 +183,12 @@ impl ImageEncoder {
 #[derive(thiserror::Error, Debug)]
 /// Errors emitted by [`VideoEncoder`] during configuration, streaming, or finalization.
 pub enum VideoEncoderError {
+    /// Windows rejected the requested encoding profile before streaming.
+    #[error("Windows cannot encode this profile: {0:?}")]
+    UnsupportedProfile(TranscodeFailureReason),
+    /// The transcoder worker panicked or stopped while input was still active.
+    #[error("The video encoder worker stopped unexpectedly")]
+    WorkerStopped,
     /// A Windows Runtime/Win32 API call failed.
     ///
     /// Wraps [`windows::core::Error`].
@@ -254,6 +260,7 @@ pub struct VideoSettingsBuilder {
     width: u32,
     height: u32,
     frame_rate: u32,
+    frame_rate_denominator: u32,
     pixel_aspect_ratio: (u32, u32),
     disabled: bool,
 }
@@ -271,6 +278,7 @@ impl VideoSettingsBuilder {
         Self {
             bitrate: 15_000_000,
             frame_rate: 60,
+            frame_rate_denominator: 1,
             pixel_aspect_ratio: (1, 1),
             sub_type: VideoSettingsSubType::HEVC,
             width,
@@ -306,6 +314,15 @@ impl VideoSettingsBuilder {
     /// Sets target frame rate (numerator; denominator is fixed to 1).
     pub const fn frame_rate(mut self, frame_rate: u32) -> Self {
         self.frame_rate = frame_rate;
+        self.frame_rate_denominator = 1;
+        self
+    }
+
+    /// Sets a rational nominal rate, retaining fractional display refresh rates.
+    /// Actual video samples continue to use their capture timestamps.
+    pub const fn frame_rate_ratio(mut self, numerator: u32, denominator: u32) -> Self {
+        self.frame_rate = numerator;
+        self.frame_rate_denominator = if denominator == 0 { 1 } else { denominator };
         self
     }
 
@@ -329,7 +346,7 @@ impl VideoSettingsBuilder {
         properties.SetWidth(self.width)?;
         properties.SetHeight(self.height)?;
         properties.FrameRate()?.SetNumerator(self.frame_rate)?;
-        properties.FrameRate()?.SetDenominator(1)?;
+        properties.FrameRate()?.SetDenominator(self.frame_rate_denominator)?;
         properties.PixelAspectRatio()?.SetNumerator(self.pixel_aspect_ratio.0)?;
         properties.PixelAspectRatio()?.SetDenominator(self.pixel_aspect_ratio.1)?;
         Ok((properties, self.disabled))
@@ -713,11 +730,27 @@ pub struct VideoEncoder {
 }
 
 impl VideoEncoder {
+    /// Checks a completed worker without waiting on an active transcoder. Call
+    /// this even when the producer is shedding frames because its queue is full.
+    pub fn check_error(&mut self) -> Result<(), VideoEncoderError> {
+        if self.transcode_thread.as_ref().is_some_and(JoinHandle::is_finished) {
+            let worker = self.transcode_thread.take().expect("worker was checked above");
+            self.error_notify.store(true, Ordering::Release);
+            worker.join().map_err(|_| VideoEncoderError::WorkerStopped)??;
+            return Err(VideoEncoderError::WorkerStopped);
+        }
+        if self.transcode_thread.is_none() && self.error_notify.load(Ordering::Acquire) {
+            return Err(VideoEncoderError::WorkerStopped);
+        }
+        Ok(())
+    }
+
     fn enqueue_video_source(
         &mut self,
         source: VideoEncoderSource,
         timestamp: TimeSpan,
     ) -> Result<(), VideoEncoderError> {
+        self.check_error()?;
         self.pending_video_samples.fetch_add(1, Ordering::Relaxed);
         if let Err(error) = self.frame_sender.send(Some((source, timestamp))) {
             self.pending_video_samples
@@ -733,6 +766,7 @@ impl VideoEncoder {
         source: AudioEncoderSource,
         timestamp: TimeSpan,
     ) -> Result<(), VideoEncoderError> {
+        self.check_error()?;
         self.pending_audio_samples.fetch_add(1, Ordering::Relaxed);
         if let Err(error) = self.audio_sender.send(Some((source, timestamp))) {
             self.pending_audio_samples
@@ -1019,17 +1053,22 @@ impl VideoEncoder {
             )?
             .join()?;
 
+        if !transcode.CanTranscode()? {
+            let reason = transcode.FailureReason()?;
+            let _ = media_stream_source.RemoveStarting(starting);
+            let _ = media_stream_source.RemoveSampleRequested(sample_requested);
+            return Err(VideoEncoderError::UnsupportedProfile(reason));
+        }
         let error_notify = Arc::new(AtomicBool::new(false));
         let transcode_thread = thread::spawn({
             let error_notify = error_notify.clone();
             move || -> Result<(), VideoEncoderError> {
-                let result = transcode.TranscodeAsync();
+                let result = transcode.TranscodeAsync().and_then(|operation| operation.join());
                 if result.is_err() {
-                    error_notify.store(true, atomic::Ordering::Relaxed);
+                    error_notify.store(true, Ordering::Release);
                 }
-                result?.join()?;
                 drop(media_transcoder);
-                Ok(())
+                result.map_err(VideoEncoderError::from)
             }
         });
 
@@ -1162,17 +1201,22 @@ impl VideoEncoder {
             .PrepareMediaStreamSourceTranscodeAsync(&media_stream_source, &stream, &media_encoding_profile)?
             .join()?;
 
+        if !transcode.CanTranscode()? {
+            let reason = transcode.FailureReason()?;
+            let _ = media_stream_source.RemoveStarting(starting);
+            let _ = media_stream_source.RemoveSampleRequested(sample_requested);
+            return Err(VideoEncoderError::UnsupportedProfile(reason));
+        }
         let error_notify = Arc::new(AtomicBool::new(false));
         let transcode_thread = thread::spawn({
             let error_notify = error_notify.clone();
             move || -> Result<(), VideoEncoderError> {
-                let result = transcode.TranscodeAsync();
+                let result = transcode.TranscodeAsync().and_then(|operation| operation.join());
                 if result.is_err() {
-                    error_notify.store(true, atomic::Ordering::Relaxed);
+                    error_notify.store(true, Ordering::Release);
                 }
-                result?.join()?;
                 drop(media_transcoder);
-                Ok(())
+                result.map_err(VideoEncoderError::from)
             }
         });
 
@@ -1272,11 +1316,7 @@ impl VideoEncoder {
 
         self.enqueue_video_source(VideoEncoderSource::DirectX(surface), timestamp)?;
 
-        if self.error_notify.load(atomic::Ordering::Relaxed)
-            && let Some(t) = self.transcode_thread.take()
-        {
-            t.join().expect("Failed to join transcode thread")?;
-        }
+        self.check_error()?;
 
         Ok(())
     }
@@ -1300,11 +1340,7 @@ impl VideoEncoder {
 
         self.enqueue_video_source(VideoEncoderSource::DirectX(SendDirectX::new(surface)), timestamp)?;
 
-        if self.error_notify.load(atomic::Ordering::Relaxed)
-            && let Some(t) = self.transcode_thread.take()
-        {
-            t.join().expect("Failed to join transcode thread")?;
-        }
+        self.check_error()?;
 
         Ok(())
     }
@@ -1348,11 +1384,7 @@ impl VideoEncoder {
         // Advance counter after stamping
         self.audio_samples_sent = self.audio_samples_sent.saturating_add(frames_in_buf as u64);
 
-        if self.error_notify.load(atomic::Ordering::Relaxed)
-            && let Some(t) = self.transcode_thread.take()
-        {
-            t.join().expect("Failed to join transcode thread")?;
-        }
+        self.check_error()?;
 
         Ok(())
     }
@@ -1376,11 +1408,7 @@ impl VideoEncoder {
 
         self.enqueue_video_source(VideoEncoderSource::Buffer(buffer.to_vec()), timestamp)?;
 
-        if self.error_notify.load(atomic::Ordering::Relaxed)
-            && let Some(t) = self.transcode_thread.take()
-        {
-            t.join().expect("Failed to join transcode thread")?;
-        }
+        self.check_error()?;
 
         Ok(())
     }
@@ -1405,11 +1433,7 @@ impl VideoEncoder {
 
         self.audio_samples_sent = self.audio_samples_sent.saturating_add(frames_in_buf as u64);
 
-        if self.error_notify.load(atomic::Ordering::Relaxed)
-            && let Some(t) = self.transcode_thread.take()
-        {
-            t.join().expect("Failed to join transcode thread")?;
-        }
+        self.check_error()?;
 
         Ok(())
     }
@@ -1435,7 +1459,7 @@ impl VideoEncoder {
 
         // 3) Wait for the transcoder to flush and finalize.
         if let Some(transcode_thread) = self.transcode_thread.take() {
-            transcode_thread.join().expect("Failed to join transcode thread")?;
+            transcode_thread.join().map_err(|_| VideoEncoderError::WorkerStopped)??;
         }
 
         // 4) Unhook events after pipeline has completed.
