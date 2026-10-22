@@ -56,6 +56,9 @@ struct Shared {
 pub(crate) struct Capture {
     shared: Arc<Shared>,
     worker: Option<thread::JoinHandle<()>>,
+    shutdown_requested: Arc<AtomicBool>,
+    ready_signal: Arc<AtomicBool>,
+    runtime_error: Arc<Mutex<Option<super::PipelineFailure>>>,
     pool: Vec<Arc<Image>>,
     mapper: Option<ToneMapper>,
     hdr: bool,
@@ -169,6 +172,9 @@ impl GraphicsCaptureApiHandler for Capture {
         Ok(Self {
             shared,
             worker: Some(worker),
+            shutdown_requested: Arc::clone(&ctx.flags.shutdown_requested),
+            ready_signal: Arc::clone(&ctx.flags.ready_signal),
+            runtime_error: Arc::clone(&ctx.flags.runtime_error),
             pool: Vec::new(),
             mapper: None,
             hdr: ctx.flags.hdr_tone_map,
@@ -286,16 +292,29 @@ impl Drop for Capture {
     fn drop(&mut self) {
         self.shared.stop.store(true, Ordering::Release);
         if let Some(worker) = self.worker.take() {
-            let deadline = Instant::now() + Duration::from_secs(65);
+            // Before ready no clips have been accepted. Bound failed startup
+            // cleanup without shortening the drain window of an active session.
+            let timeout = if self.ready_signal.load(Ordering::Acquire) {
+                65
+            } else {
+                8
+            };
+            let deadline = Instant::now() + Duration::from_secs(timeout);
             while !worker.is_finished() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(5));
             }
             if worker.is_finished() {
                 let _ = worker.join();
             } else {
-                emit(
-                    json!({"type":"pipeline-stop-timeout", "error":"Native recorder did not drain before its deadline"}),
-                );
+                // Never overlap a fallback with a worker which failed to stop.
+                self.shutdown_requested.store(true, Ordering::Release);
+                let message = "Native recorder did not drain before its deadline";
+                *self.runtime_error.lock().unwrap() = Some(super::PipelineFailure {
+                    message: message.into(),
+                    unsupported: false,
+                });
+                emit(json!({"type":"pipeline-stop-timeout", "error":message,
+                        "timeoutMs":timeout * 1000}));
             }
         }
     }
@@ -423,6 +442,9 @@ fn run_pipeline(
     device: ID3D11Device,
     context: ID3D11DeviceContext,
 ) -> Result<(), AnyError> {
+    if flags.shutdown_requested.load(Ordering::Acquire) || shared.stop.load(Ordering::Acquire) {
+        return Ok(());
+    }
     let _clock = Clock::start()?;
     let mut rate = flags.frame_rate;
     let width = even_dimension(flags.width);
@@ -511,6 +533,9 @@ fn run_pipeline(
     let mut audio_output_progress = OutputProgress::new(qpc_ticks());
     loop {
         let now = qpc_ticks();
+        if flags.shutdown_requested.load(Ordering::Acquire) {
+            shared.stop.store(true, Ordering::Release);
+        }
         // Always poll outputs before accepting more input. Encoders have a
         // finite number of GPU surfaces and async input credits.
         for p in video.poll()? {
@@ -571,6 +596,7 @@ fn run_pipeline(
                     }
                 }
                 Ok(Command::Shutdown) | Err(mpsc::TryRecvError::Disconnected) => {
+                    flags.shutdown_requested.store(true, Ordering::Release);
                     shared.stop.store(true, Ordering::Release);
                     break;
                 }

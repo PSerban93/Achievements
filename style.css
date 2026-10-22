@@ -2122,11 +2122,17 @@ body.profile-importing #bootLoading {
 }
 
 #themeCustomisationSection,
-#notificationCustomisationSection {
+#notificationCustomisationSection,
+.settings-options-disclosure,
+.settings-notification-disclosure {
   padding: 16px 18px 20px;
   border: 1px solid var(--app-border-subtle);
   border-radius: var(--app-radius-lg);
   background: var(--app-panel-bg);
+}
+
+.settings-disclosure[open] > summary {
+  margin-bottom: 14px;
 }
 
 #notificationCustomisationEditor {
@@ -2224,7 +2230,9 @@ body.profile-importing #bootLoading {
   flex-wrap: wrap;
 }
 
-#notificationCustomisationEditor .customisation-boolean-control > .san-control-hint {
+#notificationCustomisationEditor
+  .customisation-boolean-control
+  > .san-control-hint {
   flex: 0 0 100%;
   box-sizing: border-box;
   padding-inline-start: 28px;
@@ -2958,8 +2966,12 @@ body.profile-importing #bootLoading {
   min-height: 120px;
   margin-top: 10px;
   border-radius: var(--app-radius-sm);
-  background:
-    conic-gradient(rgba(255, 255, 255, 0.16) 25%, rgba(255, 255, 255, 0.30) 0 50%, rgba(255, 255, 255, 0.16) 0 75%, rgba(255, 255, 255, 0.30) 0);
+  background: conic-gradient(
+    rgba(255, 255, 255, 0.16) 25%,
+    rgba(255, 255, 255, 0.3) 0 50%,
+    rgba(255, 255, 255, 0.16) 0 75%,
+    rgba(255, 255, 255, 0.3) 0
+  );
   background-size: 20px 20px;
   overflow: hidden;
 }
@@ -3004,7 +3016,8 @@ body.profile-importing #bootLoading {
   --notification-action-color: var(--app-success);
 }
 
-#notificationCustomisationEditor :is(.notification-preview-replay, .notification-asset-choose) {
+#notificationCustomisationEditor
+  :is(.notification-preview-replay, .notification-asset-choose) {
   --notification-action-color: var(--app-accent-2, var(--app-accent));
 }
 
@@ -3025,36 +3038,80 @@ body.profile-importing #bootLoading {
   --notification-action-color: var(--app-danger);
 }
 
-#notificationCustomisationEditor :is(.notification-preview-stop, .notification-preview-replay,
-  .notification-preview-test, .notification-preview-reset, .notification-preview-reroll,
-  .notification-asset-choose, .notification-asset-clear),
+#notificationCustomisationEditor
+  :is(
+    .notification-preview-stop,
+    .notification-preview-replay,
+    .notification-preview-test,
+    .notification-preview-reset,
+    .notification-preview-reroll,
+    .notification-asset-choose,
+    .notification-asset-clear
+  ),
 #themeCustomisationEditor .theme-editor-reset {
   color: var(--app-text);
-  border-color: color-mix(in srgb, var(--notification-action-color) 60%, var(--app-border-subtle));
-  background: color-mix(in srgb, var(--notification-action-color) 14%, var(--app-input-bg));
-  transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+  border-color: color-mix(
+    in srgb,
+    var(--notification-action-color) 60%,
+    var(--app-border-subtle)
+  );
+  background: color-mix(
+    in srgb,
+    var(--notification-action-color) 14%,
+    var(--app-input-bg)
+  );
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
 }
 
-#notificationCustomisationEditor :is(.notification-preview-stop, .notification-preview-replay,
-  .notification-preview-test, .notification-preview-reset, .notification-preview-reroll,
-  .notification-asset-choose, .notification-asset-clear):not(:disabled):hover,
+#notificationCustomisationEditor
+  :is(
+    .notification-preview-stop,
+    .notification-preview-replay,
+    .notification-preview-test,
+    .notification-preview-reset,
+    .notification-preview-reroll,
+    .notification-asset-choose,
+    .notification-asset-clear
+  ):not(:disabled):hover,
 #themeCustomisationEditor .theme-editor-reset:not(:disabled):hover {
   border-color: var(--notification-action-color);
-  background: color-mix(in srgb, var(--notification-action-color) 28%, var(--app-input-bg));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--notification-action-color) 24%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--notification-action-color) 28%,
+    var(--app-input-bg)
+  );
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--notification-action-color) 24%, transparent);
 }
 
-#notificationCustomisationEditor :is(.notification-preview-stop, .notification-preview-replay,
-  .notification-preview-test, .notification-preview-reset, .notification-preview-reroll,
-  .notification-asset-choose, .notification-asset-clear):focus-visible,
+#notificationCustomisationEditor
+  :is(
+    .notification-preview-stop,
+    .notification-preview-replay,
+    .notification-preview-test,
+    .notification-preview-reset,
+    .notification-preview-reroll,
+    .notification-asset-choose,
+    .notification-asset-clear
+  ):focus-visible,
 #themeCustomisationEditor .theme-editor-reset:focus-visible {
   outline: 2px solid var(--notification-action-color);
   outline-offset: 2px;
 }
 
-#notificationCustomisationEditor :is(.notification-preview-stop, .notification-preview-replay,
-  .notification-preview-test, .notification-preview-reset, .notification-preview-reroll,
-  .notification-asset-choose, .notification-asset-clear):disabled,
+#notificationCustomisationEditor
+  :is(
+    .notification-preview-stop,
+    .notification-preview-replay,
+    .notification-preview-test,
+    .notification-preview-reset,
+    .notification-preview-reroll,
+    .notification-asset-choose,
+    .notification-asset-clear
+  ):disabled,
 #themeCustomisationEditor .theme-editor-reset:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -3857,6 +3914,45 @@ body.profile-importing #bootLoading {
   font-weight: 500;
 }
 
+.notification-placement-controls {
+  margin: 18px 0 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--app-border-subtle);
+}
+
+.notification-placement-pair {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.notification-placement-pair input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.notification-placement-pair input[type="number"] {
+  box-sizing: border-box;
+  width: 90px;
+  flex: 0 0 90px;
+  padding: 6px 8px;
+  color: var(--app-text);
+  background: var(--app-surface);
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--app-radius-sm);
+}
+
+.notification-placement-hint {
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 8px 0;
+}
+
+.notification-placement-controls.is-disabled {
+  opacity: 0.52;
+}
+
 #settings-mainNotificationControls {
   transition: opacity 0.18s ease;
 }
@@ -3885,6 +3981,21 @@ body.profile-importing #bootLoading {
 .settings-control select,
 .settings-control button {
   width: 150px;
+}
+
+.settings-control.notification-monitor-control {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+#settings-notificationMonitorSelect {
+  width: 100%;
+  min-width: 0;
+}
+
+#settings-notificationMonitorStatus {
+  color: var(--app-muted);
 }
 
 /* Image */
@@ -6230,27 +6341,32 @@ body.settings-open {
   background: rgba(255, 255, 255, 0.02);
   padding: 10px 12px;
 }
-.platform-guide-item summary {
+.platform-guide-item summary,
+.settings-disclosure > summary {
   cursor: pointer;
   font-weight: 600;
   color: var(--app-text);
   list-style: none;
 }
 
-.settings-menu:not(.hidden) .platform-guide-item summary:focus {
+.settings-menu:not(.hidden) .platform-guide-item summary:focus,
+.settings-menu:not(.hidden) .settings-disclosure > summary:focus {
   outline: 2px solid var(--app-accent-2);
   outline-offset: 2px;
   border-radius: 3px;
 }
-.platform-guide-item summary::-webkit-details-marker {
+.platform-guide-item summary::-webkit-details-marker,
+.settings-disclosure > summary::-webkit-details-marker {
   display: none;
 }
-.platform-guide-item summary::before {
+.platform-guide-item summary::before,
+.settings-disclosure > summary::before {
   content: "\25B8";
   margin-right: 8px;
   color: var(--dracula-cyan);
 }
-.platform-guide-item[open] summary::before {
+.platform-guide-item[open] summary::before,
+.settings-disclosure[open] > summary::before {
   content: "\25BE";
 }
 .platform-guide-item .platform-guide-list {
@@ -6883,6 +6999,20 @@ kbd {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+#editPlaytimeBtn {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  margin-bottom: 10px;
+}
+
+#editPlaytimeBtn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 
 #mainScroll .ms-hero-side {

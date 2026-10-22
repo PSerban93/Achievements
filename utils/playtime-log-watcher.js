@@ -63,6 +63,23 @@ function resolveSteamAppId(appid) {
 const playtimeStartMap = new Map();
 const activeWatchers = new Map();
 
+function getActiveLastPlayed() {
+  const entries = new Map();
+  for (const tracker of activeWatchers.values()) {
+    if (!tracker.lastPlayedAt) continue;
+    const key = sanitizeConfigName(tracker.playtimeKey);
+    entries.set(key, Math.max(entries.get(key) || 0, tracker.lastPlayedAt));
+  }
+  return Object.fromEntries(entries);
+}
+
+function rebasePlaytimeSession(configName, timestamp = Date.now()) {
+  const key = sanitizeConfigName(configName);
+  for (const [appid, tracker] of activeWatchers) {
+    if (sanitizeConfigName(tracker.playtimeKey) === key && playtimeStartMap.has(appid)) tracker.persistedSince = timestamp;
+  }
+}
+
 function notifyError(message) {
   try {
     const { webContents } = require("electron");
@@ -994,6 +1011,15 @@ function startPlaytimeLogWatcher(configData, options = {}) {
   };
   tracker.cleanup = cleanup;
 
+  const markSessionStarted = () => {
+    if (tracker.lastPlayedAt) return;
+    tracker.lastPlayedAt = Date.now();
+    ipcMain.emit("playtime:session-started", null, {
+      configName: tracker.playtimeKey,
+      startedAt: tracker.lastPlayedAt,
+    });
+  };
+
   const sendStart = (headerUrl) => {
     if (startNotified) return;
     startNotified = true;
@@ -1015,12 +1041,14 @@ function startPlaytimeLogWatcher(configData, options = {}) {
 
   const sendStop = async (headerUrlLocal) => {
     const startedAt = playtimeStartMap.get(appid) || Date.now();
-    const playedMs = Math.max(0, Date.now() - startedAt);
+    const endedAt = Date.now();
+    const playedMs = Math.max(0, endedAt - startedAt);
+    const unsavedMs = Math.max(0, endedAt - Math.max(startedAt, tracker.persistedSince || startedAt));
     const key = tracker.playtimeKey;
     if (requiresPs4Runtime) playtimeLogger.info("ps4recomp:session:stop", { configName: key, appid, playedMs });
     let savedTotalMs = null;
     try {
-      savedTotalMs = accumulatePlaytime(key, playedMs);
+      savedTotalMs = accumulatePlaytime(key, unsavedMs);
     } catch (error) {
       playtimeLogger.error("playtime:save-failed", {
         appid: String(appid),
@@ -1144,6 +1172,7 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     }
     if (running) {
       seenRunning = true;
+      markSessionStarted();
       if (requiresPs4Runtime) sendStart(lastHeaderUrl || initialHeader || fallbackHeaderUrl);
     }
   };
@@ -1166,6 +1195,8 @@ function startPlaytimeLogWatcher(configData, options = {}) {
 
 module.exports = {
   startPlaytimeLogWatcher,
+  rebasePlaytimeSession,
+  getActiveLastPlayed,
   cacheHeaderImage,
   redownloadHeaderImage,
 };

@@ -2,6 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 let requireFrameValidation = false;
+let captureMonitor = null;
 
 function validateCaptureFrame() {
   if (!requireFrameValidation) return Promise.resolve();
@@ -89,9 +90,15 @@ async function captureNativeWindows(outputPath, timeoutMs, hdr) {
       return;
     }
 
+    let monitorId = captureMonitor?.captureId || captureMonitor?.id;
+    if (monitorId?.startsWith("electron:")) {
+      const b = captureMonitor?.bounds;
+      if (!b) { reject(new Error("Selected screenshot monitor has no physical placement")); return; }
+      monitorId = `bounds:${b.x},${b.y},${b.width},${b.height}`;
+    }
     execFile(
       helper,
-      hdr ? [outputPath] : ["--sdr", outputPath],
+      [...(hdr ? [] : ["--sdr"]), ...(monitorId && !monitorId.startsWith("electron:") ? ["--monitor-id", monitorId] : []), outputPath],
       {
         windowsHide: true,
         timeout: timeoutMs,
@@ -128,7 +135,15 @@ async function captureNativeWindows(outputPath, timeoutMs, hdr) {
 async function captureGeneric(outputPath) {
   await validateCaptureFrame();
   const screenshot = require("screenshot-desktop");
-  const buf = await screenshot({ format: "png" });
+  let screenId;
+  if (captureMonitor?.bounds) {
+    const displays = await screenshot.listDisplays();
+    const b = captureMonitor.bounds;
+    const match = displays.find(d => d.width === b.width && d.height === b.height && d.offsetX === b.x && d.offsetY === b.y);
+    if (!match) throw new Error("Selected screenshot monitor is unavailable");
+    screenId = match.id;
+  }
+  const buf = await screenshot({ format: "png", ...(screenId == null ? {} : { screen: screenId }) });
   fs.writeFileSync(outputPath, buf);
   return outputPath;
 }
@@ -136,6 +151,7 @@ async function captureGeneric(outputPath) {
 (async () => {
   try {
     const payload = JSON.parse(process.argv[2] || "{}");
+    captureMonitor = payload.monitor || null;
     const outputPath = String(payload.outputPath || "").trim();
     const timeoutMs = Math.max(1000, Number(payload.timeoutMs) || 8000);
     const hdrRequested = payload.enableHdrScreenshots === true;
@@ -169,7 +185,7 @@ async function captureGeneric(outputPath) {
     } else {
       await captureGeneric(outputPath);
     }
-    send({ ok: true, outputPath, captureMode, hdrRequested, fallbackError });
+    send({ ok: true, outputPath, captureMode, hdrRequested, fallbackError, monitor: captureMonitor });
   } catch (err) {
     fail(err, err?.code || "capture-failed");
   }

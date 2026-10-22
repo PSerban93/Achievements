@@ -25,13 +25,13 @@ use windows_capture::settings::{
 };
 
 type AnyError = Box<dyn Error + Send + Sync>;
-const MONITORINFOF_PRIMARY_FLAG: u32 = 1;
+#[path = "../../monitor-selection.rs"]
+mod monitor_selection;
 
 #[derive(Clone, Copy, Debug)]
 struct MonitorPlacement {
     monitor: Monitor,
     rect: RECT,
-    primary: bool,
 }
 
 struct Canvas {
@@ -125,21 +125,7 @@ fn monitor_info(monitor: Monitor) -> Result<MonitorPlacement, AnyError> {
     Ok(MonitorPlacement {
         monitor,
         rect: info.rcMonitor,
-        primary: info.dwFlags & MONITORINFOF_PRIMARY_FLAG != 0,
     })
-}
-
-fn enumerate_monitors() -> Result<Vec<MonitorPlacement>, AnyError> {
-    let mut monitors = Monitor::enumerate()?
-        .into_iter()
-        .map(monitor_info)
-        .collect::<Result<Vec<_>, _>>()?;
-    if monitors.is_empty() {
-        return Err("No active monitor was found".into());
-    }
-    // Both capture modes target the primary monitor, as the original Windows path did.
-    monitors.sort_by_key(|entry| !entry.primary);
-    Ok(monitors)
 }
 
 fn make_canvas(monitors: &[MonitorPlacement]) -> Result<Canvas, AnyError> {
@@ -425,17 +411,13 @@ fn write_png(output: &PathBuf, canvas: &Canvas) -> Result<(), AnyError> {
 
 fn run() -> Result<(), AnyError> {
     let mut args = std::env::args_os().skip(1);
-    let first = args
-        .next()
-        .ok_or("Usage: achievements-hdr-screenshot.exe [--sdr] <output.png>")?;
-    let sdr = first == "--sdr";
-    let output = PathBuf::from(if sdr {
-        args.next().ok_or("Missing output path after --sdr")?
-    } else {
-        first
-    });
-    if args.next().is_some() {
-        return Err("Unexpected screenshot arguments".into());
+    let (mut sdr, mut list, mut monitor_id, mut output) = (false, false, None, None);
+    while let Some(arg) = args.next() {
+        if arg == "--sdr" { sdr = true; }
+        else if arg == "--list-monitors" { list = true; }
+        else if arg == "--monitor-id" { monitor_id = Some(args.next().ok_or("Missing monitor ID")?.to_string_lossy().into_owned()); }
+        else if output.is_none() { output = Some(PathBuf::from(arg)); }
+        else { return Err("Unexpected screenshot arguments".into()); }
     }
     // Avoid DPI virtualization: both modes must capture physical monitor pixels.
     if unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) }
@@ -443,12 +425,17 @@ fn run() -> Result<(), AnyError> {
     {
         return Err("Could not enable physical-pixel desktop capture".into());
     }
-    let monitors = enumerate_monitors()?;
-    let primary = monitors
-        .iter()
-        .copied()
-        .find(|entry| entry.primary)
-        .unwrap_or(monitors[0]);
+    if list {
+        let monitors = monitor_selection::enumerate()?;
+        let values: Vec<_> = monitors.iter().map(|d| serde_json::json!({
+            "id":d.id, "deviceName":d.device_name, "label":d.label,
+            "bounds":{"x":d.bounds[0],"y":d.bounds[1],"width":d.bounds[2],"height":d.bounds[3]}, "primary":d.primary,
+        })).collect();
+        println!("{}", serde_json::to_string(&values)?);
+        return Ok(());
+    }
+    let output = output.ok_or("Missing screenshot output path")?;
+    let primary = monitor_info(monitor_selection::select(monitor_id.as_deref())?)?;
     if sdr {
         let mut canvas = make_canvas(&[primary])?;
         capture_sdr(&mut canvas)?;

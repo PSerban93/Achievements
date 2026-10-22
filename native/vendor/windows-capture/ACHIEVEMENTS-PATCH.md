@@ -10,6 +10,14 @@ Its continuous Media Foundation encoder and compressed replay buffer live in
 upstream-compatible `VideoEncoder` extension below is retained in the vendor
 snapshot; it is not the active recording backend.
 
+Both capture entry points validate optional minimum-update-interval and border
+settings before allocating a dispatcher, D3D device, or consumer handler. An
+unsupported option therefore cannot start an encoder/audio worker whose teardown
+posts WM_QUIT into a later fallback. The native recorder additionally gives each
+capture attempt a dedicated thread, preserving typed errors and joining the
+attempt before retrying. Default border settings remain available on older
+Windows versions; no border-control API is called for that setting.
+
 Achievements adds one narrow encoder API, `VideoEncoder::send_surface`, so an
 HDR frame can be tone-mapped into a BGRA8 Direct3D surface and handed to the
 existing encoder without a GPU-to-CPU readback.

@@ -4,10 +4,16 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { StringDecoder } = require("string_decoder");
+const { isDeepStrictEqual } = require("util");
 const { readJsonWithBackupSync, writeJsonAtomicSync } = require("./atomic-json-store");
 const { sanitizeConfigName } = require("./config-name");
 const { schemaHasNativePlatinum } = require("./platinum-summary");
 const trophies = require("./ps4-recomp-trophies");
+const installations = require("./ps4-recomp-installation");
+const progressSources = require("./ps4-recomp-progress");
+const collections = require("./ps4-recomp-collections");
+const executables = require("./ps4-recomp-executables");
+const compiledLaunchers = require("./ps4-recomp-compiled-launcher");
 const { samePath, inside } = require("./pc-ports");
 const { getProcessExecutableNames } = require("./process-name-utils");
 const runtimeListeners = new Set();
@@ -15,30 +21,13 @@ let runtimeProcesses = null;
 const runtimeFirstSeen = new Map();
 let runtimeFingerprint = "";
 let latestRuntimeInput = null;
-// Legacy launcher-location hints are optional. Only Uncharted defines a collection.
-const PORTS = [
-  { port: "bloodborne", launcher: "Bloodborne.exe", settings: "bbport-launcher", env: "BB", marker: "bloodborne" },
-  { port: "uncharted", launcher: "Uncharted.exe", settings: "uncharted-launcher", env: "BB", marker: "uncharted", games: [
-    ["u1", "Uncharted: Drake's Fortune Remastered", 0], ["u2", "Uncharted 2: Among Thieves Remastered", 1], ["u3", "Uncharted 3: Drake's Deception Remastered", 2]] },
-  { port: "gow3", launcher: "God of War III.exe", settings: "gow3-launcher", env: "GOW3", marker: "gow3" },
-  { port: "medievil", launcher: "MediEvil.exe", settings: "medievil-launcher", env: "GOW3", marker: "medievil" },
-];
+const { PORTS } = collections;
 function json(file, fallback = null) { try { return JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, "")); } catch { return fallback; } }
 function settingsFile(port) {
   if (port.settingsFile) return port.settingsFile;
   return port.settings ? path.join(process.env.APPDATA || path.join(require("os").homedir(), ".config"), port.settings, "settings.json") : "";
 }
-function settings(port) {
-  try {
-    const file = settingsFile(port);
-    if (!file) return {};
-    const stat = fs.lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) throw new Error("Invalid PS4 Recomp launcher settings");
-    const value = JSON.parse(fs.readFileSync(file, "utf8").replace(/^\uFEFF/, ""));
-    if (!value || Array.isArray(value) || typeof value !== "object") throw new Error("Invalid PS4 Recomp launcher settings");
-    return value;
-  } catch (error) { if (error.code === "ENOENT") return {}; throw error; }
-}
+function settings(port) { return installations.readSettings(settingsFile(port)); }
 function scriptPathDefault(script, key, bases) {
   // Accept only a literal Path expression, e.g. PORT.parent / 'Game' or data / 'user'.
   // Computed expressions stay unresolved; launcher scripts are never evaluated.
@@ -52,17 +41,34 @@ function scriptPathDefault(script, key, bases) {
   return result;
 }
 function environment(port, root, cfg = settings(port)) {
-  const env = { ...process.env };
-  // Same KEY=VALUE tokens accepted by the launchers; never execute their contents.
-  for (const match of String(cfg.extra_env || "").matchAll(/(?:^|\s)([A-Za-z_][\w]*)=(?:"([^"]*)"|'([^']*)'|([^\s]+))/g)) env[match[1]] = match[2] ?? match[3] ?? match[4];
-  const resolve = (value) => value ? path.resolve(root, value) : "";
-  const script = port.port === "generic" ? runScript(root) : "";
-  const data = resolve(env[`${port.env}_DATA_DIR`] || cfg.data_dir) || scriptPathDefault(script, `${port.env}_DATA_DIR`, { PORT: root }) || root;
-  const explicitUser = resolve(env[`${port.env}_USER_DIR`] || cfg.user_dir) ||
-    scriptPathDefault(script, `${port.env}_USER_DIR`, { PORT: root, data });
-  const rootLogs = ["trophies.log", "last_run.log"].some((name) => regularFile(path.join(data, name)));
-  return { gameRoot: resolve(env[`${port.env}_GAME_DIR`] || cfg.game_dir) || scriptPathDefault(script, `${port.env}_GAME_DIR`, { PORT: root, data }),
-    userRoot: explicitUser || (port.port === "generic" && rootLogs ? data : path.join(data, "user")), env };
+  const env = { ...process.env, ...port.runtimeOverrides };
+  const extra = {};
+  for (const match of String(cfg.extra_env || "").matchAll(/(?:^|\s)([A-Za-z_][\w]*)=(?:"([^"]*)"|'([^']*)'|([^\s]+))/g)) {
+    extra[match[1]] = match[2] ?? match[3] ?? match[4]; env[match[1]] = extra[match[1]];
+  }
+  const resolve = (value) => typeof value === "string" && value.trim() ? path.resolve(root, value) : "";
+  const script = port.script === undefined ? runScript(root) : port.script, prefix = port.env;
+  const fromShell = (suffix, data) => {
+    const escaped = `${prefix}_${suffix}`;
+    const value = script.match(new RegExp(`\\$\\{${escaped}:-([^}]+)\\}`))?.[1]?.replace(/^['"]|['"]$/g, "");
+    return value ? resolve(value.replace(/\$\{?(?:PORT|port_dir)\}?/g, root).replace(/\$\{?data\}?/g, data || root)) : "";
+  };
+  const data = resolve(extra[`${prefix}_DATA_DIR`] || cfg.data_dir || cfg[`${prefix}_DATA_DIR`]) || resolve(env[`${prefix}_DATA_DIR`]) ||
+    port.declaredDataRoot ||
+    (path.basename(path.dirname(port.settingsFile || "")) === "data" ? path.join(root, "data") : "") ||
+    scriptPathDefault(script, `${prefix}_DATA_DIR`, { PORT: root }) || fromShell("DATA_DIR") ||
+    (!port.hasRunner && !script && installations.directory(path.join(root, "data")) ? path.join(root, "data") : root);
+  const userRoot = resolve(extra[`${prefix}_USER_DIR`] || cfg.user_dir || cfg.saves_dir || cfg[`${prefix}_USER_DIR`]) || resolve(env[`${prefix}_USER_DIR`]) ||
+    port.declaredUserRoot || scriptPathDefault(script, `${prefix}_USER_DIR`, { PORT: root, data }) || fromShell("USER_DIR", data) || path.join(data, "user");
+  const declaredOutLog = port.launcherSources?.some((entry) => /OUT_DIR\s*\/\s*['"]last_run\.log['"]/.test(entry.source));
+  const configuredLog = resolve(extra[`${prefix}_LOG_DIR`] || cfg.log_dir || cfg.logs_dir || cfg[`${prefix}_LOG_DIR`] || env[`${prefix}_LOG_DIR`]);
+  const logRoot = configuredLog || (port.logFiles?.length === 1 ? path.dirname(port.logFiles[0]) : declaredOutLog ? path.join(data, "out") :
+    /\bdata\s*\/\s*['"]last_run\.log['"]/.test(script) ? data : userRoot);
+  return { gameRoot: resolve(extra[`${prefix}_GAME_DIR`]) || port.selectedGameRoot || resolve(cfg.game_dir || cfg.game_path || cfg.game || cfg.app0 || cfg[`${prefix}_GAME_DIR`]) ||
+      resolve(env[`${prefix}_GAME_DIR`]) || (port.allowRunnerGameDefault !== false ?
+        scriptPathDefault(script, `${prefix}_GAME_DIR`, { PORT: root, data }) || fromShell("GAME_DIR", data) : ""),
+    userRoot, logRoot, logFiles: port.logFiles || [], dataRoot: data, env, userId: cfg.user_id === undefined ? "" : String(cfg.user_id),
+    logDirectories: [...new Set([...(configuredLog ? [configuredLog] : []), ...(port.compiledLogDirectories || []), path.join(root, "logs"), path.join(data, "logs"), path.join(data, "out", "logs"), path.join(userRoot, "logs")])] };
 }
 function gameIdentity(root) {
   if (!root) return {};
@@ -90,93 +96,78 @@ function regularFile(file) {
   try { const stat = fs.lstatSync(file); return stat.isFile() && !stat.isSymbolicLink(); } catch { return false; }
 }
 function runScript(root) {
-  const file = path.join(root, "run.py");
-  if (!regularFile(file)) return "";
-  const stat = fs.statSync(file);
-  if (stat.size > 512 * 1024) return "";
-  return fs.readFileSync(file, "utf8");
+  const scripts = installations.runners(root);
+  return (scripts.find((entry) => entry.file.endsWith(".py")) || scripts[0])?.source || "";
 }
 function identityFiles(port) {
-  const files = ["settings.json", "launcher/settings.json"];
-  return !port.marker ? files : files.concat(["png", "ico"].map((extension) => `launcher/${port.marker}.${extension}`),
-    [`launcher/${port.marker}_launcher.py`, `launcher/${port.marker}_launcher_win.py`, `launcher/${port.marker}_launcher_windows.py`]);
+  const files = ["run.py", "run.sh", "settings.json", "launcher.ini", "launcher.json", "launcher/settings.json",
+    "data/launcher.json", "data/settings.json", "user/launcher.json", "user/settings.json", "user/launcher.ini"];
+  if (port?.scriptFile) files.push(path.basename(port.scriptFile));
+  files.push(...(port?.identityFiles || []));
+  return [...new Set(files)];
 }
-function localSettingsFile(root) {
-  const files = [path.join(root, "settings.json"), path.join(root, "launcher", "settings.json")].filter(regularFile);
-  if (files.length > 1) throw new Error("Multiple local launcher settings files found; keep one source for the PS4 Recomp installation");
-  return files[0] || "";
+function installation(root, options = {}) {
+  return installations.resolve(root, { identity: gameIdentity, hints: options.configs || [], packageOwner: options.packageOwner });
 }
-function installationProfile(port, root) {
-  if (port.port === "uncharted") return port;
-  const file = localSettingsFile(root);
-  return file ? { ...port, settingsFile: file } : port;
+async function prepareInstallation(root, options = {}) {
+  if (options.isBlocked?.(root)) return;
+  if (!compiledLaunchers.candidates(root).length) return;
+  // The established source/collection readers do not need archive analysis.
+  if (installations.runners(root).length || installations.launcherSources(root).length) return;
+  compiledLaunchers.restore(root, options.configs || []);
+  return compiledLaunchers.prepare(root, options);
 }
-function genericPort(root, script) {
-  // Recognize the shared PS4 runner contract, without game titles or exe names.
-  if (!/boot-linked\.bin|--app0/.test(script)) return null;
-  const prefixes = [...new Set([...script.matchAll(/\b([A-Z][A-Z0-9_]*)_GAME_DIR\b/g)].map((match) => match[1]))];
-  if (prefixes.length > 1) return null;
-  let file = localSettingsFile(root);
-  if (!file) {
-    // Only inspect bounded launcher sources for a literal settings directory.
-    // Do not search arbitrary AppData folders or execute the launcher's code.
-    let declarations = script;
-    const directory = path.join(root, "launcher");
-    if (fs.existsSync(directory)) for (const name of fs.readdirSync(directory).filter((name) => /\.py$/i.test(name)).slice(0, 32)) {
-      const source = path.join(directory, name);
-      if (regularFile(source) && fs.statSync(source).size <= 256 * 1024) declarations += "\n" + fs.readFileSync(source, "utf8");
-    }
-    const hints = [...new Set([...declarations.matchAll(/['"]([a-z0-9][a-z0-9._-]*[-_]launcher)['"]/gi)].map((match) => match[1]))];
-    const candidates = hints.map((settings) => settingsFile({ settings })).filter(regularFile);
-    if (candidates.length > 1) throw new Error("Ambiguous PS4 Recomp launcher settings location");
-    file = candidates[0] || "";
-  }
-  if (!prefixes.length && !file && !regularFile(path.join(root, "sce_sys", "param.sfo"))) return null;
-  return { port: "generic", env: prefixes[0] || "", launcher: "", settingsFile: file };
-}
-function installation(root) {
-  try {
-    const stat = fs.lstatSync(root);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
-    const script = runScript(root);
-    if (!script) return null;
-    // Port-owned assets retain existing launcher-location hints. An inherited
-    // game name in a runner comment must not select another port's settings.
-    const assets = PORTS.filter((port) => identityFiles(port).some((relative) => !relative.endsWith("settings.json") && regularFile(path.join(root, relative))));
-    const identified = assets;
-    if (identified.length === 1) return installationProfile(identified[0], root);
-    // Older scripts may not identify the port. An existing named launcher is
-    // optional supporting evidence, never the only installation signature.
-    const names = fs.readdirSync(root);
-    const launchers = PORTS.filter((port) => (!identified.length || identified.includes(port)) &&
-      port.launcher &&
-      names.some((name) => name.toLowerCase() === port.launcher.toLowerCase() && regularFile(path.join(root, name))));
-    if (launchers.length === 1) return installationProfile(launchers[0], root);
-    if (/big2-ps4_Shipping\.elf/.test(script) && /big3-ps4_Shipping\.elf/.test(script)) {
-      return PORTS.find((port) => port.port === "uncharted");
-    }
-    return genericPort(root, script);
-  } catch { return null; }
-}
-function runtimeProcessName(root, env) {
-  const script = runScript(root);
+function runtimeProcessName(root, env, port) {
+  const script = port ? port.script : runScript(root);
   // Read a literal declaration, not arbitrary Python expressions or helpers.
   const expression = script.match(/^\s*probe\s*=\s*([^\r\n]+)/m)?.[1] || "";
   const overrideKey = expression.match(/(?:env|os\.environ)\[['"]([A-Z][A-Z0-9_]*_PROBE)['"]\]/)?.[1];
   if (overrideKey && env[overrideKey]) return path.basename(env[overrideKey]);
-  const literal = expression.match(/find_executable\(\s*['"]([a-z0-9_.-]+)['"]\s*(\+\s*EXE_SUFFIX)?\s*\)/i);
+  let declaration = expression;
+  for (const match of expression.matchAll(/\b([a-z_]\w*)\(\)/gi)) {
+    const body = script.match(new RegExp(`^def ${match[1]}\\([^\\r\\n]*\\):([\\s\\S]*?)(?=^def |$(?![\\s\\S]))`, "m"))?.[1];
+    if (body && /return\s+find_executable\(/.test(body)) declaration = body;
+  }
+  const literal = declaration.match(/find_executable\(\s*['"]([a-z0-9_.-]+)['"]\s*(\+\s*EXE_SUFFIX)?\s*\)/i);
   if (!literal) return "";
   return literal[1] + (literal[2] && process.platform === "win32" ? ".exe" : "");
 }
 function discoveryRootForFile(file) {
   const name = path.basename(file).toLowerCase(), parent = path.dirname(file);
-  if (name === "run.py" || name === "settings.json" && regularFile(path.join(parent, "run.py")) ||
+  if (name === "run.py" || name === "run.sh" || ["settings.json", "launcher.ini"].includes(name) &&
+      (regularFile(path.join(parent, "run.py")) || regularFile(path.join(parent, "run.sh")) || regularFile(path.join(parent, "launcher.ini"))) ||
       PORTS.some((port) => port.launcher.toLowerCase() === name)) return parent;
   if (path.basename(parent).toLowerCase() === "launcher" && (name === "settings.json" || /\.py$/i.test(name) || PORTS.some((port) =>
     identityFiles(port).some((relative) => path.basename(relative).toLowerCase() === name)))) return path.dirname(parent);
+  if (["data", "user"].includes(path.basename(parent).toLowerCase()) && ["settings.json", "launcher.json", "launcher.ini"].includes(name)) return path.dirname(parent);
+  if (name === "trophies.tsv" && /^CUSA\d{5}$/.test(path.basename(parent)) && path.basename(path.dirname(parent)) === "trophies") {
+    // Only associate exports with an actual runner installation, never an
+    // arbitrary Documents/save directory or another platform's TSV.
+    let candidate = path.dirname(path.dirname(parent));
+    for (let depth = 0; depth < 3; depth++, candidate = path.dirname(candidate)) {
+      const directory = trophyDiscoveryDirectory(candidate);
+      if (directory && samePath(directory, path.dirname(parent))) return candidate;
+    }
+  }
   return "";
 }
+function trophyDiscoveryDirectory(root, options = {}) {
+  try {
+    const port = installation(root, options);
+    return port && port.port !== "container" && !collections.collection(port.port) ? path.join(environment(port, root).userRoot, "trophies") : "";
+  } catch { return ""; } // A settings file being rewritten must not abort Folders monitoring.
+}
 function nativeGameRoot(root, isBlocked = () => false) {
+  const prepared = path.join(root, "game", "prepared");
+  if (installations.directory(prepared) && !isBlocked(prepared)) {
+    if (regularFile(path.join(prepared, "sce_sys", "param.sfo"))) return prepared;
+    const entries = fs.readdirSync(prepared, { withFileTypes: true });
+    if (entries.length > 128) throw new Error("PS4 Recomp prepared directory exceeds its discovery limit");
+    const found = entries.filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+      .map((entry) => path.join(prepared, entry.name)).filter((folder) => !isBlocked(folder) && regularFile(path.join(folder, "sce_sys", "param.sfo")));
+    if (found.length > 1) throw new Error("Multiple prepared PS4 game builds; configure game_dir explicitly before importing");
+    if (found.length) return found[0];
+  }
   const queue = [{ directory: root, depth: 0 }], found = [];
   let visited = 0;
   while (queue.length && visited++ < 128) {
@@ -192,26 +183,59 @@ function nativeGameRoot(root, isBlocked = () => false) {
   if (queue.length || found.length > 1) throw new Error("PS4 Recomp game data is ambiguous; set game_dir in the launcher settings");
   return found[0] || "";
 }
+function exportedTrophySource(userRoot, titleId, isBlocked = () => false) {
+  const directory = path.join(userRoot, "trophies");
+  if (isBlocked(directory)) return null;
+  if (/^CUSA\d{5}$/.test(titleId || "")) {
+    const metadataFile = path.join(directory, titleId, "trophies.tsv");
+    return isBlocked(path.dirname(metadataFile)) || isBlocked(metadataFile) ? null : { titleId, metadataFile };
+  }
+  if (!fs.existsSync(directory)) return null;
+  const folders = fs.readdirSync(directory, { withFileTypes: true });
+  if (folders.length > 128) throw new Error("PS4 Recomp trophy discovery exceeded its directory limit");
+  const candidates = folders.filter((entry) => entry.isDirectory() && !entry.isSymbolicLink() && /^CUSA\d{5}$/.test(entry.name))
+    .map((entry) => ({ titleId: entry.name, metadataFile: path.join(directory, entry.name, "trophies.tsv") }))
+    .filter((entry) => !isBlocked(path.dirname(entry.metadataFile)) && !isBlocked(entry.metadataFile) && trophies.tsvMetadata(entry.metadataFile));
+  if (candidates.length > 1) throw new Error("Multiple PS4 Recomp trophy exports found; configure the original game folder to identify the game");
+  return candidates[0] || null;
+}
 function detectGames(root, options = {}) {
-  const port = installation(root);
+  const port = installation(root, options);
   if (!port) return [];
+  if (port.port === "container") return port.children.flatMap((child) => {
+    if (options.isBlocked?.(child)) return [];
+    try { return detectGames(child, { ...options, packageOwner: root }); }
+    catch (error) { options.onError?.({ root: child, error: error.message }); return []; }
+  });
   const cfg = settings(port), resolved = environment(port, root, cfg);
   if (options.isBlocked?.(resolved.userRoot) || resolved.gameRoot && options.isBlocked?.(resolved.gameRoot)) return [];
   const executable = port.launcher && fs.readdirSync(root).find((name) => name.toLowerCase() === port.launcher.toLowerCase() && regularFile(path.join(root, name))) || "";
-  const processName = runtimeProcessName(root, resolved.env);
-  if (port.port === "uncharted") return port.games.map(([game, title, trophySet]) => ({ platform: "ps4recomp", appid: game, game, title, name: title,
+  const processName = runtimeProcessName(root, resolved.env, port);
+  const locations = { logRoot: resolved.logRoot, logFiles: resolved.logFiles, dataRoot: resolved.dataRoot, logDirectories: resolved.logDirectories,
+    settingsFiles: port.settingsFiles || [settingsFile(port)], userId: resolved.userId, hasRunner: port.hasRunner,
+    ...(port.compiledLauncher ? { compiledLauncher: port.compiledLauncher } : {}),
+    ...(port.packageOwner ? { packageOwner: port.packageOwner } : {}) };
+  if (collections.collection(port.port)) return port.games.map(([game, title, trophySet]) => ({ platform: "ps4recomp", appid: game, game, title, name: title,
     port: port.port, installRoot: root, gameRoot: resolved.gameRoot, userRoot: resolved.userRoot,
-    executable, processName, settingsFile: settingsFile(port), trophySet }));
+    ...locations, executable, processName, settingsFile: settingsFile(port), trophySet }));
   const gameRoot = resolved.gameRoot || nativeGameRoot(root, options.isBlocked);
-  if (!gameRoot || options.isBlocked?.(gameRoot)) return [];
-  const set = trophies.nativeSet(gameRoot, root), identity = gameIdentity(gameRoot);
-  if (!set) throw new Error("PS4 Recomp trophy data missing; configure the original game folder and rescan");
-  const appid = (set.npcommid || identity.ps4_recomp_title_id || "").toLowerCase();
+  if (gameRoot && options.isBlocked?.(gameRoot)) return [];
+  const identity = gameIdentity(gameRoot), set = gameRoot ? trophies.nativeSet(gameRoot, root) : null;
+  // A native NP identity alone cannot prove which CUSA export belongs to it.
+  const exported = set && !identity.ps4_recomp_title_id ? null :
+    exportedTrophySource(resolved.userRoot, identity.ps4_recomp_title_id, options.isBlocked);
+  const tsv = exported && trophies.tsvMetadata(exported.metadataFile);
+  if (!gameRoot && !tsv) return [];
+  if (!set && !tsv) throw new Error("PS4 Recomp trophy data missing; configure the original game folder and rescan");
+  const titleId = identity.ps4_recomp_title_id || exported?.titleId || "";
+  const appid = (set?.npcommid || titleId).toLowerCase();
   if (!appid) throw new Error("PS4 Recomp native identity missing: provide npbind.dat or param.sfo");
-  const title = identity.ps4_recomp_title || set.npcommid || identity.ps4_recomp_title_id;
-  return [{ ...identity, platform: "ps4recomp", appid, game: appid, title, name: title, npcommid: set.npcommid,
-    port: port.port, installRoot: root, gameRoot, userRoot: resolved.userRoot, executable, processName,
-    settingsFile: settingsFile(port), trophySet: set.trophySet }];
+  const title = identity.ps4_recomp_title || tsv?.title || set?.npcommid || titleId;
+  const genericExecutables = executables.discover(root, port, { titleId, legacyProcessName: processName });
+  return [{ ...identity, ps4_recomp_title_id: titleId, platform: "ps4recomp", appid, game: appid, title, name: title, npcommid: set?.npcommid || "",
+    port: port.port, installRoot: root, gameRoot, userRoot: resolved.userRoot, logRoot: resolved.logRoot, executable, processName,
+    ...locations, ...genericExecutables, metadataFile: exported?.metadataFile || "", progressFormat: tsv ? "title-unlocks" : "logs",
+    settingsFile: settingsFile(port), trophySet: set?.trophySet ?? 0 }];
 }
 async function discoverGames(root, options = {}) {
   const queue = [{ directory: path.resolve(root), depth: 0 }], games = [], errors = [];
@@ -220,7 +244,8 @@ async function discoverGames(root, options = {}) {
     const { directory, depth } = queue.shift();
     if (options.isBlocked?.(directory)) continue;
     try {
-      const detected = detectGames(directory, options);
+      await prepareInstallation(directory, options);
+      const detected = detectGames(directory, { ...options, onError: (error) => { errors.push(error); options.onError?.(error); } });
       if (detected.length) { games.push(...detected); continue; }
       if (depth < 3) for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         if (entry.isDirectory() && !entry.isSymbolicLink() && !/^(?:bin|_internal|node_modules|\.git|user|sce_sys|out)$/i.test(entry.name)) queue.push({ directory: path.join(directory, entry.name), depth: depth + 1 });
@@ -231,19 +256,24 @@ async function discoverGames(root, options = {}) {
   return { games, errors, truncated: queue.length > 0 };
 }
 function source(config) { return config.ps4_recomp_user_root || path.dirname(config.save_path || ""); }
+function timestampSource(name) { return progressSources.timestampSource(name); }
+function progressFilePath(config, name) {
+  if (path.isAbsolute(name)) return name;
+  return path.join(name === "last_run.log" ? config.ps4_recomp_log_root || source(config) : source(config), name);
+}
 function progressFiles(config) {
-  // Collections require session context; keep their existing log routing.
-  return config.ps4_recomp_port === "uncharted" ? ["last_run.log"] : ["trophies.log", "last_run.log"];
+  return progressSources.files(config).map((file) => {
+    if (samePath(file, path.join(config.ps4_recomp_log_root || source(config), "last_run.log"))) return "last_run.log";
+    return inside(source(config), file) ? path.relative(source(config), file) : file;
+  });
 }
 function progressPath(config) {
-  const root = source(config), names = progressFiles(config);
-  const existing = names.find((name) => regularFile(path.join(root, name)));
-  const saved = path.basename(config.save_path || "");
-  return path.join(root, existing || (names.includes(saved) ? saved : "last_run.log"));
+  try { return progressSources.preferred(config); }
+  catch { return config.save_path || path.join(config.ps4_recomp_log_root || source(config), "last_run.log"); }
 }
-function cacheOptions(config) { return { ps4RecompSource: source(config) }; }
+function cacheOptions(config) { return { ps4RecompSource: config.ps4_recomp_user_id ? path.join(source(config), `.profile-${config.ps4_recomp_user_id}`) : source(config) }; }
 function hash(value) { return crypto.createHash("sha256").update(path.resolve(value).toLowerCase()).digest("hex").slice(0, 16); }
-function cacheScope(config, options = {}) { return hash(options.ps4RecompSource || source(config)); }
+function cacheScope(config, options = {}) { return hash(options.ps4RecompSource || cacheOptions(config).ps4RecompSource); }
 function validSchema(config) {
   const schema = json(path.join(config.config_path || "", "achievements.json"));
   return Array.isArray(schema) && schema.length > 0 && schema.every((entry) => /^\d+$/.test(entry.name) && entry.trophyType && fs.existsSync(path.join(config.config_path, entry.icon)));
@@ -261,9 +291,9 @@ function launchArguments(value, port) {
 function reuseGameIdentity(game, configs) {
   const candidates = configs.filter((config) => config?.platform === "ps4recomp" && samePath(config.ps4_recomp_install_root, game.installRoot));
   let existing = candidates.find((config) => config.appid === game.appid);
-  if (!existing && game.port !== "uncharted") {
+  if (!existing && !collections.collection(game.port)) {
     const matches = candidates.filter((config) => {
-      if (config.ps4_recomp_port === "uncharted") return false;
+      if (!!collections.collection(config.ps4_recomp_port)) return false;
       if (config.ps4_recomp_npcommid && game.npcommid) return config.ps4_recomp_npcommid === game.npcommid;
       if (config.ps4_recomp_title_id && game.ps4_recomp_title_id) return config.ps4_recomp_title_id === game.ps4_recomp_title_id;
       return samePath(config.ps4_recomp_game_root, game.gameRoot);
@@ -273,8 +303,42 @@ function reuseGameIdentity(game, configs) {
   }
   return existing ? { ...game, appid: existing.appid, game: existing.ps4_recomp_game || existing.appid } : game;
 }
+function progressConfig(game, previous = {}) {
+  return { ps4_recomp_port: game.port, ps4_recomp_install_root: game.installRoot,
+    ps4_recomp_user_root: game.userRoot, ps4_recomp_log_root: game.logRoot || game.userRoot,
+    ps4_recomp_data_root: game.dataRoot || game.installRoot,
+    ps4_recomp_log_directories: game.logDirectories || [],
+    ...(game.packageOwner || previous.ps4_recomp_package_owner ? { ps4_recomp_package_owner: game.packageOwner || "" } : {}),
+    ...(game.logFiles?.length || previous.ps4_recomp_log_files?.length ? { ps4_recomp_log_files: game.logFiles || [] } : {}),
+    ps4_recomp_settings_file: game.settingsFile, ps4_recomp_settings_files: game.settingsFiles || [game.settingsFile],
+    ...(game.compiledLauncher || previous.ps4_recomp_compiled_launcher ? { ps4_recomp_compiled_launcher: game.compiledLauncher } : {}),
+    ps4_recomp_progress_format: game.progressFormat || "logs", ps4_recomp_title_id: game.ps4_recomp_title_id,
+    ps4_recomp_npcommid: game.npcommid || previous.ps4_recomp_npcommid || "",
+    ps4_recomp_user_id: game.userId || previous.ps4_recomp_user_id || "" };
+}
+function sameProgressConfig(config, game) {
+  const expected = progressConfig(game, config);
+  return Object.entries(expected).every(([key, value]) => isDeepStrictEqual(config[key], value));
+}
+function currentInstallationMatches(config) {
+  // Monitoring an already imported schema does not require decrypting it
+  // again, or require that its original TRP/TSV files still exist.
+  const root = config.ps4_recomp_install_root, port = installation(root, { configs: [config] });
+  if (!port) return false;
+  const resolved = environment(port, root);
+  if (!samePath(resolved.userRoot, source(config))) return false;
+  if (config.ps4_recomp_log_root && !samePath(resolved.logRoot, config.ps4_recomp_log_root)) return false;
+  if (!!collections.collection(port.port) || !!collections.collection(config.ps4_recomp_port)) return port.port === config.ps4_recomp_port &&
+    port.games.some(([key]) => key === config.ps4_recomp_game) &&
+    ((!resolved.gameRoot && !config.ps4_recomp_game_root) || samePath(resolved.gameRoot, config.ps4_recomp_game_root));
+  const gameRoot = resolved.gameRoot || nativeGameRoot(root);
+  if (!samePath(gameRoot, config.ps4_recomp_game_root) && (gameRoot || config.ps4_recomp_game_root)) return false;
+  const id = gameIdentity(gameRoot).ps4_recomp_title_id;
+  return !id || !config.ps4_recomp_title_id || id === config.ps4_recomp_title_id;
+}
 async function generateConfig(game, configsDir, options = {}) {
   if (options.isCancelled?.()) throw new Error("PS4 Recomp import cancelled");
+  if (!collections.collection(game.port) && game.metadataFile && trophies.tsvMetadata(game.metadataFile)) game = { ...game, progressFormat: "title-unlocks" };
   fs.mkdirSync(configsDir, { recursive: true });
   const configs = fs.readdirSync(configsDir).filter((name) => name.endsWith(".json")).map((file) => ({ file, data: json(path.join(configsDir, file)) }));
   game = reuseGameIdentity(game, configs.map((entry) => entry.data));
@@ -283,7 +347,7 @@ async function generateConfig(game, configsDir, options = {}) {
   // New single-game names come from decrypted native metadata. Reuse this read
   // below, and keep collection titles and existing config filenames stable.
   let imported;
-  if (!previousEntry && game.port !== "uncharted") {
+  if (!previousEntry && !collections.collection(game.port)) {
     imported = await trophies.metadata(game);
     if (imported.title) game = { ...game, title: imported.title, name: imported.title };
   }
@@ -294,7 +358,9 @@ async function generateConfig(game, configsDir, options = {}) {
   let schemaUpdated = false;
   if (!validSchema(previous) || options.force) {
     options.onProgress?.({ phase: "generatingSchema", percent: 20, appid: game.appid, itemName: game.title });
-    const { entries, icons } = imported || await trophies.metadata(game);
+    const metadata = imported || await trophies.metadata(game);
+    const { entries, icons } = metadata;
+    game = { ...game, trophySet: metadata.trophySet ?? game.trophySet, npcommid: metadata.npcommid || game.npcommid || "" };
     const old = new Map((json(path.join(schemaDir, "achievements.json"), []) || []).map((entry) => [entry.name, entry]));
     if (options.isCancelled?.()) throw new Error("PS4 Recomp import cancelled");
     fs.mkdirSync(path.join(schemaDir, "img"), { recursive: true });
@@ -323,37 +389,52 @@ async function generateConfig(game, configsDir, options = {}) {
     });
     if (options.isCancelled?.()) throw new Error("PS4 Recomp import cancelled");
     schemaUpdated = changedWrite(path.join(schemaDir, "achievements.json"), schema);
+  } else if (previous.ps4_recomp_trophy_set !== undefined) {
+    // The decrypted title resolved a collection slot on first import. Its
+    // adapter's initial search order must not overwrite that verified slot.
+    game = { ...game, trophySet: previous.ps4_recomp_trophy_set, npcommid: previous.ps4_recomp_npcommid || game.npcommid || "" };
   }
   const nativePlatinum = schemaHasNativePlatinum(json(path.join(schemaDir, "achievements.json")));
-  const config = { ...previous, ...gameIdentity(game.gameRoot), name: finalName, displayName: game.title, appid: game.appid, platform: "ps4recomp", native_platinum: nativePlatinum,
-    config_path: schemaDir, save_path: progressPath({ ps4_recomp_port: game.port, ps4_recomp_user_root: game.userRoot, save_path: previous.save_path }),
+  const config = { ...previous, ...gameIdentity(game.gameRoot), name: finalName, displayName: previous.displayName || game.title, appid: game.appid, platform: "ps4recomp", native_platinum: nativePlatinum,
+    ...progressConfig(game, previous), config_path: schemaDir, save_path: progressPath(progressConfig(game, previous)),
     ps4_recomp_game: game.game, ps4_recomp_port: game.port, ps4_recomp_install_root: game.installRoot,
     ps4_recomp_game_root: game.gameRoot, ps4_recomp_user_root: game.userRoot, ps4_recomp_settings_file: game.settingsFile,
+    ...(!collections.collection(game.port) ? { ps4_recomp_title_id: game.ps4_recomp_title_id,
+      ps4_recomp_log_root: game.logRoot || game.userRoot, ps4_recomp_progress_format: game.progressFormat || "logs" } : {}),
     ps4_recomp_npcommid: game.npcommid || previous.ps4_recomp_npcommid || "",
     ps4_recomp_trophy_set: game.trophySet,
-    executable: previous.executable || (game.executable ? path.join(game.installRoot, game.executable) : ""),
-    arguments: launchArguments(previous.arguments, game.port),
-    process_name: previous.process_name && previous.process_name !== "bb-probe.exe" ? previous.process_name :
+    // No migration/backfill of existing generic configs. Discovery applies on
+    // first import; explicit user values and older launch contracts survive.
+    ...(!previousEntry && game.runtimeExecutable ? { ps4_recomp_runtime_executable: game.runtimeExecutable } : {}),
+    ...(!previousEntry && game.runtimeExecutables ? { ps4_recomp_runtime_executables: game.runtimeExecutables } : {}),
+    executable: previous.executable || (!previousEntry || game.port !== "generic" ? (game.executable ? path.join(game.installRoot, game.executable) : "") : ""),
+    arguments: launchArguments(previous.arguments ?? game.defaultArguments ?? (game.hasRunner === false ? "" : undefined), game.port),
+    process_name: previousEntry && game.port === "generic" ? previous.process_name || "" : previous.process_name && previous.process_name !== "bb-probe.exe" ? previous.process_name :
       game.processName || previous.process_name || "", language: previous.language || "english" };
   delete config.ps4_recomp_cache_root;
   options.onProgress?.({ phase: "finalizingConfig", percent: 90, appid: game.appid, itemName: game.title });
   const configUpdated = changedWrite(path.join(configsDir, `${finalName}.json`), config);
   return { ...config, config, schemaDir, created: !previousEntry, schemaUpdated, configUpdated };
 }
-function gameFromText(text) {
-  if (/big2(?:-ps4_Shipping\.elf|[\\/].*boot-linked\.bin)/i.test(text)) return "u2";
-  if (/big3(?:-ps4_Shipping\.elf|[\\/].*boot-linked\.bin)/i.test(text)) return "u3";
-  if (/(?:eboot\.bin|[\\/]eboot[\\/].*boot-linked\.bin)/i.test(text)) return "u1";
-  return "";
-}
+function gameFromText(text, port = "uncharted") { return collections.gameFromText(text, port); }
 function matchesProcess(config, entry) {
   if (!config.ps4_recomp_install_root) return false;
   const root = path.resolve(config.ps4_recomp_install_root).toLowerCase();
   const cmd = String(entry.cmd || entry.command || "").toLowerCase();
   const user = /(?:^|\s)--user\s+(?:"([^"]+)"|'([^']+)'|(\S+))/.exec(cmd);
+  if (config.ps4_recomp_port === "generic" && (config.ps4_recomp_runtime_executable || config.ps4_recomp_runtime_executables)) {
+    const runtimes = Array.isArray(config.ps4_recomp_runtime_executables) ? config.ps4_recomp_runtime_executables : [config.ps4_recomp_runtime_executable];
+    const runtime = runtimes.find((file) => typeof file === "string" && path.isAbsolute(file) && inside(root, file) && samePath(executables.commandExecutable(entry), file));
+    if (!runtime ||
+        !getProcessExecutableNames(config.process_name).includes(String(entry.name || "").toLowerCase()) ||
+        !samePath(executables.commandExecutable(entry), runtime)) return false;
+    // These optional arguments refine an exact runtime-path match. A supplied
+    // conflicting game/profile must never select this config.
+    return executables.matchesPathOptions(cmd, { user: source(config), app0: config.ps4_recomp_game_root });
+  }
   if (!getProcessExecutableNames(config.process_name).includes(String(entry.name || "").toLowerCase()) || !cmd.includes(root + path.sep) ||
       !user || !samePath(user[1] || user[2] || user[3], source(config))) return false;
-  return config.ps4_recomp_port !== "uncharted" || gameFromText(cmd) === config.ps4_recomp_game;
+  return !collections.collection(config.ps4_recomp_port) || gameFromText(cmd, config.ps4_recomp_port) === config.ps4_recomp_game;
 }
 function observeRuntimeProcesses(processes) {
   const list = Array.isArray(processes) ? processes : [];
@@ -369,7 +450,7 @@ function updateRuntimeProcesses(processes) {
   if (latestRuntimeInput !== null && latestRuntimeInput !== list) return;
   if (latestRuntimeInput === null) observeRuntimeProcesses(list);
   // Own a stable copy: the native poller can replace its name-only entries.
-  runtimeProcesses = list.filter((entry) => /(?:^|\s)--user\s/.test(String(entry.cmd || entry.command || "")))
+  runtimeProcesses = list.filter((entry) => String(entry.cmd || entry.command || "").trim())
     .map((entry) => ({ ...entry, observedAt: runtimeFirstSeen.get(entry.pid) }));
   const fingerprint = JSON.stringify(runtimeProcesses.map((entry) => [entry.pid, entry.name, entry.cmd || entry.command]).sort((a, b) => a[0] - b[0]));
   if (fingerprint === runtimeFingerprint) return;
@@ -383,10 +464,10 @@ function subscribeRuntimeProcesses(listener) {
 function runtimeIdentity(config) {
   const processes = runtimeProcesses || require("./process-poller").getSnapshot();
   const matches = processes.filter((entry) => (runtimeProcesses === null || runtimeFirstSeen.has(entry.pid)) && matchesProcess({ ...config,
-    ps4_recomp_game: config.ps4_recomp_port === "uncharted" ? gameFromText(String(entry.cmd || "")) : config.ps4_recomp_game }, entry));
+    ps4_recomp_game: !!collections.collection(config.ps4_recomp_port) ? gameFromText(String(entry.cmd || ""), config.ps4_recomp_port) : config.ps4_recomp_game }, entry));
   if (matches.length !== 1) return null;
   const entry = matches[0];
-  return { game: config.ps4_recomp_port === "uncharted" ? gameFromText(entry.cmd) : config.ps4_recomp_game,
+  return { game: !!collections.collection(config.ps4_recomp_port) ? gameFromText(entry.cmd, config.ps4_recomp_port) : config.ps4_recomp_game,
     session: `${entry.pid}:${entry.observedAt || 0}`, observedAt: entry.observedAt || Date.now() };
 }
 function runningGame(config) { return runtimeIdentity(config)?.game || ""; }
@@ -414,11 +495,13 @@ function observeSource(config) {
 function configureCacheStorage(storage) { cacheStorage = storage; }
 function cacheIdentity(config) {
   return { game: String(config.ps4_recomp_game || config.appid || ""),
-    installRoot: path.resolve(config.ps4_recomp_install_root), sourceRoot: path.resolve(source(config)) };
+    installRoot: path.resolve(config.ps4_recomp_install_root), sourceRoot: path.resolve(source(config)),
+    ...(config.ps4_recomp_user_id ? { userId: String(config.ps4_recomp_user_id) } : {}) };
 }
 function validCacheMetadata(config, metadata) {
   if (!metadata || metadata.version !== 1 || metadata.game !== cacheIdentity(config).game ||
       !samePath(metadata.installRoot, config.ps4_recomp_install_root) || !samePath(metadata.sourceRoot, source(config)) ||
+      (metadata.userId || "") !== String(config.ps4_recomp_user_id || "") ||
       !metadata.routing || !metadata.routing.sources || !metadata.routing.unassigned || !metadata.trophies ||
       !Number.isSafeInteger(metadata.routing.updatedAt) || metadata.routing.updatedAt < 0 ||
       [metadata.routing.sources, metadata.routing.unassigned, metadata.trophies].some((value) =>
@@ -471,6 +554,24 @@ function encodeCache(config, snapshot, previous = {}, metadataSource = snapshot)
   }
   return document;
 }
+function cacheCheckpoint(metadata) {
+  if (!metadata) return metadata;
+  const { updatedAt, sources, ...routing } = metadata.routing;
+  return { ...metadata, routing: { ...routing, sources: Object.fromEntries(
+    Object.entries(sources).map(([name, entry]) => {
+      // Keep these observations in memory for truncation/routing detection, but
+      // unrelated output growth does not require a durable checkpoint. A new
+      // record, source generation, owner or missing file still does.
+      const { hash, size, mtimeMs, headLength, headHash, liveChangeAt, ...checkpoint } = entry;
+      return [name, checkpoint];
+    }),
+  ) } };
+}
+function cacheDocumentsEqual(left, right) {
+  const checkpoint = (document) => document && { ...document,
+    ...(document[CACHE_METADATA_KEY] ? { [CACHE_METADATA_KEY]: cacheCheckpoint(document[CACHE_METADATA_KEY]) } : {}) };
+  return isDeepStrictEqual(checkpoint(left), checkpoint(right));
+}
 function readStoredCache(config) {
   const file = cacheStorage.getPath(config);
   if (!fs.existsSync(file)) return {};
@@ -511,7 +612,7 @@ function migrateLegacyCache(config, configs) {
     const trophies = { ...(snapshot[CACHE_METADATA]?.trophies || {}) };
     const keys = [identity.game];
     // Old single-game configs used the port label before native NP identities.
-    if (configs.length === 1 && peer.ps4_recomp_port !== "uncharted") keys.push(peer.ps4_recomp_port);
+    if (configs.length === 1 && !collections.collection(peer.ps4_recomp_port)) keys.push(peer.ps4_recomp_port);
     for (const key of new Set(keys)) {
       if (!Object.hasOwn(legacy.games, key)) continue;
       for (const [id, entry] of Object.entries(legacy.games[key])) {
@@ -569,21 +670,62 @@ function routing(config) {
   return { key, state: routingStates.get(key) };
 }
 
-function logCollector(name) {
+function binaryCollector(name, config) {
+  const chunks = [];
+  let length = 0;
+  return {
+    push(bytes) {
+      length += bytes.length;
+      if (length > 16) throw new Error("Invalid PS4 Recomp binary progress size");
+      chunks.push(Buffer.from(bytes));
+    },
+    finish(target, stat) {
+      if (length !== 16) throw new Error("Incomplete PS4 Recomp binary progress");
+      const match = /^(CUSA\d{5})-user(\d+)\.bin$/.exec(path.basename(name));
+      if (!match || match[1] !== config.ps4_recomp_title_id || config.ps4_recomp_user_id && match[2] !== String(config.ps4_recomp_user_id)) {
+        throw new Error("PS4 Recomp binary progress identity does not match the config");
+      }
+      const schema = json(path.join(config.config_path, "achievements.json"), []);
+      const ids = new Set(schema.map((entry) => Number(entry.name)));
+      if (!ids.size || [...ids].some((id) => !Number.isInteger(id) || id < 0 || id >= 128)) throw new Error("PS4 Recomp schema is incompatible with 128-bit progress");
+      const data = Buffer.concat(chunks), records = [];
+      for (let id = 0; id < 128; id++) if (data.readUInt32LE(Math.floor(id / 32) * 4) & (1 << (id % 32))) {
+        if (!ids.has(id)) throw new Error("PS4 Recomp binary progress contains a trophy outside its schema");
+        records.push({ key: `${id}:1`, id: String(id), context: "", time: 0 });
+      }
+      return { name, hash: crypto.createHash("sha256").update(data).digest("hex"), size: 16, mtimeMs: stat.mtimeMs,
+        identity: `${stat.dev}:${stat.ino}:${stat.birthtimeMs}`, head: data, hasMarkers: false, records };
+    },
+  };
+}
+function logCollector(name, config) {
+  if (progressSources.binarySource(name)) return binaryCollector(name, config);
   const digest = crypto.createHash("sha256"), decoder = new StringDecoder("utf8");
   const records = [], counts = new Map(), head = Buffer.alloc(32768);
-  let headLength = 0, pending = "", context = "", hasMarkers = false;
+  let headLength = 0, pending = "", context = "", hasMarkers = false, lineNumber = 0;
+  const snapshot = progressSources.snapshotSource(name);
   const line = (text) => {
     text = text.replace(/\r$/, "");
-    if (/^(?:Preparing |Switching to |Runtime: SystemService: load executable )/.test(text)) {
-      const next = gameFromText(text);
+    if (snapshot) {
+      lineNumber++;
+      if (lineNumber <= 2) {
+        const expected = lineNumber === 1 ? "DCP-TROPHIES 1" : `npcommid ${String(config.ps4_recomp_npcommid || "").toUpperCase()}`;
+        if (text !== expected) throw new Error("PS4 Recomp progress header does not match the configured NPWR identity");
+        return;
+      }
+      if (text && !/^unlocked \d{1,4} \d+$/.test(text)) throw new Error("Invalid PS4 Recomp trophy progress row");
+    }
+    if (/^(?:Preparing |Switching to |The game started |Runtime: SystemService: load executable )/.test(text)) {
+      const next = gameFromText(text, config.ps4_recomp_port);
       if (next) { context = next; hasMarkers = true; }
     }
-    const match = name === "trophies.log" ? /^(\d{1,4})\s+(\d+)\s*$/.exec(text) : /Runtime: trophy (\d{1,4}) unlocked\b/.exec(text);
+    const match = snapshot ? /^unlocked (\d{1,4}) (\d+)$/.exec(text) : timestampSource(name) ? /^(\d{1,4})\s+(\d+)\s*$/.exec(text) : /(?:Runtime|Trophies): trophy (\d{1,4}) unlocked\b/.exec(text);
     if (!match) return;
     const id = String(Number(match[1])), count = (counts.get(id) || 0) + 1;
     counts.set(id, count);
-    records.push({ key: `${id}:${count}`, id, context, time: name === "trophies.log" ? Number(match[2]) * 1000 : 0 });
+    const time = timestampSource(name) ? Number(match[2]) * 1000 : 0;
+    if (!Number.isSafeInteger(time) || time < 0 || time > 8640000000000000) throw new Error("Invalid native trophy timestamp");
+    records.push({ key: `${id}:${count}`, id, context, time });
   };
   return {
     push(bytes) {
@@ -596,6 +738,9 @@ function logCollector(name) {
       if (pending.length > 8 * 1024 * 1024) throw new Error("PS4 Recomp log contains an oversized unfinished line");
     },
     finish(target, stat) {
+      pending += decoder.end();
+      if (snapshot && pending) line(pending);
+      if (snapshot && lineNumber < 2) throw new Error("Incomplete PS4 Recomp progress header");
       // An unfinished line is deliberately omitted; the next complete read
       // will include it once its newline has been written.
       const hash = digest.digest("hex"), cached = parsedLogs.get(target);
@@ -609,13 +754,13 @@ function logCollector(name) {
 }
 
 async function readProgressLog(config, name) {
-  const target = path.join(source(config), name);
+  const target = progressFilePath(config, name);
   let handle;
   try {
     const pathStat = await fs.promises.lstat(target);
     if (!pathStat.isFile() || pathStat.isSymbolicLink()) throw new Error("Invalid PS4 Recomp log file");
     handle = await fs.promises.open(target, "r");
-    const stat = await handle.stat(), collector = logCollector(name), buffer = Buffer.alloc(65536);
+    const stat = await handle.stat(), collector = logCollector(name, config), buffer = Buffer.alloc(65536);
     if (!stat.isFile()) throw new Error("Invalid PS4 Recomp log file");
     // Each pass starts at zero and reads only the size captured on open.
     // A continuously growing file cannot keep this pass running forever.
@@ -625,7 +770,7 @@ async function readProgressLog(config, name) {
       collector.push(buffer.subarray(0, bytesRead)); position += bytesRead;
     }
     const after = await handle.stat(), current = await fs.promises.lstat(target);
-    if (after.size < stat.size || current.isSymbolicLink() || current.ino !== stat.ino || current.dev !== stat.dev) {
+    if (after.size < stat.size || progressSources.binarySource(name) && (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) || current.isSymbolicLink() || current.ino !== stat.ino || current.dev !== stat.dev) {
       throw new Error("PS4 Recomp log changed during reading");
     }
     return collector.finish(target, stat);
@@ -637,27 +782,28 @@ async function readProgressLog(config, name) {
 
 async function readProgressLogs(config) {
   const files = await Promise.all(progressFiles(config).map((name) => readProgressLog(config, name)));
-  return { files, observedAt: Date.now() };
+  const actual = files.find((entry) => !entry.missing && !entry.error);
+  return { files, observedAt: Date.now(), sourcePath: actual ? progressFilePath(config, actual.name) : "" };
 }
 
 function readProgressLogsSync(config) {
   // Compatibility for unmonitored UI/import reads. Live monitoring always
   // supplies the single asynchronously read source shared by its clients.
   const files = progressFiles(config).map((name) => {
-    const target = path.join(source(config), name);
+    const target = progressFilePath(config, name);
     let fd;
     try {
       const pathStat = fs.lstatSync(target);
       if (!pathStat.isFile() || pathStat.isSymbolicLink()) throw new Error("Invalid PS4 Recomp log file");
       fd = fs.openSync(target, "r");
-      const stat = fs.fstatSync(fd), collector = logCollector(name), buffer = Buffer.alloc(65536);
+      const stat = fs.fstatSync(fd), collector = logCollector(name, config), buffer = Buffer.alloc(65536);
       for (let position = 0; position < stat.size;) {
         const count = fs.readSync(fd, buffer, 0, Math.min(buffer.length, stat.size - position), position);
         if (!count) throw new Error("PS4 Recomp log changed during reading");
         collector.push(buffer.subarray(0, count)); position += count;
       }
       const after = fs.fstatSync(fd), current = fs.lstatSync(target);
-      if (after.size < stat.size || current.isSymbolicLink() || current.ino !== stat.ino || current.dev !== stat.dev) throw new Error("PS4 Recomp log changed during reading");
+      if (after.size < stat.size || progressSources.binarySource(name) && (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs) || current.isSymbolicLink() || current.ino !== stat.ino || current.dev !== stat.dev) throw new Error("PS4 Recomp log changed during reading");
       return collector.finish(target, stat);
     } catch (error) {
       if (error.code === "ENOENT" || error.code === "ENOTDIR") return { name, missing: true };
@@ -697,7 +843,7 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
     const cached = readStoredCache(config);
     const earned = mergeEarned({ ...previous }, cached, schemaIds);
     const trophies = { ...(cached[CACHE_METADATA]?.trophies || {}), ...(previous[CACHE_METADATA]?.trophies || {}) };
-    const collection = config.ps4_recomp_port === "uncharted";
+    const collection = !!collections.collection(config.ps4_recomp_port);
     const remember = (id, time, key, historical, nativeTime) => {
       if (key !== game || !schemaIds.has(id)) return;
       const old = earned[id], flags = trophies[id];
@@ -717,6 +863,18 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
     if (consume) {
       const failed = logRead.files.find((entry) => entry.error);
       if (failed) throw new Error(failed.name + ": " + failed.error);
+      if (!config.ps4_recomp_user_id) {
+        const profileNames = new Set([...Object.keys(state.sources || {}), ...logRead.files.filter((entry) => !entry.missing).map((entry) => entry.name)]
+          .filter((name) => progressSources.snapshotSource(name) || progressSources.binarySource(name)).map(progressSources.profileUser));
+        if (profileNames.size > 1) throw new Error("PS4 Recomp progress user changed; select the intended user ID before monitoring");
+      }
+      if (!collection) {
+        // Earned rows already preserve history. Dated runtime sessions must
+        // not leave a second, ever-growing history of those same trophies.
+        const active = new Set(logRead.files.map((entry) => entry.name));
+        for (const name of Object.keys(state.sources)) if (!active.has(name)) delete state.sources[name];
+        for (const [key, entry] of Object.entries(state.unassigned)) if (!active.has(entry.source)) delete state.unassigned[key];
+      }
       if (!state.sources || typeof state.sources !== "object" || Array.isArray(state.sources) ||
           !state.unassigned || typeof state.unassigned !== "object" || Array.isArray(state.unassigned)) throw new Error("Invalid PS4 Recomp progress sources");
       const identity = collection ? runtimeIdentity(config) : null;
@@ -734,8 +892,14 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
           !inputRecords.has(key) || record.context !== undefined && record.context !== inputRecords.get(key).context);
         const prefixMatches = !current?.headLength || input.head.length >= current.headLength &&
           crypto.createHash("sha256").update(input.head.subarray(0, current.headLength)).digest("hex") === current.headHash;
+        // This launcher opens the shared log with 'w' on each start. Even an
+        // identical first trophy row belongs to a new generation when a new
+        // verified process session and a subsequent source write prove it.
+        const newSessionLog = collections.collection(config.ps4_recomp_port)?.resetLogOnStart && !input.hasMarkers && identity && current?.session &&
+          current.session !== identity.session && input.mtimeMs >= identity.observedAt &&
+          (current.hash !== input.hash || current.mtimeMs !== undefined && current.mtimeMs !== input.mtimeMs);
         const replaced = current && (current.missing || current.identity && current.identity !== input.identity ||
-          input.size < current.size || !prefixMatches || sequenceChanged);
+          input.size < current.size || !prefixMatches || sequenceChanged || newSessionLog);
         if (replaced) {
           for (const [key, record] of Object.entries(current.records || {})) if (!record.game) {
             state.unassigned[name + ":" + current.generation + ":" + key] = { ...record, source: name, generation: current.generation };
@@ -763,7 +927,7 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
           let record = current.records[event.key];
           if (record && record.id !== event.id) throw new Error("PS4 Recomp log changed its recorded trophy sequence");
           if (!record) {
-            const historical = !options.live || name === "trophies.log" && event.time > 0 && event.time < (options.since || 0) - 2000;
+            const historical = !options.live || timestampSource(name) && event.time > 0 && event.time < (options.since || 0) - 2000;
             record = { id: event.id, context: event.context, game: "", time: event.time || (historical ? 0 : logRead.observedAt),
               historical, observedAt: logRead.observedAt, session: identity?.session || current.session || "" };
             current.records[event.key] = record;
@@ -787,7 +951,7 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
           }
         }
         delete current.legacy;
-        Object.assign(current, { identity: input.identity, hash: input.hash, size: input.size, missing: false,
+        Object.assign(current, { identity: input.identity, hash: input.hash, size: input.size, mtimeMs: input.mtimeMs, missing: false,
           headLength: input.head.length, headHash: crypto.createHash("sha256").update(input.head).digest("hex") });
         state.sources[name] = current;
       }
@@ -801,13 +965,13 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
       // game's cache from those old routing records.
       if (input.missing) continue;
       for (const record of Object.values(input.records || {})) {
-        if (record.game) remember(record.id, record.time, record.game, record.historical, name === "trophies.log");
+        if (record.game) remember(record.id, record.time, record.game, record.historical, timestampSource(name));
       }
     }
     for (const record of Object.values(state.unassigned)) {
       const input = state.sources[record.source];
       if (record.game && input && !input.missing && input.generation === record.generation) {
-        remember(record.id, record.time, record.game, record.historical, record.source === "trophies.log");
+        remember(record.id, record.time, record.game, record.historical, timestampSource(record.source));
       }
     }
     if (before !== JSON.stringify(state)) {
@@ -821,14 +985,14 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
     }));
     const metadata = { version: 1, ...cacheIdentity(config), routing: state, trophies };
     snapshot[CACHE_METADATA] = metadata;
-    const cacheChanged = JSON.stringify(cached[CACHE_METADATA]) !== JSON.stringify(metadata);
+    const cacheChanged = !isDeepStrictEqual(cacheCheckpoint(cached[CACHE_METADATA]), cacheCheckpoint(metadata));
     const historicalIds = schema.filter((entry) => trophies[entry.name]?.historical).map((entry) => entry.name);
     const pendingContext = Object.values(state.sources || {}).some((entry) => !entry.missing &&
       Object.values(entry.records || {}).some((record) => !record.game));
     return { valid: true, snapshot, more: false, historicalIds, pendingContext, cacheChanged };
   } catch (error) { return { valid: false, snapshot: previous, error: error.message }; }
 }
-module.exports = { PORTS, settings, settingsFile, environment, installation, identityFiles, discoveryRootForFile, detectGames, discoverGames, generateConfig, validSchema, reuseGameIdentity,
+module.exports = { PORTS, settings, settingsFile, environment, installation, prepareInstallation, forgetInstallation: compiledLaunchers.forget, identityFiles, discoveryRootForFile, trophyDiscoveryDirectory, detectGames, discoverGames, generateConfig, validSchema, reuseGameIdentity,
   source, progressPath, progressFiles, cacheOptions, cacheScope, loadConfigSnapshot, observeSource, samePath, inside, runningGame, matchesProcess,
   launchArguments, observeRuntimeProcesses, updateRuntimeProcesses, subscribeRuntimeProcesses, runtimeIdentity, readProgressLogs,
-  configureCacheStorage, decodeCache, encodeCache };
+  configureCacheStorage, decodeCache, encodeCache, cacheDocumentsEqual, sameProgressConfig, currentInstallationMatches };

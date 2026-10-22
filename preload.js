@@ -776,8 +776,8 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.send("show-test-platinum-notification", options),
   showTestProgressNotification: (options) =>
     ipcRenderer.send("show-test-progress-notification", options),
-  showTestPlaytimeNotification: () =>
-    ipcRenderer.send("show-test-playtime-notification"),
+  showTestPlaytimeNotification: (options = {}) =>
+    ipcRenderer.send("show-test-playtime-notification", options),
   queueAchievementNotification: (data) =>
     ipcRenderer.send("queue-achievement-notification", data),
   queueProgressNotification: (data) =>
@@ -858,6 +858,8 @@ contextBridge.exposeInMainWorld("api", {
   savePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   updatePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   loadPreferences: () => ipcRenderer.invoke("load-preferences"),
+  listNotificationDisplays: () => ipcRenderer.invoke("notification-displays:list"),
+  onNotificationDisplaysChanged: (callback) => subscribeIpc("notification-displays:changed", callback, (_event, payload) => [payload]),
   getDashboardUiState: () => ipcRenderer.sendSync("dashboard:ui-state:load"),
   saveDashboardUiState: (patch) =>
     ipcRenderer.sendSync("dashboard:ui-state:save", patch),
@@ -1055,6 +1057,11 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("startup:get-start-with-windows"),
   getTotalPlaytime: (configName) =>
     ipcRenderer.invoke("playtime:get-total", configName),
+  getLastPlayedSnapshot: () => ipcRenderer.invoke("playtime:last-played"),
+  onLastPlayedUpdate: (callback) =>
+    subscribeIpc("playtime:last-played-updated", callback, (_event, payload) => [payload]),
+  setTotalPlaytime: (configName, totalMs) =>
+    ipcRenderer.invoke("playtime:set-total", { configName, totalMs }),
   setDashboardOpen: (state) => ipcRenderer.invoke("dashboard:set-open", state),
   isDashboardOpen: () => ipcRenderer.invoke("dashboard:is-open"),
   dashboardReady: () => ipcRenderer.send("dashboard:ready"),

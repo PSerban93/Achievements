@@ -67,9 +67,29 @@ function getPlaytimeInfo(configName) {
   };
 }
 
+function getLastPlayedSnapshot() {
+  return Object.fromEntries(Object.entries(readStore()).map(([name, entry]) => {
+    const timestamp = Number(entry?.updatedAt);
+    return [name, Number.isFinite(timestamp) ? Math.max(0, timestamp) : 0];
+  }));
+}
+
+function setPlaytimeTotal(configName, totalMs) {
+  if (!Number.isSafeInteger(totalMs) || totalMs < 0) throw new Error("Invalid playtime total");
+  const key = sanitizeKey(configName), store = readStore();
+  const previous = Object.hasOwn(store, key) ? store[key] : {};
+  // A correction is not a new play session: retain the Last Played timestamp.
+  const updatedAt = Number(previous?.updatedAt) || 0;
+  Object.defineProperty(store, key, { value: { ...previous, totalMs, updatedAt }, enumerable: true, configurable: true, writable: true });
+  writeStore(store);
+  return { totalMs, updatedAt };
+}
+
 module.exports = {
   accumulatePlaytime,
   getPlaytimeTotal,
   getPlaytimeInfo,
+  getLastPlayedSnapshot,
+  setPlaytimeTotal,
   sanitizeConfigName: sanitizeKey,
 };

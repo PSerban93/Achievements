@@ -138,6 +138,7 @@ async function generateConfig(game, configsDir, options = {}) {
       executable: game.launch.executable, arguments: game.launch.arguments, workingDirectory: game.launch.workingDirectory } } : {}),
     config_path: schemaDir, x360_recomp_title_id: game.titleId, x360_recomp_install_root: game.installRoot,
     x360_recomp_adapter: game.adapter, x360_recomp_profile: profile, x360_recomp_profiles: profiles,
+    ...(game.native?.generic ? { x360_recomp_generic: true } : existing?.data.x360_recomp_generic ? { x360_recomp_generic: false } : {}),
     x360_recomp_progress: progress, x360_recomp_source_only: game.sourceOnly === true,
     x360_recomp_cache_root: existing?.data.x360_recomp_cache_root || existing?.data.x360_recomp_install_root || game.installRoot,
     x360_recomp_discovery_roots: game.searchRoots || [],

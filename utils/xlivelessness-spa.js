@@ -241,7 +241,7 @@ function parseXdbf(buffer) {
   if (!Number.isSafeInteger(dataOffset) || dataOffset > buffer.length) {
     throw new Error("XDBF data area is outside the file");
   }
-  const entries = [];
+  const entries = [], warnings = [];
   for (let index = 0; index < entryCount; index += 1) {
     const offset = 24 + index * 18;
     const namespace = readU16BE(buffer, offset, "XDBF namespace");
@@ -249,7 +249,15 @@ function parseXdbf(buffer) {
     const relativeOffset = readU32BE(buffer, offset + 10, "XDBF data offset");
     const length = readU32BE(buffer, offset + 14, "XDBF data length");
     const absoluteOffset = dataOffset + relativeOffset;
-    assertRange(buffer, absoluteOffset, length, "XDBF entry data");
+    try {
+      assertRange(buffer, absoluteOffset, length, "XDBF entry data");
+    } catch (error) {
+      // XLAST source and stats definitions are optional for achievement import.
+      // Never relax validation of achievement, string, title or image data.
+      if (namespace !== 1 || ![0x58535243n, 0x58564332n].includes(id)) throw error;
+      warnings.push(`Skipped invalid optional SPA section ${id === 0x58535243n ? "XSRC" : "XVC2"}`);
+      continue;
+    }
     entries.push({
       namespace,
       id,
@@ -258,7 +266,7 @@ function parseXdbf(buffer) {
       data: buffer.subarray(absoluteOffset, absoluteOffset + length),
     });
   }
-  return { version, entries, dataOffset };
+  return { version, entries, dataOffset, warnings };
 }
 
 function parseXach(buffer) {
@@ -430,7 +438,7 @@ function buildSchemaFromSpa(parsedSpa, options = {}) {
     }
     const iconName = `${achievement.id}.png`;
     return {
-      hidden: (achievement.flags & 0x1) !== 0 ? 1 : 0,
+      hidden: (achievement.flags & 0x8) !== 0 ? 0 : 1,
       displayName,
       description,
       lockedDescription,

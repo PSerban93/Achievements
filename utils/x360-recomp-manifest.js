@@ -5,7 +5,7 @@ const path = require("path");
 const state = require("./x360-recomp-state");
 const { expandPath } = require("./x360-recomp-paths");
 const NAME = "achievements-recomp.json";
-const FORMATS = new Set(["toml", "tsv", "json", "unleashed", "gpd", "json-mapped", "tsv-mapped"]);
+const FORMATS = new Set(["toml", "tsv", "json", "ini-earned", "unleashed", "gpd", "json-mapped", "tsv-mapped"]);
 const TIME_FORMATS = new Set(["unknown", "unix", "unix-ms", "filetime", "iso"]);
 
 function mappingFor(format, value) {

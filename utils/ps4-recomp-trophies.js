@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const zlib = require("zlib");
+const collections = require("./ps4-recomp-collections");
 // Main installs its File compatibility shim before importing web/XML parsers.
 // Keep this lazy because the platform module is registered early at startup.
 const cheerio = { load: (...args) => require("cheerio").load(...args) };
@@ -24,6 +25,35 @@ function bounded(file, max = 16 * 1024 * 1024) {
   const stat = fs.lstatSync(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size > max) throw new Error(`Invalid trophy metadata: ${file}`);
   return fs.readFileSync(file);
+}
+function tsvMetadata(file) {
+  if (!file) return null;
+  try {
+    const entries = [], seen = new Set();
+    let title = "", language = "english";
+    const lines = bounded(file, 4 * 1024 * 1024).toString("utf8").replace(/^\uFEFF/, "").split(/\r?\n/);
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      const fields = line.split("\t");
+      if (fields[0].startsWith("#")) {
+        if (fields[0] === "#title") title = (fields[1] || "").trim();
+        if (fields[0] === "#lang") language = LANG[String(fields[1]).padStart(2, "0")] || "english";
+        continue;
+      }
+      if (fields.length !== 5 || !/^\d{1,4}$/.test(fields[0]) || !GRADES[fields[1].toLowerCase()] ||
+          !/^[01]$/.test(fields[2]) || !fields[3].trim()) return null;
+      const id = String(Number(fields[0]));
+      if (seen.has(id)) return null;
+      seen.add(id);
+      entries.push({ name: id, trophyType: GRADES[fields[1].toLowerCase()], hidden: Number(fields[2]),
+        text: fields[3].trim(), detail: fields[4].trim() });
+    }
+    if (!entries.length) return null;
+    return { title, entries: entries.sort((a, b) => Number(a.name) - Number(b.name)).map(({ text, detail, ...entry }) => ({
+      ...entry, rarity: entry.trophyType, displayName: { [language]: text, english: text },
+      description: { [language]: detail, english: detail },
+    })) };
+  } catch { return null; } // Missing/invalid exports fall back to the native trophy files.
 }
 function xmlEntries(documents) {
   const entries = new Map();
@@ -148,11 +178,13 @@ function nativeSet(gameRoot, installRoot = gameRoot) {
   return { trophySet, npcommid: fs.existsSync(bindFile) ? npBindings(bindFile).get(trophySet) || "" : "" };
 }
 async function metadata(game) {
+  const exported = !collections.collection(game.port) ? tsvMetadata(game.metadataFile) : null;
   const trophyRoot = path.join(game.gameRoot || game.installRoot, "sce_sys", "trophy");
-  if (game.port === "uncharted" && !game.metadataSetVerified) {
+  if (collections.collection(game.port) && !game.metadataSetVerified) {
     // Collection set order can differ between regions. Resolve by the XML's
     // title, never by an assumed trophy00/u1, trophy01/u2 ordering.
-    const expected = { u1: /drake.?s fortune/i, u2: /among thieves/i, u3: /drake.?s deception/i }[game.game];
+    const expected = collections.expectedTitle(game.port, game.game);
+    if (!expected) throw new Error("Unknown PS4 Recomp collection game");
     const exportRoot = path.join(game.installRoot, "TrophyFiles");
     const slots = new Set();
     for (const directory of [trophyRoot, exportRoot]) if (fs.existsSync(directory)) {
@@ -187,15 +219,16 @@ async function metadata(game) {
     const names = fs.readdirSync(trophyRoot), trp = names.find((name) => name.toLowerCase() === `trophy${slot}.trp`);
     if (trp) {
       const bindFile = path.join(game.gameRoot || game.installRoot, "sce_sys", "npbind.dat");
-      const bindings = !documents.length && fs.existsSync(bindFile) ? npBindings(bindFile) : new Map();
+      const bindings = !exported && !documents.length && fs.existsSync(bindFile) ? npBindings(bindFile) : new Map();
       const keyFile = path.join(game.installRoot, "trophy.key");
-      const key = !documents.length && fs.existsSync(keyFile) ? bounded(keyFile, 256).toString("utf8").trim() : PUBLIC_RETAIL_TROPHY_KEY;
+      const key = !exported && !documents.length && fs.existsSync(keyFile) ? bounded(keyFile, 256).toString("utf8").trim() : PUBLIC_RETAIL_TROPHY_KEY;
       if (!/^[a-f0-9]{32}$/i.test(key)) throw new Error("Invalid local trophy.key: expected 32 hexadecimal characters");
-      const contents = trpContents(path.join(trophyRoot, trp), bindings.get(Number(game.trophySet)), key, !documents.length);
+      const contents = trpContents(path.join(trophyRoot, trp), bindings.get(Number(game.trophySet)), key, !exported && !documents.length);
       documents.push(...contents.documents);
       for (const [id, bytes] of contents.icons) if (!icons.has(id)) icons.set(id, bytes);
     }
   }
+  if (exported) return { ...exported, icons, trophySet: game.trophySet };
   if (!documents.length) throw new Error(`PS4 Recomp metadata missing for ${game.title}: provide the original game's trophy data and matching npbind.dat, or decrypted TrophyFiles/trophy${slot}/Xml`);
   if (game.expectedTitle && !documents.some((document) => {
     const $ = cheerio.load(document.text, { xmlMode: true });
@@ -212,7 +245,9 @@ async function metadata(game) {
     title = $("trophyconf > title-name").first().text().trim();
     if (title) break;
   }
-  return { entries, icons, title };
+  const bind = path.join(game.gameRoot || game.installRoot, "sce_sys", "npbind.dat");
+  return { entries, icons, title, trophySet: game.trophySet,
+    npcommid: fs.existsSync(bind) ? npBindings(bind).get(Number(game.trophySet)) || "" : "" };
 }
 function trophyPng(grade, locked = false) {
   // Generic cup, equivalent to the port's launcher icon; no external icon source.
@@ -233,4 +268,4 @@ function trophyPng(grade, locked = false) {
   const header = Buffer.alloc(13); header.writeUInt32BE(size, 0); header.writeUInt32BE(size, 4); header[8] = 8; header[9] = 6;
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk("IHDR", header), chunk("IDAT", zlib.deflateSync(data)), chunk("IEND", Buffer.alloc(0))]);
 }
-module.exports = { metadata, nativeSet, trophyPng };
+module.exports = { metadata, nativeSet, trophyPng, tsvMetadata };

@@ -133,6 +133,26 @@ function watchConfig(config, callbacks = {}) {
     });
     watcher.on("error", (error) => callbacks.onError?.(error.message));
     watchers.push({ watcher, ready: Promise.resolve(true), resolveReady: () => {}, flush: () => {} });
+  } else if (config.x360_recomp_generic === true) {
+    // New profiles remain discoverable after the first source has been bound.
+    // Only the common profiles/<name> progress layout is admitted here.
+    const profileRoot = path.join(config.x360_recomp_install_root, "profiles");
+    const safe = name => state.validProfile(name) && !["__proto__", "constructor", "prototype"].includes(name);
+    const watcher = chokidar.watch(profileRoot, { ignoreInitial: false, followSymlinks: false, depth: 3,
+      ignorePermissionErrors: true, awaitWriteFinish: { stabilityThreshold: 350, pollInterval: 75 },
+      ignored: (file, stat) => {
+        const relative = path.relative(profileRoot, file);
+        if (!relative) return false;
+        const parts = relative.split(path.sep);
+        if (!safe(parts[0]) || parts.length > 3) return true;
+        if (parts.length === 1) return stat ? !stat.isDirectory() : false;
+        if (parts.length === 2 && parts[1].toLowerCase() === "achievements") return stat ? !stat.isDirectory() : false;
+        return !(parts.length === 2 && /^achievements\.(?:ini|json)$/i.test(parts[1]) ||
+          parts.length === 3 && parts[1].toLowerCase() === "achievements" && parts[2].toUpperCase() === `${config.appid}.TOML`);
+      } });
+    const discovery = file => { if (!closing && !closed) callbacks.onDiscovery?.(file); };
+    watcher.on("add", discovery).on("change", discovery).on("error", error => callbacks.onError?.(error.message));
+    watchers.push({ watcher, ready: Promise.resolve(true), resolveReady: () => {}, flush: () => {} });
   }
   const readyPromise = Promise.all(watchers.map((item) => item.ready))
     .then((results) => results.every((ready) => ready === true));

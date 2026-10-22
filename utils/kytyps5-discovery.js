@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const chokidar = require("chokidar");
+const { EventEmitter } = require("events");
 const { readGameIdentity, parseProgressPath } = require("./kytyps5-trophy");
 const { isArchivePath, listTrophyPackages } = require("./kytyps5-game-source");
 
@@ -10,6 +11,23 @@ const MAX_GAME_DISCOVERY_DEPTH = 8;
 const rootEvidence = new Map();
 const lastValidSettings = new Map();
 const pathKey = (value) => process.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value);
+
+function relativeInside(parent, candidate) {
+  const relative = path.relative(pathKey(parent), pathKey(candidate));
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)) ? relative : null;
+}
+
+function excludedSources(options = {}) {
+  return [...new Map((options.getExcludedRoots?.() || options.excludedRoots || [])
+    .filter((source) => typeof source === "string" && path.isAbsolute(source))
+    .map((source) => [pathKey(source), source])).values()];
+}
+
+function isGameSourceActive(root, settings, candidate, options = {}) {
+  return !excludedSources(options).some((source) => relativeInside(source, candidate) != null) &&
+    [root, ...settings.gameRoots].some((source) => relativeInside(source, candidate) != null);
+}
 
 function validUserId(value) {
   return /^\d+$/.test(String(value ?? "")) && Number.isSafeInteger(Number(value)) &&
@@ -95,7 +113,9 @@ function readSettings(root) {
   }
   if (incomplete) return { ...(previous || { filePath, gameRoots: [], configuredGamePaths: [], gameSettings: {}, userId: null }),
     valid: false, pendingFilePath: filePath, error: "Incomplete Kyty game settings" };
-  const result = { filePath, gameRoots: [...new Set([...gameRoots, ...configuredGamePaths])], configuredGamePaths,
+  // Per-game settings are indexed by their exact source path. They are not
+  // launcher library roots and can outlive a moved or removed installation.
+  const result = { filePath, gameRoots: [...new Map(gameRoots.map((source) => [pathKey(source), source])).values()], configuredGamePaths,
     gameSettings, userId: String(Number(configuredUser)), valid: true };
   lastValidSettings.set(pathKey(root), result);
   return result;
@@ -105,18 +125,18 @@ function resolveGameUserId(settings, gamePath) {
   return settings.gameSettings?.[pathKey(gamePath)]?.userId || settings.userId;
 }
 
-async function discoverGames(root, shouldSkip = () => false) {
+async function discoverGames(root, shouldSkip = () => false, options = {}) {
   const settings = readSettings(root);
+  const excluded = excludedSources(options);
   // Process explicit launcher sources first. If both a directory and an
   // archive contain the same PPSA, choose one complete source, never merge them.
-  const stack = [root, ...settings.gameRoots.slice().reverse(),
-    ...settings.configuredGamePaths.slice().reverse()].map((dir) => ({ dir, depth: 0 }));
+  const stack = [root, ...settings.gameRoots.slice().reverse()].map((dir) => ({ dir, depth: 0 }));
   const seen = new Set(), games = new Map(), errors = [];
   let visited = 0;
   while (stack.length && visited < 20000) {
     const { dir, depth } = stack.pop();
     const key = process.platform === "win32" ? dir.toLowerCase() : dir;
-    if (seen.has(key) || shouldSkip(dir)) continue;
+    if (seen.has(key) || excluded.some((source) => relativeInside(source, dir) != null) || shouldSkip(dir)) continue;
     seen.add(key); visited += 1;
     let candidate = false;
     try {
@@ -181,96 +201,146 @@ async function listProgress(root, trophyTitles) {
   return results;
 }
 
-function createDiscoveryWatcher(root, onScan, onError, shouldSkip = () => false) {
+function createDiscoveryWatcher(root, onScan, onError, shouldSkip = () => false, options = {}) {
   const settingsPaths = [path.join(root, "Kyty.ini"),
     path.join(process.env.ProgramData || "C:\\ProgramData", "Kyty", "Kyty.ini")];
-  const trophies = path.join(root, "_Trophies");
-  const saveData = path.join(root, "_SaveData");
-  const archivePaths = new Map();
-  const archiveParents = new Set();
-  const packageDirectories = new Map();
-  const gameDirectories = new Set();
-  const gameRoots = new Map([root, ...readSettings(root).gameRoots]
-    .filter((source) => !shouldSkip(source)).map((source) => [pathKey(source), source]));
-  let watchedSources = new Map(gameRoots);
-  const relativeInside = (parent, candidate) => {
-    const relative = path.relative(pathKey(parent), pathKey(candidate));
-    return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative)) ? relative : null;
-  };
-  const isGameSourceCandidate = (candidate, stat) => {
-    for (const sourceRoot of gameRoots.values()) {
-      const relative = relativeInside(sourceRoot, candidate);
-      if (relative == null) continue;
-      if (!relative) return true;
-      if (stat?.isSymbolicLink?.()) continue;
+  const trophies = path.join(root, "_Trophies"), saveData = path.join(root, "_SaveData");
+  // Keep a stable handle for watched-folders while replacing the underlying
+  // watcher. Unwatching an ancestor in place can also suppress retained children.
+  const watcher = new EventEmitter();
+  let active = null, closed = false, timer = null, refreshDiscovery = false, closing = null;
+  let desired = null, operation = Promise.resolve(), signature = "";
+  let resolveReady;
+  const readyPromise = new Promise((resolve) => { resolveReady = resolve; });
+
+  function makePolicy(games, settings) {
+    const excluded = excludedSources(options);
+    const roots = [...new Map([root, ...settings.gameRoots]
+      .filter((source) => !excluded.some((other) => relativeInside(other, source) != null) && !shouldSkip(source))
+      .map((source) => [pathKey(source), source])).values()];
+    const activeGames = [...games.values()].filter((game) =>
+      roots.some((source) => relativeInside(source, game.gamePath) != null) &&
+      !excluded.some((other) => relativeInside(other, game.gamePath) != null));
+    const gameDirectories = new Set(activeGames.filter((game) => {
+      try { return fs.lstatSync(game.gamePath).isDirectory(); }
+      catch { return !isArchivePath(game.gamePath); }
+    }).map((game) => pathKey(game.gamePath)));
+    const archives = new Set(activeGames.filter((game) => !gameDirectories.has(pathKey(game.gamePath)))
+      .map((game) => pathKey(game.gamePath)));
+    const checkedDirectories = new Map(), checkedMarkers = new Map();
+    const remember = (cache, key, value) => {
+      if (cache.size >= 20000 && !cache.has(key)) cache.delete(cache.keys().next().value);
+      cache.set(key, value); return value;
+    };
+    const blockedDirectory = (directory) => {
+      const key = pathKey(directory);
+      return checkedDirectories.has(key) ? checkedDirectories.get(key)
+        : remember(checkedDirectories, key, shouldSkip(directory));
+    };
+    const hasMetadataDirectory = (directory) => {
+      const key = pathKey(directory);
+      if (!checkedMarkers.has(key)) {
+        let found = false;
+        try { const stat = fs.lstatSync(path.join(directory, "sce_sys")); found = stat.isDirectory() && !stat.isSymbolicLink(); } catch {}
+        remember(checkedMarkers, key, found);
+      }
+      if (checkedMarkers.get(key)) gameDirectories.add(key);
+    };
+    for (const source of roots) hasMetadataDirectory(source);
+    const metadataMember = (relative) => /^(?:sce_sys|sce_sys\/param\.json|sce_sys\/trophy2|sce_sys\/trophy2\/trophy\d{2}\.ucp)$/i.test(relative.split(path.sep).join("/"));
+    const runtimeMember = (candidate, stat) => {
+      const relative = relativeInside(root, candidate);
+      if (relative == null) return null;
       const parts = relative.split(path.sep);
-      if (parts.some((part) => /^(?:[._]|node_modules$|dist$|data$)/i.test(part))) continue;
-      // Traverse launcher containers, but stop at a game's metadata directory.
-      // Game assets/save data are not watched or read on every change.
-      for (let depth = 0; depth < parts.length && depth <= MAX_GAME_DISCOVERY_DEPTH; depth++) {
-        const gamePath = path.join(sourceRoot, ...parts.slice(0, depth));
-        const gameKey = pathKey(gamePath);
-        if (!gameDirectories.has(gameKey) && fs.existsSync(path.join(gamePath, "sce_sys"))) {
-          gameDirectories.add(gameKey);
+      if (/^_savedata$/i.test(parts[0])) {
+        return parts.length === 1 || parts.length === 2 && /^PPSA\d+$/i.test(parts[1]) && !stat?.isFile();
+      }
+      if (/^_trophies$/i.test(parts[0])) {
+        return parts.length === 1 || parts.length === 2 && /^PPSA\d+$/i.test(parts[1]) && !stat?.isFile() ||
+          parts.length === 3 && !!parseProgressPath(candidate) && !stat?.isDirectory();
+      }
+      return null;
+    };
+    const sourceCandidate = (candidate, stat) => {
+      const key = pathKey(candidate);
+      for (const source of roots) {
+        const relative = relativeInside(source, candidate);
+        if (relative == null) continue;
+        if (!relative) return true;
+        const parts = relative.split(path.sep);
+        if (parts.some((part) => /^(?:[._]|node_modules$|dist$|data$)/i.test(part))) continue;
+        // Only directory admission probes sce_sys, once per directory. Rejected
+        // files never perform filesystem checks on all of their ancestors.
+        for (let depth = 0; depth < parts.length; depth++) {
+          if (gameDirectories.has(pathKey(path.join(source, ...parts.slice(0, depth))))) {
+            return metadataMember(parts.slice(depth).join(path.sep));
+          }
         }
-        if (gameDirectories.has(gameKey)) {
-          const member = parts.slice(depth).join("/");
-          return /^(?:sce_sys|sce_sys\/param\.json|sce_sys\/trophy2|sce_sys\/trophy2\/trophy\d{2}\.ucp)$/i.test(member);
+        if (stat?.isFile()) return isArchivePath(candidate) && parts.length <= MAX_GAME_DISCOVERY_DEPTH;
+        if (parts.length > MAX_GAME_DISCOVERY_DEPTH) continue;
+        if (stat?.isDirectory()) {
+          if (path.basename(candidate).toLowerCase() === "sce_sys") {
+            gameDirectories.add(pathKey(path.dirname(candidate)));
+          } else { hasMetadataDirectory(candidate); }
         }
+        return true;
       }
-      if (stat?.isFile()) return isArchivePath(candidate) && parts.length <= MAX_GAME_DISCOVERY_DEPTH;
-      if (parts.length <= MAX_GAME_DISCOVERY_DEPTH) return true;
-    }
-    return false;
-  };
-  // Watching the root detects first creation of _Trophies and _SaveData.
-  const watcher = chokidar.watch([...gameRoots.values(), ...settingsPaths], {
-    // A source at discovery depth 8 still needs sce_sys/trophy2/trophyXX.ucp.
-    // ignored() prunes game assets and keeps runtime storage shallow.
-    ignoreInitial: true, depth: MAX_GAME_DISCOVERY_DEPTH + 3, ignorePermissionErrors: true,
-    followSymlinks: false,
-    awaitWriteFinish: { stabilityThreshold: 350, pollInterval: 100 },
-    ignored: (candidate, stat) => {
-      if (shouldSkip(candidate)) return true;
-      if (archivePaths.has(pathKey(candidate)) || archiveParents.has(pathKey(candidate))) return false;
-      for (const directory of packageDirectories.values()) {
-        const relative = path.relative(directory, candidate);
-        if (!relative || (!relative.includes(path.sep) && /^trophy\d{2}\.ucp$/i.test(relative))) return false;
+      return false;
+    };
+    const ignored = (candidate, stat) => {
+      if (closed || stat?.isSymbolicLink?.()) return true;
+      // Cheap lexical ownership and file-type filters precede physical path
+      // resolution. In particular another port's shader cache is pruned here.
+      if (excluded.some((source) => relativeInside(source, candidate) != null)) return true;
+      const settingsMember = settingsPaths.some((file) => relativeInside(candidate, file) != null);
+      const runtime = runtimeMember(candidate, stat);
+      let wanted = settingsMember || runtime === true || archives.has(pathKey(candidate));
+      if (runtime === false) return true;
+      if (!wanted) {
+        // Chokidar also needs the ancestor corridor for a missing declared root.
+        wanted = !stat?.isFile() && roots.some((source) => relativeInside(candidate, source) != null) ||
+          sourceCandidate(candidate, stat);
       }
-      if (path.relative(root, candidate) === "" || settingsPaths.some((filePath) => {
-        const relative = path.relative(candidate, filePath);
-        return !relative || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
-      })) return false;
-      const relative = path.relative(root, candidate);
-      if (relative.toLowerCase() === "kyty.ini") return false;
-      const parts = relative.split(path.sep);
-      if (parts[0].toLowerCase() === "_savedata") {
-        // Only the storage root and immediate title directories matter for
-        // discovery. Frequent save writes and their nested directories do not.
-        return parts.length > 2 || (parts.length === 2 &&
-          (!/^PPSA\d+$/i.test(parts[1]) || stat?.isFile() === true));
+      if (!wanted) return true;
+      if (!stat) return false; // Chokidar will call again with the actual type.
+      if (stat.isDirectory()) return blockedDirectory(candidate);
+      return blockedDirectory(path.dirname(candidate)) || shouldSkip(candidate);
+    };
+    const invalidate = (candidate, event) => {
+      for (const directory of [candidate, path.dirname(candidate)]) {
+        checkedDirectories.delete(pathKey(directory)); checkedMarkers.delete(pathKey(directory));
       }
-      if (relative === "_Trophies" || relative.startsWith(`_Trophies${path.sep}`)) {
-        return parts.length > 3 || (stat?.isFile() === true && !parseProgressPath(candidate));
+      if (path.basename(candidate).toLowerCase() === "sce_sys") {
+        const parent = pathKey(path.dirname(candidate));
+        if (event === "unlinkDir") gameDirectories.delete(parent);
+        else gameDirectories.add(parent);
       }
-      return !isGameSourceCandidate(candidate, stat);
-    },
-  });
-  let timer = null, closed = false, refreshDiscovery = false;
-  const schedule = (candidate) => {
+    };
+    // Attach to an existing ancestor for a library that has not been created
+    // yet. The predicate admits only its corridor, never sibling subtrees.
+    let depth = MAX_GAME_DISCOVERY_DEPTH + 3;
+    const anchors = [...new Map(roots.map((source) => {
+      let anchor = source;
+      while (!fs.existsSync(anchor) && path.dirname(anchor) !== anchor) anchor = path.dirname(anchor);
+      depth = Math.max(depth, path.relative(anchor, source).split(path.sep).filter(Boolean).length + MAX_GAME_DISCOVERY_DEPTH + 3);
+      return [pathKey(anchor), anchor];
+    })).values()];
+    const sources = [...anchors.filter((source, index) => !anchors.some((other, otherIndex) =>
+      index !== otherIndex && relativeInside(other, source) != null)), ...settingsPaths];
+    return { ignored, invalidate, sources, depth,
+      signature: JSON.stringify([roots.map(pathKey).sort(), sources.map(pathKey).sort(), [...archives].sort(),
+        activeGames.map((game) => pathKey(game.gamePath)).sort(), excluded.map(pathKey).sort(), options.getPolicyKey?.() || ""]) };
+  }
+
+  function schedule(candidate, event, policy) {
+    if (closed) return;
+    const settingsEvent = typeof candidate === "string" && settingsPaths.some((file) => pathKey(file) === pathKey(candidate));
     if (typeof candidate === "string") {
-      const relative = path.relative(root, candidate);
-      const runtimeEvent = /^(?:_SaveData|_Trophies)(?:$|[\\/])/i.test(relative);
-      const settingsEvent = settingsPaths.some((file) => pathKey(file) === pathKey(candidate));
-      const packageEvent = [...packageDirectories.values()].some((directory) => {
-        const member = relativeInside(directory, candidate);
-        return member != null && (!member || /^trophy\d{2}\.ucp$/i.test(member));
-      });
-      const sourceEvent = archivePaths.has(pathKey(candidate)) || packageEvent ||
-        (!runtimeEvent && isGameSourceCandidate(candidate));
-      if (!runtimeEvent && !settingsEvent && !sourceEvent) return;
-      if (settingsEvent || sourceEvent) refreshDiscovery = true;
+      if (event === "addDir" || event === "unlinkDir") policy.invalidate(candidate, event);
+      if (!settingsEvent && policy.ignored(candidate)) return;
+      const relative = relativeInside(root, candidate);
+      const runtimeEvent = relative != null && /^(?:_SaveData|_Trophies)(?:$|[\\/])/i.test(relative);
+      if (!runtimeEvent) refreshDiscovery = true;
     }
     clearTimeout(timer);
     timer = setTimeout(() => {
@@ -278,59 +348,80 @@ function createDiscoveryWatcher(root, onScan, onError, shouldSkip = () => false)
       refreshDiscovery = false;
       if (!closed) Promise.resolve(onScan({ refreshDiscovery: refresh })).catch(onError);
     }, 400);
-  };
-  watcher.on("add", schedule).on("change", schedule).on("addDir", schedule)
-    .on("unlink", schedule).on("unlinkDir", schedule).on("error", onError);
-  let resolveReady;
-  const readyPromise = new Promise((resolve) => {
-    resolveReady = resolve;
-    watcher.once("ready", () => resolve(true));
-    watcher.once("error", () => resolve(false));
-    watcher.once("close", () => resolve(false));
-  });
-  const close = watcher.close.bind(watcher);
-  watcher.close = async () => { closed = true; clearTimeout(timer); resolveReady(false); await close(); };
+  }
+
+  function start(policy) {
+    const inner = chokidar.watch(policy.sources, {
+      ignoreInitial: true, depth: policy.depth,
+      ignorePermissionErrors: true, followSymlinks: false,
+      awaitWriteFinish: { stabilityThreshold: 350, pollInterval: 100 }, ignored: policy.ignored,
+    });
+    let finish;
+    const ready = new Promise((resolve) => { finish = resolve; });
+    const current = { inner, policy, ready, finish: (value) => finish(value) };
+    active = current;
+    for (const event of ["add", "change", "addDir", "unlink", "unlinkDir"]) {
+      inner.on(event, (candidate) => {
+        if (closed || active !== current) return;
+        schedule(candidate, event, policy); watcher.emit(event, candidate);
+      });
+    }
+    inner.on("error", (error) => {
+      finish(false);
+      if (closed || active !== current) return;
+      resolveReady(false);
+      onError(error);
+    });
+    inner.once("close", () => finish(false));
+    inner.once("ready", () => {
+      finish(true);
+      if (closed || active !== current) return;
+      resolveReady(true); watcher.emit("ready");
+    });
+    return current;
+  }
+
+  const initial = makePolicy(new Map(), readSettings(root));
+  signature = initial.signature;
+  start(initial);
   const updateGameSources = (games, settings = readSettings(root)) => {
-    if (closed) return;
-    const next = new Map([...games.values()].filter((game) => isArchivePath(game.gamePath))
-      .map((game) => [pathKey(game.gamePath), game.gamePath]));
-    archivePaths.clear();
-    archiveParents.clear();
-    for (const [key, value] of next) {
-      archivePaths.set(key, value);
-      // Allow the immediate parent for Chokidar's file replacement handling;
-      // its other files/subdirectories remain ignored.
-      archiveParents.add(pathKey(path.dirname(value)));
-    }
-    const nextDirectories = new Map([...games.values()].filter((game) => !isArchivePath(game.gamePath))
-      .map((game) => { const directory = path.join(game.gamePath, "sce_sys", "trophy2"); return [pathKey(directory), directory]; }));
-    packageDirectories.clear();
-    for (const [key, value] of nextDirectories) packageDirectories.set(key, value);
-    gameDirectories.clear();
-    for (const game of games.values()) {
-      if (!isArchivePath(game.gamePath)) gameDirectories.add(pathKey(game.gamePath));
-    }
-    gameRoots.clear();
-    for (const source of [root, ...settings.gameRoots]) {
-      if (!shouldSkip(source)) gameRoots.set(pathKey(source), source);
-    }
-    const nextSources = new Map([...gameRoots, ...archivePaths, ...packageDirectories]);
-    // Do not unwatch a known archive/package that is still covered by a launcher
-    // root: it must remain observable when removed or replaced during a copy.
-    const removedSources = [...watchedSources].filter(([key, source]) =>
-      !nextSources.has(key) && ![...nextSources.values()].some((nextSource) =>
-        relativeInside(nextSource, source) != null || relativeInside(source, nextSource) != null))
-      .map(([, source]) => source);
-    const addedSources = [...nextSources].filter(([key]) => !watchedSources.has(key))
-      .map(([, source]) => source);
-    watchedSources = nextSources;
-    if (removedSources.length) watcher.unwatch(removedSources);
-    if (addedSources.length) watcher.add(addedSources);
-    // Detect switching between portable and shared settings without a restart.
-    watcher.add(settingsPaths);
+    if (closed || !settings.valid) return operation;
+    const next = makePolicy(games, settings);
+    if (next.signature === (desired?.signature || signature)) return operation;
+    desired = next;
+    operation = operation.catch(onError).then(async () => {
+      while (desired && !closed) {
+        const policy = desired; desired = null;
+        const previous = active; active = null;
+        previous?.finish(false);
+        await previous?.inner.close();
+        if (closed) return;
+        signature = policy.signature;
+        const current = start(policy);
+        const ready = await current.ready;
+        // Reconcile once after attachment: files can appear during replacement.
+        if (ready && !closed && active === current) {
+          refreshDiscovery = true;
+          schedule();
+        }
+      }
+    });
+    return operation;
+  };
+  watcher.getWatched = () => active?.inner.getWatched() || {};
+  watcher.close = () => {
+    if (closing) return closing;
+    closed = true; clearTimeout(timer); resolveReady(false);
+    const current = active; active = null; current?.finish(false);
+    closing = (async () => {
+      await current?.inner.close();
+      await operation.catch(() => {});
+      watcher.removeAllListeners();
+    })();
+    return closing;
   };
   return { watcher, readyPromise, trophies, saveData, updateGameSources };
 }
 
 module.exports = { isKytyRoot, emulatorRootForFolder, readSettings, discoverGames,
-  resolveGameUserId, listTrophyTitles, listSaveDataTitles, listProgress, createDiscoveryWatcher };
+  resolveGameUserId, listTrophyTitles, listSaveDataTitles, listProgress, createDiscoveryWatcher, isGameSourceActive };

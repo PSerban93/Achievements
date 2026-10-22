@@ -4,9 +4,9 @@ const fs = require("fs");
 const path = require("path");
 const { parentPort } = require("node:worker_threads");
 const state = require("./x360-recomp-state");
-const { readProgressCandidate, discoverGames, inside } = require("./x360-recomp-discovery");
+const { readProgressCandidate, discoverGames, inside, localProfile } = require("./x360-recomp-discovery");
 
-parentPort.on("message", async ({ requestId, file, explicit, root, configs, blockedPaths, skipExisting }) => {
+parentPort.on("message", async ({ requestId, file, explicit, implicitOwner, root, configs, blockedPaths, skipExisting }) => {
   try {
     if (root) {
       const discovery = await discoverGames(root, { ...explicit, existingConfigs: configs,
@@ -28,6 +28,12 @@ parentPort.on("message", async ({ requestId, file, explicit, root, configs, bloc
       ancestor = parent;
     }
     let item = readProgressCandidate(file);
+    if (item && implicitOwner && inside(implicitOwner.installRoot, file)) {
+      if (item.id && item.id !== implicitOwner.titleId) throw new Error("Local progress TitleID differs from its native installation");
+      item.id ||= implicitOwner.titleId;
+      item.profile = localProfile(implicitOwner.installRoot, file, item.format, item.profile);
+    }
+    if (item && !item.id) item = null;
     if (item && explicit && item.id === explicit.titleId && item.format !== "tsv") {
       item.profile = explicit.profile; item.descriptor = explicit.descriptor;
     }

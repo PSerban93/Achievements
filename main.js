@@ -51,6 +51,24 @@ const CRC32 = require("crc-32");
 const AdmZip = require("adm-zip");
 const SanPresetCapabilities = require("./utils/san-preset-capabilities");
 const NativePresetDimensions = require("./utils/notification-preset-dimensions");
+const NotificationPlacement = require("./utils/notification-placement");
+const { NotificationDisplayService } = require("./utils/notification-display");
+const notificationDisplays = new NotificationDisplayService({
+  screen,
+  getPreference: () => cachedPreferences?.notificationMonitorId || "",
+  changed: (payload) => {
+    broadcastToAll("notification-displays:changed", payload);
+    if (achievementRecorderController && !isQuitting) void syncAchievementRecorderState("display-change");
+  },
+  failed: (error) => windowLogger.warn("notification-displays:enumeration-failed", { error: error.message }),
+});
+function getNotificationDisplay() { return notificationDisplays.resolve().display; }
+function getNotificationCaptureTarget() {
+  if (process.platform !== "win32" && !cachedPreferences?.notificationMonitorId) return null;
+  const { id, captureId, bounds, label } = notificationDisplays.resolve();
+  return { id, captureId, bounds, label };
+}
+ipcMain.handle("notification-displays:list", () => notificationDisplays.payload());
 const {
   applyPendingProfileRestoreSync,
   cleanupProfileRestoreRollbacks,
@@ -223,6 +241,7 @@ const {
 } = require("./utils/schema-parse-coordinator");
 const {
   startPlaytimeLogWatcher,
+  rebasePlaytimeSession,
   cacheHeaderImage,
   redownloadHeaderImage,
 } = require("./utils/playtime-log-watcher");
@@ -2379,6 +2398,7 @@ function resolveShadPs4AchievementCacheUserId(
 }
 
 const DEFAULT_PREFERENCES = {
+  ...NotificationPlacement.defaults(),
   startInTray: false,
   screenshotFolder: getDefaultScreenshotFolder(),
   recordsFolder: getDefaultRecordFolder(),
@@ -2405,6 +2425,7 @@ const DEFAULT_PREFERENCES = {
   mainWindowBounds: null,
   disableAchievementScreenshot: false,
   disableAchievementRecords: true,
+  notificationMonitorId: "",
   enableHdrScreenshots: false,
   notificationClickRedirectEnabled: false,
   notificationClickRedirectTarget: "overlay",
@@ -2549,6 +2570,9 @@ function mergeWithDefaultPreferences(prefs = {}) {
   merged.dashboardCardLayout =
     merged.dashboardCardLayout === "landscape" ? "landscape" : "portrait";
   Object.assign(merged, normalizeTrophyModeThresholds(merged));
+  for (const key of Object.keys(NotificationPlacement.defaults())) {
+    merged[key] = NotificationPlacement.normalizeOffset(merged[key]);
+  }
   return merged;
 }
 
@@ -6947,14 +6971,15 @@ function applyPreferenceSideEffects(
     prefsSnapshot.notificationClickRedirectEnabled !== true
   ) {
     disableActiveAnimatedNotificationNavigation("preferences-disabled");
-    activeNativeAchievementNotifications.releaseAll("preferences-disabled");
+    // Disabling navigation must not discard in-flight native notifications.
     clearNativeWindowsNotificationRoutes("preferences-disabled");
   }
   if (
     Object.prototype.hasOwnProperty.call(patch, "disableAchievementRecords") ||
     Object.prototype.hasOwnProperty.call(patch, "recordFps") ||
     Object.prototype.hasOwnProperty.call(patch, "recordDurationSeconds") ||
-    Object.prototype.hasOwnProperty.call(patch, "enableHdrRecords")
+    Object.prototype.hasOwnProperty.call(patch, "enableHdrRecords") ||
+    Object.prototype.hasOwnProperty.call(patch, "notificationMonitorId")
   ) {
     if (prefsSnapshot.disableAchievementRecords !== false) {
       pendingAchievementRecordQueue.clear("preferences-disabled");
@@ -6963,6 +6988,9 @@ function applyPreferenceSideEffects(
       "preferences:achievement-records",
       prefsSnapshot,
     );
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "notificationMonitorId")) {
+    broadcastToAll("notification-displays:changed", notificationDisplays.payload());
   }
   if (Object.prototype.hasOwnProperty.call(patch, "lumaPlayWatcherEnabled")) {
     try {
@@ -7055,6 +7083,10 @@ function updatePreferences(patch = {}) {
       incoming.recordFps,
       DEFAULT_PREFERENCES.recordFps,
     );
+  }
+  if (Object.prototype.hasOwnProperty.call(incoming, "notificationMonitorId")) {
+    incoming.notificationMonitorId = typeof incoming.notificationMonitorId === "string"
+      ? incoming.notificationMonitorId.trim().slice(0, 2048) : "";
   }
   if (Object.prototype.hasOwnProperty.call(incoming, "recordDurationSeconds")) {
     incoming.recordDurationSeconds = normalizeAchievementRecordDuration(
@@ -7357,6 +7389,7 @@ const DASHBOARD_UI_STATE_VALUES = {
   nameSort: new Set(["off", "asc", "desc"]),
   progressSort: new Set(["off", "asc", "desc"]),
   updatedSort: new Set(["off", "asc", "desc"]),
+  lastPlayedSort: new Set(["off", "asc", "desc"]),
 };
 
 ipcMain.on("dashboard:ui-state:load", (event) => {
@@ -7382,7 +7415,7 @@ ipcMain.on("dashboard:ui-state:save", (event, patch) => {
     return;
   }
   const entries = Object.entries(patch);
-  if (entries.length < 1 || entries.length > 7) {
+  if (entries.length < 1 || entries.length > 9) {
     prefsLogger.warn("dashboard:ui-state:save-rejected", { reason: "size" });
     event.returnValue = false;
     return;
@@ -7393,6 +7426,11 @@ ipcMain.on("dashboard:ui-state:save", (event, patch) => {
       : null;
     const valid =
       allowedValues?.has(value) ||
+      (key === "sortPriority" &&
+        typeof value === "string" &&
+        value.split(",").length === 4 &&
+        new Set(value.split(",")).size === 4 &&
+        value.split(",").every((mode) => ["name", "progress", "updated", "lastPlayed"].includes(mode))) ||
       (key === "collectionFilter" &&
         typeof value === "string" &&
         value.length > 0 &&
@@ -7514,6 +7552,7 @@ async function prepareAchievementRecordOutputPath(gameName, achievementName) {
 }
 
 let achievementRecorderController = null;
+let achievementRecorderSyncRevision = 0;
 let achievementRecorderPipelineStallSamples = 0;
 const ACHIEVEMENT_RECORDER_FINALIZER_TIMEOUT_MS = 120_000;
 let achievementRecorderFinalizerWatchdogTimer = null;
@@ -7876,6 +7915,8 @@ function syncAchievementRecorderState(
   reason = "unknown",
   prefs = cachedPreferences,
 ) {
+  const revision = ++achievementRecorderSyncRevision;
+  const intendedConfig = selectedConfig;
   const preferenceEnabled =
     process.platform === "win32" && prefs?.disableAchievementRecords === false;
   const sessionActive =
@@ -7897,6 +7938,11 @@ function syncAchievementRecorderState(
   const controller = getAchievementRecorderController();
   const timings = getAchievementRecorderTimings(prefs);
   const timingsChanged = controller.updateTimings(timings);
+  const monitorTarget = notificationDisplays.resolve(prefs.notificationMonitorId || "");
+  const monitorId = monitorTarget.captureId;
+  const monitorMode = `${monitorTarget.bounds.width}x${monitorTarget.bounds.height}@${monitorTarget.display.displayFrequency || 0}`;
+  const monitorChanged = controller.monitorId !== monitorId || controller.monitorMode !== monitorMode;
+  const monitorTransitionPending = !!controller.monitorChangePromise;
   recordLogger.info("achievement-recorder:sync", {
     reason,
     enabled,
@@ -7906,10 +7952,17 @@ function syncAchievementRecorderState(
     timings,
     timingsChanged,
   });
-  const operation =
-    enabled && timingsChanged && controller.status.running
+  const operation = (async () => {
+    if (!enabled) return controller.setEnabled(false, reason);
+    await controller.setMonitor(monitorId, monitorMode);
+    // A newer disable/selection/quit must win while the old source drains.
+    if (revision !== achievementRecorderSyncRevision || isQuitting || selectedConfig !== intendedConfig ||
+        !shouldEnableAchievementRecorder({ platform: process.platform, prefs: cachedPreferences,
+          configName: selectedConfig, configMode: selectedConfigMode })) return false;
+    return timingsChanged && !monitorChanged && !monitorTransitionPending && controller.status.running
       ? controller.restart(`${reason}:timings-changed`)
-      : controller.setEnabled(enabled, reason);
+      : controller.setEnabled(true, reason);
+  })();
   return operation.catch((error) => {
     recordLogger.warn("achievement-recorder:sync-failed", {
       reason,
@@ -8656,7 +8709,7 @@ async function saveFullScreenShot(gameName, achDisplayName, options = {}) {
       // The queue may have waited behind another PNG encoder. Revalidate the
       // actual notification frame immediately before starting the helper.
       await options.beforeCapture?.();
-      return captureFullScreenShotInWorker(filePath, { validateFrame: options.beforeCapture });
+      return captureFullScreenShotInWorker(filePath, { validateFrame: options.beforeCapture, monitor: options.monitor });
     },
     {
       gameName,
@@ -8743,6 +8796,7 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
       timeoutMs,
       enableHdrScreenshots: cachedPreferences?.enableHdrScreenshots === true,
       validateFrame: typeof options.validateFrame === "function",
+      monitor: options.monitor || getNotificationCaptureTarget(),
     });
     const cp = fork(script, [payload], {
       stdio: ["ignore", "ignore", "pipe", "ipc"],
@@ -8791,6 +8845,8 @@ function captureFullScreenShotInWorker(outputPath, options = {}) {
         notificationLogger.info("notification:screenshot:capture-backend", {
           backend: message.captureMode || "unknown",
           hdrRequested: message.hdrRequested === true,
+          monitorId: message.monitor?.captureId || message.monitor?.id || null,
+          monitorBounds: message.monitor?.bounds || null,
           ...(message.fallbackError
             ? { fallbackError: String(message.fallbackError).slice(0, 500) }
             : {}),
@@ -14711,6 +14767,11 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         fs.unlinkSync(configPath),
       );
       configFileDeleted = true;
+      if (platform === "ps4recomp") {
+        for (const cachePath of listScopedAchievementCachePaths(safeName, platform)) {
+          ps4RecompCacheWriter.cancel(cachePath);
+        }
+      }
       deletedConfigIdentity = {
         configName: safeName,
         appid,
@@ -16387,15 +16448,23 @@ function scheduleMainWindowStateSave(reason = "window-change") {
 function ensureDisplayMetricsListener() {
   if (displayMetricsListenerAdded) return;
   displayMetricsListenerAdded = true;
+  let monitorRefreshTimer = null;
+  const refreshMonitors = () => {
+    clearTimeout(monitorRefreshTimer);
+    monitorRefreshTimer = setTimeout(() => { void notificationDisplays.refresh(); }, 300);
+  };
   screen.on("display-metrics-changed", () => {
+    refreshMonitors();
     scheduleMainWindowZoomUpdate();
     applyTrayMenuScale();
   });
   screen.on("display-added", () => {
+    refreshMonitors();
     scheduleMainWindowZoomUpdate();
     applyTrayMenuScale();
   });
   screen.on("display-removed", () => {
+    refreshMonitors();
     scheduleMainWindowZoomUpdate();
     applyTrayMenuScale();
   });
@@ -17089,12 +17158,19 @@ function getPlatinumPresetIconPath(presetFolder, presetName = "") {
 function normalizeNotificationScale(rawScale) {
   const scale = Number(rawScale);
   const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
-  const displayScale = screen.getPrimaryDisplay()?.scaleFactor || 1;
+  const displayScale = getNotificationDisplay()?.scaleFactor || 1;
   const effectiveScale = safeScale * displayScale;
   return { scale: safeScale, displayScale, effectiveScale };
 }
 
+function configureNotificationAnimationAnchor(anchor) {
+  for (const [key, value] of Object.entries({ screenX: anchor.x, screenLeft: anchor.x, screenY: anchor.y, screenTop: anchor.y })) {
+    try { Object.defineProperty(window, key, { configurable: true, get: () => value }); } catch {}
+  }
+}
+
 function createNotificationWindow(message) {
+  const targetDisplay = message.__notificationMonitorDisplay || getNotificationDisplay();
   const preset = message.preset || "default";
   const isSanNotification = !!message.sanTheme;
   const { presetFolder } = isSanNotification
@@ -17136,7 +17212,7 @@ function createNotificationWindow(message) {
     y: ay,
     width: aw,
     height: ah,
-  } = screen.getPrimaryDisplay().workArea;
+  } = targetDisplay.workArea;
   const gapX = Math.round(0 * scale);
   const gapY = Math.round(0 * scale);
 
@@ -17195,13 +17271,22 @@ function createNotificationWindow(message) {
   if (position.startsWith("top") || position === "center-top") y -= scaledGutter;
   else if (!position.startsWith("middle")) y += scaledGutter;
 
+  const animationAnchor = { x: x + windowGutter * dimensionScale, y: y + windowGutter * dimensionScale };
+  const placement = NotificationPlacement.read(message.notificationProfile || "main", cachedPreferences, message);
+  ({ x, y } = NotificationPlacement.apply({
+    x, y, width: scaledWidth, height: scaledHeight, position,
+    workArea: { x: ax, y: ay, width: aw, height: ah },
+    insets: { left: scaledGutter, right: scaledGutter, top: scaledGutter, bottom: scaledGutter },
+    ...placement,
+  }));
+
   let nativeViewportFrame = null;
   if (!isSanNotification && windowGutter > 0) {
     const contentX = x + windowGutter * dimensionScale;
     const contentY = y + windowGutter * dimensionScale;
     // Oversized glow envelopes can exceed a monitor at 300% scale. Clip only
     // off-screen paint instead of letting the OS resize/reposition the layout.
-    const bounds = screen.getPrimaryDisplay().bounds;
+    const bounds = targetDisplay.bounds;
     const right = Math.min(x + scaledWidth, bounds.x + bounds.width);
     const bottom = Math.min(y + scaledHeight, bounds.y + bounds.height);
     x = Math.max(x, bounds.x);
@@ -17211,7 +17296,9 @@ function createNotificationWindow(message) {
     nativeViewportFrame = {
       left: (contentX - x) / dimensionScale,
       top: (contentY - y) / dimensionScale,
-      screenX: contentX, screenY: contentY, scale: dimensionScale,
+      screenX: placement.notificationOffsetX || placement.notificationOffsetY ? animationAnchor.x : contentX,
+      screenY: placement.notificationOffsetX || placement.notificationOffsetY ? animationAnchor.y : contentY,
+      scale: dimensionScale,
     };
   }
 
@@ -17259,13 +17346,23 @@ function createNotificationWindow(message) {
   notificationWindow.showInactive();
   windowLogger.info("create-notification-window:load-file", {
     presetHtml,
+    bounds: { x, y, width: scaledWidth, height: scaledHeight },
+    notificationProfile: message.notificationProfile || "main",
+    ...placement,
   });
 
   notificationWindow.webContents.on("did-finish-load", async () => {
     // Navigation restores Chromium's origin zoom; apply the preset scale here.
     if (!isSanNotification) {
       notificationWindow.webContents.setZoomFactor(presetScale);
-      try { await applyNativePresetViewport(notificationWindow, nativeGeometry, nativeViewportFrame); }
+      try {
+        await applyNativePresetViewport(notificationWindow, nativeGeometry, nativeViewportFrame);
+        if (placement.notificationOffsetX || placement.notificationOffsetY) {
+          await notificationWindow.webContents.executeJavaScript(
+            `(${configureNotificationAnimationAnchor.toString()})(${JSON.stringify(animationAnchor)});`,
+          );
+        }
+      }
       catch (error) {
         if (notificationWindow.isDestroyed()) return;
         notificationLogger.warn("notification:layout-viewport-failed", { error: error?.message || String(error) });
@@ -17968,6 +18065,7 @@ ipcMain.on("show-test-notification", (event, options) => {
         : getNotificationTimingPreferences("main", prefs).scale,
     ),
     notificationDuration: options.notificationDuration,
+    ...NotificationPlacement.read("main", prefs, options),
     skipScreenshot: true,
     isTest: true,
   };
@@ -18045,6 +18143,7 @@ ipcMain.on("show-test-rare-notification", (_event, options = {}) => {
         : getNotificationTimingPreferences("rare", prefs).scale,
     ),
     notificationDuration: options.notificationDuration,
+    ...NotificationPlacement.read("rare", prefs, options),
     skipScreenshot: true,
     isTest: true,
     isTestRare: true,
@@ -18129,6 +18228,7 @@ ipcMain.on("show-test-emulator-notification", (_event, options = {}) => {
         : getNotificationTimingPreferences(platform, prefs).scale,
     ),
     notificationDuration: options.notificationDuration,
+    ...NotificationPlacement.read(platform, prefs, options),
     skipScreenshot: true,
     isTest: true,
   });
@@ -18170,6 +18270,7 @@ ipcMain.on("show-test-platinum-notification", (_event, options = {}) => {
         : getNotificationTimingPreferences("platinum", prefs).scale,
     ),
     notificationDuration: options.notificationDuration,
+    ...NotificationPlacement.read("platinum", prefs, options),
     skipScreenshot: true,
     isTest: true,
     testPreset: options.testPreset === true,
@@ -22370,6 +22471,7 @@ function queueAchievementNotification(achievement) {
     notificationDuration: isTest && achievement.notificationDuration != null
       ? Number(achievement.notificationDuration) : timing.duration,
     notificationProfile,
+    ...NotificationPlacement.read(notificationProfile, prefs, isTest ? achievement : null),
     skipScreenshot: resolvedSkipScreenshot,
     isPlatinum,
     isTest,
@@ -22631,7 +22733,7 @@ async function captureAchievementUnlockScreenshot(notificationData = {}, options
       displayName: achName,
       config: notificationData.config_path || null,
     });
-    const saved = await saveFullScreenShot(gameName, achName, options);
+    const saved = await saveFullScreenShot(gameName, achName, { ...options, monitor: options.monitor || getNotificationCaptureTarget() });
     notificationLogger.info("notification:screenshot:success", {
       displayName: achName,
       path: saved,
@@ -23140,6 +23242,89 @@ function invokeNativeWindowsNotificationCallback(callback, ...args) {
   }
 }
 
+function resolveNativeWindowsNotificationIcon(notificationData = {}) {
+  const candidates = [];
+  if (notificationData.isTest !== true) {
+    for (const source of [
+      notificationData.iconPath,
+      notificationData.icon,
+      notificationData.icon_gray,
+    ]) {
+      if (!source) continue;
+      const resolved = resolveIconAbsolutePath(notificationData.config_path, source);
+      // The shared resolver falls back to the app icon. Try both achievement
+      // images before accepting that fallback for a native notification.
+      if (resolved && resolved !== ICON_PNG_PATH && resolved !== ICON_PATH) {
+        candidates.push(resolved);
+      }
+    }
+  }
+  candidates.push(ICON_PATH, ICON_PNG_PATH);
+
+  const cacheDir = path.join(app.getPath("userData"), "native-notification-icons");
+  for (const sourcePath of new Set(candidates)) {
+    try {
+      const stat = fs.statSync(sourcePath);
+      if (!stat.isFile() || stat.size === 0) continue;
+      const extension = path.extname(sourcePath).toLowerCase();
+      const supportedOriginal = [".png", ".jpg", ".jpeg"].includes(extension);
+      const insideAsar = /\.asar[\\/]/i.test(sourcePath);
+      let image = nativeImage.createFromPath(sourcePath);
+      if (image.isEmpty()) {
+        notificationLogger.warn("native-windows-notification:icon-invalid", {
+          sourcePath,
+        });
+        continue;
+      }
+      const fallback = sourcePath === ICON_PATH || sourcePath === ICON_PNG_PATH;
+      // Windows reads the URI itself. Keep ordinary schema images unchanged;
+      // archive members need a physical copy, and other formats need a PNG.
+      if (supportedOriginal && !insideAsar) {
+        return { path: sourcePath, sourcePath, fallback };
+      }
+      const cacheFormat = supportedOriginal ? "original-v1" : "png-256-v1";
+      const key = crypto.createHash("sha256")
+        .update(JSON.stringify([cacheFormat, sourcePath, stat.size, stat.mtimeMs]))
+        .digest("hex");
+      const iconPath = path.join(cacheDir, `${key}${supportedOriginal ? extension : ".png"}`);
+      if (!fs.existsSync(iconPath) || fs.statSync(iconPath).size === 0) {
+        let content;
+        if (supportedOriginal) {
+          content = fs.readFileSync(sourcePath);
+        } else {
+          const size = image.getSize();
+          if (Math.max(size.width, size.height) > 256) {
+            image = image.resize(size.width >= size.height ? { width: 256 } : { height: 256 });
+          }
+          content = image.toPNG();
+        }
+        if (!content.length) continue;
+        fs.mkdirSync(cacheDir, { recursive: true });
+        const tempPath = `${iconPath}.${process.pid}.tmp`;
+        fs.writeFileSync(tempPath, content);
+        fs.renameSync(tempPath, iconPath);
+      }
+      return {
+        path: iconPath,
+        sourcePath,
+        fallback,
+      };
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        notificationLogger.warn("native-windows-notification:icon-prepare-failed", {
+          sourcePath,
+          error: error?.message || String(error),
+        });
+      }
+    }
+  }
+  // A missing or unreadable image must not suppress the notification text.
+  notificationLogger.warn("native-windows-notification:icon-unavailable", {
+    config: notificationData.config_path || null,
+  });
+  return { path: "", sourcePath: "", fallback: true };
+}
+
 function showNativeWindowsAchievementNotification(
   notificationData = {},
   callbacks = {},
@@ -23157,10 +23342,8 @@ function showNativeWindowsAchievementNotification(
     return null;
   }
 
-  const iconPath =
-    notificationData.iconPath && fs.existsSync(notificationData.iconPath)
-      ? notificationData.iconPath
-      : ICON_PATH;
+  const preparedIcon = resolveNativeWindowsNotificationIcon(notificationData);
+  const iconPath = preparedIcon.path;
   const title = notificationData.displayName || (isProgress ? tUi("progress.achievementFallback", {}, "Achievement") : "Achievement");
   const body = isProgress ? notificationData.description || notificationData.configName || "" : [
     notificationData.description || notificationData.configName || "",
@@ -23202,56 +23385,48 @@ function showNativeWindowsAchievementNotification(
       groupId,
       groupTitle: notificationData.configName || "Achievements",
     };
-    if ((hasNavigationRoute && registeredNavigationRoute) || isProgress) {
-      const launchArguments = hasNavigationRoute && registeredNavigationRoute
-        ? encodeNativeWindowsNotificationLaunchArguments({
-            token: notificationId,
-            ...registeredNavigationRoute,
-          })
-        : "";
-      notificationOptions.toastXml = buildNativeWindowsAchievementToastXml({
-        launchArguments,
-        groupId,
-        groupTitle: notificationData.configName || "Achievements",
-        title,
-        body,
-        iconUrl: pathToFileURL(iconPath).toString(),
-        ...(isProgress ? { progress: notificationData.nativeProgress || { value: null } } : {}),
-      });
-    } else {
-      Object.assign(notificationOptions, {
-        title,
-        body,
-        icon: iconPath,
-        silent: true,
-        timeoutType: "default",
-        urgency: "normal",
-      });
-    }
+    const launchArguments = hasNavigationRoute && registeredNavigationRoute
+      ? encodeNativeWindowsNotificationLaunchArguments({
+          token: notificationId,
+          ...registeredNavigationRoute,
+        })
+      : "";
+    notificationOptions.toastXml = buildNativeWindowsAchievementToastXml({
+      launchArguments,
+      groupId,
+      groupTitle: notificationData.configName || "Achievements",
+      includeHeader: !isProgress,
+      title,
+      body,
+      iconUrl: iconPath ? pathToFileURL(iconPath).toString() : "",
+      ...(isProgress ? { progress: notificationData.nativeProgress || { value: null } } : {}),
+    });
 
     nativeNotification = new Notification(notificationOptions);
 
-    if (hasNavigationRoute || isProgress) {
-      activeNativeAchievementNotifications.retain(
-        notificationId,
-        nativeNotification,
-      );
-      notificationLogger.debug(
-        "native-windows-notification:reference-retained",
-        {
-          token: notificationId,
-          retained: activeNativeAchievementNotifications.size,
-          maxEntries: NATIVE_WINDOWS_REFERENCE_MAX_ENTRIES,
-          ttlMs: NATIVE_WINDOWS_REFERENCE_TTL_MS,
-        },
-      );
-    }
+    activeNativeAchievementNotifications.retain(
+      notificationId,
+      nativeNotification,
+    );
+    notificationLogger.debug(
+      "native-windows-notification:reference-retained",
+      {
+        token: notificationId,
+        retained: activeNativeAchievementNotifications.size,
+        maxEntries: NATIVE_WINDOWS_REFERENCE_MAX_ENTRIES,
+        ttlMs: NATIVE_WINDOWS_REFERENCE_TTL_MS,
+      },
+    );
 
     nativeNotification.once("show", () => {
       notificationLogger.info("native-windows-notification:show", {
         displayName: notificationData.displayName,
         type: isProgress ? "progress" : "achievement",
         config: notificationData.config_path || null,
+        iconResolved: iconPath,
+        iconSource: preparedIcon.sourcePath || null,
+        iconFallback: preparedIcon.fallback,
+        customXml: typeof notificationOptions.toastXml === "string",
         groupId,
         navigationEnabled: hasNavigationRoute,
       });
@@ -23287,7 +23462,7 @@ function showNativeWindowsAchievementNotification(
     nativeNotification.once("close", (details) => {
       const reason = details?.reason || null;
       const retainedForActionCenter =
-        hasNavigationRoute && reason === "timedOut";
+        hasNavigationRoute && isNotificationClickRedirectEnabled() && reason === "timedOut";
       if (!retainedForActionCenter) {
         releaseReference(`closed:${reason || "unknown"}`);
       }
@@ -23300,6 +23475,15 @@ function showNativeWindowsAchievementNotification(
         retainedForActionCenter,
       });
       invokeNativeWindowsNotificationCallback(callbacks.onClose, reason);
+    });
+    notificationLogger.debug("native-windows-notification:prepared", {
+      displayName: notificationData.displayName,
+      type: isProgress ? "progress" : "achievement",
+      iconResolved: iconPath || null,
+      iconSource: preparedIcon.sourcePath || null,
+      iconFallback: preparedIcon.fallback,
+      customXml: true,
+      navigationEnabled: hasNavigationRoute,
     });
     nativeNotification.show();
     return nativeNotification;
@@ -23336,9 +23520,11 @@ function showCustomAchievementNotification({
   onFinished,
 }) {
   let notificationWindow = null;
+  const captureTarget = getNotificationCaptureTarget();
+  const targetDisplay = getNotificationDisplay();
   try {
     notificationWindow = createNotificationWindow({
-      ...notificationData, screenshotRequested: shouldScreenshot === true,
+      ...notificationData, screenshotRequested: shouldScreenshot === true, __notificationMonitorDisplay: targetDisplay,
     });
     registerAnimatedNotificationNavigation(
       notificationWindow,
@@ -23364,6 +23550,7 @@ function showCustomAchievementNotification({
       armPendingNotificationScreenshot(
         notificationWindow,
         () => captureAchievementUnlockScreenshot(notificationData, {
+          monitor: captureTarget,
           beforeCapture: async () => {
             const frame = !notificationWindow.isDestroyed() &&
               await notificationWindow.webContents.executeJavaScript(
@@ -23490,6 +23677,8 @@ function processNextNotification() {
     scale: parseFloat(achievement.scale || 1),
     notificationDuration: achievement.notificationDuration,
     notificationProfile: achievement.notificationProfile || "main",
+    notificationOffsetX: achievement.notificationOffsetX,
+    notificationOffsetY: achievement.notificationOffsetY,
     skipScreenshot: !!achievement.skipScreenshot,
     isPlatinum:
       achievement.isPlatinum === true || achievement.__isPlatinum === true,
@@ -23736,6 +23925,11 @@ function processNextNotification() {
     };
     const startNativeFallback = (reason, error = null) => {
       if (nativeFallbackStarted || queueEntryFinished) return;
+      if (nativeShowReceived) {
+        clearNativeCompletionTimer();
+        finishCurrentNotification();
+        return;
+      }
       nativeFallbackStarted = true;
       clearNativeCompletionTimer();
       if (achievement.__gameBarFallbackOnly === true) {
@@ -24185,6 +24379,8 @@ ps4Recomp.configureCacheStorage({
     } catch { return []; }
   }),
 });
+const ps4RecompCacheWriter = require("./utils/achievement-cache-writer")
+  .createAchievementCacheWriter();
 
 function listScopedAchievementCachePaths(configName, platform = "steam") {
   const normalizedPlatform = normalizePlatform(platform) || "steam";
@@ -25006,41 +25202,76 @@ function savePreviousAchievements(
       : ordered;
     const existingDocument = normalizedPlatform === "ps4recomp" && existing
       ? ps4Recomp.encodeCache(readConfigForAchievementCache(configName), existing) : existing;
-    if (existing && deepEqual(existingDocument, document)) {
+    if (existing && (normalizedPlatform === "ps4recomp"
+      ? ps4Recomp.cacheDocumentsEqual(existingDocument, document)
+      : deepEqual(existingDocument, document))) {
       return false;
     }
+    const onSaved = () => {
+      markGameBarWidgetSnapshotDirty("achievement-cache-saved");
+      queueDashboardSummaryReconcile(configName, "achievement-cache-saved");
+      persistenceLogger.info("save-achievement-cache", {
+        config: configName,
+        path: cachePath,
+        steamOfficialAccountId:
+          normalizedPlatform === "steam-official"
+            ? effectiveOptions.accountId || null
+            : null,
+        epicOfficialAccountId:
+          normalizedPlatform === "epic-official"
+            ? effectiveOptions.accountId || null
+            : null,
+        shadps4UserId:
+          normalizedPlatform === "shadps4"
+            ? resolveShadPs4AchievementCacheUserId(
+                configName,
+                normalizedPlatform,
+                effectiveOptions,
+              ) || null
+            : null,
+        xLiveLessNessProfile:
+          normalizedPlatform === "xlivelessness"
+            ? resolveXLiveLessNessAchievementCacheProfile(
+                configName,
+                normalizedPlatform,
+                effectiveOptions,
+              ) || null
+            : null,
+        count: data ? Object.keys(data).length : 0,
+      });
+    };
+    if (normalizedPlatform === "ps4recomp") {
+      const config = readConfigForAchievementCache(configName);
+      const configFile = path.join(configsDir, `${sanitizeConfigName(configName)}.json`);
+      return ps4RecompCacheWriter.save(cachePath, document, {
+        equal: ps4Recomp.cacheDocumentsEqual,
+        merge: (incoming, pending) => ps4Recomp.encodeCache(config,
+          ps4Recomp.decodeCache(config, incoming), ps4Recomp.decodeCache(config, pending)),
+        stillValid: () => {
+          if (!fs.existsSync(configFile)) return false;
+          const current = readConfigForAchievementCache(configName);
+          return normalizePlatform(current?.platform) === "ps4recomp" && current.appid === config.appid &&
+            getCachePath(configName, "ps4recomp", ps4Recomp.cacheOptions(current)) === cachePath;
+        },
+        prepare: (pending) => {
+          const current = readCacheSilent(configName, "ps4recomp", effectiveOptions);
+          if (fs.existsSync(cachePath) && !current) throw new Error("PS4 Recomp cache is invalid; preserving it instead of overwriting progress");
+          return ps4Recomp.encodeCache(config, ps4Recomp.decodeCache(config, pending), current || {});
+        },
+        onSaved,
+        onRetry: (error, retry) => persistenceLogger.warn("save-achievement-cache:retry", {
+          config: configName, path: cachePath, code: error.code, ...retry,
+        }),
+        onError: (error) => {
+          notifyError(tUi("main.notify.cache.writeFailed", { error: error.message }));
+          persistenceLogger.error("save-achievement-cache:error", {
+            config: configName, path: cachePath, code: error.code, error: error.message,
+          });
+        },
+      });
+    }
     writeJsonAtomicSync(cachePath, document);
-    markGameBarWidgetSnapshotDirty("achievement-cache-saved");
-    queueDashboardSummaryReconcile(configName, "achievement-cache-saved");
-    persistenceLogger.info("save-achievement-cache", {
-      config: configName,
-      path: cachePath,
-      steamOfficialAccountId:
-        normalizedPlatform === "steam-official"
-          ? effectiveOptions.accountId || null
-          : null,
-      epicOfficialAccountId:
-        normalizedPlatform === "epic-official"
-          ? effectiveOptions.accountId || null
-          : null,
-      shadps4UserId:
-        normalizedPlatform === "shadps4"
-          ? resolveShadPs4AchievementCacheUserId(
-              configName,
-              normalizedPlatform,
-              effectiveOptions,
-            ) || null
-          : null,
-      xLiveLessNessProfile:
-        normalizedPlatform === "xlivelessness"
-          ? resolveXLiveLessNessAchievementCacheProfile(
-              configName,
-              normalizedPlatform,
-              effectiveOptions,
-            ) || null
-          : null,
-      count: data ? Object.keys(data).length : 0,
-    });
+    onSaved();
     return true;
   } catch (e) {
     notifyError(tUi("main.notify.cache.readFailed", { error: e.message }));
@@ -25792,19 +26023,8 @@ async function monitorAchievementsFile(filePath) {
         if (achievementConfig) {
           const notificationData = {
             name: achievementConfig.name || key,
-            displayName:
-              typeof achievementConfig.displayName === "object"
-                ? achievementConfig.displayName[lang] ||
-                  achievementConfig.displayName.english ||
-                  Object.values(achievementConfig.displayName)[0]
-                : achievementConfig.displayName,
-
-            description:
-              typeof achievementConfig.description === "object"
-                ? achievementConfig.description[lang] ||
-                  achievementConfig.description.english ||
-                  Object.values(achievementConfig.description)[0]
-                : achievementConfig.description,
+            displayName: getSafeLocalizedText(achievementConfig.displayName, lang),
+            description: getSafeLocalizedText(achievementConfig.description, lang),
             hidden: sanTruthy(achievementConfig.hidden),
             icon: achievementConfig.icon,
             icon_gray:
@@ -31217,6 +31437,7 @@ ipcMain.on("tray:action", (_event, action) => {
 });
 
 app.whenReady().then(async () => {
+  await notificationDisplays.refresh();
   if (startupProfileRestoreResult?.recoveryRequired) {
     const restoreDir = path.join(app.getPath("userData"), ".profile-restore");
     dialog.showErrorBox(
@@ -31413,6 +31634,7 @@ app.on("will-quit", () => {
 });
 
 function showProgressNotification(data) {
+  const targetDisplay = getNotificationDisplay();
   const scale = normalizeNotificationScale(
     data?.scale ?? getNotificationTimingPreferences("progress").scale,
   ).scale;
@@ -31421,7 +31643,7 @@ function showProgressNotification(data) {
     config: data?.config_path || null,
     scale,
   });
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const { width, height } = targetDisplay.workAreaSize;
   const progressHtmlPath = resolveProgressTemplatePath();
   let progressWidth = 350;
   let progressHeight = 150;
@@ -31460,7 +31682,7 @@ function showProgressNotification(data) {
     y: ay,
     width: aw,
     height: ah,
-  } = screen.getPrimaryDisplay().workArea;
+  } = targetDisplay.workArea;
   const scaledProgressWidth = Math.ceil(
     progressWidth * (scale > 1 ? scale : 1),
   );
@@ -31517,6 +31739,12 @@ function showProgressNotification(data) {
       y = ay + ah - scaledProgressContentHeight - gapY - centeredPaddingOffsetY;
       break;
   }
+  ({ x, y } = NotificationPlacement.apply({
+    x, y, width: scaledProgressWidth, height: scaledProgressHeight, position,
+    workArea: { x: ax, y: ay, width: aw, height: ah },
+    insets: { top: centeredPaddingOffsetY, bottom: progressAnimationPaddingY - centeredPaddingOffsetY },
+    ...NotificationPlacement.read("progress", cachedPreferences, data?.isTestProgress ? data : null),
+  }));
   const progressWindow = new BrowserWindow({
     width: scaledProgressWidth,
     height: scaledProgressHeight,
@@ -31848,16 +32076,18 @@ ipcMain.on("show-test-progress-notification", (_event, options = {}) => {
     icon: "",
     config_path: "",
     isTestProgress: true,
+    ...NotificationPlacement.read("progress", cachedPreferences, options),
   });
 });
 
-ipcMain.on("show-test-playtime-notification", () => {
+ipcMain.on("show-test-playtime-notification", (_event, options = {}) => {
   createPlaytimeWindow({
     phase: "start",
     displayName: "Achievements",
     description: tUi("playtime.descStart", {}, "Playtime starting!"),
     headerUrl: getRandomTestPlaytimeHeaderUrl(),
     isTestPlaytime: true,
+    ...NotificationPlacement.read("playtime", cachedPreferences, options),
   });
 });
 
@@ -31918,15 +32148,18 @@ function createPlaytimeWindow(playData = {}) {
     x: ax,
     y: ay,
     width: aw,
-  } = require("electron").screen.getPrimaryDisplay().workArea;
+    height: ah,
+  } = getNotificationDisplay().workArea;
   const winWidth = 460;
   const winHeight = 340;
   let playtimeScale = 1;
   let playtimeDurationMs = 0;
+  let playtimePlacement = NotificationPlacement.read("playtime", cachedPreferences, isTestPlaytime ? playData : null);
   try {
     const prefs = fs.existsSync(preferencesPath)
       ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
       : {};
+    playtimePlacement = NotificationPlacement.read("playtime", prefs, isTestPlaytime ? playData : null);
     playtimeScale = getPlaytimeNotificationScale(prefs);
     playtimeDurationMs = Math.round(getNotificationTimingPreferences("playtime", prefs).duration * 1000);
   } catch {}
@@ -31936,8 +32169,11 @@ function createPlaytimeWindow(playData = {}) {
   const scaledWinHeight = Math.ceil(
     winHeight * (playtimeScale > 1 ? playtimeScale : 1),
   );
-  const x = Math.floor(ax + (aw - scaledWinWidth) / 2),
-    y = Math.floor(ay + 40);
+  const { x, y } = NotificationPlacement.apply({
+    x: Math.floor(ax + (aw - scaledWinWidth) / 2), y: Math.floor(ay + 40),
+    width: scaledWinWidth, height: scaledWinHeight, position: "center-top",
+    workArea: { x: ax, y: ay, width: aw, height: ah }, ...playtimePlacement,
+  });
 
   playtimeWindow = new BrowserWindow({
     width: scaledWinWidth,
@@ -38080,7 +38316,28 @@ ipcMain.handle("uplay:steam-appid", async (_evt, appid) => {
 const {
   accumulatePlaytime,
   getPlaytimeInfo,
+  getLastPlayedSnapshot,
+  setPlaytimeTotal,
 } = require("./utils/playtime-store");
+
+ipcMain.handle("playtime:last-played", () => {
+  const snapshot = getLastPlayedSnapshot();
+  const active = require("./utils/playtime-log-watcher").getActiveLastPlayed();
+  for (const [name, timestamp] of Object.entries(active)) {
+    Object.defineProperty(snapshot, name, {
+      value: Math.max(Object.hasOwn(snapshot, name) ? snapshot[name] : 0, timestamp), enumerable: true,
+      configurable: true, writable: true,
+    });
+  }
+  return snapshot;
+});
+
+ipcMain.on("playtime:session-started", (_event, payload = {}) => {
+  broadcastToAll("playtime:last-played-updated", {
+    configName: payload.configName,
+    lastPlayedAt: payload.startedAt,
+  });
+});
 
 ipcMain.on("playtime:session-ended", (_event, payload = {}) => {
   const safeKey = sanitizeConfigName(payload.configName || "");
@@ -38094,11 +38351,33 @@ ipcMain.on("playtime:session-ended", (_event, payload = {}) => {
     totalMs,
     updatedAt,
   });
+  broadcastToAll("playtime:last-played-updated", {
+    configName: payload.configName || "",
+    lastPlayedAt: updatedAt,
+  });
 });
 
 ipcMain.handle("playtime:get-total", async (_event, configName) => {
   const safe = sanitizeConfigName(configName);
   return getPlaytimeInfo(safe);
+});
+
+ipcMain.handle("playtime:set-total", async (_event, payload = {}) => {
+  try {
+    if (typeof payload?.configName !== "string" || !payload.configName.trim() ||
+        !Number.isSafeInteger(payload.totalMs) || payload.totalMs < 0 || !readConfigForAchievementCache(payload.configName)) {
+      return { ok: false };
+    }
+    const configName = sanitizeConfigName(payload.configName);
+    const info = setPlaytimeTotal(configName, payload.totalMs);
+    rebasePlaytimeSession(configName);
+    broadcastToAll("playtime:update", { configName, ...info });
+    requestDashboardRefresh({ mode: "summary", reason: "playtime-edited", configName });
+    return { ok: true, ...info };
+  } catch (error) {
+    uiLogger.warn("playtime:edit-failed", { error: error?.message || String(error) });
+    return { ok: false };
+  }
 });
 
 ipcMain.handle("covers:ui-log", async (_event, payload = {}) => {
@@ -38873,6 +39152,7 @@ app.on("before-quit", (event) => {
   }
   activeProfileBackupWorkers.clear();
   achievementCacheMetaStore.flushSync();
+  ps4RecompCacheWriter.close();
   dashboardSummaryStore.flush().catch(() => {});
   pendingAchievementRecordQueue.clear("app-before-quit");
   achievementRecorderController?.forceStop("app-before-quit");

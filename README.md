@@ -8,7 +8,7 @@ A desktop application built with Electron that monitors running games and displa
 - 🖼️ Game image overlays
 - 📊 Real-time achievement dashboard
 - Steam/Uplay/GOG/Epic emulators, Xbox PC, RetroAchievements, XLiveLessNess, MarkerPatch, MadnessPatch, FINAL FANTASY VII `achievement.dat` and official launcher schema support (auto-detected where possible)
-- PS4 Recomp trophy tracking for compatible Bloodborne, Uncharted: The Nathan Drake Collection, God of War III Remastered and MediEvil ports ([setup and requirements](#ps4-recomp-support))
+- PS4 Recomp trophy tracking for compatible Bloodborne, Uncharted: The Nathan Drake Collection, God of War III Remastered, MediEvil and CTR Nitro-Fueled ports ([setup and requirements](#ps4-recomp-support))
 
 **Platform:** Windows (uses Task Scheduler + Windows paths).
 
@@ -26,6 +26,7 @@ If you’d like to support the project further, you can buy me a coffee on Ko-fi
   - Real-time progress monitoring and updates
   - Supports progress stats from Online-Fix `Stats.ini` and Tenoke `user_stats.ini`
   - Screenshots achievements when unlocked (optional)
+  - Choose the monitor for animated notifications, screenshots and recordings in **Settings → Notifications → Notification Toggles**. If disconnected, the first available monitor is used until the selected monitor reconnects.
   - Records optional achievement clips with selectable 10–30 second duration, 30/60 FPS, and system audio
   - Optional GPU HDR-to-SDR conversion keeps recorded H.264/MP4 clips compatible with standard SDR players
 - **Smart Dashboard**
@@ -444,10 +445,12 @@ RUNE Ubisoft Connect saves are supported as an opt-in watched folder. Add `%USER
 | Project Gotham Racing 4                       | The installed game folder containing `pgr4_recomp.exe` or `pgr4_recompiled.exe` and its game data. The Documents save location follows the executable's application name.                                      |
 | Crackdown 2                                   | The installed game folder containing `crackdown2.exe` and its game data, built with achievement persistence support. Its Documents save location is selected automatically.                                    |
 | Banjo-Kazooie: Nuts & Bolts (reNut)           | The installed game folder containing `renut.exe`. Complete the game's path setup wizard first; Achievements reads the game and save locations from `renut.cfg`.                                                |
+| Lost Odyssey (freefrank)                    | The installed port folder containing `LostOdysseyRecomp.exe`. Imported game data is located through `game-path.txt` or `game/disc1`; unlocks are monitored in `profile/achievements.ini`.                       |
 
 **Important notes:**
 
 - Use a build that saves achievement unlocks. **Skate3Recomp v2.0.2** can import the achievement list, but its unlocks are not saved and cannot produce live notifications in Achievements.
+- Other compatible ReXGlue builds and portable ports using `game-path.txt` with local profile storage can also be detected without a listed executable name. Add the installed port folder after configuring its original game data. Supported progress formats include ReXGlue TOML, `EOTACH1` TSV, compatible achievement JSON and earned-only INI.
 - Supported games can generate a config before the first achievement is unlocked. If the config reports that its unlock source is pending, start the game and unlock an achievement, then rescan if necessary. Live notifications require a recognized save location.
 - The first import generates the achievement schema and retrieves its metadata and achievement icons. After a successful import, changes to game settings, save paths, or player profiles do not rebuild the schema automatically. Use **Folders -> Rescan** for a later rebuild or to retry metadata and icons that failed during the initial import.
 - If the unlock location is not yet confirmed, Achievements watches for compatible progress files in the game folder, Documents and any explicitly configured save location. Once a valid source is found, its path is saved and only its progress directory is monitored. Documents does not need to be added to Folders; adding it separately does not create another X360 Recomp config for the same installation.
@@ -504,17 +507,18 @@ RUNE Ubisoft Connect saves are supported as an opt-in watched folder. Add `%USER
 
 1. Install the port and the game data required by that port.
 2. Select the original game folder in the port's launcher. If you use a custom save folder, configure it there too; Achievements follows the launcher's saved location.
-3. Add the port's installation folder in **Settings → Folders**. Its launcher settings or runner must identify the original game and save locations; adding only the original game dump is insufficient.
+3. Add the port's installation folder in **Settings → Folders**. Its launcher settings or runner must identify the original game and save locations; adding only the original game dump is insufficient. Compatible packaged PyInstaller launchers are also detected without separate Python source files or a Python installation.
 4. Use **Folders → Rescan** if import does not start. Once the required trophy data is available, the config selector and Dashboard show the imported game under **PS4 Recomp**, with its trophy list and trophy icons.
 5. Configure **PS4 Recomp Notification** in the Notifications tab: preset or SAN preset, sound, position, scale and duration. Native Bronze/Silver/Gold grades are preserved. Games with a native Platinum use the dedicated Platinum notification settings; trophy lists without Platinum use the generic completion notification at 100%.
-6. Start the game through its port launcher and unlock a trophy. Keep launcher logging enabled: Achievements reads the port's unlock log to update progress and show notifications.
+6. Start the game through its port launcher and unlock a trophy. Achievements reads the port's saved unlocks or unlock log to update progress and show notifications. Keep logging enabled for ports that only record unlocks in logs.
 
 **Important notes:**
 
-- Trophy lists and original trophy icons are imported from the original game's trophy files and `npbind.dat`, using the built-in public retail trophy key. A local `trophy.key` beside the launcher is optional and overrides that key; decrypted trophy data is also supported. Use **Folders → Rescan** to update an existing import's icons.
-- Uncharted: The Nathan Drake Collection creates one config per game when all three trophy lists are available.
-- Single-game ports using the compatible `run.py` runner and one trophy set do not need a game-specific entry. Achievements reads native trophy metadata and monitors `trophies.log` and `last_run.log`, including files created after import. Other collections require separate support.
-- No executable is required for import or unlock monitoring. Play requires a valid launcher path; process-based playtime requires a runtime name. If locations cannot be read automatically, a local `settings.json` beside `run.py` can specify `game_dir` and `user_dir`.
+- Trophy lists can be read from the port's `trophies.tsv` export or the original game's trophy files and `npbind.dat`, using the built-in public retail trophy key. Original trophy icons come from the game files. A local `trophy.key` beside the launcher is optional and overrides that key; decrypted trophy data is also supported. Use **Folders → Rescan** to update an existing import's icons.
+- Uncharted: The Nathan Drake Collection and PROTOTYPE Biohazard Bundle create one config per game when their original trophy lists are available. Start them through their launchers; progress is kept separate for each game.
+- Single-game ports with one trophy set use shared detection rules for compatible Python/shell runners and native launcher layouts. Supported progress sources include `trophies.log`, `last_run.log`, a log explicitly declared by the launcher, dated session logs, `user/trophies/<TITLE_ID>/unlocked.txt`, `<TITLE_ID>-user<ID>.bin` trophy flags and `user/trophy/<NPWR>/progress_user*.txt`, including files created after import. Keep users separate when several profiles exist. Other collections require separate support.
+- For compatible PORTHEON packages, add the package folder containing `games` and `src`, or an individual port folder. Configure each game's original folder in its launcher first; Achievements follows the package's declared data locations, including locations outside the installation folder.
+- JSON/INI launcher settings identify the game and save locations. If multiple games or users could match, monitoring pauses instead of combining their progress. No executable is required for import or unlock monitoring; Play requires a valid launcher path and process-based playtime requires a runtime name. A local `settings.json` in the port folder can specify `game_dir` and `user_dir` when launcher settings cannot be resolved automatically.
 
 #### KytyPS5 Support
 
@@ -606,7 +610,8 @@ Expected game-side layout:
 - When process command-line detection is available, `-xllnconfig=<path>` is resolved and its containing directory is added as another state root automatically.
 - Multiple executables for the same title ID are kept in one config as process-name alternatives. Profiles keep independent baselines so changing profiles does not create false unlock notifications.
 - Achievement schema languages follow the selection in **Settings -> Advanced -> Achievements Schema Languages** when the embedded SPAFILE contains those localizations.
-- The app only reads the installed executable, XLiveLessNess title config and `achievements.dat`; it does not modify the game or emulator data.
+- Builds that export DLC achievement metadata in `dlc/<TITLEID>/<pack>/Content/spa.bin` are supported. Use **Folders -> Rescan** after installing DLC to add its achievements and images to the existing game config.
+- The app only reads the installed executable, XLiveLessNess title config, DLC metadata and `achievements.dat`; it does not modify the game or emulator data.
 
 #### Steam Launcher Support
 

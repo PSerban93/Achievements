@@ -16,6 +16,7 @@ const {
 const XLIVELESSNESS_PLATFORM = "xlivelessness";
 const XLIVELESSNESS_PROVIDER = "xlivelessness";
 const XLIVELESSNESS_RECORD_SIZE = 16;
+const XLIVELESSNESS_SCHEMA_VERSION = 2;
 const XLIVELESSNESS_MAX_STATE_BYTES = 1024 * 1024;
 const FILETIME_UNIX_EPOCH_MS = 11644473600000n;
 const DISCOVERY_MAX_DEPTH = 5;
@@ -253,6 +254,7 @@ function deserializeWorkerSpa(serializedSpa = {}) {
     titleNames: new Map(
       Array.isArray(serializedSpa.titleNames) ? serializedSpa.titleNames : [],
     ),
+    warnings: serializedSpa.warnings || [],
   };
 }
 
@@ -278,6 +280,7 @@ function serializeWorkerSpa(parsedSpa = {}, options = {}) {
     titleNames: Array.from(
       parsedSpa.titleNames instanceof Map ? parsedSpa.titleNames : [],
     ),
+    warnings: parsedSpa.warnings || [],
   };
 }
 
@@ -1199,7 +1202,7 @@ function parseAchievementsDatBuffer(buffer, previousSnapshot = {}) {
 }
 
 function readXLiveLessNessSnapshot(filePath, previousSnapshot = {}) {
-  if (!filePath || !isFile(filePath)) {
+  if (!filePath) {
     return {
       valid: false,
       reason: "state-file-missing",
@@ -1208,6 +1211,11 @@ function readXLiveLessNessSnapshot(filePath, previousSnapshot = {}) {
     };
   }
   try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size > XLIVELESSNESS_MAX_STATE_BYTES) {
+      return { valid: false, reason: stat.isFile() ? "state-too-large" : "state-not-file",
+        filePath, snapshot: previousSnapshot || {} };
+    }
     return {
       ...parseAchievementsDatBuffer(fs.readFileSync(filePath), previousSnapshot),
       filePath,
@@ -1216,7 +1224,8 @@ function readXLiveLessNessSnapshot(filePath, previousSnapshot = {}) {
   } catch (error) {
     return {
       valid: false,
-      reason: "state-file-read-failed",
+      reason: ["ENOENT", "ENOTDIR"].includes(error?.code) ? "state-file-missing" : "state-file-read-failed",
+      code: error?.code || "",
       filePath,
       error: error?.message || String(error),
       snapshot: previousSnapshot || {},
@@ -1292,16 +1301,16 @@ async function chooseConfigPathAsync(configsDir, displayName, titleId) {
   return { name: fallback, filePath: path.join(configsDir, `${fallback}.json`) };
 }
 
-async function copySpaImagesAsync(parsedSpa, schemaDir, concurrency = 4) {
+async function copySpaImagesAsync(images, schemaDir, concurrency = 4) {
   const imagesDir = path.join(schemaDir, "img");
   await fs.promises.mkdir(imagesDir, { recursive: true });
   const jobs = [];
-  for (const achievement of parsedSpa.achievements) {
-    const image = parsedSpa.images.get(achievement.imageId);
-    if (!image) continue;
+  for (const [id, imageBytes] of images) {
+    if (!/^\d{1,5}$/.test(String(id))) throw new Error("Invalid XLiveLessNess schema image ID");
+    const image = Buffer.from(imageBytes);
     jobs.push({
       image,
-      destination: path.join(imagesDir, `${achievement.id}.png`),
+      destination: path.join(imagesDir, `${id}.png`),
     });
   }
   let nextIndex = 0;
@@ -1431,9 +1440,46 @@ function findActiveState(previous, storageRoots, titleId) {
   return { active, candidates };
 }
 
+async function listDlcSpaFiles(storageRoots, titleId) {
+  const result = [], seen = new Set();
+  const directoryExists = async (directory) => {
+    try {
+      const stat = await fs.promises.lstat(directory);
+      return stat.isDirectory() && !stat.isSymbolicLink();
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR"].includes(error.code)) return false;
+      throw error;
+    }
+  };
+  for (const root of storageRoots) {
+    const dlcRoot = path.join(root, "dlc"), titleRoot = path.join(dlcRoot, titleId);
+    if (!await directoryExists(dlcRoot) || !await directoryExists(titleRoot)) continue;
+    const packs = await fs.promises.readdir(titleRoot, { withFileTypes: true });
+    if (packs.length > 512) throw new Error("XLiveLessNess DLC directory limit exceeded");
+    for (const pack of packs.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!pack.isDirectory() || pack.isSymbolicLink()) continue;
+      const content = path.join(titleRoot, pack.name, "Content");
+      if (!await directoryExists(content)) continue;
+      const file = path.join(content, "spa.bin");
+      try {
+        const stat = await fs.promises.lstat(file);
+        if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      } catch (error) {
+        if (["ENOENT", "ENOTDIR"].includes(error.code)) continue;
+        throw error;
+      }
+      const key = normalizePathForComparison(file);
+      if (seen.has(key)) continue;
+      seen.add(key); result.push(file);
+      if (result.length > 128) throw new Error("XLiveLessNess DLC SPA file limit exceeded");
+    }
+  }
+  return result;
+}
+
 async function ensureXLiveLessNessConfig(options = {}) {
   const game = options.game;
-  if (!game?.titleId || !game?.spa || !Array.isArray(game?.executables)) {
+  if (!/^[0-9A-F]{8}$/i.test(game?.titleId || "") || !game?.spa || !Array.isArray(game?.executables)) {
     throw new Error("A validated XLiveLessNess game detection is required");
   }
   const configsDir = path.resolve(String(options.configsDir || ""));
@@ -1544,6 +1590,7 @@ async function ensureXLiveLessNessConfig(options = {}) {
     ),
   ).sort();
   const needsSchemaRefresh =
+    options.forceSchemaRefresh === true ||
     previous.xlln_resource_fingerprint !== fingerprint ||
     JSON.stringify(previous.xlln_schema_languages_selection || []) !==
       JSON.stringify(requestedLanguages) ||
@@ -1551,16 +1598,48 @@ async function ensureXLiveLessNessConfig(options = {}) {
   let schemaLanguages = Array.isArray(previous.schema_languages)
     ? previous.schema_languages
     : [];
+  let dlcSources = previous.xlln_dlc_schema_sources || [];
+  let achievementCount = previous.xlln_schema_achievement_count || game.spa.achievements.length;
+  let metadataWarnings = game.spa.warnings || [];
   if (needsSchemaRefresh) {
+    // Only first import, changed base metadata or explicit
+    // Rescan enumerate DLC metadata. Live unlocks never regenerate a schema.
+    const packFiles = await listDlcSpaFiles(storageRoots, game.titleId);
     const built = await runXLiveLessNessWorker({
       operation: "build-schema",
       spa: serializeWorkerSpa(game.spa),
       schemaLanguages: requestedLanguages,
+      packFiles, titleId: game.titleId,
     });
+    // Rescan updates definitions without losing a user's refreshed rarity.
+    let oldSchema = [];
+    try { oldSchema = JSON.parse(await fs.promises.readFile(schemaPath, "utf8")); } catch (error) {
+      if (error.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+    }
+    const oldEntries = new Map((Array.isArray(oldSchema) ? oldSchema : []).filter((entry) =>
+      entry && typeof entry.name === "string").map((entry) => [entry.name, entry]));
+    for (const entry of built.schema) {
+      const old = oldEntries.get(entry.name);
+      if (Number.isFinite(old?.rarityPct)) {
+        entry.rarityPct = old.rarityPct;
+        if (old.raritySource !== undefined) entry.raritySource = old.raritySource;
+      }
+    }
     await fs.promises.mkdir(schemaDir, { recursive: true });
-    await copySpaImagesAsync(game.spa, schemaDir);
+    // Base images are already held here; do not copy them into and back out
+    // of the worker. Only the newly imported DLC images cross that boundary.
+    const images = new Map();
+    for (const entry of game.spa.achievements) {
+      const bytes = game.spa.images.get(entry.imageId);
+      if (bytes) images.set(String(entry.id), bytes);
+    }
+    for (const [id, bytes] of built.images) images.set(id, bytes);
+    await copySpaImagesAsync(images, schemaDir);
     await writeJsonAtomic(schemaPath, built.schema);
     schemaLanguages = built.languages;
+    dlcSources = built.sources;
+    achievementCount = built.schema.length;
+    metadataWarnings = built.warnings;
   }
   const activeFile = active?.filePath || "";
   const config = {
@@ -1594,6 +1673,9 @@ async function ensureXLiveLessNessConfig(options = {}) {
     xlln_active_state_file: activeFile || previous.xlln_active_state_file || "",
     xlln_detected_executables: detectedExecutables,
     xlln_resource_fingerprint: fingerprint,
+    xlln_schema_version: needsSchemaRefresh ? XLIVELESSNESS_SCHEMA_VERSION : previous.xlln_schema_version || 1,
+    xlln_schema_achievement_count: achievementCount,
+    xlln_dlc_schema_sources: dlcSources,
     xlln_schema_languages_selection: requestedLanguages,
     schema_languages: schemaLanguages,
     achievement_source: {
@@ -1622,6 +1704,8 @@ async function ensureXLiveLessNessConfig(options = {}) {
     activeStateFile: activeFile,
     stateFiles: candidates,
     config,
+    metadataWarnings,
+    achievementCount,
   };
 }
 

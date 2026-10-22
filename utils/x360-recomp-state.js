@@ -192,6 +192,25 @@ function parseJsonState(file) {
   return { entries, titleId: id, title: typeof doc.title === "string" ? doc.title : "" };
 }
 
+// An earned-only INI is a snapshot, not metadata. Use it only through an
+// explicit descriptor established by a port or manifest, never by extension.
+function parseEarnedIni(file) {
+  const text = readStateText(file).replace(/^\uFEFF/, "");
+  if (!/^\s*#\s*Achievements earned:\s*id=unix time\s*$/im.test(text)) throw new Error("Missing earned achievement INI header");
+  const snapshot = {};
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim() || /^\s*[#;]/.test(line)) continue;
+    const match = /^\s*(\d+)\s*=\s*(\d+)\s*$/.exec(line);
+    if (!match) throw new Error("Incomplete earned achievement INI entry");
+    const id = achievementId(match[1]), seconds = Number(match[2]);
+    if (!Number.isSafeInteger(seconds) || seconds <= 0 || seconds > 253402300799 || Object.hasOwn(snapshot, id)) {
+      throw new Error(`Invalid or duplicate earned achievement INI entry ${id}`);
+    }
+    snapshot[id] = { earned: true, earned_time: seconds };
+  }
+  return snapshot;
+}
+
 function readSnapshot(file, fallback = {}, options = {}) {
   try {
     if (!file || !fs.existsSync(file)) return { valid: false, missing: true, snapshot: fallback };
@@ -205,6 +224,7 @@ function readSnapshot(file, fallback = {}, options = {}) {
     const format = descriptor.format === "tsv-directory" ? "tsv" : descriptor.format ||
       (/\.tsv$/i.test(file) ? "tsv" : /\.json$/i.test(file) ? "json" : "toml");
     if (format === "tsv") return { valid: true, ...parseTsv(file, options.titleId) };
+    if (format === "ini-earned") return { valid: true, snapshot: parseEarnedIni(file) };
     if (format === "json") {
       const json = parseJsonState(file);
       if (json.titleId && options.titleId && json.titleId !== titleId(options.titleId)) throw new Error("Achievement JSON Title ID mismatch");

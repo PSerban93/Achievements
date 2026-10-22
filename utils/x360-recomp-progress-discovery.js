@@ -25,6 +25,8 @@ function createProgressDiscovery(options) {
     return root && inside(root, file) && /(?:^|[\\/])(?:cache|shader_cache|shaders)(?:[\\/]|$)/i.test(path.relative(root, file));
   });
   const relevantFile = (file) => /^(?:[a-f0-9]{8}\.toml|[a-f0-9]{16}\.tsv|achievements\.json|ach-data)$/i.test(path.basename(file)) ||
+    path.basename(file).toLowerCase() === "achievements.ini" && unresolved().some(({ config }) =>
+      config.x360_recomp_generic === true && inside(config.x360_recomp_install_root, file)) ||
     unresolved().some(({ config }) => Object.values(config.x360_recomp_progress || {}).some((entry) => state.samePath(entry.file, file)));
   function failRequests(error) {
     for (const request of requests.values()) { clearTimeout(request.timer); request.reject(error); }
@@ -60,7 +62,12 @@ function createProgressDiscovery(options) {
     try {
       const declarations = candidates.flatMap(({ config }) => Object.entries(config.x360_recomp_progress || {}).filter(([, entry]) =>
         state.samePath(entry.file, file)).map(([profile, descriptor]) => ({ titleId: config.appid, profile, descriptor })));
-      const item = await request({ file, explicit: declarations.length === 1 ? declarations[0] : null });
+      const local = candidates.filter(({ config }) => config.x360_recomp_generic === true && inside(config.x360_recomp_install_root, file));
+      const owners = local.filter(({ config }) => !local.some(other =>
+        !state.samePath(config.x360_recomp_install_root, other.config.x360_recomp_install_root) &&
+        inside(config.x360_recomp_install_root, other.config.x360_recomp_install_root)));
+      const implicitOwner = owners.length === 1 ? { titleId: owners[0].config.appid, installRoot: owners[0].config.x360_recomp_install_root } : null;
+      const item = await request({ file, explicit: declarations.length === 1 ? declarations[0] : null, implicitOwner });
       if (!item || stopped || blocked(file)) return;
       let matches = candidates.filter(({ config }) => config.appid === item.id &&
         (configName || rootsFor({ config }).some((root) => inside(root, file))));

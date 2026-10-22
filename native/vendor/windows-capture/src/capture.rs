@@ -20,8 +20,92 @@ use windows_future::AsyncActionCompletedHandler;
 use crate::d3d11::{self, create_d3d_device};
 use crate::frame::Frame;
 use crate::graphics_capture_api::{self, GraphicsCaptureApi, InternalCaptureControl};
-use crate::settings::{GraphicsCaptureItemType, MinimumUpdateIntervalSettings, Settings};
+use crate::settings::{DrawBorderSettings, GraphicsCaptureItemType, MinimumUpdateIntervalSettings, Settings};
 use crate::winrt::WinRT;
+
+// Reject unsupported options before constructing a handler: its worker may
+// allocate encoders/audio devices and post WM_QUIT while being torn down.
+fn validate_optional_settings<E>(
+    interval: MinimumUpdateIntervalSettings,
+    border: DrawBorderSettings,
+    supports_interval: impl FnOnce() -> Result<bool, graphics_capture_api::Error>,
+    supports_border: impl FnOnce() -> Result<bool, graphics_capture_api::Error>,
+) -> Result<(), GraphicsCaptureApiError<E>> {
+    if interval != MinimumUpdateIntervalSettings::Default
+        && !supports_interval().map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?
+    {
+        return Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
+            graphics_capture_api::Error::MinimumUpdateIntervalUnsupported,
+        ));
+    }
+    if border != DrawBorderSettings::Default
+        && !supports_border().map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?
+    {
+        return Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
+            graphics_capture_api::Error::BorderConfigUnsupported,
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn default_options_do_not_require_optional_windows_apis() {
+        validate_optional_settings::<()>(
+            MinimumUpdateIntervalSettings::Default,
+            DrawBorderSettings::Default,
+            || panic!("default interval must not probe the optional API"),
+            || panic!("default border must not probe the optional API"),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn older_windows_can_fallback_from_both_options_before_starting_a_handler() {
+        let error = validate_optional_settings::<()>(
+            MinimumUpdateIntervalSettings::Custom(Duration::ZERO),
+            DrawBorderSettings::WithoutBorder,
+            || Ok(false),
+            || panic!("interval rejection should return first"),
+        )
+        .unwrap_err();
+        assert!(matches!(error, GraphicsCaptureApiError::GraphicsCaptureApiError(
+            graphics_capture_api::Error::MinimumUpdateIntervalUnsupported
+        )));
+        let error = validate_optional_settings::<()>(
+            MinimumUpdateIntervalSettings::Default,
+            DrawBorderSettings::WithoutBorder,
+            || panic!("default interval must not probe the optional API"),
+            || Ok(false),
+        )
+        .unwrap_err();
+        assert!(matches!(error, GraphicsCaptureApiError::GraphicsCaptureApiError(
+            graphics_capture_api::Error::BorderConfigUnsupported
+        )));
+        validate_optional_settings::<()>(
+            MinimumUpdateIntervalSettings::Default,
+            DrawBorderSettings::Default,
+            || Ok(false),
+            || Ok(false),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn supported_windows_retains_borderless_and_custom_interval_options() {
+        validate_optional_settings::<()>(
+            MinimumUpdateIntervalSettings::Custom(Duration::from_nanos(16_666_666)),
+            DrawBorderSettings::WithoutBorder,
+            || Ok(true),
+            || Ok(true),
+        )
+        .unwrap();
+    }
+}
 
 const fn dispatcher_queue_options() -> DispatcherQueueOptions {
     DispatcherQueueOptions {
@@ -296,17 +380,12 @@ pub trait GraphicsCaptureApiHandler: Sized {
         // Initialize WinRT
         let _winrt = WinRT::new().map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
 
-        // Validate optional capture throttling before constructing the consumer
-        // handler. Handler construction may allocate encoders and audio devices,
-        // which must not happen for an unsupported setting that will be retried.
-        if settings.minimum_update_interval_settings != MinimumUpdateIntervalSettings::Default
-            && !GraphicsCaptureApi::is_minimum_update_interval_supported()
-                .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?
-        {
-            return Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
-                graphics_capture_api::Error::MinimumUpdateIntervalUnsupported,
-            ));
-        }
+        validate_optional_settings(
+            settings.minimum_update_interval_settings,
+            settings.draw_border_settings,
+            GraphicsCaptureApi::is_minimum_update_interval_supported,
+            GraphicsCaptureApi::is_border_settings_supported,
+        )?;
 
         // Create a dispatcher queue for the current thread
         let controller = unsafe {
@@ -390,14 +469,12 @@ pub trait GraphicsCaptureApiHandler: Sized {
             // Initialize WinRT
             let _winrt = WinRT::new().map_err(|_| GraphicsCaptureApiError::FailedToInitWinRT)?;
 
-            if settings.minimum_update_interval_settings != MinimumUpdateIntervalSettings::Default
-                && !GraphicsCaptureApi::is_minimum_update_interval_supported()
-                    .map_err(GraphicsCaptureApiError::GraphicsCaptureApiError)?
-            {
-                return Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
-                    graphics_capture_api::Error::MinimumUpdateIntervalUnsupported,
-                ));
-            }
+            validate_optional_settings(
+                settings.minimum_update_interval_settings,
+                settings.draw_border_settings,
+                GraphicsCaptureApi::is_minimum_update_interval_supported,
+                GraphicsCaptureApi::is_border_settings_supported,
+            )?;
 
             // Create a dispatcher queue for the current thread
             let controller = unsafe {

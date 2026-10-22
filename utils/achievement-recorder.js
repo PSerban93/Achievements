@@ -142,6 +142,11 @@ class AchievementRecorderController extends EventEmitter {
     this.stopPromise = null;
     this.stopReason = null;
     this.pendingOutputs = new Map();
+    this.monitorId = "";
+    this.activeMonitorId = "";
+    this.monitorMode = "";
+    this.activeMonitorMode = "";
+    this.monitorChangePromise = null;
     this.forceStopGraceMs = Math.max(
       100,
       Number(options.forceStopGraceMs) || DEFAULT_FORCE_STOP_GRACE_MS,
@@ -222,6 +227,27 @@ class AchievementRecorderController extends EventEmitter {
     return this.enabled ? this.ensureStarted(`${reason}:restart`) : false;
   }
 
+  setMonitor(monitorId, mode = "") {
+    const id = String(monitorId || "");
+    if (id === this.monitorId && mode === this.monitorMode) return this.monitorChangePromise || Promise.resolve(false);
+    this.monitorId = id;
+    this.monitorMode = mode;
+    this.restartBlockedError = null;
+    if (this.monitorChangePromise) return this.monitorChangePromise;
+    if (!this.enabled || !this.child) return Promise.resolve(false);
+    // Keep the old source alive until its clips finish; new requests wait for
+    // the new source so a clip can never contain frames from two monitors.
+    this.monitorChangePromise = (async () => {
+      while (this.enabled && (this.activeMonitorId !== this.monitorId || this.activeMonitorMode !== this.monitorMode)) {
+        while (this.enabled && this.pendingOutputs.size) await new Promise(resolve => setTimeout(resolve, 100));
+        if (!this.enabled) return false;
+        await this.restart("monitor-changed");
+      }
+      return true;
+    })().finally(() => { this.monitorChangePromise = null; });
+    return this.monitorChangePromise;
+  }
+
   setEnabled(enabled, reason = "unknown") {
     const wasEnabled = this.enabled;
     this.enabled = enabled === true;
@@ -295,10 +321,13 @@ class AchievementRecorderController extends EventEmitter {
       "--hdr-tone-map",
       String(this.timings.hdrToneMapping === true),
     ];
+    if (this.monitorId && !this.monitorId.startsWith("electron:")) args.push("--monitor-id", this.monitorId);
     const child = this.spawnProcess(helper, args, {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.activeMonitorId = this.monitorId;
+    this.activeMonitorMode = this.monitorMode;
     this.child = child;
     this.exitedChild = null;
     let resolveClosed;
@@ -549,7 +578,7 @@ class AchievementRecorderController extends EventEmitter {
   }
 
   async trigger(payload = {}) {
-    const eventAtUnixMs = Number.isFinite(payload.eventAtUnixMs)
+    let eventAtUnixMs = Number.isFinite(payload.eventAtUnixMs)
       ? payload.eventAtUnixMs
       : Date.now();
     if (!this.enabled) {
@@ -557,7 +586,14 @@ class AchievementRecorderController extends EventEmitter {
       error.code = "recorder-disabled";
       throw error;
     }
-    await this.ensureStarted("achievement-trigger");
+    let waitedForMonitor = false;
+    do {
+      if (this.monitorChangePromise) { waitedForMonitor = true; await this.monitorChangePromise; }
+      await this.ensureStarted("achievement-trigger");
+    } while (this.monitorChangePromise);
+    // An old timestamp can be outside the new monitor's replay buffer. Record
+    // from the new source's ready point rather than creating an empty clip.
+    if (waitedForMonitor) eventAtUnixMs = Math.max(eventAtUnixMs, Date.now());
     if (!this.enabled || this.stopping || (this.child && this.exitedChild === this.child)) {
       const error = new Error("Achievement recorder stopped before accepting the trigger");
       error.code = "recorder-disabled";

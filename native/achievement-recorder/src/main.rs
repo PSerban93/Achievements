@@ -41,6 +41,8 @@ mod performance;
 mod recording;
 mod replay;
 mod tone_mapper;
+#[path = "../../monitor-selection.rs"]
+mod monitor_selection;
 use recording::Capture;
 type AnyError = Box<dyn Error + Send + Sync>;
 #[derive(Debug)]
@@ -203,6 +205,7 @@ enum Command {
 #[derive(Clone)]
 pub(crate) struct CaptureFlags {
     command_rx: Arc<Mutex<Receiver<Command>>>,
+    shutdown_requested: Arc<AtomicBool>,
     session_dir: PathBuf,
     pre_ms: u64,
     post_ms: u64,
@@ -595,11 +598,22 @@ fn run_audio_loopback(
     Ok(())
 }
 
-fn read_commands(tx: Sender<Command>) {
-    for line in io::stdin().lock().lines() {
+fn read_commands(tx: Sender<Command>, shutdown_requested: Arc<AtomicBool>) {
+    read_commands_from(io::stdin().lock(), tx, &shutdown_requested);
+}
+
+fn read_commands_from(reader: impl BufRead, tx: Sender<Command>, shutdown_requested: &AtomicBool) {
+    for line in reader.lines() {
         match line {
             Ok(line) => match serde_json::from_str::<Command>(&line) {
                 Ok(command) => {
+                    if matches!(command, Command::Shutdown) {
+                        // This state survives a failed attempt consuming the
+                        // command, so a later fallback cannot restart capture.
+                        shutdown_requested.store(true, Ordering::Release);
+                        let _ = tx.send(command);
+                        return;
+                    }
                     if tx.send(command).is_err() {
                         return;
                     }
@@ -609,9 +623,11 @@ fn read_commands(tx: Sender<Command>) {
             Err(_) => break,
         }
     }
+    shutdown_requested.store(true, Ordering::Release);
     let _ = tx.send(Command::Shutdown);
 }
 struct Options {
+    monitor_id: Option<String>,
     buffer_dir: PathBuf,
     pre_ms: u64,
     post_ms: u64,
@@ -638,6 +654,7 @@ fn parse_options() -> Result<Options, AnyError> {
     let mut fps = 30;
     let mut unlocked = false;
     let mut hdr_tone_map = false;
+    let mut monitor_id = None;
     while let Some(raw) = args.next() {
         let key = raw.to_string_lossy();
         let value = args
@@ -655,11 +672,13 @@ fn parse_options() -> Result<Options, AnyError> {
                 }
             }
             "--hdr-tone-map" => hdr_tone_map = parse_bool_arg(&value)?,
+            "--monitor-id" => monitor_id = Some(value.to_string_lossy().into_owned()),
             _ => return Err(format!("Unknown argument: {key}").into()),
         }
     }
     let buffer_dir = buffer_dir.ok_or("Missing --buffer-dir")?;
     Ok(Options {
+        monitor_id,
         buffer_dir,
         pre_ms: pre_ms.clamp(1_000, 60_000),
         post_ms: post_ms.clamp(1_000, 60_000),
@@ -669,6 +688,29 @@ fn parse_options() -> Result<Options, AnyError> {
         unlocked,
         hdr_tone_map,
     })
+}
+
+// A failed handler can leave WM_QUIT and dispatcher messages on its thread.
+// Give every attempt its own WinRT/message-loop lifetime instead of reusing it.
+fn run_capture_on_thread(
+    shutdown_requested: &Arc<AtomicBool>,
+    capture: impl FnOnce() -> Result<(), GraphicsCaptureApiError<AnyError>> + Send + 'static,
+) -> Result<(), GraphicsCaptureApiError<AnyError>> {
+    if shutdown_requested.load(Ordering::Acquire) {
+        return Ok(());
+    }
+    let shutdown = Arc::clone(shutdown_requested);
+    thread::Builder::new()
+        .name("achievement-capture".into())
+        .spawn(move || {
+            if shutdown.load(Ordering::Acquire) {
+                return Ok(());
+            }
+            capture()
+        })
+        .map_err(|error| GraphicsCaptureApiError::NewHandlerError(Box::new(error) as AnyError))?
+        .join()
+        .map_err(|_| GraphicsCaptureApiError::FailedToJoinThread)?
 }
 
 /// Tries to start capture with border settings, with fallback to default if border is unsupported
@@ -682,7 +724,7 @@ fn try_capture_with_border_fallback<T>(
     flags: CaptureFlags,
 ) -> Result<(), GraphicsCaptureApiError<AnyError>>
 where
-    T: TryInto<GraphicsCaptureItemType> + Clone,
+    T: TryInto<GraphicsCaptureItemType> + Clone + Send + 'static,
 {
     // Attempt 1: Without border (preferred)
     let mut borderless_flags = flags.clone();
@@ -704,12 +746,14 @@ where
         borderless_flags.clone(),
     );
 
-    match Capture::start(settings) {
+    match run_capture_on_thread(&flags.shutdown_requested, move || Capture::start(settings)) {
         Ok(()) => Ok(()),
         Err(err) => {
             // A runtime failure after the first encoded frame belongs to the
             // active session and must not start a second capture pipeline.
-            if !borderless_flags.ready_signal.load(Ordering::Acquire) && is_border_unsupported(&err)
+            if !borderless_flags.ready_signal.load(Ordering::Acquire)
+                && !flags.shutdown_requested.load(Ordering::Acquire)
+                && is_border_unsupported(&err)
             {
                 let err_str = err.to_string();
                 emit(json!({
@@ -732,6 +776,7 @@ where
                     GraphicsCaptureApiError::NewHandlerError(Box::new(error) as AnyError)
                 })?;
                 let mut fallback_flags = flags;
+                let shutdown = Arc::clone(&fallback_flags.shutdown_requested);
                 fallback_flags.session_dir = fallback_session_dir;
                 fallback_flags.border_mode = "default";
                 fallback_flags.border_fallback = true;
@@ -745,7 +790,7 @@ where
                     color_format,
                     fallback_flags,
                 );
-                Capture::start(fallback_settings)
+                run_capture_on_thread(&shutdown, move || Capture::start(fallback_settings))
             } else {
                 // If error is not about border, propagate it
                 Err(err)
@@ -764,7 +809,7 @@ fn try_capture_with_rate_limit_fallback<T>(
     mut flags: CaptureFlags,
 ) -> Result<(), GraphicsCaptureApiError<AnyError>>
 where
-    T: TryInto<GraphicsCaptureItemType> + Clone,
+    T: TryInto<GraphicsCaptureItemType> + Clone + Send + 'static,
 {
     let interval_nanos = if flags.unlocked {
         0
@@ -791,6 +836,7 @@ where
         flags.clone(),
     );
     if !flags.ready_signal.load(Ordering::Acquire)
+        && !flags.shutdown_requested.load(Ordering::Acquire)
         && result.as_ref().is_err_and(is_minimum_interval_unsupported)
     {
         emit(json!({
@@ -840,12 +886,14 @@ fn run() -> Result<(), AnyError> {
     }
     fs::create_dir_all(&session_dir)?;
 
-    let monitor = Monitor::primary()?;
+    let monitor = monitor_selection::select(options.monitor_id.as_deref())?;
     let width = monitor.width()?;
     let height = monitor.height()?;
     let frame_rate = encoding_frame_rate(&monitor, options.fps, options.unlocked);
     let (command_tx, command_rx) = mpsc::channel();
-    thread::spawn(move || read_commands(command_tx));
+    let shutdown_requested = Arc::new(AtomicBool::new(false));
+    let command_shutdown = Arc::clone(&shutdown_requested);
+    thread::spawn(move || read_commands(command_tx, command_shutdown));
     let command_rx = Arc::new(Mutex::new(command_rx));
     let ready_signal = Arc::new(AtomicBool::new(false));
     let runtime_error = Arc::new(Mutex::new(None));
@@ -858,6 +906,7 @@ fn run() -> Result<(), AnyError> {
 
     let flags = CaptureFlags {
         command_rx: Arc::clone(&command_rx),
+        shutdown_requested: Arc::clone(&shutdown_requested),
         session_dir: session_dir.clone(),
         pre_ms: options.pre_ms,
         post_ms: options.post_ms,
@@ -894,6 +943,7 @@ fn run() -> Result<(), AnyError> {
     if options.hdr_tone_map
         && capture_result.as_ref().is_err_and(should_retry_sdr)
         && !ready_signal.load(Ordering::Acquire)
+        && !shutdown_requested.load(Ordering::Acquire)
     {
         emit(json!({
             "type": "hdr-tone-map-fallback",
@@ -901,7 +951,7 @@ fn run() -> Result<(), AnyError> {
             "fallback": "sdr",
             "reason": "hdr-capture-failed-before-ready",
         }));
-        let fallback_monitor = Monitor::primary()?;
+        let fallback_monitor = monitor_selection::select(options.monitor_id.as_deref())?;
         let fallback_width = fallback_monitor.width()?;
         let fallback_height = fallback_monitor.height()?;
         let fallback_frame_rate =
@@ -916,6 +966,7 @@ fn run() -> Result<(), AnyError> {
 
         let fallback_flags = CaptureFlags {
             command_rx,
+            shutdown_requested,
             session_dir: fallback_session_dir,
             pre_ms: options.pre_ms,
             post_ms: options.post_ms,
@@ -975,6 +1026,77 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_attempt_quit_message_does_not_reach_the_next_attempt() {
+        use windows::Win32::UI::WindowsAndMessaging::{
+            MSG, PM_NOREMOVE, PM_REMOVE, PeekMessageW, PostQuitMessage, WM_QUIT,
+        };
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let error = run_capture_on_thread(&shutdown, || {
+            // Reproduce failed-handler teardown leaving a thread-local quit.
+            unsafe {
+                let mut message = MSG::default();
+                let _ = PeekMessageW(&mut message, None, 0, 0, PM_NOREMOVE);
+                PostQuitMessage(0);
+            }
+            Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
+                GraphicsCaptureError::BorderConfigUnsupported,
+            ))
+        })
+        .unwrap_err();
+        assert!(is_border_unsupported(&error));
+        run_capture_on_thread(&shutdown, || {
+            let mut message = MSG::default();
+            let stale_quit =
+                unsafe { PeekMessageW(&mut message, None, WM_QUIT, WM_QUIT, PM_REMOVE).as_bool() };
+            assert!(
+                !stale_quit,
+                "a previous attempt stopped this capture thread"
+            );
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn shutdown_consumed_by_a_failed_attempt_prevents_fallback() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let command_shutdown = Arc::clone(&shutdown);
+        let (tx, rx) = mpsc::channel();
+        let error = run_capture_on_thread(&shutdown, move || {
+            read_commands_from(
+                io::Cursor::new(b"{\"type\":\"shutdown\"}\n"),
+                tx,
+                &command_shutdown,
+            );
+            assert!(matches!(rx.recv().unwrap(), Command::Shutdown));
+            Err(GraphicsCaptureApiError::GraphicsCaptureApiError(
+                GraphicsCaptureError::BorderConfigUnsupported,
+            ))
+        })
+        .unwrap_err();
+        assert!(is_border_unsupported(&error));
+        run_capture_on_thread(&shutdown, || panic!("capture restarted after shutdown")).unwrap();
+    }
+
+    #[test]
+    fn closed_command_input_prevents_a_new_capture() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        read_commands_from(io::Cursor::new(b""), tx, &shutdown);
+        assert!(matches!(rx.recv().unwrap(), Command::Shutdown));
+        run_capture_on_thread(&shutdown, || panic!("capture started after EOF")).unwrap();
+    }
+
+    #[test]
+    fn capture_thread_panic_is_an_error_and_not_an_hdr_retry() {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let error =
+            run_capture_on_thread(&shutdown, || panic!("simulated capture failure")).unwrap_err();
+        assert!(matches!(error, GraphicsCaptureApiError::FailedToJoinThread));
+        assert!(!should_retry_sdr(&error));
+    }
 
     #[test]
     fn audio_recovery_retries_with_bounded_backoff_then_resumes() {

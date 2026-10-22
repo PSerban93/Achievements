@@ -15,6 +15,16 @@ const coverLogger = createLogger("covers");
 const CDN_BASE = "https://shared.fastly.steamstatic.com";
 const baseLaunchArgs = ["--disable-blink-features=AutomationControlled"];
 const browserByApp = new Map();
+const imageRequests = new Map();
+
+function sharedRequest(key, operation) {
+  if (imageRequests.has(key)) return imageRequests.get(key);
+  const pending = Promise.resolve().then(operation).finally(() => {
+    if (imageRequests.get(key) === pending) imageRequests.delete(key);
+  });
+  imageRequests.set(key, pending);
+  return pending;
+}
 
 function markSteamDbNotFound(err, message) {
   const e = err instanceof Error ? err : new Error(message || String(err));
@@ -41,19 +51,29 @@ async function launchChromiumSafe(opts = {}) {
 
 async function getBrowserForApp(appid, opts = {}) {
   const key = String(appid || "");
-  if (browserByApp.has(key)) {
-    const existing = browserByApp.get(key);
-    if (existing && existing.isConnected && existing.isConnected()) {
-      return existing;
-    }
-    try {
-      await existing?.close();
-    } catch {}
-    browserByApp.delete(key);
+  let entry = browserByApp.get(key);
+  if (!entry || entry.browser && !entry.browser.isConnected()) {
+    entry = { browser: null, users: 0, promise: null };
+    // Publish the pending launch, so concurrent acquisitions share one browser.
+    browserByApp.set(key, entry);
+    entry.promise = launchChromiumSafe(opts).then((browser) => {
+      entry.browser = browser;
+      return browser;
+    });
   }
-  const browser = await launchChromiumSafe(opts);
-  browserByApp.set(key, browser);
-  return browser;
+  entry.users++;
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
+    if (--entry.users > 0) return;
+    // Retire this particular browser before awaiting close. A late release
+    // cannot remove or close a replacement acquired under the same key.
+    if (browserByApp.get(key) === entry) browserByApp.delete(key);
+    try { if (entry.browser?.isConnected()) await entry.browser.close(); } catch {}
+  };
+  try { return { browser: await entry.promise, release }; }
+  catch (error) { await release(); throw error; }
 }
 
 function normalizeSteamDbRel(appid, relOrAbs) {
@@ -64,26 +84,31 @@ function normalizeSteamDbRel(appid, relOrAbs) {
   return `${CDN_BASE}/store_item_assets/steam/apps/${appid}/${clean}`;
 }
 
-async function fetchSteamDbLibraryCover(appid) {
+function fetchSteamDbLibraryCover(appid) {
+  return sharedRequest(`steamdb:${String(appid)}`, () => fetchSteamDbLibraryCoverRequest(appid));
+}
+async function fetchSteamDbLibraryCoverRequest(appid) {
   coverLogger.info("steamdb:fetch:start", { appid: String(appid) });
   const url = `https://steamdb.info/app/${appid}/info/`;
-  const browser = await getBrowserForApp(appid, { headless: true });
+  const lease = await getBrowserForApp(appid, { headless: true });
+  const { browser } = lease;
   const steamDbCapsuleFallbackSelector =
     "#js-assets-table > tbody > tr:nth-child(6) > td:nth-child(2) > table > tbody > tr:nth-child(2) > td:nth-child(2) > a";
 
-  const ctx = await browser.newContext({
-    userAgent:
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36",
-    viewport: { width: 1400, height: 1000 },
-  });
-
-  await ctx.route("**/*", (route) => {
-    const u = route.request().url();
-    if (/\.(mp4|webm|gif|woff2?|ttf|otf)$/i.test(u)) return route.abort();
-    route.continue();
-  });
-
+  let ctx;
   try {
+    ctx = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36",
+      viewport: { width: 1400, height: 1000 },
+    });
+
+    await ctx.route("**/*", (route) => {
+      const u = route.request().url();
+      if (/\.(mp4|webm|gif|woff2?|ttf|otf)$/i.test(u)) return route.abort();
+      route.continue();
+    });
+
     const page = await ctx.newPage();
     page.setDefaultTimeout(20000);
 
@@ -146,13 +171,8 @@ async function fetchSteamDbLibraryCover(appid) {
     });
     throw markSteamDbNotFound(err);
   } finally {
-    await ctx.close().catch(() => {});
-    try {
-      if (browser && browser.isConnected && browser.isConnected()) {
-        await browser.close();
-      }
-    } catch {}
-    browserByApp.delete(String(appid || ""));
+    await ctx?.close().catch(() => {});
+    await lease.release();
   }
 }
 
@@ -195,6 +215,12 @@ function buildSteamGridSearchUrl(
 }
 
 async function fetchSteamGridDbImage(term, options = {}) {
+  options = { ...options };
+  const url = buildSteamGridSearchUrl(term, options.size, options.assetType);
+  const key = `${String(options.appid || term)}|${url}`;
+  return sharedRequest(`steamgrid:${key}`, () => fetchSteamGridDbImageRequest(term, options));
+}
+async function fetchSteamGridDbImageRequest(term, options = {}) {
   const assetType = normalizeSteamGridAssetType(options.assetType);
   const size =
     String(options.size || "").trim() ||
@@ -203,11 +229,12 @@ async function fetchSteamGridDbImage(term, options = {}) {
       : STEAMGRID_GRID_PORTRAIT_DIMENSIONS);
   const url = buildSteamGridSearchUrl(term, size, assetType);
   coverLogger.info("steamgrid:fetch:start", { term, size, assetType });
-  let browser;
+  let browser, lease;
   try {
-    browser = await getBrowserForApp(options?.appid || term, {
+    lease = await getBrowserForApp(options?.appid || term, {
       headless: true,
     });
+    browser = lease.browser;
   } catch (err) {
     coverLogger.error("steamgrid:browser-failed", {
       term,
@@ -231,6 +258,7 @@ async function fetchSteamGridDbImage(term, options = {}) {
       assetType,
       error: err?.message || String(err),
     });
+    await lease.release();
     throw markSteamGridNotFound(err, "context-create-failed");
   }
   try {
@@ -304,14 +332,7 @@ async function fetchSteamGridDbImage(term, options = {}) {
     throw markSteamGridNotFound(err);
   } finally {
     await ctx?.close().catch(() => {});
-    try {
-      const key = String(options?.appid || term);
-      const b = browserByApp.get(key);
-      if (b && b.isConnected && b.isConnected()) {
-        await b.close();
-      }
-      browserByApp.delete(key);
-    } catch {}
+    await lease.release();
   }
 }
 

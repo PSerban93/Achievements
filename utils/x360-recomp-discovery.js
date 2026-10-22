@@ -5,6 +5,7 @@ const path = require("path");
 const state = require("./x360-recomp-state");
 const { readDeclarations, expandPath, readPortConfig, argumentPaths, pathArguments } = require("./x360-recomp-paths");
 const { NAME: MANIFEST_NAME, readManifest } = require("./x360-recomp-manifest");
+const { readImports } = require("./x360-recomp-pe");
 
 // Specific native-port executables; generic launcher.exe is never a signature.
 const PORTS = [
@@ -16,6 +17,8 @@ const PORTS = [
   { id: "545407F8", title: "Midnight Club: Los Angeles", names: ["larecomp.exe"], app: "larecomp" },
   { id: "415608B2", title: "Spider-Man: Edge of Time", names: ["spidermaneot.exe"], app: "spider_man_edge_of_time", format: "tsv" },
   { id: "4D5307DF", title: "Blue Dragon (re:Blue)", names: ["reblue.exe"], app: "reblue", adapter: "reblue" },
+  { id: "4D5307FA", title: "Lost Odyssey", names: ["lostodysseyrecomp.exe"], adapter: "ini-earned", format: "ini-earned",
+    gamePathFile: "game-path.txt", gameFolders: ["game/disc1", "game", "disc1"], progressFile: "profile/achievements.ini" },
   { id: "58410847", ids: ["58410847", "5841089D"], title: "Castlevania: Symphony of the Night", names: ["nocturnerecomp.exe"], app: "nocturnerecomp", saveLayout: true },
   { id: "4B4E0823", title: "Silent Hill: Downpour", names: ["downpour.exe"], app: "downpour", userFolder: "user", gameFolders: ["assets"], saveLayout: true },
   { id: "4D5607D1", title: "Deadly Premonition", names: ["deadlyprem.exe"], app: "deadlyprem", userFolder: "userdata", cliAlwaysOverrides: true, gameFolders: ["assets"], saveLayout: true },
@@ -34,13 +37,20 @@ const PORTS = [
 ];
 const RUNTIMES = ["rexruntime.dll", "rexruntimerd.dll"];
 const acceptsTitle = (port, id) => port.id === id || port.ids?.includes(id);
+const safeProfile = (name) => state.validProfile(name) && !["__proto__", "constructor", "prototype"].includes(name);
+function portableHint(root, entries, blocked) {
+  const has = (name, type) => entries.some(entry => entry.name.toLowerCase() === name && entry[type]() &&
+    !entry.isSymbolicLink() && !blocked(path.join(root, entry.name)));
+  return has("game-path.txt", "isFile") && (has("settings.ini", "isFile") || has("profile", "isDirectory")) &&
+    entries.some(entry => entry.isFile() && /\.exe$/i.test(entry.name) && !blocked(path.join(root, entry.name)) && isPeFile(path.join(root, entry.name)));
+}
 
 // Only installations with native-port evidence enter early discovery. A save
 // file, XEX alone, or a generic launcher name cannot claim a watched root.
 function hasInstallationHint(root, options = {}) {
   if (options.isBlocked?.(root)) return false;
   const entries = filesAt(root);
-  return entries.some((entry) => entry.isFile() && !entry.isSymbolicLink() &&
+  return portableHint(root, entries, options.isBlocked || (() => false)) || entries.some((entry) => entry.isFile() && !entry.isSymbolicLink() &&
     !options.isBlocked?.(path.join(root, entry.name)) &&
     (entry.name.toLowerCase() === MANIFEST_NAME ||
       PORTS.some((port) => port.names.includes(entry.name.toLowerCase())) && isPeFile(path.join(root, entry.name)) ||
@@ -51,10 +61,13 @@ function validateKnownInstallation(config, options = {}) {
   const root = config?.x360_recomp_install_root;
   if (!root || config.x360_recomp_source_only === true || options.isBlocked?.(root)) return false;
   const executable = config.executable;
-  if (!executable || options.isBlocked?.(executable) || !isPeFile(executable)) return false;
   const titleId = String(config.appid || "").toUpperCase();
   const xex = config.x360_recomp_xex_path;
   if (xex && (options.isBlocked?.(xex) || readXexTitle(xex) !== titleId)) return false;
+  if (config.x360_recomp_generic === true && xex) {
+    return !!genericNativePort(root, filesAt(root), titleId, options.isBlocked || (() => false));
+  }
+  if (!executable || options.isBlocked?.(executable) || !isPeFile(executable)) return false;
   const namedPort = PORTS.some((port) => acceptsTitle(port, titleId) &&
     port.names.includes(path.basename(executable).toLowerCase()) && inside(root, executable));
   if (namedPort) return true;
@@ -123,18 +136,29 @@ function isPeFile(file, dll = false) {
   } catch { return false; } finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
-function genericNativePort(root, entries, id, blocked) {
+function genericNativePort(root, entries, id, blocked, declarations = []) {
   if (!id) return null;
   const runtime = entries.find((entry) => entry.isFile() && !entry.isSymbolicLink() && RUNTIMES.includes(entry.name.toLowerCase()) &&
     !blocked(path.join(root, entry.name)) && isPeFile(path.join(root, entry.name), true));
-  if (!runtime) return null;
+  if (!runtime && !portableHint(root, entries, blocked)) return null;
   const executables = entries.filter((entry) => entry.isFile() && !entry.isSymbolicLink() && /\.exe$/i.test(entry.name) &&
     !/^(?:launcher|setup|install|uninstall|unins\d*|crashpad_handler|crashreporter)\.exe$/i.test(entry.name) &&
     !blocked(path.join(root, entry.name)) && isPeFile(path.join(root, entry.name)));
-  if (executables.length !== 1) return null;
+  if (!executables.length) return null;
+  const imported = runtime ? executables.filter(entry => readImports(path.join(root, entry.name)).includes(runtime.name.toLowerCase())) : [];
+  const declared = executables.filter(entry => declarations.some(declaration => declaration.kind === "launcher" &&
+    state.samePath(declaration.executable, path.join(root, entry.name))));
+  const selected = declared.length === 1 ? declared : imported.length === 1 ? imported : executables.length === 1 ? executables : [];
   // The native executable/runtime plus the actual XEX establish an installation.
   // An app/save path cannot be deduced from an arbitrary executable filename.
-  return { id, title: path.basename(root).replace(/_/g, " "), names: [executables[0].name.toLowerCase()], generic: true };
+  return { id, title: path.basename(root).replace(/_/g, " "), names: selected.map(entry => entry.name.toLowerCase()), generic: true,
+    adapter: runtime ? "rexglue" : "native-port" };
+}
+
+function localProfile(installRoot, file, format, fallback = "default") {
+  if (format === "tsv" || !inside(installRoot, file)) return fallback;
+  const parts = path.relative(installRoot, file).split(path.sep);
+  return parts[0]?.toLowerCase() === "profiles" && parts.length >= 3 && safeProfile(parts[1]) ? parts[1] : fallback;
 }
 function readXexTitle(file) {
   let fd;
@@ -180,7 +204,12 @@ function statesAt(root, blocked, errors) {
       const parsed = state.readSnapshot(file, {}, { titleId: "53450812", descriptor: { format: "unleashed" } });
       if (parsed.valid) found.push({ id: "53450812", format: "unleashed", file, userRoot: root, profile: "default", title: "Sonic Unleashed" });
       else errors.push({ file, error: parsed.error });
-    } else if (entry.name.toLowerCase() === "achievements.json" && path.basename(root).toLowerCase() === "savedata") {
+    } else if (entry.name.toLowerCase() === "achievements.ini" && (path.basename(root).toLowerCase() === "profile" ||
+        path.basename(path.dirname(root)).toLowerCase() === "profiles" && safeProfile(path.basename(root)))) {
+      const parsed = state.readSnapshot(file, {}, { descriptor: { format: "ini-earned" } });
+      if (parsed.valid) found.push({ id: "", format: "ini-earned", file, userRoot: root, profile: "default" });
+    } else if (entry.name.toLowerCase() === "achievements.json" && (["savedata", "save", "profile"].includes(path.basename(root).toLowerCase()) ||
+        path.basename(path.dirname(root)).toLowerCase() === "profiles" && safeProfile(path.basename(root)))) {
       try {
         const parsed = state.parseJsonState(file);
         const gearGame = path.dirname(root), installRoot = path.dirname(gearGame);
@@ -249,6 +278,25 @@ function midnightInstallation(native, root, blocked) {
   return null;
 }
 
+// A portable port can remember an imported disc folder outside its install.
+// This is data-path resolution only; do not turn it into ReXGlue CLI flags.
+function importedGameXex(native, root, blocked, errors) {
+  if (!native?.gamePathFile) return "";
+  const pointer = path.join(root, native.gamePathFile);
+  if (blocked(pointer)) return "";
+  let configured = "";
+  try {
+    if (fs.lstatSync(pointer).isSymbolicLink()) throw new Error("Linked game-data pointer");
+    configured = state.readStateText(pointer).replace(/^\uFEFF/, "").split(/\r?\n/, 1)[0].trim();
+    if (configured.includes("\0")) throw new Error("Invalid game-data pointer");
+  } catch (error) { if (error.code !== "ENOENT") errors.push({ file: pointer, error: error.message }); }
+  const roots = configured ? [path.resolve(root, configured)] : [];
+  const candidates = roots.flatMap((candidate) => path.basename(candidate).toLowerCase() === "default.xex" ? [candidate] :
+    [path.join(candidate, "default.xex"), path.join(candidate, "disc1", "default.xex")]);
+  candidates.push(...native.gameFolders.map((folder) => path.join(root, folder, "default.xex")), path.join(root, "default.xex"));
+  return candidates.find((file) => !blocked(file) && readXexTitle(file)) || "";
+}
+
 function documentStates(documentsPath, ids, blocked, errors) {
   const found = [];
   if (!documentsPath || blocked(documentsPath) || !ids.size) return found;
@@ -266,6 +314,7 @@ function documentStates(documentsPath, ids, blocked, errors) {
 // launcher override changes them; a path string in TOML is not sufficient.
 function registeredPaths(game, options) {
   const port = game.native;
+  if (port?.generic) return null;
   const executableRoot = game.launch?.executable ? path.dirname(game.launch.executable) : game.installRoot;
   if (!port?.saveLayout) {
     if (game.adapter === "rexglue" && !port?.format && !port?.progressUnavailable && game.launch?.runtime.user_data_root) {
@@ -308,6 +357,7 @@ async function discoverGames(root, options = {}) {
       old.declarations = [...(old.declarations || []), ...(game.declarations || [])]
         .filter((entry, i, all) => all.findIndex((other) => other.file === entry.file && JSON.stringify(other.runtime) === JSON.stringify(entry.runtime)) === i);
       old.native ||= game.native;
+      old.installationConfirmed ||= game.installationConfirmed;
       old.executable ||= game.executable;
       if (game.sourceOnly === false) old.sourceOnly = false;
       return old;
@@ -341,7 +391,7 @@ async function discoverGames(root, options = {}) {
         path.basename(current.root).toLowerCase() === "patched" && filesAt(path.dirname(current.root)).some((entry) => entry.isFile() && entry.name.toLowerCase() === "unleashedrecomp.exe")) installRoot = path.dirname(current.root);
     let installEntries = state.samePath(installRoot, current.root) ? entries : filesAt(installRoot);
     const nativeMatches = PORTS.filter((port) => port.names.some((name) => installEntries.some((e) => e.isFile() && !e.isSymbolicLink() && e.name.toLowerCase() === name &&
-      (!port.saveLayout || !blocked(path.join(installRoot, e.name)) && isPeFile(path.join(installRoot, e.name))))));
+      (!(port.saveLayout || port.progressFile) || !blocked(path.join(installRoot, e.name)) && isPeFile(path.join(installRoot, e.name))))));
     let native = nativeMatches.length === 1 ? nativeMatches[0] : null;
     if (native?.adapter === "unleashed") {
       // The game's installer already creates a complete patched XEX. Read it
@@ -371,6 +421,7 @@ async function discoverGames(root, options = {}) {
       nativeMatches.some((port) => port.names.includes(path.basename(entry.executable || "").toLowerCase())) &&
       state.samePath(path.dirname(entry.executable), executableRoot));
     const pathConfigFiles = [];
+    if (native?.gamePathFile) pathConfigFiles.push(path.join(installRoot, native.gamePathFile));
     if (native?.pathConfig) {
       const priorLaunch = (options.existingConfigs || []).find((cfg) => cfg.platform === "x360recomp" &&
         state.samePath(cfg.x360_recomp_install_root, installRoot) && acceptsTitle(native, cfg.appid) &&
@@ -415,6 +466,25 @@ async function discoverGames(root, options = {}) {
       !explicitRoots.length && names.has("default.xex") ? path.join(current.root, names.get("default.xex")) : "";
     if (xexPath && blocked(xexPath)) xexPath = "";
     let id = xexPath ? readXexTitle(xexPath) : "";
+    // Unknown ports use the same bounded imported-data layouts. Runtime or
+    // portable-launcher evidence is still required before accepting an XEX.
+    if (!native && !nativeMatches.length && !explicitRoots.length && hasInstallationHint(installRoot, { isBlocked: blocked })) {
+      const hasPointer = installEntries.some(entry => entry.isFile() && entry.name.toLowerCase() === "game-path.txt");
+      const folders = ["game/disc1", "game", "disc1", "assets", "base", "content"];
+      let candidate = "";
+      if (hasPointer) candidate = importedGameXex({ gamePathFile: "game-path.txt", gameFolders: folders }, installRoot, blocked, errors);
+      else if (!id) {
+        const candidates = folders.map(folder => path.join(installRoot, folder, "default.xex")).filter(file => !blocked(file) && readXexTitle(file));
+        if (new Set(candidates.map(readXexTitle)).size === 1) candidate = candidates[0];
+        else if (candidates.length) errors.push({ root: installRoot, error: "Multiple generic game-data identities; explicit game location required" });
+      }
+      if (candidate) { xexPath = candidate; id = readXexTitle(candidate); }
+      if (hasPointer) pathConfigFiles.push(path.join(installRoot, "game-path.txt"));
+    }
+    if (native?.gamePathFile && !explicitRoots.length) {
+      const imported = importedGameXex(native, installRoot, blocked, errors);
+      if (imported) { xexPath = imported; id = readXexTitle(imported); }
+    }
     if (native?.preferredXex && !explicitRoots.length) { xexPath = native.preferredXex; id = native.id; }
     if (!id && !explicitRoots.length && names.has("achievements.toml")) {
       try {
@@ -459,7 +529,7 @@ async function discoverGames(root, options = {}) {
       }
     }
     if (native && id && acceptsTitle(native, id) && native.id !== id) native = { ...native, id };
-    if (!native && nativeMatches.length === 0 && xexPath && id) native = genericNativePort(installRoot, installEntries, id, blocked);
+    if (!native && nativeMatches.length === 0 && xexPath && id) native = genericNativePort(installRoot, installEntries, id, blocked, declarations.declarations);
     if (native && id && native.id !== id) errors.push({ root: installRoot, error: "Native executable / XEX TitleID mismatch" });
     else {
       id = id || native?.id || "";
@@ -478,7 +548,8 @@ async function discoverGames(root, options = {}) {
         if (executableCandidates.length > 1) errors.push({ root: installRoot, error: "Multiple game executables; choose the executable manually" });
         const game = { appid: id, titleId: id, installRoot,
           executable: executableCandidates.length === 1 ? executableCandidates[0] : "",
-          adapter: native?.adapter || "rexglue", native, declarations: applicable, pathConfigFiles, xexPath, metadataPaths: [],
+          adapter: native?.adapter || "rexglue", native, installationConfirmed: !!native,
+          declarations: applicable, pathConfigFiles, xexPath, metadataPaths: [],
           title: native?.title || path.basename(installRoot).replace(/_/g, " "), sourceOnly: false };
         if (native || applicable.some((entry) => entry.runtime.game_data_root || entry.runtime.user_data_root)) add(game);
         else if (xexPath) unclaimedXex.set(keyOf(game), game);
@@ -540,6 +611,7 @@ async function discoverGames(root, options = {}) {
   // native save format and matching XEX identity. Plain Xenia XEX folders,
   // without such state or a runtime declaration, remain unclaimed.
   for (const item of dedup.values()) {
+    if (item.format === "ini-earned") continue; // Its rows carry no game identity.
     const local = [...unclaimedXex.values()].filter((game) => (!item.id || game.titleId === item.id) && inside(game.installRoot, item.file));
     if (!local.length) continue;
     const nearest = local.filter((game) => !local.some((other) => !state.samePath(game.installRoot, other.installRoot) && inside(game.installRoot, other.installRoot)));
@@ -548,7 +620,15 @@ async function discoverGames(root, options = {}) {
   }
   for (const item of dedup.values()) {
     if (ambiguousFiles.has(fileKey(item.file))) continue;
-    let candidates = [...games.values()].filter((game) => item.id ? game.titleId === item.id : inside(game.installRoot, item.file));
+    const localOwners = [...games.values()].filter(game => game.native?.generic && inside(game.installRoot, item.file));
+    if (item.id && localOwners.length && !localOwners.some(game => game.titleId === item.id)) {
+      errors.push({ file: item.file, error: "Local progress TitleID differs from its native installation" });
+      continue;
+    }
+    let candidates = [...games.values()].filter((game) => item.id ? game.titleId === item.id :
+      inside(game.installRoot, item.file) && (item.format !== "ini-earned" || game.native?.generic && game.installationConfirmed));
+    if (!item.id && candidates.length > 1) candidates = candidates.filter(game =>
+      !candidates.some(other => !state.samePath(game.installRoot, other.installRoot) && inside(game.installRoot, other.installRoot)));
     // A known port's current path rule is stronger than a stale save from
     // another build. Do not create a second, state-only config for that file.
     if (candidates.length && candidates.every((game) => game.portPaths &&
@@ -572,7 +652,7 @@ async function discoverGames(root, options = {}) {
     }
     let game = candidates.length === 1 ? candidates[0] : null;
     item.id ||= game?.titleId || "";
-    if (!item.id) { errors.push({ file: item.file, error: "Achievement JSON has no established TitleID" }); continue; }
+    if (!item.id) { if (item.format !== "ini-earned") errors.push({ file: item.file, error: "Achievement state has no established TitleID" }); continue; }
     if (!game) {
       const reblue = item.id === "4D5307DF" && path.basename(path.dirname(item.userRoot)).toLowerCase() === "profiles" &&
         fs.existsSync(path.join(item.userRoot, "reblue.toml"));
@@ -580,6 +660,7 @@ async function discoverGames(root, options = {}) {
         adapter: reblue ? "reblue" : "rexglue", title: reblue ? "Blue Dragon (re:Blue)" : item.title || path.basename(item.installRoot || item.userRoot).replace(/_/g, " "),
         xexPath: reblue ? path.join(path.dirname(path.dirname(item.userRoot)), "base", "default.xex") : "", metadataPaths: [], declarations: [], sourceOnly: !reblue });
     }
+    if (game.native?.generic) item.profile = localProfile(game.installRoot, item.file, item.format, item.profile);
     (game.states ||= []).push(item);
   }
   for (const game of games.values()) {
@@ -616,6 +697,15 @@ async function discoverGames(root, options = {}) {
       for (const entry of filesAt(profileRoot)) if (entry.isDirectory() && !entry.isSymbolicLink() && state.validProfile(entry.name)) game.profiles[entry.name] = path.join(profileRoot, entry.name);
       game.profiles.default ||= path.join(profileRoot, "default");
       for (const [profile, userRoot] of Object.entries(game.profiles)) game.progress[profile] = { format: "toml", file: path.join(userRoot, "achievements", `${game.titleId}.toml`), source: "reblue-profile" };
+    } else if (game.native?.progressFile) {
+      const file = path.join(game.installRoot, game.native.progressFile), userRoot = path.dirname(file);
+      const descriptor = { format: game.native.format, file, source: "port-fixed" };
+      const parsed = blocked(file) ? null : state.readSnapshot(file, {}, { titleId: game.titleId, descriptor });
+      if (parsed && !parsed.valid && !parsed.missing) errors.push({ file, error: parsed.error });
+      game.profiles.default = userRoot;
+      game.progress.default = { ...descriptor, confirmed: parsed?.valid === true };
+      game.searchRoots.push(userRoot);
+      game.stateAliases.push(userRoot);
     } else if (game.portPaths) {
       const { root: userRoot, source, reason } = game.portPaths;
       if (userRoot && !game.ambiguousSource) {
@@ -655,6 +745,7 @@ async function discoverGames(root, options = {}) {
       const hasOtherInstallation = installations.some((entry) => !state.samePath(entry.installRoot, game.installRoot));
       const candidates = [declaredRoot, game.installRoot, path.join(game.installRoot, "user"), path.join(game.installRoot, "user-data"),
         path.join(game.installRoot, "content"), documentsRoot, roamingRoot].filter(Boolean);
+      if (game.native?.generic) game.searchRoots.push(...candidates, path.join(game.installRoot, "profile"), path.join(game.installRoot, "profiles"));
       for (const candidate of candidates) {
         game.searchRoots.push(path.join(candidate, "achievements"));
         const local = progressStatesAt(candidate, new Set([game.titleId]), blocked, errors).filter((item) => !ambiguousFiles.has(fileKey(item.file)));
@@ -667,6 +758,11 @@ async function discoverGames(root, options = {}) {
         if (uniqueRoots.length > 1 || ambiguousProfiles.size || game.ambiguousSource || !declaredRoot && hasOtherInstallation && documentsRoot) {
           game.profiles.default = game.installRoot;
           game.progress.default = { format: "pending", file: "", source: "pending", reason: "ambiguous-progress-source" };
+        } else if (game.native?.generic) {
+          // A runtime's general user-data root does not declare an achievement
+          // format. Discover the first actual supported state before binding.
+          game.profiles.default = game.installRoot;
+          game.progress.default = { format: "pending", file: "", source: "pending" };
         } else if (game.native?.format === "json") {
           game.profiles.default = path.join(game.installRoot, "GearGame", "SaveData");
           game.progress.default = { format: "json", file: path.join(game.profiles.default, "Achievements.json"), source: "registered-port" };
@@ -750,7 +846,7 @@ async function discoverGames(root, options = {}) {
     const existingOwner = known.some((cfg) => !currentRoots.has(fileKey(cfg.x360_recomp_install_root)) &&
       Object.keys(cfg.x360_recomp_profiles || {}).some((profile) => fileKey(state.progressPath(cfg, profile) || cfg.x360_recomp_install_root) === file));
     if (currentRoots.size < 2 && !existingOwner) continue;
-    for (const { game, profile } of owners) if (game.manifest || game.adapter === "unleashed" || game.portPaths) {
+    for (const { game, profile } of owners) if (game.manifest || game.adapter === "unleashed" || game.portPaths || game.native?.progressFile) {
       game.progress[profile] = { format: "pending", file: "", source: "ambiguous-installation" };
       game.progressPending = true;
       errors.push({ root: game.installRoot, file, error: "Achievement file claimed by multiple installations; distinct sources required" });
@@ -764,8 +860,9 @@ function isDiscoveryMarker(file) {
   return /(?:default\.xex|\.toml|\.bat|\.cmd|\.ps1|\.spa|\.xdbf)$/.test(name) ||
     PORTS.some((port) => port.names.includes(name)) || name === MANIFEST_NAME || name === "ach-data" || name === "portable.txt" ||
     name === "achievements.json" || /^[a-f0-9]{16}\.tsv$/.test(name) || RUNTIMES.includes(name) || name === "renut.cfg" ||
+    name === "game-path.txt" ||
     /\.exe$/i.test(name) && RUNTIMES.some((runtime) => fs.existsSync(path.join(path.dirname(file), runtime)));
 }
 
-module.exports = { discoverGames, readXexTitle, filesAt, inside, isDiscoveryMarker, hasInstallationHint, validateKnownInstallation,
+module.exports = { discoverGames, readXexTitle, filesAt, inside, isDiscoveryMarker, hasInstallationHint, validateKnownInstallation, localProfile,
   readProgressCandidate: (file) => statesAt(path.dirname(file), () => false, []).find((item) => state.samePath(item.file, file)) || null };

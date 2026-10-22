@@ -981,28 +981,28 @@
             aria-labelledby="tab-general"
           >
             <div style="padding: 0 60px">
-              <div class="settings-section">
-                <h4 id="settings-appLanguageTitle">App Language</h4>
+              <details class="settings-section settings-disclosure settings-options-disclosure" id="settings-appLanguageControls" aria-labelledby="settings-appLanguageTitle">
+                <summary id="settings-appLanguageTitle">App Language</summary>
                 <div class="settings-control">
                   <label for="appLanguageSelect">App Language:</label>
                   <select id="appLanguageSelect"></select>
                 </div>
-              </div>
+              </details>
               <hr style="margin: 18px 0 14px" />
-              <div class="settings-section">
-                <h4 id="settings-globalAchievementsLanguageTitle">
+              <details class="settings-section settings-disclosure settings-options-disclosure" id="settings-globalAchievementsLanguageControls" aria-labelledby="settings-globalAchievementsLanguageTitle">
+                <summary id="settings-globalAchievementsLanguageTitle">
                   Global Achievements Language
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label for="globalAchievementLanguageSelect"
                     >Global Achievements Language:</label
                   >
                   <select id="globalAchievementLanguageSelect"></select>
                 </div>
-              </div>
+              </details>
               <hr style="margin: 18px 0 14px" />
-              <div class="settings-section settings-section--pad-top">
-                <h4 id="settings-overlayShortcutTitle">Overlay Shortcut</h4>
+              <details class="settings-section settings-disclosure settings-options-disclosure settings-section--pad-top" id="settings-overlayShortcutControls" aria-labelledby="settings-overlayShortcutTitle">
+                <summary id="settings-overlayShortcutTitle">Overlay Shortcut</summary>
                 <div class="settings-control">
                   <label for="overlay-shortcut-btn" style="margin-top: -10px"
                     >Shortcut Key:</label
@@ -1054,10 +1054,10 @@
                     </button>
                   </div>
                 </div>
-              </div>
+              </details>
               <hr style="margin: 18px 0 14px" />
-              <div class="settings-section">
-                <h4 id="settings-startupTitle">Startup</h4>
+              <details class="settings-section settings-disclosure settings-options-disclosure" id="settings-startupControls" aria-labelledby="settings-startupTitle">
+                <summary id="settings-startupTitle">Startup</summary>
                 <div class="checkbox-control">
                   <input type="checkbox" id="settings-startWindowsCheckbox" />
                   <label for="settings-startWindowsCheckbox"
@@ -1097,10 +1097,10 @@
                     >Disable Update</label
                   >
                 </div>
-              </div>
+              </details>
               <hr style="margin: 18px 0 14px" />
-              <div class="settings-section" style="margin-bottom: 5px">
-                <h4 id="settings-screenshotsTitle">Achievements Screenshots</h4>
+              <details class="settings-section settings-disclosure settings-options-disclosure" style="margin-bottom: 5px" id="settings-screenshotsControls" aria-labelledby="settings-screenshotsTitle">
+                <summary id="settings-screenshotsTitle">Achievements Screenshots</summary>
                 <div class="settings-control">
                   <div class="input-with-button">
                     <label for="settings-screenshotFolder"
@@ -1138,10 +1138,10 @@
                     Reset to Default
                   </button>
                 </div>
-              </div>
+              </details>
               <hr style="margin: 18px 0 14px" />
-              <div class="settings-section" style="margin-bottom: 5px">
-                <h4 id="settings-recordsTitle">Achievements Records</h4>
+              <details class="settings-section settings-disclosure settings-options-disclosure" style="margin-bottom: 5px" id="settings-recordsControls" aria-labelledby="settings-recordsTitle">
+                <summary id="settings-recordsTitle">Achievements Records</summary>
                 <div class="settings-control">
                   <div class="input-with-button">
                     <label
@@ -1215,7 +1215,7 @@
                     Reset to Default
                   </button>
                 </div>
-              </div>
+              </details>
             </div>
           </div>
 
@@ -1227,10 +1227,23 @@
             hidden
           >
             <div style="padding: 0 60px">
-              <div class="settings-section">
-                <h4 id="settings-notificationTogglesTitle">
+              <details
+                id="settings-notificationTogglesControls"
+                class="settings-section settings-disclosure settings-notification-disclosure"
+                aria-labelledby="settings-notificationTogglesTitle"
+              >
+                <summary id="settings-notificationTogglesTitle">
                   Notification Toggles
-                </h4>
+                </summary>
+
+                <div class="settings-control notification-monitor-control">
+                  <label for="settings-notificationMonitorSelect" data-i18n="notificationMonitor.label">Notification and capture monitor</label>
+                  <select id="settings-notificationMonitorSelect" data-i18n-title="notificationMonitor.help"
+                    title="Used for animated notifications, screenshots and recordings. If disconnected, the first available monitor is used until the selected monitor returns.">
+                    <option value="" data-i18n="notificationMonitor.primary">Primary monitor</option>
+                  </select>
+                  <small id="settings-notificationMonitorStatus" role="status" hidden></small>
+                </div>
 
                 <div class="checkbox-control">
                   <input
@@ -1346,11 +1359,81 @@
                   </div>
                 </div>
 
+              </details>
+
+              <hr style="margin: 18px 0 14px" />
+              <details
+                id="settings-notificationClickActionControls"
+                class="settings-section settings-disclosure settings-notification-disclosure"
+                aria-labelledby="settings-notificationClickActionTitle"
+              >
+                <summary
+                  id="settings-notificationClickActionTitle"
+                  data-i18n="settings.notificationClickNavigation.title"
+                >
+                  Notification Click Action
+                </summary>
+                <div class="checkbox-control">
+                  <input
+                    type="checkbox"
+                    id="settings-notificationClickRedirectCheckbox"
+                  />
+                  <label
+                    for="settings-notificationClickRedirectCheckbox"
+                    data-i18n="label.settings-notificationClickRedirectCheckbox"
+                  >
+                    Open the achievement when clicking a notification
+                  </label>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-notificationClickRedirectTargetSelect"
+                    data-i18n="label.settings-notificationClickRedirectTargetSelect"
+                  >
+                    Open notification in
+                  </label>
+                  <select
+                    id="settings-notificationClickRedirectTargetSelect"
+                    disabled
+                  >
+                    <option
+                      value="overlay"
+                      data-i18n="option.notificationClickRedirectTargetOverlay"
+                    >
+                      In-game Overlay
+                    </option>
+                    <option
+                      value="application"
+                      data-i18n="option.notificationClickRedirectTargetApplication"
+                    >
+                      Main application
+                    </option>
+                  </select>
+                </div>
+                <div
+                  class="hint"
+                  data-i18n="settings.notificationClickNavigation.hint"
+                >
+                  The Overlay stays non-focusable and click-through. Opening
+                  the main application moves focus away from the game.
+                </div>
+                <div
+                  class="hint"
+                  data-i18n="settings.notificationClickNavigation.nativeWindowsAdminHint"
+                >
+                  Native Windows notifications have limitations when
+                  Achievements runs as administrator.
+                </div>
+              </details>
                 <hr style="margin: 18px 0 14px" />
-                <div id="settings-mainNotificationControls">
-                  <h4 id="settings-achievementNotificationTitle">
+                <details
+                  id="settings-mainNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-achievementNotificationTitle"
+                >
+                  <summary id="settings-achievementNotificationTitle">
                     Achievement Notification
-                  </h4>
+                  </summary>
 
                   <div class="settings-control">
                     <label for="settings-positionDropdown"
@@ -1442,16 +1525,20 @@
                   >
                     Test Achievement
                   </button>
-                </div>
+                </details>
 
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-rareNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-rareTitle"
+                >
+                <summary
                   id="settings-rareTitle"
                   data-i18n="settings-rareTitle"
-                  style="margin-top: 10px"
                 >
                   Rare Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-rarePositionDropdown"
@@ -1559,14 +1646,20 @@
                   Test Rare Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-xeniaNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-xeniaNotificationTitle"
+                >
+                <summary
                   id="settings-xeniaNotificationTitle"
                   data-i18n="settings-xeniaNotificationTitle"
-                  style="margin-top: 10px"
                 >
                   Xenia Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-xeniaPositionDropdown"
@@ -1672,14 +1765,20 @@
                   Test Xenia Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-x360recompNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-x360recompNotificationTitle"
+                >
+                <summary
                   id="settings-x360recompNotificationTitle"
                   data-i18n="settings-x360recompNotificationTitle"
-                  style="margin-top: 10px"
                 >
                   Xbox 360 Recomp Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-x360recompPositionDropdown"
@@ -1785,14 +1884,20 @@
                   Test Xbox 360 Recomp Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-ps4recompNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-ps4recompNotificationTitle"
+                >
+                <summary
                   id="settings-ps4recompNotificationTitle"
                   data-i18n="settings-ps4recompNotificationTitle"
-                  style="margin-top: 10px"
                 >
                   PS4 Recomp Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-ps4recompPositionDropdown"
@@ -1898,14 +2003,20 @@
                   Test PS4 Recomp Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-rpcs3NotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-rpcs3NotificationTitle"
+                >
+                <summary
                   id="settings-rpcs3NotificationTitle"
                   data-i18n="settings-rpcs3NotificationTitle"
-                  style="margin-top: 10px"
                 >
                   RPCS3 Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-rpcs3PositionDropdown"
@@ -2011,14 +2122,20 @@
                   Test RPCS3 Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-shadps4NotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-shadps4NotificationTitle"
+                >
+                <summary
                   id="settings-shadps4NotificationTitle"
                   data-i18n="settings-shadps4NotificationTitle"
-                  style="margin-top: 10px"
                 >
                   ShadPS4 Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-shadps4PositionDropdown"
@@ -2124,14 +2241,20 @@
                   Test ShadPS4 Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-kytyps5NotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-kytyps5NotificationTitle"
+                >
+                <summary
                   id="settings-kytyps5NotificationTitle"
                   data-i18n="settings-kytyps5NotificationTitle"
-                  style="margin-top: 10px"
                 >
                   KytyPS5 Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-kytyps5PositionDropdown"
@@ -2237,10 +2360,17 @@
                   Test KytyPS5 Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4 id="settings-platinumTitle" style="margin-top: 10px">
+                <details
+                  id="settings-platinumNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-platinumTitle"
+                >
+                <summary id="settings-platinumTitle">
                   Platinum Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label for="settings-platinumPositionDropdown"
                     >Platinum Achievement Position:</label
@@ -2302,14 +2432,20 @@
                   Test Platinum Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-progressNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-progressNotificationTitle"
+                >
+                <summary
                   id="settings-progressNotificationTitle"
                   data-i18n="settings-progressNotificationTitle"
-                  style="margin-top: 10px"
                 >
                   Progress Notification
-                </h4>
+                </summary>
                 <div class="settings-control">
                   <label
                     for="settings-progressNotificationMethodDropdown"
@@ -2378,14 +2514,20 @@
                   Test Progress Notification
                 </button>
 
+                </details>
+
                 <hr style="margin: 18px 0 14px" />
-                <h4
+                <details
+                  id="settings-playtimeNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-playtimeNotificationTitle"
+                >
+                <summary
                   id="settings-playtimeNotificationTitle"
                   data-i18n="settings-playtimeNotificationTitle"
-                  style="margin-top: 10px"
                 >
                   Playtime Notification
-                </h4>
+                </summary>
                 <div class="settings-slider">
                   <label for="settings-playtimeScaleSlider"
                     >Notification Scale:
@@ -2420,7 +2562,7 @@
                 >
                   Test Playtime Notification
                 </button>
-              </div>
+                </details>
             </div>
           </div>
           <div
@@ -2464,8 +2606,8 @@
           >
             <div style="padding: 0 60px">
               <div class="settings-section">
-                <div class="settings-section" style="margin-bottom: 5px">
-                  <h4 id="settings-steamApiTitle">Steam Web API</h4>
+                <details class="settings-section settings-disclosure settings-options-disclosure" style="margin-bottom: 5px" id="settings-steamApiControls" aria-labelledby="settings-steamApiTitle">
+                  <summary id="settings-steamApiTitle">Steam Web API</summary>
                   <div class="settings-control">
                     <input
                       type="password"
@@ -2482,12 +2624,12 @@
                       Remove
                     </button>
                   </div>
-                </div>
+                </details>
                 <hr style="margin: 18px 0 14px" />
-                <div class="settings-section" style="margin-bottom: 5px">
-                  <h4 id="settings-steamOfficialAccountTitle">
+                <details class="settings-section settings-disclosure settings-options-disclosure" style="margin-bottom: 5px" id="settings-steamOfficialAccountControls" aria-labelledby="settings-steamOfficialAccountTitle">
+                  <summary id="settings-steamOfficialAccountTitle">
                     Steam Official Account
-                  </h4>
+                  </summary>
                   <div class="settings-control">
                     <label for="settings-steamOfficialAccountSelect">
                       Tracked Steam account
@@ -2509,15 +2651,15 @@
                   >
                     Uses Steam loginusers.vdf when available.
                   </div>
-                </div>
+                </details>
                 <hr style="margin: 18px 0 14px" />
-                <div class="settings-section" style="margin-bottom: 5px">
-                  <h4
+                <details class="settings-section settings-disclosure settings-options-disclosure" style="margin-bottom: 5px" id="settings-epicOfficialAccountControls" aria-labelledby="settings-epicOfficialAccountTitle">
+                  <summary
                     id="settings-epicOfficialAccountTitle"
                     data-i18n="settings.epicOfficialAccount.title"
                   >
                     Epic Official Account
-                  </h4>
+                  </summary>
                   <div
                     id="settings-epicOfficialAccountStatus"
                     class="hint"
@@ -2556,15 +2698,15 @@
                   >
                     Uses Epic login for Epic (Official) configs.
                   </div>
-                </div>
+                </details>
                 <hr style="margin: 18px 0 14px" />
-                <div class="settings-section" style="margin-bottom: 5px">
-                  <h4
+                <details class="settings-section settings-disclosure settings-options-disclosure" style="margin-bottom: 5px" id="settings-xboxPcControls" aria-labelledby="settings-xboxPcTitle">
+                  <summary
                     id="settings-xboxPcTitle"
                     data-i18n="settings.xboxPc.title"
                   >
                     Xbox PC (Microsoft / Xbox Network)
-                  </h4>
+                  </summary>
                   <div
                     id="settings-xboxPcStatus"
                     data-i18n="settings.xboxPc.notConnected"
@@ -2608,15 +2750,15 @@
                     OAuth route is experimental and can be restricted by
                     Microsoft.
                   </div>
-                </div>
+                </details>
                 <hr style="margin: 18px 0 14px" />
-                <div class="settings-section" style="margin-bottom: 5px">
-                  <h4
+                <details class="settings-section settings-disclosure settings-options-disclosure" style="margin-bottom: 5px" id="settings-retroAchievementsControls" aria-labelledby="settings-retroAchievementsTitle">
+                  <summary
                     id="settings-retroAchievementsTitle"
                     data-i18n="settings.retroAchievements.title"
                   >
                     RetroAchievements
-                  </h4>
+                  </summary>
                   <div
                     id="settings-retroAchievementsStatus"
                     data-i18n="settings.retroAchievements.notConnected"
@@ -2684,10 +2826,10 @@
                     stored encrypted. Notifications are checked only while a
                     RetroAchievements config is selected.
                   </div>
-                </div>
+                </details>
                 <hr style="margin: 18px 0 14px" />
-                <div class="settings-section">
-                  <h4 id="settings-blacklistTitle">Blacklist</h4>
+                <details class="settings-section settings-disclosure settings-options-disclosure" id="settings-blacklistControls" aria-labelledby="settings-blacklistTitle">
+                  <summary id="settings-blacklistTitle">Blacklist</summary>
                   <div class="checkbox-control">
                     <input
                       type="checkbox"
@@ -2712,67 +2854,10 @@
                       Reset Blacklist
                     </button>
                   </div>
-                </div>
+                </details>
                 <hr style="margin: 18px 0 14px" />
-                <div class="settings-section">
-                  <h4 data-i18n="settings.notificationClickNavigation.title">
-                    Notification Click Action
-                  </h4>
-                  <div class="checkbox-control">
-                    <input
-                      type="checkbox"
-                      id="settings-notificationClickRedirectCheckbox"
-                    />
-                    <label
-                      for="settings-notificationClickRedirectCheckbox"
-                      data-i18n="label.settings-notificationClickRedirectCheckbox"
-                    >
-                      Open the achievement when clicking a notification
-                    </label>
-                  </div>
-                  <div class="settings-control">
-                    <label
-                      for="settings-notificationClickRedirectTargetSelect"
-                      data-i18n="label.settings-notificationClickRedirectTargetSelect"
-                    >
-                      Open notification in
-                    </label>
-                    <select
-                      id="settings-notificationClickRedirectTargetSelect"
-                      disabled
-                    >
-                      <option
-                        value="overlay"
-                        data-i18n="option.notificationClickRedirectTargetOverlay"
-                      >
-                        In-game Overlay
-                      </option>
-                      <option
-                        value="application"
-                        data-i18n="option.notificationClickRedirectTargetApplication"
-                      >
-                        Main application
-                      </option>
-                    </select>
-                  </div>
-                  <div
-                    class="hint"
-                    data-i18n="settings.notificationClickNavigation.hint"
-                  >
-                    The Overlay stays non-focusable and click-through. Opening
-                    the main application moves focus away from the game.
-                  </div>
-                  <div
-                    class="hint"
-                    data-i18n="settings.notificationClickNavigation.nativeWindowsAdminHint"
-                  >
-                    Native Windows notifications have limitations when
-                    Achievements runs as administrator.
-                  </div>
-                </div>
-                <hr style="margin: 18px 0 14px" />
-                <div class="settings-section">
-                  <h4 id="settings-advancedRenderingTitle">Tweaks</h4>
+                <details class="settings-section settings-disclosure settings-options-disclosure" id="settings-advancedRenderingControls" aria-labelledby="settings-advancedRenderingTitle">
+                  <summary id="settings-advancedRenderingTitle">Tweaks</summary>
                   <div class="checkbox-control">
                     <input
                       type="checkbox"
@@ -2876,12 +2961,12 @@
                       </option>
                     </select>
                   </div>
-                </div>
+                </details>
                 <hr style="margin: 18px 0 14px" />
-                <div class="settings-section">
-                  <h4 id="settings-schemaLanguagesTitle">
+                <details class="settings-section settings-disclosure settings-options-disclosure" id="settings-schemaLanguagesControls" aria-labelledby="settings-schemaLanguagesTitle">
+                  <summary id="settings-schemaLanguagesTitle">
                     Achievements Schema Languages
-                  </h4>
+                  </summary>
                   <div
                     class="settings-control"
                     style="gap: 8px; margin-bottom: 8px"
@@ -2906,7 +2991,7 @@
                     aria-label="Achievements schema languages"
                     style="max-height: 220px; overflow: auto"
                   ></div>
-                </div>
+                </details>
               </div>
             </div>
           </div>
@@ -3004,33 +3089,33 @@
                 </div>
               </section>
               <hr style="margin: 18px 0 14px" />
-              <h4
-                id="themeCustomisationTitle"
-                data-i18n="settings.themeCustomisation.title"
-              >
-                Theme Customisation
-              </h4>
-              <section
-                class="settings-section"
+              <details
+                class="settings-section settings-disclosure settings-customisation-disclosure"
                 id="themeCustomisationSection"
                 aria-labelledby="themeCustomisationTitle"
               >
+                <summary
+                  id="themeCustomisationTitle"
+                  data-i18n="settings.themeCustomisation.title"
+                >
+                  Theme Customisation
+                </summary>
                 <div id="themeCustomisationEditor"></div>
-              </section>
+              </details>
               <hr style="margin: 18px 0 14px" />
-              <h4
-                id="notificationCustomisationTitle"
-                data-i18n="settings.notificationCustomisation.title"
-              >
-                Notification Customisation
-              </h4>
-              <section
-                class="settings-section"
+              <details
+                class="settings-section settings-disclosure settings-customisation-disclosure"
                 id="notificationCustomisationSection"
                 aria-labelledby="notificationCustomisationTitle"
               >
+                <summary
+                  id="notificationCustomisationTitle"
+                  data-i18n="settings.notificationCustomisation.title"
+                >
+                  Notification Customisation
+                </summary>
                 <div id="notificationCustomisationEditor"></div>
-              </section>
+              </details>
             </div>
           </div>
           <div
@@ -5592,6 +5677,11 @@
                     <span id="achStatsPlaytime" class="ms-stat-value"
                       >Playtime: 0m</span
                     >
+                    <button id="editPlaytimeBtn" type="button" class="icon-btn edit" disabled
+                      title="Edit playtime" aria-label="Edit playtime"
+                      data-i18n-title="playtime.editTitle" data-i18n-aria-label="playtime.editTitle">
+                      <i class="fa-solid fa-pen" aria-hidden="true"></i>
+                    </button>
                   </span>
                   <span class="ms-stat-group">
                     <span class="ms-stat">
@@ -6480,6 +6570,19 @@
                     <span class="dir">↑</span>
                   </button>
 
+                  <!-- Last played -->
+                  <button
+                    id="sort-last-played"
+                    class="sort-btn"
+                    type="button"
+                    title="Sort by last played (newest / oldest / Off)"
+                  >
+                    <i class="fa-solid fa-gamepad fa-icon" aria-hidden="true"></i>
+                    <span class="fa-fallback" aria-hidden="true">▶</span>
+                    <span class="dashboard-sort-label" data-i18n="dashboard.sort.lastPlayed">Last Played</span>
+                    <span class="dir">·</span>
+                  </button>
+
                   <!-- Last updated -->
                   <button
                     id="sort-time"
@@ -7273,6 +7376,10 @@
     <script src="utils/san-customisation-editor.js"></script>
     <script src="utils/notification-customisation-editor.js"></script>
     <script src="utils/notification-preset-dimensions.js"></script>
+    <script src="utils/notification-placement.js"></script>
+    <script src="utils/notification-placement-controls.js"></script>
+    <script src="utils/notification-monitor-controls.js"></script>
+    <script src="utils/playtime-duration.js"></script>
     <script>
       window.__coverNameCache = window.__coverNameCache || {};
       function rememberCoverName(appid, displayName) {
@@ -11431,9 +11538,12 @@
       async function updatePlaytimeLabel(configName) {
         const label = document.getElementById("achStatsPlaytime");
         const lastPlayedLabel = document.getElementById("achStatsLastPlayed");
+        const editButton = document.getElementById("editPlaytimeBtn");
+        if (editButton) editButton.disabled = !configName;
         if (!label || !configName) return;
         try {
           const res = await window.api.getTotalPlaytime(configName);
+          if (sanitizeOptionalConfigName(document.getElementById("configList")?.value) !== sanitizeOptionalConfigName(configName)) return;
           const totalMs =
             typeof res === "number" ? res : Number(res?.totalMs || 0);
           const updatedAt =
@@ -11465,6 +11575,50 @@
           }
         }
       }
+
+      let playtimeEditOpen = false;
+      document.getElementById("editPlaytimeBtn")?.addEventListener("click", async () => {
+        const select = document.getElementById("configList"), configName = select?.value;
+        if (!configName || playtimeEditOpen) return;
+        const button = document.getElementById("editPlaytimeBtn");
+        const game = select.selectedOptions[0]?.textContent || configName;
+        playtimeEditOpen = true;
+        button.disabled = true;
+        try {
+          const info = await window.api.getTotalPlaytime(configName);
+          if (select.value !== configName) return;
+          const current = typeof info === "number" ? info : Number(info?.totalMs || 0);
+          let value = PlaytimeDuration.formatInput(current);
+          while (true) {
+            button.disabled = false;
+            const result = await showAppTextPrompt({
+              title: tUi("playtime.editTitle", "Edit playtime"),
+              message: tUiFmt("playtime.editMessage", { game }, 'Enter the total playtime for “{game}” as hours:minutes:seconds (for example, 12:30:00).'),
+              inputLabel: tUi("playtime.editTitle", "Edit playtime"),
+              inputValue: value, inputPlaceholder: "12:30:00", inputRequired: true,
+              okText: tUi("settings-steamApiKeySave", "Save"),
+            });
+            if (!result.confirmed) return;
+            value = result.value;
+            const totalMs = PlaytimeDuration.parseInput(value);
+            if (totalMs === null) {
+              showNotification(tUi("playtime.editInvalid", "Enter a valid hours:minutes:seconds value. Minutes and seconds must be between 0 and 59."), "#f44336");
+              continue;
+            }
+            if (totalMs === Math.floor(current / 1000) * 1000) return;
+            button.disabled = true;
+            const saved = await window.api.setTotalPlaytime(configName, totalMs);
+            if (!saved?.ok) throw new Error("Playtime update failed");
+            if (select.value === configName) await updatePlaytimeLabel(configName);
+            return;
+          }
+        } catch {
+          showNotification(tUi("playtime.editFailed", "Could not update playtime."), "#f44336");
+        } finally {
+          playtimeEditOpen = false;
+          button.disabled = !select?.value;
+        }
+      });
 
       const notificationQueue = [];
       let isNotificationActive = false;
@@ -15838,12 +15992,14 @@
             active,
           );
         }
+        window.__refreshNotificationPlacementControls?.();
         if (!active) {
           refreshNativeWindowsNotificationControls();
         }
       }
 
       function refreshNativeWindowsNotificationControls() {
+        window.__refreshNotificationPlacementControls?.();
         for (const mapping of NATIVE_WINDOWS_NOTIFICATION_CONTROL_MAP) {
           const presetSelect = document.getElementById(mapping.presetId);
           if (!presetSelect) continue;
@@ -16041,6 +16197,7 @@
 
           stopUiAudioPlayback();
           window.api.showTestNotification({
+            ...readNotificationPlacementControls("main"),
             preset,
             position,
             sound,
@@ -17040,6 +17197,34 @@
         { key: "progress", prefix: "progress" },
         { key: "playtime", prefix: "playtime" },
       ]);
+      const notificationPlacementPositionControl = (profile) => document.getElementById(
+        `settings-${profile.prefix ? `${profile.prefix}Position` : "position"}Dropdown`,
+      );
+      const notificationPlacementControls = window.createNotificationPlacementControls({
+        profiles: NOTIFICATION_TIMING_PROFILES,
+        translate: tUi,
+        durationControl: (profile) => notificationTimingControl(profile, "duration"),
+        positionControl: notificationPlacementPositionControl,
+        position: (profile) => profile.key === "playtime" ? "center-top"
+          : notificationPlacementPositionControl(profile)?.value || "center-bottom",
+        disabled: (profile) => (profile.key === "main" && document.getElementById("settings-enableTrophyModeCheckbox")?.checked === true)
+          || (profile.key === "progress"
+            ? ["native", "gamebar"].includes(document.getElementById("settings-progressNotificationMethodDropdown")?.value)
+            : profile.presetId ? isNativeWindowsPresetValue(document.getElementById(profile.presetId)?.value) : false),
+        save: async (patch) => {
+          await window.api.savePreferences(patch);
+          await refreshPreferencesCache();
+        },
+      });
+      const readNotificationPlacementControls = (profile) => notificationPlacementControls.read(profile);
+      const notificationMonitorControls = window.createNotificationMonitorControls({
+        api: window.api, translate: tUi,
+        saved: () => refreshPreferencesCache(),
+        error: (message) => showNotification(message, "#f44336"),
+      });
+      window.__refreshNotificationPlacementControls = () => notificationPlacementControls.refresh();
+      document.getElementById("settings-progressNotificationMethodDropdown")?.addEventListener("change", () => notificationPlacementControls.refresh());
+
       const notificationTimingRevisions = new Map();
       const notificationTimingLoads = new Map();
       const notificationTimingEdits = new Map();
@@ -17627,6 +17812,8 @@
         applyRareNotificationPreferences(prefs);
         applyEmulatorNotificationPreferences(prefs);
         applyNotificationTogglePreferences(prefs);
+        notificationPlacementControls.hydrate(prefs);
+        void notificationMonitorControls.refresh();
         const hiddenPlatPos = document.getElementById("platinumPositionValue");
         if (prefs.platinumPosition) {
           const el = document.getElementById(
@@ -17879,6 +18066,8 @@
             applyProgressNotificationMethodPreferences(prefs);
             applyRareNotificationPreferences(prefs);
             applyNotificationTogglePreferences(prefs);
+            notificationPlacementControls.hydrate(prefs);
+            void notificationMonitorControls.refresh();
             applyNotificationClickRedirectPreferences(prefs);
             const hiddenPlatPos = document.getElementById(
               "platinumPositionValue",
@@ -19061,6 +19250,8 @@
 
       async function showEmptyAchievementStats(configName = "") {
         updateAchievementStats([]);
+        const editButton = document.getElementById("editPlaytimeBtn");
+        if (editButton) editButton.disabled = !configName;
         if (configName) {
           await updatePlaytimeLabel(configName);
           return;
@@ -21617,6 +21808,7 @@
       const settingsTabsContent = document.querySelector(
         ".settings-tabs-content",
       );
+      const settingsSearchDisclosureStates = new Map();
       const settingsSearchNoResults = document.createElement("p");
       settingsSearchNoResults.id = "settingsSearchNoResults";
       settingsSearchNoResults.className = "settings-search-no-results hidden";
@@ -21642,6 +21834,18 @@
             section.removeAttribute("data-search-source");
           });
         settingsSearchNoResults.classList.add("hidden");
+        for (const [disclosure, wasOpen] of settingsSearchDisclosureStates) {
+          disclosure.open = wasOpen;
+        }
+        settingsSearchDisclosureStates.clear();
+      }
+
+      function openSettingsSearchDisclosure(section) {
+        if (!section.matches("details.settings-disclosure")) return;
+        if (!settingsSearchDisclosureStates.has(section)) {
+          settingsSearchDisclosureStates.set(section, section.open);
+        }
+        section.open = true;
       }
 
       function filterSettings(queryValue) {
@@ -21686,9 +21890,11 @@
             totalMatches += 1;
             section.classList.remove("settings-search-hidden");
             section.setAttribute("data-search-source", sourceTitle);
+            openSettingsSearchDisclosure(section);
             let parent = section.parentElement?.closest(".settings-section");
             while (parent && panel.contains(parent)) {
               parent.classList.remove("settings-search-hidden");
+              openSettingsSearchDisclosure(parent);
               parent = parent.parentElement?.closest(".settings-section");
             }
           }
@@ -25254,6 +25460,9 @@
         let editorPickerOpen = false;
         let editorPickerCloseTimer = null;
         const customisationPanel = document.getElementById("customisationTab");
+        const notificationDisclosure = document.getElementById("notificationCustomisationSection");
+        const isNotificationEditorVisible = () => notificationDisclosure.open &&
+          previewShell.getClientRects().length > 0;
         const updatePlaybackButton = () => {
           stopPreview.classList.toggle("is-paused", playbackState === "paused");
           stopPreview.disabled = !livePreviewActive || exactPreviewInFlight;
@@ -25268,7 +25477,7 @@
           const visibleFraction = rect.width > 0 && rect.height > 0 ? clippedWidth * clippedHeight / (rect.width * rect.height) : 0;
           return {
             bounds: { x: rect.left, y: rect.top, width: rect.width, height: rect.height },
-            visible: !editorPickerOpen && visibleFraction > 0.98 && previewShell.getClientRects().length > 0 &&
+            visible: !editorPickerOpen && visibleFraction > 0.98 && isNotificationEditorVisible() &&
               !document.querySelector(".settings-tabs-content.settings-search-active"),
           };
         };
@@ -25323,7 +25532,7 @@
         window.addEventListener("focus", releaseEditorPicker);
 
         async function renderExactPreview(sequence = renderSequence) {
-          if (!sourceReady || !previewShell.getClientRects().length) return;
+          if (!sourceReady || !isNotificationEditorVisible()) return;
           if (exactPreviewInFlight) {
             exactPreviewPending = true;
             return;
@@ -25378,7 +25587,7 @@
             updatePlaybackButton();
             if (exactPreviewPending) {
               exactPreviewPending = false;
-              if (sourceReady && previewShell.getClientRects().length) scheduleExactPreview(0);
+              if (sourceReady && isNotificationEditorVisible()) scheduleExactPreview(0);
             }
           }
         }
@@ -25387,7 +25596,7 @@
           const sequence = ++renderSequence;
           playbackState = "playing";
           updatePlaybackButton();
-          if (!sourceReady || !previewShell.getClientRects().length) return;
+          if (!sourceReady || !isNotificationEditorVisible()) return;
           renderTimer = setTimeout(() => void renderExactPreview(sequence), delay);
         }
         stopPreview.addEventListener("click", async () => {
@@ -25425,13 +25634,24 @@
         new ResizeObserver(updateLivePlacement).observe(previewViewport);
         window.addEventListener("resize", updateLivePlacement);
         window.addEventListener("scroll", updateLivePlacement, true);
-        window.addEventListener("notification-customisation:settings-closed", () => {
+        const deactivateLivePreview = () => {
           clearTimeout(renderTimer);
           renderSequence += 1;
           exactPreviewPending = false;
           livePreviewActive = false;
           releaseEditorPicker();
           updatePlaybackButton();
+        };
+        window.addEventListener("notification-customisation:settings-closed", deactivateLivePreview);
+        notificationDisclosure.addEventListener("toggle", () => {
+          if (!notificationDisclosure.open) {
+            deactivateLivePreview();
+            void window.api?.closeLivePresetPreview?.();
+            notificationScrollPanel?.style.setProperty("--notification-sticky-stack-height", "0px");
+            return;
+          }
+          updateStickyPreviewOffset();
+          scheduleExactPreview(10);
         });
         const previewVisibilityObserver = new IntersectionObserver((entries) => {
           if (entries[0]?.isIntersecting && sourceReady && !livePreviewActive && !exactPreviewInFlight) scheduleExactPreview(10);
@@ -25692,6 +25912,7 @@
 
           stopUiAudioPlayback();
           window.api.showTestNotification({
+            ...readNotificationPlacementControls("main"),
             preset,
             position,
             sound,
@@ -25709,7 +25930,7 @@
         .getElementById("settings-testPlaytimeNotificationBtn")
         .addEventListener("click", async function () {
           await notificationTimingLoads.get("playtime");
-          window.api.showTestPlaytimeNotification();
+          window.api.showTestPlaytimeNotification(readNotificationPlacementControls("playtime"));
         });
 
       document
@@ -25719,7 +25940,7 @@
           const position =
             document.getElementById("settings-progressPositionDropdown")
               ?.value || "bottom-left";
-          window.api.showTestProgressNotification({ position });
+          window.api.showTestProgressNotification({ position, ...readNotificationPlacementControls("progress") });
         });
 
       document
@@ -25747,6 +25968,7 @@
 
           stopUiAudioPlayback();
           window.api.showTestRareNotification({
+            ...readNotificationPlacementControls("rare"),
             preset,
             position,
             sound,
@@ -25782,6 +26004,7 @@
 
           stopUiAudioPlayback();
           window.api.showTestPlatinumNotification({
+            ...readNotificationPlacementControls("platinum"),
             preset,
             position,
             sound,
@@ -25830,6 +26053,7 @@
           );
           stopUiAudioPlayback();
           window.api.showTestEmulatorNotification({
+            ...readNotificationPlacementControls(setting.prefix),
             platform: setting.platform,
             preset: presetSelect?.value || "default",
             position: positionSelect?.value || "center-bottom",
@@ -25965,6 +26189,8 @@
 
       window.__refreshNotificationTimingLabels = () => {
         NOTIFICATION_TIMING_PROFILES.forEach(updateNotificationTimingLabels);
+        notificationPlacementControls.refresh();
+        void notificationMonitorControls.refresh();
       };
 
       function updateSettingsPlaytimeScaleLabel() {
@@ -26452,6 +26678,8 @@
         renderSchemaLanguageSelection(prefs);
         bindSchemaLanguageSelectionEvents();
         refreshSteamApiKeyStatus();
+        notificationPlacementControls.hydrate(prefs);
+        void notificationMonitorControls.refresh();
       }
 
       function syncSettingsFromModal() {
@@ -26672,6 +26900,7 @@
             base.recordsFolder || "",
           ),
           disableAchievementRecords: checkbox("settings-disableRecordCheckbox"),
+          notificationMonitorId: getVal("settings-notificationMonitorSelect"),
           recordFps: getVal("settings-recordFpsSelect") === "unlocked"
             ? "unlocked"
             : Number(getVal("settings-recordFpsSelect")) || 30,
@@ -26748,12 +26977,14 @@
             else snapshot[key] = base[key];
           }
         }
+        Object.assign(snapshot, notificationPlacementControls.collect());
         return snapshot;
       }
 
       async function persistSettingsPreferences() {
         try {
           await Promise.all(notificationTimingLoads.values());
+          await notificationPlacementControls.flush();
           await refreshPreferencesCache();
           const payload = collectSettingsPreferences();
           await window.api.savePreferences(payload);
@@ -28396,6 +28627,7 @@
         const DASH_COLLECTION_FILTER_STORE = "dashFilter:collection";
         const DASH_VIEW_MODE_STORE = "dashView:mode";
         const DASH_COLLECTION_NAME_SORT_STORE = "dashSort:collectionName";
+        const DASH_SORT_PRIORITY_DEFAULT = ["lastPlayed", "updated", "progress", "name"];
         const dashboardUiState = window.api?.getDashboardUiState?.() || {};
         const durableDashboardUiState = { ...dashboardUiState };
         const dashboardUiStorageKeys = {
@@ -28406,9 +28638,17 @@
           nameSort: "dashSort:name",
           progressSort: "dashSort:progress",
           updatedSort: "dashSort:updated",
+          lastPlayedSort: "dashSort:lastPlayed",
+          sortPriority: "dashSort:priority",
         };
         const isValidDashboardSetting = (field, value) => {
           if (typeof value !== "string") return false;
+          if (field === "sortPriority") {
+            const keys = value.split(",");
+            return keys.length === DASH_SORT_PRIORITY_DEFAULT.length &&
+              new Set(keys).size === keys.length &&
+              keys.every((key) => DASH_SORT_PRIORITY_DEFAULT.includes(key));
+          }
           if (field === "viewMode") {
             return ["both", "configs", "collections"].includes(value);
           }
@@ -28451,22 +28691,26 @@
         }
         const getDashboardSetting = (field, storageKey) =>
           dashboardUiState[field] ?? localStorage.getItem(storageKey);
-        const saveDashboardSetting = (field, storageKey, value) => {
-          localStorage.setItem(storageKey, value);
-          dashboardUiState[field] = value;
-          if (durableDashboardUiState[field] === value) return;
+        const saveDashboardSettings = (patch) => {
+          for (const [field, value] of Object.entries(patch)) {
+            localStorage.setItem(dashboardUiStorageKeys[field], value);
+            dashboardUiState[field] = value;
+          }
+          if (Object.entries(patch).every(([field, value]) => durableDashboardUiState[field] === value)) return;
           try {
             if (
-              window.api?.saveDashboardUiState?.({ [field]: value }) === true
+              window.api?.saveDashboardUiState?.(patch) === true
             ) {
-              durableDashboardUiState[field] = value;
+              Object.assign(durableDashboardUiState, patch);
             } else {
-              console.warn("Failed to persist Dashboard setting:", field);
+              console.warn("Failed to persist Dashboard settings:", Object.keys(patch));
             }
           } catch (error) {
-            console.warn("Failed to persist Dashboard setting:", field, error);
+            console.warn("Failed to persist Dashboard settings:", Object.keys(patch), error);
           }
         };
+        const saveDashboardSetting = (field, _storageKey, value) =>
+          saveDashboardSettings({ [field]: value });
         const DASH_DETAIL_CONCURRENCY = 3;
         const DASH_DETAIL_BATCH_SIZE = 24;
         const DASH_DETAIL_BATCH_PAUSE_MS = 25;
@@ -31565,6 +31809,52 @@
           applyDashboardSortAndFilter(options);
         }
 
+        let dashboardLastPlayed = new Map();
+        const dashboardLastPlayedRevisions = new Map();
+        let dashboardLastPlayedRevision = 0;
+        let dashboardLastPlayedLoaded = false;
+        let dashboardLastPlayedLoad = null;
+        const validLastPlayedTime = (value) =>
+          Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0;
+
+        function refreshDashboardLastPlayed() {
+          if (dashboardLastPlayedLoad) return dashboardLastPlayedLoad;
+          const revision = dashboardLastPlayedRevision;
+          dashboardLastPlayedLoad = (async () => {
+            try {
+              const snapshot = await window.api.getLastPlayedSnapshot();
+              if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return;
+              const next = new Map(Object.entries(snapshot).map(([name, timestamp]) => [
+                sanitizeOptionalConfigName(name), validLastPlayedTime(timestamp),
+              ]));
+              // Events received during the IPC read take precedence over its snapshot.
+              for (const [name, version] of dashboardLastPlayedRevisions) {
+                if (version > revision) next.set(name, dashboardLastPlayed.get(name) || 0);
+              }
+              dashboardLastPlayed = next;
+              dashboardLastPlayedLoaded = true;
+              if (window.__dashboardOpen && getMultiSortState().lastPlayed !== "off") {
+                requestDashboardSortAndFilter({ preserveScroll: true, reason: "last-played-loaded" });
+              }
+            } catch (error) {
+              console.warn("Failed to load Dashboard last played:", error);
+            } finally {
+              dashboardLastPlayedLoad = null;
+            }
+          })();
+          return dashboardLastPlayedLoad;
+        }
+
+        window.api.onLastPlayedUpdate?.((payload = {}) => {
+          const name = sanitizeOptionalConfigName(payload.configName);
+          if (!name) return;
+          dashboardLastPlayed.set(name, validLastPlayedTime(payload.lastPlayedAt));
+          dashboardLastPlayedRevisions.set(name, ++dashboardLastPlayedRevision);
+          if (window.__dashboardOpen && getMultiSortState().lastPlayed !== "off") {
+            requestDashboardSortAndFilter({ preserveScroll: true, reason: "last-played-update" });
+          }
+        });
+
         async function openDashboard() {
           if (isSettingsOpen()) {
             return;
@@ -31576,6 +31866,9 @@
           // Restore the saved view independently of the asynchronous config build.
           renderDashboardCollectionGallery();
           updateSortIconsUI();
+          if (getMultiSortState().lastPlayed !== "off") {
+            await refreshDashboardLastPlayed();
+          }
           if (!dashboardCollectionsLoaded) {
             void ensureDashboardCollectionsLoaded();
           }
@@ -33279,7 +33572,6 @@
           const cards = Array.from(
             gridEl?.querySelectorAll(".dash-card") || [],
           );
-          if (!cards.length) return;
           const stats = cards.map((card) => ({
             name: card.dataset.name,
             total: Number(card.dataset.total) || 0,
@@ -33624,6 +33916,9 @@
         async function buildDashboardOnce() {
           if (!gridEl || !window.api) return;
           try {
+            if (getMultiSortState().lastPlayed !== "off" && !dashboardLastPlayedLoaded) {
+              await refreshDashboardLastPlayed();
+            }
             const scrollAnchor = captureDashboardScrollAnchor();
             // Do not override the current blacklist visibility state from cache here.
             // The checkbox and blacklist state are already managed elsewhere.
@@ -33997,8 +34292,10 @@
                 .map((r) => (r.status === "fulfilled" ? r.value : null))
                 .filter((it) => it && it.progress);
               if (ready.length) {
-                updateDashboardCounts(items, ready);
-                scheduleIdle(() => updateDashboardCounts(items, ready));
+                // An earlier build may finish after a config was deleted.
+                // Read the current grid so stale jobs cannot restore old totals.
+                refreshDashboardHeaderCountsFromGrid();
+                scheduleIdle(refreshDashboardHeaderCountsFromGrid);
                 requestDashboardSortAndFilter({
                   reason: "dashboard-detail-ready",
                 });
@@ -35373,11 +35670,12 @@
         void ensureDashboardCollectionsLoaded();
 
         // --- MULTI-SORT ---
-        const SORT_KEYS = ["name", "progress", "updated"];
+        const SORT_KEYS = ["name", "progress", "updated", "lastPlayed"];
         const STORE = {
           name: dashboardUiStorageKeys.nameSort,
           progress: dashboardUiStorageKeys.progressSort,
           updated: dashboardUiStorageKeys.updatedSort,
+          lastPlayed: dashboardUiStorageKeys.lastPlayedSort,
         };
 
         function getMultiSortState() {
@@ -35386,13 +35684,20 @@
             progress:
               getDashboardSetting("progressSort", STORE.progress) || "off",
             updated: getDashboardSetting("updatedSort", STORE.updated) || "off",
+            lastPlayed: getDashboardSetting("lastPlayedSort", STORE.lastPlayed) || "off",
           };
+        }
+        function getDashboardSortPriority() {
+          const saved = getDashboardSetting("sortPriority", dashboardUiStorageKeys.sortPriority);
+          return isValidDashboardSetting("sortPriority", saved)
+            ? saved.split(",") : [...DASH_SORT_PRIORITY_DEFAULT];
         }
         function cycle(v) {
           return v === "off" ? "asc" : v === "asc" ? "desc" : "off";
         }
 
         function setSort(mode) {
+          if (!SORT_KEYS.includes(mode)) return;
           if (mode === "name" && isDashboardCollectionGallerySort()) {
             saveDashboardSetting(
               "collectionNameSort",
@@ -35404,10 +35709,23 @@
             return;
           }
           const st = getMultiSortState();
-          st[mode] = cycle(st[mode]);
-          saveDashboardSetting(`${mode}Sort`, STORE[mode], st[mode]);
+          st[mode] = mode === "lastPlayed"
+            ? st[mode] === "off" ? "desc" : st[mode] === "desc" ? "asc" : "off"
+            : cycle(st[mode]);
+          const priority = getDashboardSortPriority();
+          // The latest enabled/changed criterion becomes primary. The others
+          // retain their directions and their relative order for tie-breaking.
+          const nextPriority = st[mode] !== "off"
+            ? [mode, ...priority.filter((key) => key !== mode)] : priority;
+          saveDashboardSettings({
+            [`${mode}Sort`]: st[mode],
+            sortPriority: nextPriority.join(","),
+          });
           updateSortIconsUI(st);
           applyDashboardSortAndFilter();
+          if (mode === "lastPlayed" && st.lastPlayed !== "off") {
+            void refreshDashboardLastPlayed();
+          }
         }
         window.__dashboardCycleSort = setSort;
 
@@ -35442,10 +35760,13 @@
         });
 
         function updateSortIconsUI(st = getMultiSortState()) {
-          const nameSort = isDashboardCollectionGallerySort()
+          const gallerySort = isDashboardCollectionGallerySort();
+          const nameSort = gallerySort
             ? getDashboardCollectionNameSort()
             : st.name;
-          const setBtn = (id, state, title) => {
+          const activeOrder = gallerySort ? (nameSort === "off" ? [] : ["name"])
+            : getDashboardSortPriority().filter((key) => st[key] !== "off");
+          const setBtn = (id, state, title, key) => {
             const btn = document.getElementById(id);
             if (!btn) return;
             btn.classList.toggle("active", state !== "off");
@@ -35457,12 +35778,26 @@
             if (dirEl)
               dirEl.textContent =
                 state === "asc" ? "↑" : state === "desc" ? "↓" : "·";
-            if (title) btn.title = title;
+            const rank = activeOrder.indexOf(key) + 1;
+            let badge = btn.querySelector(".sort-priority");
+            if (!badge) {
+              badge = document.createElement("span");
+              badge.className = "sort-priority";
+              badge.setAttribute("aria-hidden", "true");
+              btn.insertBefore(badge, btn.querySelector(".dashboard-sort-label"));
+            }
+            badge.hidden = rank === 0;
+            badge.textContent = rank ? `${rank}.` : "";
+            if (title) {
+              btn.title = rank ? `${rank}. ${title}` : title;
+              btn.setAttribute("aria-label", btn.title);
+            }
           };
           setBtn(
             "sort-name",
             nameSort,
             tUi("title.sort-name-cycle", "Sort by name (A-Z / Z-A / Off)"),
+            "name",
           );
           setBtn(
             "sort-progress",
@@ -35471,6 +35806,13 @@
               "title.sort-progress-cycle",
               "Sort by progress (low-high / high-low / Off)",
             ),
+            "progress",
+          );
+          setBtn(
+            "sort-last-played",
+            st.lastPlayed,
+            tUi("dashboard.sort.lastPlayedTooltip", "Sort by last played (newest / oldest / Off)"),
+            "lastPlayed",
           );
           setBtn(
             "sort-time",
@@ -35479,26 +35821,21 @@
               "title.sort-time-cycle",
               "Sort by last updated (oldest-newest / newest-oldest / Off)",
             ),
+            "updated",
           );
           const summary = document.getElementById("dashboardSortSummaryText");
           if (summary) {
-            const gallerySort = isDashboardCollectionGallerySort();
-            const activeSorts = [];
-            if (!gallerySort && st.updated !== "off") {
-              activeSorts.push(
-                `${tUi("achievements.sortDateLabel", "Date")} ${st.updated === "asc" ? "↑" : "↓"}`,
-              );
-            }
-            if (!gallerySort && st.progress !== "off") {
-              activeSorts.push(
-                `${tUi("overlay.progressLabel", "Progress")} ${st.progress === "asc" ? "↑" : "↓"}`,
-              );
-            }
-            if (nameSort !== "off") {
-              activeSorts.push(
-                `${tUi("achievements.sortNameLabel", "Name")} ${nameSort === "asc" ? "A–Z" : "Z–A"}`,
-              );
-            }
+            const labels = {
+              lastPlayed: tUi("dashboard.sort.lastPlayed", "Last Played"),
+              updated: tUi("achievements.sortDateLabel", "Date"),
+              progress: tUi("overlay.progressLabel", "Progress"),
+              name: tUi("achievements.sortNameLabel", "Name"),
+            };
+            const activeSorts = activeOrder.map((key, index) => {
+              const direction = key === "name" ? (nameSort === "asc" ? "A–Z" : "Z–A")
+                : st[key] === "asc" ? "↑" : "↓";
+              return `${activeOrder.length > 1 ? `${index + 1}. ` : ""}${labels[key]} ${direction}`;
+            });
             summary.textContent =
               activeSorts.join(" · ") || tUi("dashboard.sort.label", "Sort");
             summary.title = summary.textContent;
@@ -35619,7 +35956,7 @@
             card,
           }));
 
-          const pri = ["updated", "progress", "name"];
+          const pri = getDashboardSortPriority();
           const mult = (k) => (st[k] === "asc" ? 1 : st[k] === "desc" ? -1 : 0);
           const ignoreLeadingArticles = shouldIgnoreLeadingArticlesInGameSort();
           const sortTitleCache = new WeakMap();
@@ -35654,7 +35991,13 @@
               const m = mult(k);
               if (!m) continue;
 
-              if (k === "updated") {
+              if (k === "lastPlayed") {
+                const da = dashboardLastPlayed.get(sanitizeOptionalConfigName(cardA.dataset.name)) || 0;
+                const db = dashboardLastPlayed.get(sanitizeOptionalConfigName(cardB.dataset.name)) || 0;
+                // Unknown history stays last in both directions.
+                if (!!da !== !!db) return da ? -1 : 1;
+                if (da !== db) return (da - db) * m;
+              } else if (k === "updated") {
                 const da = Number(cardA.dataset.updated || 0),
                   db = Number(cardB.dataset.updated || 0);
                 if (da !== db) return (da - db) * m;
@@ -35737,6 +36080,9 @@
         window.applyDashboardSortAndFilter = applyDashboardSortAndFilter;
 
         (function () {
+          document
+            .getElementById("sort-last-played")
+            ?.addEventListener("click", () => setSort("lastPlayed"));
           document
             .getElementById("sort-name")
             ?.addEventListener("click", () => setSort("name"));
@@ -38427,12 +38773,24 @@
           }
         }
         window.ensureShortcutsTabContent = ensureShortcutsTabContent;
+        function settingsSectionFocusList(content) {
+          return window.focusablesIn(content).filter((el) => {
+            if (el.closest(".settings-tabs")) return false;
+            if (el.classList.contains("settings-close-button")) return false;
+            let ancestor = el.parentElement;
+            while (ancestor && content.contains(ancestor)) {
+              if (ancestor.tagName === "DETAILS" && !ancestor.open) {
+                const summary = ancestor.querySelector(":scope > summary");
+                if (!summary?.contains(el)) return false;
+              }
+              ancestor = ancestor.parentElement;
+            }
+            return true;
+          });
+        }
         function focusFirstInActiveSection() {
           const content = activeSettingsPanel() || $(".settings-content");
-          const list = window
-            .focusablesIn(content)
-            .filter((el) => !el.closest(".settings-tabs"))
-            .filter((el) => !el.classList.contains("settings-close-button"));
+          const list = settingsSectionFocusList(content);
           (list[0] || content)?.focus({ preventScroll: true });
         }
 
@@ -38449,12 +38807,7 @@
           window.__settingsMode = "section";
           const activePanel = activeSettingsPanel();
           if (activePanel) {
-            const firstFocusable = window
-              .focusablesIn(activePanel)
-              .filter((el) => !el.closest(".settings-tabs"))
-              .filter(
-                (el) => !el.classList.contains("settings-close-button"),
-              )[0];
+            const firstFocusable = settingsSectionFocusList(activePanel)[0];
             (firstFocusable || activePanel)?.focus({ preventScroll: true });
           }
         };
@@ -38471,10 +38824,7 @@
         };
         window.settingsSectionFocusMove = function (delta) {
           const content = activeSettingsPanel() || $(".settings-content");
-          const list = window
-            .focusablesIn(content)
-            .filter((el) => !el.closest(".settings-tabs"))
-            .filter((el) => !el.classList.contains("settings-close-button"));
+          const list = settingsSectionFocusList(content);
           if (!list.length) return;
           const cur = document.activeElement;
           let idx = list.findIndex(

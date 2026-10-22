@@ -21,7 +21,7 @@ function watchConfig(config, callbacks = {}) {
       group.operation = group.operation.then(async () => {
         group.readPending = false;
         if (group.closed) return;
-        const clients = [...group.clients].filter((client) => !client.closed);
+        const clients = [...group.clients].filter((client) => !client.closed && !client.config.__ps4RecompSourcePending);
         if (!clients.length) return;
         // Read from zero once per shared source, even when Windows has not
         // delivered a directory event or refreshed its cached metadata.
@@ -38,6 +38,10 @@ function watchConfig(config, callbacks = {}) {
             continue; // Keep the baseline and retry through the same one-second cycle.
           }
           client.lastError = "";
+          if (logRead.sourcePath && !state.samePath(client.config.save_path, logRead.sourcePath)) {
+            await client.callbacks.onSourceChange?.(logRead.sourcePath);
+            if (client.closed || client.config.__ps4RecompSourcePending) continue;
+          }
           if (parsed.pendingContext && !client.waitingContext) client.callbacks.onPendingContext?.();
           client.waitingContext = parsed.pendingContext === true;
           if (client.baseline) {
@@ -60,8 +64,8 @@ function watchConfig(config, callbacks = {}) {
             client.known = parsed.snapshot;
             continue;
           }
-          await client.callbacks.onEvent?.(state.progressPath(client.config), parsed.snapshot);
-          if (!client.closed) client.known = parsed.snapshot;
+          await client.callbacks.onEvent?.(logRead.sourcePath || state.progressPath(client.config), parsed.snapshot);
+          if (!client.closed && !client.config.__ps4RecompSourcePending) client.known = parsed.snapshot;
         }
       }).catch((error) => {
         for (const client of group.clients) {
@@ -84,18 +88,24 @@ function watchConfig(config, callbacks = {}) {
       // its command line. Use the same serialized reader, never another watcher.
       if ([...group.clients].some((client) => client.waitingContext)) enqueue();
     });
-    if (config.ps4_recomp_settings_file) {
-      // Launcher settings are independent of progress. Only this JSON file
+    const settingsTargets = [...new Set([config.ps4_recomp_settings_file, ...(config.ps4_recomp_settings_files || [])]
+      .filter((file) => typeof file === "string" && path.isAbsolute(file)))];
+    if (settingsTargets.length) {
+      // Launcher settings are independent of progress. Only this JSON/INI file
       // retains native event monitoring and its short write-stability delay.
-      const target = config.ps4_recomp_settings_file, directory = path.dirname(target);
-      let anchor = directory, settingsTimer;
-      while (!fs.existsSync(anchor) && path.dirname(anchor) !== anchor) anchor = path.dirname(anchor);
-      const watcher = chokidar.watch(anchor, { ignoreInitial: true, followSymlinks: false, ignorePermissionErrors: true,
-        depth: path.relative(anchor, directory).split(path.sep).filter(Boolean).length + 1,
-        ignored: (candidate) => !state.inside(candidate, target) && !state.samePath(candidate, target),
+      const anchors = settingsTargets.map((target) => {
+        let anchor = path.dirname(target);
+        while (!fs.existsSync(anchor) && path.dirname(anchor) !== anchor) anchor = path.dirname(anchor);
+        return anchor;
+      });
+      let settingsTimer;
+      const watcher = chokidar.watch([...new Set(anchors)], { ignoreInitial: true, followSymlinks: false, ignorePermissionErrors: true,
+        depth: Math.max(...settingsTargets.map((target, index) => path.relative(anchors[index], path.dirname(target)).split(path.sep).filter(Boolean).length + 1)),
+        ignored: (candidate) => !settingsTargets.some((target) => state.inside(candidate, target) || state.samePath(candidate, target)),
         awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 } });
       const onSettings = (file) => {
-        if (group.closed || !state.samePath(file, target)) return;
+        if (group.closed || !settingsTargets.some((target) => state.samePath(file, target))) return;
+        for (const client of group.clients) client.config.__ps4RecompSourcePending = true;
         clearTimeout(settingsTimer);
         settingsTimer = setTimeout(() => {
           const client = [...group.clients].find((entry) => !entry.closed);
@@ -112,6 +122,14 @@ function watchConfig(config, callbacks = {}) {
   config.__ps4RecompClosed = false;
   const releaseSource = state.observeSource(config);
   const client = { config, callbacks, known: callbacks.getCached?.() || {}, closed: false, baseline: true };
+  if (config.ps4_recomp_settings_file) {
+    try {
+      if (!state.currentInstallationMatches(config)) throw new Error("PS4 Recomp launcher now selects a different game or save location; monitoring is paused until its settings are resolved");
+    } catch (error) {
+      config.__ps4RecompSourcePending = true;
+      callbacks.onError?.(error.message);
+    }
+  }
   group.clients.add(client);
   // A joining collection config gets its own quiet baseline. Existing clients
   // keep their snapshots and continue receiving live deltas.
