@@ -15,7 +15,7 @@ const VALID_PLATFORMS = new Set([
   "xbox-pc",
   "retroachievements",
   "x360recomp",
-  "ps4recomp",
+  "ps3recomp", "ps4recomp",
   "pcports",
   "xenia",
   "rpcs3",
@@ -67,6 +67,7 @@ function sanitizeAppIdForPlatform(value, platform) {
   if (normalized === "retroachievements") {
     return sanitizeRetroAchievementsGameId(raw);
   }
+  if (normalized === "ps3recomp") return /^NPWR\d{5}_\d{2}$/i.test(raw) ? raw.toUpperCase() : "";
   if (normalized === "rpcs3") {
     // Trophy set ids like NPWR12345_00
     return /^NP[A-Z0-9_]+$/i.test(raw) ? raw : "";
@@ -92,6 +93,7 @@ function sanitizeAppIdForPlatform(value, platform) {
 }
 
 function inferOfficialPlatformFromMarkers(config = {}) {
+  if (config?.ps3_recomp_install_root && config?.ps3_recomp_progress_file) return "ps3recomp";
   if (config?.ps4_recomp_game && config?.ps4_recomp_install_root) return "ps4recomp";
   if (config?.pc_port_game && config?.pc_port_install_root) return "pcports";
   if (config?.x360_recomp_title_id && config?.x360_recomp_install_root) return "x360recomp";
@@ -256,7 +258,7 @@ function inferPlatformAndSteamId({ config, mapping }) {
     platform === "xlivelessness"
   ) {
     steamAppId = "";
-  } else if (platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp" || platform === "xenia" || platform === "rpcs3" || platform === "kytyps5") {
+  } else if (platform === "ps3recomp" || platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp" || platform === "xenia" || platform === "rpcs3" || platform === "kytyps5") {
     steamAppId = "";
   }
 
@@ -319,7 +321,7 @@ function migrateConfigPlatforms({
     const prevPlatform = data.platform;
 
     let nativePlatinumChanged = false;
-    if (["rpcs3", "shadps4", "ps4recomp"].includes(nextPlatform) && data.config_path) {
+    if (["ps3recomp", "rpcs3", "shadps4", "ps4recomp"].includes(nextPlatform) && data.config_path) {
       try {
         const entries = JSON.parse(fs.readFileSync(
           path.join(data.config_path, "achievements.json"), "utf8",
@@ -518,7 +520,7 @@ function migrateSchemaStorage({ configsDir, platformIndex, logger = console }) {
         sanitizeAppId(data?.appId) ||
         sanitizeAppId(data?.steamAppId);
       if (!appid) continue;
-      if (platform === "ps4recomp" || platform === "x360recomp" || platform === "pcports") continue;
+      if (platform === "ps3recomp" || platform === "ps4recomp" || platform === "x360recomp" || platform === "pcports") continue;
     const storagePlatform =
       platform === "uplay"
         ? "uplay"

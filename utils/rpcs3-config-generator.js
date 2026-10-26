@@ -13,7 +13,6 @@ const {
   EXOPHASE_LANG_KEYS,
   EXOPHASE_LANG_MAP,
   EXOPHASE_RARITY_SOURCE,
-  buildExophaseSlugVariants,
   downloadExophaseIcon,
 } = require("./exophase-scraper");
 
@@ -663,82 +662,25 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
       !skipExo &&
       (added > 0 || !hasMultiLang(currentEntries) || !hasAllRarityPct(currentEntries))
     ) {
-    const variants = buildExophaseSlugVariants(title || appid);
-    const slugCandidates = Array.from(
-      new Set([
-        ...variants,
-        ...variants.map((s) => `${s}-ps3`),
-        ...variants.map((s) => `${s}-psn`),
-      ]),
-    );
-    if (slugCandidates.length) {
-      schemaLogger.info("rpcs3:exophase:start", {
-        appid: String(appid),
-        slug: slugCandidates[0],
-        platform: "rpcs3",
-        variants: slugCandidates.length,
-      });
-      let merged = false;
-      let usedSlug = slugCandidates[0];
-      let lastError = null;
-      let exoData = null;
-      let mergeRes = null;
-      for (const candidate of slugCandidates) {
-        try {
-          exoData = await fetchExophaseAchievementsMultiLang({
-            slug: candidate,
-            platform: "rpcs3",
-            langKeys: EXOPHASE_LANG_KEYS,
-            langMap: EXOPHASE_LANG_MAP,
-            logger: schemaLogger,
-          });
-      mergeRes = await enrichSchemaFromExophase(
-        schemaDir,
-        parsed,
-        exoData
-      );
-      merged = mergeRes?.updated || mergeRes?.matched > 0;
-      if (merged) schemaChanged = true;
-      usedSlug = candidate;
-      break;
-        } catch (err) {
-          lastError = err;
-          schemaLogger.warn("rpcs3:exophase:retry", {
-            appid: String(appid),
-            slug: candidate,
-            platform: "rpcs3",
-            error: err?.message || String(err),
-          });
-        }
-      }
-      if (merged) {
-        if (usedSlug !== slugCandidates[0]) {
-          schemaLogger.info("rpcs3:exophase:alt-slug", {
-            appid: String(appid),
-            slug: usedSlug,
-            platform: "rpcs3",
-          });
-        }
+      schemaLogger.info("rpcs3:exophase:start", { appid: String(appid), title, platform: "rpcs3" });
+      try {
+        const exoData = await fetchExophaseAchievementsMultiLang({
+          title: title || appid, platform: "rpcs3", schemaAchievements: currentEntries,
+          langKeys: EXOPHASE_LANG_KEYS, langMap: EXOPHASE_LANG_MAP, logger: schemaLogger,
+        });
+        const mergeRes = await enrichSchemaFromExophase(schemaDir, parsed, exoData);
+        if (mergeRes?.updated || mergeRes?.matched > 0) schemaChanged = true;
         schemaLogger.info("rpcs3:exophase:merged", {
-          appid: String(appid),
-          slug: usedSlug,
-          expected: trophyCount,
-          matched: mergeRes?.matched || 0,
-          updated: !!mergeRes?.updated,
-          icons: mergeRes?.icons || 0,
-          rarity: mergeRes?.rarity || 0,
+          appid: String(appid), slug: exoData.usedSlug, expected: trophyCount,
+          matched: mergeRes?.matched || 0, updated: !!mergeRes?.updated,
+          icons: mergeRes?.icons || 0, rarity: mergeRes?.rarity || 0,
           raritySidecar: mergeRes?.raritySidecar || 0,
         });
-      } else if (lastError) {
+      } catch (error) {
         schemaLogger.warn("rpcs3:exophase:failed", {
-          appid: String(appid),
-          slug: slugCandidates[0],
-          platform: "rpcs3",
-          error: lastError?.message || String(lastError),
-          tried: slugCandidates,
+          appid: String(appid), title, platform: "rpcs3", code: error.code, error: error.message,
         });
       }
-    }
     }
   }
 

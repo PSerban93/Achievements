@@ -13,7 +13,6 @@ const { writeAchievementPercentagesSidecar } = require("./achievement-rarity");
 const {
   EXOPHASE_LANG_MAP,
   EXOPHASE_RARITY_SOURCE,
-  buildExophaseSlugVariants,
   fetchExophaseAchievementsMultiLang,
 } = require("./exophase-scraper");
 
@@ -219,21 +218,6 @@ function writeExophaseRaritySidecar(schemaDir, appid, entries) {
   return { written: true, matched: achievements.length, sidecarPath };
 }
 
-function buildPs4ExophaseSlugCandidates(title, appid = "") {
-  const cleaned = String(title || appid || "")
-    .replace(/\s*\((?:PS4|shadps4)\)\s*$/i, "")
-    .replace(/[™®©]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  const variants = buildExophaseSlugVariants(cleaned || appid);
-  return Array.from(
-    new Set([
-      ...variants,
-      ...variants.map((slug) => `${slug}-ps4`),
-    ]),
-  );
-}
-
 async function enrichSchemaRarityFromExophase(schemaDir, parsed) {
   if (!schemaDir || !parsed) return { updated: false, matched: 0, fetched: 0 };
   const schemaPath = path.join(schemaDir, "achievements.json");
@@ -256,47 +240,18 @@ async function enrichSchemaRarityFromExophase(schemaDir, parsed) {
     return { updated: false, matched: entries.length, fetched: entries.length };
   }
 
-  const slugCandidates = buildPs4ExophaseSlugCandidates(
-    parsed?.title || parsed?.appid,
-    parsed?.appid,
-  );
-  let exoData = null;
-  let usedSlug = slugCandidates[0] || "";
-  let lastError = null;
-  schemaLogger.info("ps4:exophase:start", {
-    appid: String(parsed?.appid || ""),
-    slug: usedSlug,
-    platform: "ps4",
-    variants: slugCandidates.length,
-  });
-  for (const slug of slugCandidates) {
-    try {
-      exoData = await fetchExophaseAchievementsMultiLang({
-        slug,
-        platform: "shadps4",
-        langKeys: ["english"],
-        langMap: EXOPHASE_LANG_MAP,
-        logger: schemaLogger,
-      });
-      usedSlug = slug;
-      break;
-    } catch (err) {
-      lastError = err;
-      schemaLogger.warn("ps4:exophase:retry", {
-        appid: String(parsed?.appid || ""),
-        slug,
-        platform: "ps4",
-        error: err?.message || String(err),
-      });
-    }
-  }
-  if (!exoData) {
+  const title = parsed?.title || parsed?.appid || "";
+  let exoData;
+  schemaLogger.info("ps4:exophase:start", { appid: String(parsed?.appid || ""), title, platform: "ps4" });
+  try {
+    exoData = await fetchExophaseAchievementsMultiLang({
+      title, platform: "shadps4", schemaAchievements: entries,
+      langKeys: ["english"], langMap: EXOPHASE_LANG_MAP, logger: schemaLogger,
+    });
+  } catch (error) {
     schemaLogger.warn("ps4:exophase:failed", {
-      appid: String(parsed?.appid || ""),
-      slug: slugCandidates[0] || "",
-      platform: "ps4",
-      error: lastError?.message || String(lastError || "No working Exophase URL"),
-      tried: slugCandidates,
+      appid: String(parsed?.appid || ""), title, platform: "ps4",
+      code: error.code, error: error.message,
     });
     return { updated: false, matched: 0, fetched: 0 };
   }
@@ -359,7 +314,7 @@ async function enrichSchemaRarityFromExophase(schemaDir, parsed) {
   );
   schemaLogger.info("ps4:exophase:merged", {
     appid: String(parsed?.appid || ""),
-    slug: usedSlug,
+    slug: exoData.usedSlug,
     platform: "ps4",
     fetched: (exoData.items || []).length,
     matched,

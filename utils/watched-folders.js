@@ -3,6 +3,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const chokidar = require("chokidar");
+const achievementLockRuntime = require("./achievement-lock-runtime");
 const { createLogger } = require("./logger");
 const { generationDetail, getGenerationBlacklistDecision } = require("./emulator-generation-result");
 const uplayMappingStore = require("./uplay-mapping-store");
@@ -58,6 +59,8 @@ const x360Recomp = require("./x360-recomp-state");
 const ps4Recomp = require("./ps4-recomp");
 const ps4RecompWatch = require("./ps4-recomp-watch");
 const pcPorts = require("./pc-ports");
+const ps3Recomp = require("./ps3-recomp");
+const ps3RecompWatch = require("./ps3-recomp-watch");
 const pcPortsWatch = require("./pc-ports-watch");
 const { refreshPcPortSchemaRarity } = require("./pc-ports-rarity");
 const recompDiscovery = require("./x360-recomp-discovery");
@@ -97,6 +100,8 @@ const {
   getSafeLocalizedText,
   isRuneUplayConfig,
   loadAchievementsFromSaveFile,
+  looksLikeSaveJson,
+  resolveSaveFilePath,
   alignUplaySnapshotToConfig,
   getNameIndexFromConfigPath,
   mergeEarnedTimeFromCached,
@@ -735,11 +740,15 @@ module.exports = function makeWatchedFolders({
   onRecompConfigChanged = null,
   onPs4RecompConfigChanged = null,
   onPcPortConfigChanged = null,
+  onPs3RecompConfigChanged = null,
 }) {
   // --- state ---
   const folderWatchers = new Map();
   const kytyScans = new Map();
   const recompScans = new Map();
+  const ps3RecompScans = new Map();
+  const ps3RecompRootsByFolder = new Map();
+  const ps3RecompRoots = new Set();
   const pcPortScans = new Map();
   let pcPortScanQueue = Promise.resolve();
   const pcPortFingerprints = new Map();
@@ -1491,6 +1500,11 @@ module.exports = function makeWatchedFolders({
   function pickExistingSeedTargetForMeta(meta, candidates) {
     const list = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
     if (!list.length) return "";
+    if (usesGenericJsonSave(meta) && meta?.save_path) {
+      const preferred = resolveSaveFilePath(meta.save_path, meta.appid);
+      if (list.some((candidate) => normalizePathForMetaMatch(candidate) === normalizePathForMetaMatch(preferred)) &&
+          looksLikeSaveJson(readJsonSafe(preferred))) return preferred;
+    }
     const isXenia = isXeniaMeta(meta);
     const appid = String(meta?.appid || "").trim();
 
@@ -1504,6 +1518,8 @@ module.exports = function makeWatchedFolders({
         continue;
       }
       if (!stat?.isFile?.()) continue;
+      if (usesGenericJsonSave(meta) && path.basename(candidate).toLowerCase() === "achievements.json" &&
+          !looksLikeSaveJson(readJsonSafe(candidate))) continue;
       if (isXenia && !isExpectedXeniaGpdFile(meta, appid, candidate)) {
         continue;
       }
@@ -1973,15 +1989,16 @@ module.exports = function makeWatchedFolders({
     }
     let running = 0;
     let idx = 0;
+    let cancellation = null;
     const generated = new Set();
     const onTaskProgress =
       typeof opts.onTaskProgress === "function" ? opts.onTaskProgress : null;
     const onTaskSettled =
       typeof opts.onTaskSettled === "function" ? opts.onTaskSettled : null;
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const next = async () => {
-        while (running < BOOT_GEN_CONCURRENCY && idx < tasks.length) {
+        while (!cancellation && running < BOOT_GEN_CONCURRENCY && idx < tasks.length) {
           const taskIndex = idx;
           const task = tasks[idx++];
           running++;
@@ -1992,6 +2009,7 @@ module.exports = function makeWatchedFolders({
                 task.appid,
                 task.appDir || null,
                 {
+                  generationId: opts.generationId,
                   forcePlatform: task.forcePlatform,
                   normalizedSavePath: task.normalizedPath || "",
                   skipPostIndex: true,
@@ -2016,7 +2034,15 @@ module.exports = function makeWatchedFolders({
               if (generationResult?.created === true) {
                 generated.add(String(task.appid));
               }
-            } catch {
+            } catch (error) {
+              if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(error?.code)) {
+                cancellation = error;
+              } else {
+                generationResult = { appid: task.appid, platform: task.forcePlatform || null,
+                  status: "technical-error", failed: true, created: false,
+                  error: String(error.message || error) };
+                watcherLogger.warn("watcher:generate-task-failed", generationResult);
+              }
             } finally {
               try {
                 if (onTaskSettled) {
@@ -2028,7 +2054,10 @@ module.exports = function makeWatchedFolders({
             }
           })();
         }
-        if (running === 0 && idx >= tasks.length) resolve(generated);
+        if (running === 0) {
+          if (cancellation) reject(cancellation);
+          else if (idx >= tasks.length) resolve(generated);
+        }
       };
       next();
     });
@@ -4898,10 +4927,12 @@ module.exports = function makeWatchedFolders({
     return names;
   }
 
-  function pauseDashboardPoll(state = true) {
-    try {
-      broadcastAll("dashboard:poll-pause", state === true);
-    } catch {}
+  const dashboardPauseOwners = new Set();
+  function pauseDashboardPoll(state = true, owner = "legacy") {
+    const before = dashboardPauseOwners.size > 0;
+    if (state) dashboardPauseOwners.add(owner); else dashboardPauseOwners.delete(owner);
+    const after = dashboardPauseOwners.size > 0;
+    if (before !== after) try { broadcastAll("dashboard:poll-pause", after); } catch {}
   }
 
   let bootIndexingPromise = null;
@@ -4945,6 +4976,7 @@ module.exports = function makeWatchedFolders({
         (platform === "rpcs3" ||
           platform === "shadps4" ||
           (platform === "ps4recomp" && /^[a-z0-9._-]+$/.test(appid)) ||
+          (platform === "ps3recomp" && /^NPWR\d{5}_\d{2}$/.test(appid)) ||
           (platform === "pcports" && data.pc_port_game === "ladxhd" && appid === "ladxhd") ||
           (platform === "kytyps5" && /^PPSA\d+(?:-s\d{1,2})?$/i.test(appid)) ||
           /^[0-9a-fA-F]+$/.test(appid) ||
@@ -4969,6 +5001,7 @@ module.exports = function makeWatchedFolders({
         game_path: typeof data?.game_path === "string" ? data.game_path : "",
         ...Object.fromEntries(Object.entries(data).filter(([key]) => key.startsWith("ps4_recomp_"))),
         ...(platform === "ps4recomp" ? { process_name: data.process_name || "" } : {}),
+        ...Object.fromEntries(Object.entries(data).filter(([key]) => key.startsWith("ps3_recomp_"))),
         pc_port_game: data.pc_port_game || "",
         pc_port_install_root: data.pc_port_install_root || "",
         pc_port_progress_file: data.pc_port_progress_file || "",
@@ -5289,6 +5322,7 @@ module.exports = function makeWatchedFolders({
 
   // Snapshot cache keyed by config name + platform (+ account for steam-official)
   const lastSnapshot = new Map();
+  const manualLockSourceVersions = new Map();
 
   function resolveSteamOfficialSnapshotAccountId(meta, appid, options = {}) {
     const platform = normalizePlatform(meta?.platform) || "steam";
@@ -5318,6 +5352,7 @@ module.exports = function makeWatchedFolders({
     const parts = [name, platform];
     if (platform === "x360recomp") parts.push(`scope:${x360Recomp.cacheScope(meta, options)}`);
     if (platform === "ps4recomp") parts.push(`scope:${ps4Recomp.cacheScope(meta, options)}`);
+    if (platform === "ps3recomp") parts.push(`scope:${ps3Recomp.cacheScope(meta, options)}`);
     if (platform === "pcports") parts.push(`scope:${pcPorts.cacheScope(meta, options)}`);
     if (platform === "kytyps5") {
       const parsed = kytyTrophy.parseProgressPath(options.filePath || options.savePath || kytyTrophy.resolveProgressPath(meta));
@@ -5373,6 +5408,9 @@ module.exports = function makeWatchedFolders({
   function getCacheMetaParserRevision(filePath) {
     const baseName = path.basename(filePath).toLowerCase();
     const parentName = path.basename(path.dirname(filePath)).toLowerCase();
+    // Re-read legacy JSON baselines once: older versions could record a schema
+    // and a save against the same snapshot. Keep the existing metadata mechanism.
+    if (baseName === "achievements.json") return "achievement-json-parser:1";
     if (baseName === RUNE_UPLAY_ACHIEVEMENTS_FILE) {
       return "rune-uplay-parser:1";
     }
@@ -5461,6 +5499,10 @@ module.exports = function makeWatchedFolders({
     }
   }
 
+  function usesGenericJsonSave(meta) {
+    return ["steam", "gog", "epic", "uplay"].includes(normalizePlatform(meta?.platform) || "steam");
+  }
+
   function resolveAchievementsSchemaPath(meta) {
     if (!meta?.config_path) return null;
     const p1 = path.join(meta.config_path, "achievements.json");
@@ -5535,6 +5577,7 @@ module.exports = function makeWatchedFolders({
     if (isLumaPlayMeta(meta)) return [];
     if (normalizePlatform(meta?.platform) === "x360recomp") return [x360Recomp.progressPath(meta)].filter(Boolean);
     if (normalizePlatform(meta?.platform) === "ps4recomp") return [ps4Recomp.progressPath(meta)];
+    if (normalizePlatform(meta?.platform) === "ps3recomp") return [ps3Recomp.progressPath(meta)].filter(Boolean);
     if (normalizePlatform(meta?.platform) === "pcports") return [pcPorts.progressPath(meta)].filter(Boolean);
     if (normalizePlatform(meta?.platform) === "kytyps5") {
       return kytyTrophy.resolveProgressPaths(meta);
@@ -5745,6 +5788,8 @@ module.exports = function makeWatchedFolders({
   const bootDashDebounce = { t: null, pending: false };
 
   async function evaluateFile(appid, meta, filePath, opts = {}) {
+    const lockRuntime = typeof achievementLockRuntime === "undefined" ? null : achievementLockRuntime;
+    const sourceLockRevision = lockRuntime?.revision(filePath) || 0;
     const {
       initial = false,
       retry = false,
@@ -5765,8 +5810,9 @@ module.exports = function makeWatchedFolders({
     const isKyty = normalizePlatform(meta?.platform) === "kytyps5";
     const isRecomp = normalizePlatform(meta?.platform) === "x360recomp";
     const isPs4Recomp = normalizePlatform(meta?.platform) === "ps4recomp";
-    const isPcPort = isPs4Recomp || normalizePlatform(meta?.platform) === "pcports";
-    const localPortState = isPs4Recomp ? ps4Recomp : pcPorts;
+    const isPs3Recomp = normalizePlatform(meta?.platform) === "ps3recomp";
+    const isPcPort = isPs3Recomp || isPs4Recomp || normalizePlatform(meta?.platform) === "pcports";
+    const localPortState = isPs3Recomp ? ps3Recomp : isPs4Recomp ? ps4Recomp : pcPorts;
     const isPs4ProgressXml = isPs4 && isPs4ProgressXmlPath(filePath);
     const isSteamOfficial = isSteamOfficialMeta(meta);
     const isGogOfficial = isGogOfficialMeta(meta);
@@ -5780,6 +5826,7 @@ module.exports = function makeWatchedFolders({
     if (isLumaPlay) {
       // Registry-backed source; no file suffix checks.
     } else if (isPcPort) {
+      if (isPs3Recomp && meta.__ps3RecompClosed) return false;
       // A PS4 snapshot already belongs to the path actually read by its
       // serialized reader. A new session file may appear before this callback;
       // comparing against a fresh directory scan would discard that unlock.
@@ -5864,8 +5911,16 @@ module.exports = function makeWatchedFolders({
         return;
     }
 
+    const debounceKey = buildScopedRuntimeKey({
+      appid,
+      platform: meta?.platform,
+      configName: meta?.name,
+      source: isLumaPlay ? `lumaplay:${meta?.name || appid}` : filePath,
+    });
     const now = Date.now();
-    const hitKey = isLumaPlay
+    // EA games share EADesktopVerbose.log. Throttle each config separately so
+    // the first game's watcher cannot consume another game's log event.
+    const hitKey = isEaOfficial ? debounceKey : isLumaPlay
       ? `lumaplay:${String(appid || "")}:${String(meta?.name || "")}`
       : filePath;
     const last = fileHitCooldown.get(hitKey) || 0;
@@ -5883,12 +5938,6 @@ module.exports = function makeWatchedFolders({
       }
     }
 
-    const debounceKey = buildScopedRuntimeKey({
-      appid,
-      platform: meta?.platform,
-      configName: meta?.name,
-      source: isLumaPlay ? `lumaplay:${meta?.name || appid}` : filePath,
-    });
     const shouldEvaluate = await new Promise((resolve) => {
       const previous = evalDebounce.get(debounceKey);
       if (previous?.timer) clearTimeout(previous.timer);
@@ -5910,10 +5959,19 @@ module.exports = function makeWatchedFolders({
     });
     if (!shouldEvaluate) return false;
     if ((isKyty && meta.__kytyClosed) || (isRecomp && meta.__x360RecompClosed)) return false;
+    if (isPs3Recomp && meta.__ps3RecompClosed) return false;
     if (isPcPort && (isPs4Recomp ? meta.__ps4RecompClosed || meta.__ps4RecompSourcePending : meta.__pcPortsClosed)) return false;
 
     const cfgPath = path.join(configsDir, `${meta.name}.json`);
     await waitForFileExists(cfgPath);
+
+    if (usesGenericJsonSave(meta) && base === "achievements.json") {
+      const json = readJsonSafe(filePath);
+      if (json === null) return retry ? false : "__retry__";
+      if (!looksLikeSaveJson(json)) return false;
+      if (meta.save_path && normalizePathForMetaMatch(filePath) !==
+          normalizePathForMetaMatch(resolveSaveFilePath(meta.save_path, meta.appid))) return false;
+    }
 
     const snapKey = makeSnapshotKey(meta, appid, { filePath });
     const metaKey = isLumaPlay ? "" : getCacheMetaKey(meta, appid, filePath);
@@ -5957,11 +6015,12 @@ module.exports = function makeWatchedFolders({
     let shouldSeed =
       seedOnly === true ||
       (typeof onSeedCache === "function" && !lastSnapshot.has(snapKey));
-    // Tenoke: if the file appears after boot (add event), do not seed it so notifications can still fire
+    // A save first created after boot can contain the first real unlock. Do not
+    // consume it as a silent baseline (the JSON source was validated above).
     if (
       shouldSeed &&
       seedOnly !== true &&
-      meta.__tenoke &&
+      (meta.__tenoke || (usesGenericJsonSave(meta) && base === "achievements.json")) &&
       isAddEvent &&
       !bootMode
     ) {
@@ -5970,6 +6029,17 @@ module.exports = function makeWatchedFolders({
     const isActiveConfig = !!isConfigActive?.(meta.name);
 
     let prev = forceEmptyPrev ? {} : lastSnapshot.get(snapKey) || {};
+    if (lockRuntime && typeof manualLockSourceVersions !== "undefined" && lockRuntime.revision(filePath) > 0) {
+      const lockKey = `${snapKey}\0${filePath}`;
+      const previousRevision = manualLockSourceVersions.get(lockKey) || 0;
+      const revision = lockRuntime.revision(filePath);
+      if (revision > previousRevision) {
+        prev = lockRuntime.rebase(prev, filePath, previousRevision);
+        manualLockSourceVersions.set(lockKey, revision);
+        lastSnapshot.set(snapKey, prev);
+      }
+      if (sourceLockRevision !== lockRuntime.revision(filePath)) return "__retry__";
+    }
     if (normalizePlatform(meta?.platform) === "uplay") {
       prev = alignUplaySnapshotToConfig(prev, meta, resolveAchievementsSchemaPath(meta));
     }
@@ -6221,6 +6291,10 @@ module.exports = function makeWatchedFolders({
     lastSnapshot.set(snapKey, cur);
     await updateMetaFromStat();
 
+    if (lockRuntime && sourceLockRevision !== lockRuntime.revision(filePath)) {
+      lastSnapshot.set(snapKey, lockRuntime.rebase(lastSnapshot.get(snapKey), filePath, sourceLockRevision));
+      return "__retry__";
+    }
     if (parsedGpd && meta?.config_path) {
       try {
         updateSchemaFromGpd(meta.config_path, parsedGpd);
@@ -6268,7 +6342,7 @@ module.exports = function makeWatchedFolders({
     const schemaPath = resolveAchievementsSchemaPath(meta);
     const schemaArr =
       schemaPath && fs.existsSync(schemaPath) ? readJsonSafe(schemaPath) : null;
-    if ((isRpcs3 || isPs4 || isPs4Recomp) && Array.isArray(schemaArr) && schemaArr.length > 0) {
+    if ((isRpcs3 || isPs4 || isPs4Recomp || isPs3Recomp) && Array.isArray(schemaArr) && schemaArr.length > 0) {
       // The schema is authoritative, including configs imported before the flag existed.
       meta.native_platinum = schemaHasNativePlatinum(schemaArr);
     }
@@ -7147,6 +7221,32 @@ module.exports = function makeWatchedFolders({
           emitDashboardRefresh({ mode: "summary", reason: "ps4recomp-history-recovered", configName: meta.name });
         },
         onError: (error) => watcherLogger.warn("ps4recomp:watch:pending", { config: meta.name, error }),
+      });
+      bucket.set(meta.name, entry);
+      return;
+    }
+
+    if (platform === "ps3recomp") {
+      if (isPathBlocked(meta.ps3_recomp_install_root) || isPathBlocked(ps3Recomp.progressPath(meta))) return;
+      const entry = ps3RecompWatch.watchConfig(meta, {
+        getCached: () => getCachedSnapshot?.(meta.name, platform, ps3Recomp.cacheOptions(meta)),
+        onSeed: (snapshot) => {
+          const options = ps3Recomp.cacheOptions(meta);
+          lastSnapshot.set(makeSnapshotKey(meta, appid, options), snapshot);
+          onSeedCache?.({ appid, configName: meta.name, platform, ...options, snapshot });
+          const schema = readJsonSafe(path.join(meta.config_path, "achievements.json")) || [];
+          const key = buildScopedRuntimeKey({ appid, platform, configName: meta.name, source: ps3Recomp.progressPath(meta) });
+          if (schema.length && schema.every((item) => snapshot[item.name]?.earned)) platinumNotifiedByApp.add(key);
+          else platinumNotifiedByApp.delete(key);
+        },
+        onEvent: async (file, snapshot) => {
+          const touched = await evaluateFile(appid, meta, file, { pcPortsSnapshot: snapshot });
+          if (meta.__ps3RecompClosed) return;
+          broadcastAll("refresh-achievements-table");
+          emitDashboardRefresh({ mode: "summary", reason: "ps3recomp-progress", configName: meta.name });
+          if (touched === true && !bootMode) enqueueAutoSelect(meta);
+        },
+        onError: (error) => watcherLogger.warn("ps3recomp:watch:pending", { config: meta.name, error }),
       });
       bucket.set(meta.name, entry);
       return;
@@ -8760,7 +8860,9 @@ module.exports = function makeWatchedFolders({
             return !rel || (!rel.startsWith("..") && !path.isAbsolute(rel));
           }) || (normalizePlatform(meta?.platform) === "ps4recomp" &&
             roots.some((root) => ps4Recomp.inside(root, meta.ps4_recomp_install_root)) &&
-            !isPathBlocked(meta.ps4_recomp_install_root, blockedFolders)) || (normalizePlatform(meta?.platform) === "pcports" &&
+            !isPathBlocked(meta.ps4_recomp_install_root, blockedFolders)) || (normalizePlatform(meta?.platform) === "ps3recomp" &&
+            roots.some((root) => ps3Recomp.inside(root, meta.ps3_recomp_install_root)) &&
+            !isPathBlocked(meta.ps3_recomp_install_root, blockedFolders)) || (normalizePlatform(meta?.platform) === "pcports" &&
             roots.some((root) => pcPorts.inside(root, meta.pc_port_install_root)) &&
             !isPathBlocked(meta.pc_port_install_root, blockedFolders)) || (normalizePlatform(meta?.platform) === "x360recomp" &&
             roots.some((root) => isPathInsideRoot(normalizePrefPath(root), normalizePrefPath(meta.x360_recomp_install_root))) &&
@@ -9908,6 +10010,7 @@ module.exports = function makeWatchedFolders({
           });
         }
         const genOptions = {
+          generationId: opts.generationId,
           appDir,
           onSeedCache,
           forcePlatform: desiredPlatform || undefined,
@@ -10530,18 +10633,29 @@ module.exports = function makeWatchedFolders({
       return;
     }
 
-    const orderedCandidates = isPs4Meta(meta)
+    let orderedCandidates = isPs4Meta(meta)
       ? [
           ...candidates.filter((fp) => isPs4ProgressXmlPath(fp)),
           ...candidates.filter((fp) => !isPs4ProgressXmlPath(fp)),
         ]
       : candidates;
+    if (usesGenericJsonSave(meta) && meta?.save_path) {
+      const preferred = resolveSaveFilePath(meta.save_path, meta.appid);
+      orderedCandidates = [preferred, ...orderedCandidates.filter((candidate) =>
+        normalizePathForMetaMatch(candidate) !== normalizePathForMetaMatch(preferred))];
+    }
     const hasPs4ProgressCandidate =
       isPs4Meta(meta) &&
       orderedCandidates.some((fp) => isPs4ProgressXmlPath(fp));
 
     for (const fp of orderedCandidates) {
       if (!fp || !fs.existsSync(fp)) continue;
+      if (usesGenericJsonSave(meta)) {
+        if (!readFileStatSyncSafe(fp)?.isFile()) continue;
+        if (path.basename(fp).toLowerCase() === "achievements.json" &&
+            (!looksLikeSaveJson(readJsonSafe(fp)) || (meta.save_path &&
+              normalizePathForMetaMatch(fp) !== normalizePathForMetaMatch(resolveSaveFilePath(meta.save_path, meta.appid))))) continue;
+      }
       if (isXeniaMeta(meta) && !isExpectedXeniaGpdFile(meta, appid, fp)) {
         continue;
       }
@@ -10803,14 +10917,16 @@ module.exports = function makeWatchedFolders({
             }
           }
         } else {
+          const previousSnapshot = lastSnapshot.get(snapKey) || {};
           snapshot = loadAchievementsFromSaveFile(
             path.dirname(fp),
-            lastSnapshot.get(snapKey) || {},
+            previousSnapshot,
             {
               configMeta: meta,
               fullSchemaPath: resolveAchievementsSchemaPath(meta),
             },
           );
+          if (snapshot === previousSnapshot) continue;
         }
         if (!snapshot) continue;
 
@@ -11308,9 +11424,9 @@ module.exports = function makeWatchedFolders({
   function createDedicatedInstallationWatchPolicy(rootPath, entry) {
     if (!entry || normalizePrefPath(entry.root) !== normalizePrefPath(rootPath)) return null;
     const platform = entry.platform;
-    if (!["pcports", "x360recomp", "ps4recomp"].includes(platform)) return null;
+    if (!["ps3recomp", "pcports", "x360recomp", "ps4recomp"].includes(platform)) return null;
     const installRootField = {
-      pcports: "pc_port_install_root", x360recomp: "x360_recomp_install_root", ps4recomp: "ps4_recomp_install_root",
+      ps3recomp: "ps3_recomp_install_root", pcports: "pc_port_install_root", x360recomp: "x360_recomp_install_root", ps4recomp: "ps4_recomp_install_root",
     }[platform];
     const metas = Array.from(configIndex.values()).flat().filter((meta) =>
       meta.platform === platform && normalizePrefPath(meta[installRootField]) === normalizePrefPath(rootPath));
@@ -11325,7 +11441,10 @@ module.exports = function makeWatchedFolders({
       directories.add(path.dirname(file));
       if (signature) signaturePaths.add(normalizePrefPath(file));
     };
-    if (platform === "pcports") {
+    if (platform === "ps3recomp") {
+      for (const game of games) for (const file of game.settingsFiles || []) addPath(file, true);
+      for (const meta of metas) for (const file of meta.ps3_recomp_settings_files || []) addPath(file, true);
+    } else if (platform === "pcports") {
       for (const relative of ["Data/Languages", "Mods/Languages", "Data/Achievements"]) {
         directories.add(path.join(rootPath, relative));
       }
@@ -11402,7 +11521,7 @@ module.exports = function makeWatchedFolders({
           return !(parent === "" ? /^(?:portable\.txt|Link['\u2019]?s Awakening DX HD\.exe|LADXHD\.exe)$/i.test(name)
             : /\.(?:lng|png)$/i.test(name));
         }
-        if (platform === "ps4recomp") return true; // All required files are exact targets.
+        if (platform === "ps3recomp" || platform === "ps4recomp") return true; // All required files are exact targets.
         return !(recompDiscovery.isDiscoveryMarker(candidatePath) || /\.cfg$/i.test(name));
       },
     };
@@ -11528,6 +11647,14 @@ module.exports = function makeWatchedFolders({
           catch (error) { errors.push({ root: directory, error: error.message }); }
           const entry = { platform: "ps4recomp", root: directory, discovery: { games: ps4Games, errors: [], truncated: false } };
           entry.discovery.errors = errors;
+          entries.push(entry); return entry;
+        }
+        const knownPs3 = !rescanInProgress.value ? configs.filter((meta) => meta.platform === "ps3recomp" &&
+          ps3Recomp.samePath(meta.ps3_recomp_install_root, directory) && ps3Recomp.validSchema(meta)) : [];
+        const ps3Games = knownPs3.length ? knownPs3.map(ps3Recomp.gameFromConfig) : ps3Recomp.detectGames(directory, { isBlocked: isPathBlocked });
+        if (ps3Games.length) {
+          const entry = { platform: "ps3recomp", root: directory,
+            discovery: { games: ps3Games, errors: [], truncated: false } };
           entries.push(entry); return entry;
         }
         const pcGame = pcPorts.detectGame(directory, { isBlocked: isPathBlocked });
@@ -12725,14 +12852,14 @@ module.exports = function makeWatchedFolders({
   }
 
   function getKytyExcludedInstallations() {
-    const fields = { ps4recomp: "ps4_recomp_install_root", x360recomp: "x360_recomp_install_root", pcports: "pc_port_install_root" };
+    const fields = { ps4recomp: "ps4_recomp_install_root", x360recomp: "x360_recomp_install_root", pcports: "pc_port_install_root", ps3recomp: "ps3_recomp_install_root" };
     return [...new Set([...configIndex.values()].flat().flatMap((meta) => {
       const source = meta[fields[normalizePlatform(meta.platform)]];
       return typeof source === "string" && path.isAbsolute(source) ? [source] : [];
     }))];
   }
 
-  async function scanKytyRoot(inputRoot, { reuseDiscovery = false } = {}) {
+  async function scanKytyRoot(inputRoot, { reuseDiscovery = false, retryGamePaths = null, isRetry = false } = {}) {
     const root = kytyDiscovery.emulatorRootForFolder(inputRoot);
     const key = normalizeRoot(root);
     if (kytyScans.has(key)) return kytyScans.get(key);
@@ -12743,6 +12870,9 @@ module.exports = function makeWatchedFolders({
     const operation = (async () => {
       try {
         const initialState = folderWatchers.get(normalizeRoot(inputRoot));
+        clearTimeout(initialState?.pendingTimer);
+        if (initialState && !isRetry) initialState.pendingRetryAttempt = 0;
+        let retryPaths = retryGamePaths == null ? null : new Set(retryGamePaths.map(normalizeRoot));
         const cancelled = () => initialState?.stopped || isPathBlocked(inputRoot);
         const trophyTitles = await kytyDiscovery.listTrophyTitles(root);
         const saveDataTitles = await kytyDiscovery.listSaveDataTitles(root);
@@ -12756,11 +12886,17 @@ module.exports = function makeWatchedFolders({
           settingsStamp += `:${stat.size}:${stat.mtimeMs}`;
         } catch {}
         const cachedDiscovery = kytyGameDiscovery.get(key);
+        // A settings/source ownership change applies to every game, even if
+        // observed just before its filesystem event reaches the scheduler.
+        if (cachedDiscovery && cachedDiscovery.settingsStamp !== settingsStamp) retryPaths = null;
         let discovered = cachedDiscovery?.discovered;
         if (!reuseDiscovery || !discovered || cachedDiscovery.settingsStamp !== settingsStamp ||
-            titleIds.some((titleId) => !discovered.games.has(titleId))) {
+            titleIds.some((titleId) => !discovered.games.has(titleId) && !cachedDiscovery.runtimeTitleIds.has(titleId))) {
           discovered = await kytyDiscovery.discoverGames(root, isPathBlocked, sourceOptions);
-          kytyGameDiscovery.set(key, { discovered, settingsStamp });
+          // A runtime-only title is not a reason to rediscover the library on
+          // every progress event. Metadata/settings events and Rescan still
+          // explicitly refresh discovery; a newly seen runtime title does too.
+          kytyGameDiscovery.set(key, { discovered, settingsStamp, runtimeTitleIds: new Set(titleIds) });
         }
         if (cancelled()) return { handled: true, platform: "kytyps5", processed: 0 };
         const preservedSources = new Set();
@@ -12769,7 +12905,8 @@ module.exports = function makeWatchedFolders({
           Number(b.kytyps5_format_version === 2) - Number(a.kytyps5_format_version === 2));
         for (const meta of metasByPreference) {
             if (meta.platform === "kytyps5" && normalizeRoot(meta.kytyps5_emulator_root) === key &&
-                meta.kytyps5_game_path && !isPathBlocked(meta.kytyps5_game_path) &&
+                meta.kytyps5_game_path && (!retryPaths || retryPaths.has(normalizeRoot(meta.kytyps5_game_path))) &&
+                !isPathBlocked(meta.kytyps5_game_path) &&
                 kytyDiscovery.isGameSourceActive(root, settings, meta.kytyps5_game_path, sourceOptions)) {
               try {
                 const game = kytyTrophy.readGameIdentity(meta.kytyps5_game_path);
@@ -12783,6 +12920,10 @@ module.exports = function makeWatchedFolders({
         const changed = [];
         const missingTitles = titleIds.filter((titleId) => !discovered.games.has(titleId));
         let pending = missingTitles.length > 0 || discovered.errors.length > 0 || !settings.valid;
+        // Missing metadata waits for source events. Read/generation failures
+        // keep a recovery timer, scoped to their sources when settings are valid.
+        const retrySources = new Set(discovered.errors.map((error) => error.gamePath));
+        const retryDiscovery = !settings.valid || discovered.errors.length > 0;
         if (!settings.valid) watcherLogger.warn("kytyps5:settings:pending", { root, error: settings.error });
         for (const error of discovered.errors) watcherLogger.warn("kytyps5:discovery:pending", error);
         await initialState?.updateGameSources?.(discovered.games, settings);
@@ -12793,7 +12934,8 @@ module.exports = function makeWatchedFolders({
           });
         }
         if (initialState) initialState.missingTitles = missingTitles.join(",");
-        const games = [...discovered.games.values()];
+        const games = [...discovered.games.values()].filter((game) =>
+          !retryPaths || retryPaths.has(normalizeRoot(game.gamePath)));
         const progressTasks = games.map((game) => ({ appid: game.titleId, itemName: game.title }));
         generationProgress = createGenerationBatchReporter(progressTasks, {
           fallbackItemName: "KytyPS5",
@@ -12815,6 +12957,7 @@ module.exports = function makeWatchedFolders({
           }
           let packages = [];
           try { packages = kytyGameSource.listTrophyPackages(game.gamePath); } catch (error) {
+            retrySources.add(game.gamePath);
             pending = true;
             progressFailed = true;
             settleProgress({ failed: true, reason: "trophy-packages-unreadable" });
@@ -12882,12 +13025,16 @@ module.exports = function makeWatchedFolders({
               onGenerationProgress: (progress) => generationProgress.updateTask(progressTasks[gameIndex], gameIndex, progress),
             });
             if (!result || result.skipped) {
+              retrySources.add(game.gamePath);
               pending = true;
               settleProgress({ pendingSchema: true });
               await restoreExistingWatchers();
               continue;
             }
-            if (result.pending?.length) pending = true;
+            if (result.pending?.length) {
+              retrySources.add(game.gamePath);
+              pending = true;
+            }
             await indexExistingConfigsSync();
             const meta = getConfigMetas(appid).find((candidate) => candidate.name === result.name);
             if (meta) attachWatcherForMeta(meta, { suppressInitialNotify: true });
@@ -12911,6 +13058,7 @@ module.exports = function makeWatchedFolders({
             settleProgress(result.pending?.length ? { pendingSchema: true } :
               result.created || result.configUpdated || result.schemaUpdated ? result : { reason: "unchanged" });
           } catch (error) {
+            retrySources.add(game.gamePath);
             pending = true;
             progressFailed = true;
             settleProgress({ failed: true, reason: "generation-failed" });
@@ -12930,11 +13078,19 @@ module.exports = function makeWatchedFolders({
         const state = folderWatchers.get(normalizeRoot(inputRoot));
         if (state?.kyty) {
           clearTimeout(state.pendingTimer);
-          if (pending && !state.stopped) {
+          if ((!settings.valid || retrySources.size) && !state.stopped) {
+            const attempt = state.pendingRetryAttempt || 0;
+            const delay = Math.min(120000, 15000 * 2 ** Math.min(attempt, 3));
+            state.pendingRetryAttempt = attempt + 1;
             state.pendingTimer = setTimeout(() => {
-              if (!state.stopped) scanKytyRoot(inputRoot).catch(() => {});
-            }, 15000);
+              if (!state.stopped) state.scheduleRescan({
+                refreshDiscovery: retryDiscovery, isRetry: true,
+                retryGamePaths: settings.valid ? [...retrySources] : null,
+              }).catch(() => {});
+            }, delay);
             state.pendingTimer.unref?.();
+          } else {
+            state.pendingRetryAttempt = 0;
           }
         }
         return { handled: true, platform: "kytyps5", processed: changed.length, pending };
@@ -13227,6 +13383,67 @@ module.exports = function makeWatchedFolders({
     try { return await operation; } finally { ps4RecompScans.delete(key); }
   }
 
+  async function scanPs3RecompRoot(rootPath, options = {}) {
+    const key = normalizeRoot(rootPath);
+    if (ps3RecompScans.has(key)) return ps3RecompScans.get(key);
+    const operation = (async () => {
+      const folderState = folderWatchers.get(key);
+      const foreign = (options.dedicatedGameDiscoveries || []).filter((e) => e.platform !== "ps3recomp");
+      const isBlocked = (file) => isPathBlocked(file) || foreign.some((e) => ps3Recomp.inside(e.root, file)) || (options.excludedScanRoots || []).some((excluded) =>
+        (!options.scanScopeRoot || !isPathInsideRoot(excluded, options.scanScopeRoot)) && isPathInsideRoot(excluded, file));
+      if (folderState?.stopped || isBlocked(rootPath)) return;
+      const reusable = (options.dedicatedGameDiscoveries || []).filter((e) => e.platform === "ps3recomp" &&
+        e.discovery && ps3Recomp.inside(rootPath, e.root) && !isBlocked(e.root));
+      const discovery = await ps3Recomp.discoverGames(rootPath, { isBlocked: (file) => isBlocked(file) || reusable.some((e) => ps3Recomp.inside(e.root, file)) });
+      for (const e of reusable) discovery.games.push(...e.discovery.games);
+      for (const error of discovery.errors) watcherLogger.warn("ps3recomp:discovery:pending", error);
+      if (!discovery.truncated) {
+        ps3RecompRootsByFolder.set(key, discovery.games.map((game) => game.installRoot));
+        ps3RecompRoots.clear();
+        for (const roots of ps3RecompRootsByFolder.values()) for (const root of roots) ps3RecompRoots.add(normalizePrefPath(root));
+      }
+      const tasks = discovery.games.filter((game) => !isAppIdBlacklisted(game.appid, "ps3recomp") &&
+        !configDeletionGuard.isSuppressed(game.appid, { platform: "ps3recomp" }));
+      if (!tasks.length) return;
+      const progress = createGenerationBatchReporter(tasks, { rootLabel: path.basename(rootPath), fallbackItemName: "PS3 Recomp", deferStartUntilVisible: true });
+      const changed = []; let failed = false;
+      progress.start();
+      try {
+        for (const [index, game] of tasks.entries()) {
+          try {
+            const result = await ps3Recomp.generateConfig(game, configsDir, {
+              force: rescanInProgress.value || options.forceRecompSchema === true,
+              isCancelled: () => folderState?.stopped || !fs.existsSync(rootPath) || isBlocked(game.installRoot) ||
+                configDeletionGuard.isSuppressed(game.appid, { platform: "ps3recomp" }),
+              onProgress: (update) => progress.updateTask(game, index, update),
+            });
+            if (result.created || result.configUpdated || result.schemaUpdated) {
+              const bucket = appidSaveWatchers.get(game.appid), watcher = bucket?.get(result.name);
+              if (watcher) { await watcher.close(); bucket.delete(result.name); }
+              changed.push(result);
+            }
+            await indexExistingConfigsSync();
+            const meta = getConfigMetas(game.appid).find((entry) => entry.name === result.name && entry.platform === "ps3recomp");
+            if (meta) attachWatcherForMeta(meta, { suppressInitialNotify: true });
+            if (result.created || result.configUpdated || result.schemaUpdated) await onPs3RecompConfigChanged?.(result);
+            watcherLogger.info("ps3recomp:import:ready", { config: result.name, appid: game.appid, source: result.save_path, created: result.created });
+            progress.settleTask(game, index, result.created || result.configUpdated || result.schemaUpdated ? result : { reason: "unchanged" });
+          } catch (error) {
+            failed = true; watcherLogger.warn("ps3recomp:import:pending", { appid: game.appid, error: error.message });
+            progress.settleTask(game, index, { failed: true, reason: error.message });
+          }
+        }
+        if (changed.length) {
+          await invalidateDashboardSummaryForSchemaResults(changed, "ps3recomp-schema-updated");
+          broadcastAll("configs:changed"); broadcastAll("refresh-achievements-table");
+          emitDashboardRefresh({ mode: "full", reason: "ps3recomp-configs" });
+        }
+      } finally { progress.finish(failed ? "failed" : "success", ""); }
+    })();
+    ps3RecompScans.set(key, operation);
+    try { return await operation; } finally { ps3RecompScans.delete(key); }
+  }
+
   async function scanPcPortRoot(rootPath, options = {}) {
     const key = normalizeRoot(rootPath);
     if (pcPortScans.has(key)) return pcPortScans.get(key);
@@ -13344,6 +13561,8 @@ module.exports = function makeWatchedFolders({
         // Identification data is a one-scan snapshot, not a persistent cache.
         if (localPatchState) localPatchState.dedicatedGameDiscoveries = [];
       }
+      await scanPs3RecompRoot(rootPath, opts);
+      if ([...ps3RecompRoots].some((source) => source === normalizePrefPath(rootPath))) return { handled: true, platform: "ps3recomp" };
       await scanPs4RecompRoot(rootPath, opts);
       if ([...ps4RecompRoots].some((source) => source === normalizePrefPath(rootPath))) return { handled: true, platform: "ps4recomp" };
       await scanPcPortRoot(rootPath, opts);
@@ -13371,6 +13590,9 @@ module.exports = function makeWatchedFolders({
         .filter(Boolean),
     );
     let rootBatchProgress = null;
+    const scanGenerationTasks = [];
+    const scanPollOwner = Symbol("scan-poll-owner");
+    const scanGenerationId = `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     try {
       if (!rootPath || !fs.existsSync(rootPath)) return;
       const blockedFolders = getBlockedFoldersSet();
@@ -13484,7 +13706,7 @@ module.exports = function makeWatchedFolders({
         if (!candidate) return true;
         if (isNormalizedPathBlocked(candidate, blockedFolders)) return true;
         if (recompProgressDiscovery.ownsFile(candidate) || recompProgressDiscovery.ownsDirectory(candidate)) return true;
-        if ([...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, candidate))) return true;
+        if ([...ps3RecompRoots, ...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, candidate))) return true;
         if (
           scanScopeRoot &&
           !isPathInsideRoot(scanScopeRoot, candidate) &&
@@ -13513,7 +13735,7 @@ module.exports = function makeWatchedFolders({
         ? { deferInitialSeed: true }
         : {};
 
-      const generationTasks = [];
+      const generationTasks = scanGenerationTasks;
       const brandNewIds = [];
       const xeniaAppIds = new Set();
       const xeniaSchemaResults = [];
@@ -15177,7 +15399,7 @@ module.exports = function makeWatchedFolders({
               })
             : null;
         rootBatchProgress = batchProgress;
-        pauseDashboardPoll(true);
+        pauseDashboardPoll(true, scanPollOwner);
         batchProgress?.start();
 
         if (bootMode) {
@@ -15207,6 +15429,7 @@ module.exports = function makeWatchedFolders({
                   batchableTasks,
                   configsDir,
                   {
+                    generationId: scanGenerationId,
                     onSeedCache,
                     onTaskProgress: (task, taskIndex, progress) => {
                       batchProgress?.updateTask(task, taskIndex, progress);
@@ -15225,11 +15448,13 @@ module.exports = function makeWatchedFolders({
                 generatedIds.add(String(id));
               }
             } catch (err) {
+              if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(err?.code)) throw err;
               watcherLogger.warn("watcher:generate-batch-failed", {
                 error: err?.message || String(err),
                 count: batchableTasks.length,
               });
               const fallbackIds = await generateIdsThrottled(batchableTasks, {
+                generationId: scanGenerationId,
                 onTaskProgress: (task, taskIndex, progress) => {
                   batchProgress?.updateTask(task, taskIndex, progress);
                 },
@@ -15243,6 +15468,7 @@ module.exports = function makeWatchedFolders({
             }
           }
           const singleGeneratedIds = await generateIdsThrottled(singleTasks, {
+            generationId: scanGenerationId,
             onTaskProgress: (task, taskIndex, progress) => {
               batchProgress?.updateTask(task, taskIndex, progress);
             },
@@ -15261,29 +15487,38 @@ module.exports = function makeWatchedFolders({
             taskIndex += 1
           ) {
             const task = generationTasks[taskIndex];
-            const generationResult = await generateOneAppId(
-              task.appid,
-              task.appDir || null,
-              {
-                forcePlatform: task.forcePlatform,
-                normalizedSavePath: task.normalizedPath || "",
-                skipPostIndex: true,
-                allowExistingVariant: task.allowExistingVariant === true,
-                __savePathOverride: task.__savePathOverride || null,
-                __gogClientId: task.__gogClientId || null,
-                __gogUserId: task.__gogUserId || null,
-                __gogGameplayDbPath: task.__gogGameplayDbPath || null,
-                __ubisoftUserId: task.__ubisoftUserId || null,
-                __ubisoftSpoolFile: task.__ubisoftSpoolFile || null,
-                __eaAchievementSet: task.__eaAchievementSet || null,
-                __eaLogFile: task.__eaLogFile || null,
-                __eaGameName: task.__eaGameName || null,
-                __emu: task.__emu || null,
-                onGenerationProgress: (progress) => {
-                  batchProgress?.updateTask(task, taskIndex, progress);
+            let generationResult;
+            try {
+              generationResult = await generateOneAppId(
+                task.appid,
+                task.appDir || null,
+                {
+                  generationId: scanGenerationId,
+                  forcePlatform: task.forcePlatform,
+                  normalizedSavePath: task.normalizedPath || "",
+                  skipPostIndex: true,
+                  allowExistingVariant: task.allowExistingVariant === true,
+                  __savePathOverride: task.__savePathOverride || null,
+                  __gogClientId: task.__gogClientId || null,
+                  __gogUserId: task.__gogUserId || null,
+                  __gogGameplayDbPath: task.__gogGameplayDbPath || null,
+                  __ubisoftUserId: task.__ubisoftUserId || null,
+                  __ubisoftSpoolFile: task.__ubisoftSpoolFile || null,
+                  __eaAchievementSet: task.__eaAchievementSet || null,
+                  __eaLogFile: task.__eaLogFile || null,
+                  __eaGameName: task.__eaGameName || null,
+                  __emu: task.__emu || null,
+                  onGenerationProgress: (progress) => {
+                    batchProgress?.updateTask(task, taskIndex, progress);
+                  },
                 },
-              },
-            );
+              );
+            } catch (error) {
+              if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(error?.code)) throw error;
+              generationResult = { appid: task.appid, platform: task.forcePlatform || null,
+                status: "technical-error", failed: true, created: false, error: String(error.message || error) };
+              watcherLogger.warn("watcher:generate-task-failed", generationResult);
+            }
             batchProgress?.settleTask(task, taskIndex, generationResult);
             if (generationResult?.created === true) {
               generatedIds.add(String(task.appid));
@@ -15410,7 +15645,7 @@ module.exports = function makeWatchedFolders({
         batchProgress?.finish("success", "Config generation completed");
         rootBatchProgress = null;
         clearPendingForTasks(generationTasks);
-        pauseDashboardPoll(false);
+        pauseDashboardPoll(false, scanPollOwner);
       } else {
         if (bootMode) {
           notifyWarn(
@@ -15421,8 +15656,9 @@ module.exports = function makeWatchedFolders({
             clearPendingForTasks(generationTasks);
             return;
           }
-          pauseDashboardPoll(true);
+          pauseDashboardPoll(true, scanPollOwner);
           await generateGameConfigs(scanBase, configsDir, {
+            generationId: scanGenerationId,
             onSeedCache,
             forcePlatform: strictRootPlatform || undefined,
           });
@@ -15431,10 +15667,14 @@ module.exports = function makeWatchedFolders({
           for (const id of discovered) knownAppIds.add(id);
           broadcastAll("refresh-achievements-table");
           clearPendingForTasks(generationTasks);
-          pauseDashboardPoll(false);
+          pauseDashboardPoll(false, scanPollOwner);
         }
       }
     } catch (e) {
+      if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(e?.code)) {
+        rootBatchProgress?.finish("failed", "Config generation cancelled");
+        throw e;
+      }
       scanTelemetry.outcome = "failed";
       rootBatchProgress?.finish(
         "failed",
@@ -15442,6 +15682,8 @@ module.exports = function makeWatchedFolders({
       );
       notifyWarn(`Scan failed for "${rootPath}": ${e.message}`);
     } finally {
+      clearPendingForTasks(scanGenerationTasks);
+      pauseDashboardPoll(false, scanPollOwner);
       const durationMs = Date.now() - scanStartedAt;
       if (
         bootMode ||
@@ -15535,21 +15777,34 @@ module.exports = function makeWatchedFolders({
         root, error: error?.message || String(error),
       });
       let state;
-      const runScan = async ({ refreshDiscovery = false } = {}) => {
+      const runScan = async ({ refreshDiscovery = false, retryGamePaths = null, isRetry = false } = {}) => {
         if (state?.stopped) return;
         if (refreshDiscovery) state.refreshDiscovery = true;
+        // A normal filesystem event takes precedence over a queued retry.
+        if (!state.scanAgain) {
+          state.retryGamePaths = retryGamePaths;
+          state.retryOnly = isRetry;
+        } else if (!isRetry) {
+          state.retryGamePaths = null;
+          state.retryOnly = false;
+        } else if (state.retryOnly && state.retryGamePaths && retryGamePaths) {
+          state.retryGamePaths = [...new Set([...state.retryGamePaths, ...retryGamePaths])];
+        } else if (state.retryOnly) {
+          state.retryGamePaths = null;
+        }
         state.scanAgain = true;
         if (state.scanRunning) return;
         state.scanRunning = true;
         try {
           while (state.scanAgain && !state.stopped) {
+            const retryGamePaths = state.retryGamePaths, isRetry = state.retryOnly;
             state.scanAgain = false;
             await waitForBootOnboardingGateOpen();
             const inFlight = kytyScans.get(normalizeRoot(runtimeRoot));
             if (inFlight) await inFlight;
             const reuseDiscovery = !state.refreshDiscovery;
             state.refreshDiscovery = false;
-            if (!state.stopped) await scanKytyRoot(root, { reuseDiscovery });
+            if (!state.stopped) await scanKytyRoot(root, { reuseDiscovery, retryGamePaths, isRetry });
           }
         } finally { state.scanRunning = false; }
       };
@@ -16156,7 +16411,7 @@ module.exports = function makeWatchedFolders({
           await recompProgressDiscovery.consider(filePath);
           if (recompProgressDiscovery.ownsFile(filePath)) return;
         }
-        if ([...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, filePath))) return;
+        if ([...ps3RecompRoots, ...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, filePath))) return;
         if (rescanInProgress.value) return;
         if (isPathBlocked(filePath)) return;
         if (!bootOnboardingGateOpen) {
@@ -16382,18 +16637,6 @@ module.exports = function makeWatchedFolders({
           return;
         }
 
-        const tenokeReady =
-          meta.__tenoke !== true || tenokeRelinkedConfigs.has(meta.name);
-        // Auto-select only after notifications are processed
-        if (
-          !bootMode &&
-          tenokeReady &&
-          !isRecentlyUnblocked(appid, meta) &&
-          !isAutoSelectSuppressedForMeta(appid, meta)
-        ) {
-          setTimeout(() => enqueueAutoSelect(meta), 0);
-        }
-
         const appKey = String(appid);
         const runEval = async (retryFlag = false) => {
           let result = false;
@@ -16401,6 +16644,7 @@ module.exports = function makeWatchedFolders({
             result = await evaluateFile(appKey, meta, filePath, {
               initial: false,
               retry: retryFlag,
+              isAddEvent: true,
             });
           } catch {}
           if (result === "__retry__") {
@@ -16414,6 +16658,17 @@ module.exports = function makeWatchedFolders({
                 configName: meta?.name || null,
               });
             } catch {}
+            const tenokeReady =
+              meta.__tenoke !== true || tenokeRelinkedConfigs.has(meta.name);
+            // As on change, a file appearing alone must not activate a game.
+            if (
+              !bootMode &&
+              tenokeReady &&
+              !isRecentlyUnblocked(appid, meta) &&
+              !isAutoSelectSuppressedForMeta(appid, meta)
+            ) {
+              setTimeout(() => enqueueAutoSelect(meta), 0);
+            }
           }
         };
         try {
@@ -16436,7 +16691,7 @@ module.exports = function makeWatchedFolders({
           await recompProgressDiscovery.consider(filePath);
           if (recompProgressDiscovery.ownsFile(filePath)) return;
         }
-        if ([...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, filePath))) return;
+        if ([...ps3RecompRoots, ...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, filePath))) return;
         if (rescanInProgress.value) return;
         if (isPathBlocked(filePath)) return;
         if (!bootOnboardingGateOpen) {
@@ -16716,7 +16971,7 @@ module.exports = function makeWatchedFolders({
 
       .on("addDir", async (dir) => {
         if (recompProgressDiscovery.ownsDirectory(dir) || await recompProgressDiscovery.inspectDirectory(dir)) return;
-        if ([...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, dir))) { schedule(); return; }
+        if ([...ps3RecompRoots, ...ps4RecompRoots, ...pcPortRoots, ...recompSourceRoots].some((source) => isPathInsideRoot(source, dir))) { schedule(); return; }
         if (rescanInProgress.value) return;
         if (isPathBlocked(dir)) return;
         if (!bootOnboardingGateOpen) {
@@ -16979,7 +17234,7 @@ module.exports = function makeWatchedFolders({
             normalizePrefPath(file) === signature || event === "unlinkDir" && isPathInsideRoot(file, signature))) {
         scheduleDiscoveryPolicyRestart("installation-signature-removed");
       }
-      const ps4InstallCandidate = ps4Recomp.discoveryRootForFile(file);
+      const ps4InstallCandidate = ps4Recomp.discoveryRootForFile(file, { watchRoot: root });
       if (!state.stopped && ["add", "change"].includes(event) && ps4InstallCandidate) {
         const candidate = ps4InstallCandidate;
         void scanPs4RecompRoot(root, { ps4NewInstall: candidate }).catch((error) => watcherLogger.warn("ps4recomp:discovery:event-failed", { error: error.message }));
@@ -17007,6 +17262,9 @@ module.exports = function makeWatchedFolders({
     ps4RecompRootsByFolder.delete(root);
     ps4RecompRoots.clear();
     for (const roots of ps4RecompRootsByFolder.values()) for (const source of roots) ps4RecompRoots.add(normalizePrefPath(source));
+    ps3RecompRootsByFolder.delete(root);
+    ps3RecompRoots.clear();
+    for (const roots of ps3RecompRootsByFolder.values()) for (const source of roots) ps3RecompRoots.add(normalizePrefPath(source));
     pcPortRootsByFolder.delete(root);
     pcPortRoots.clear();
     for (const roots of pcPortRootsByFolder.values()) for (const source of roots) pcPortRoots.add(normalizePrefPath(source));
@@ -18377,6 +18635,27 @@ module.exports = function makeWatchedFolders({
     });
   }
 
+  function applyManualAchievementSourceEdit(configName, files, changes, completed = false) {
+    const name = sanitizeConfigName(configName);
+    const candidates = new Set([...configIndex.values()].flat());
+    for (const bucket of appidSaveWatchers.values()) for (const watcher of bucket.values()) {
+      if (watcher.meta) candidates.add(watcher.meta);
+    }
+    for (const meta of candidates) {
+      if (sanitizeConfigName(meta.name || "") !== name) continue;
+      meta.platinum = completed;
+      const platinumKey = buildScopedRuntimeKey({ appid: meta.appid, platform: meta.platform, configName: meta.name,
+        source: meta.platform === "x360recomp" ? x360Recomp.progressPath(meta) : "" });
+      if (completed) { platinumNotified.add(meta.name); platinumNotifiedByApp.add(platinumKey); }
+      else { platinumNotified.delete(meta.name); platinumNotifiedByApp.delete(platinumKey); }
+      for (const file of files) {
+        const snapKey = makeSnapshotKey(meta, meta.appid, { filePath: file, savePath: file });
+        lastSnapshot.set(snapKey, { ...(lastSnapshot.get(snapKey) || {}), ...structuredClone(changes) });
+        manualLockSourceVersions.set(`${snapKey}\0${file}`, achievementLockRuntime.revision(file));
+      }
+    }
+  }
+
   async function stopRecompConfig(configName) {
     const safeName = sanitizeConfigName(configName || "");
     recompProgressDiscovery.remove(safeName);
@@ -18536,6 +18815,7 @@ module.exports = function makeWatchedFolders({
 
   return {
     beginConfigDeletion,
+    applyManualAchievementSourceEdit,
     endConfigDeletion,
     resetPlatinumState,
     rebuildKnownAppIds,

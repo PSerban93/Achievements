@@ -8,7 +8,6 @@ const trophy = require("./kytyps5-trophy");
 const { packageFingerprint } = require("./kytyps5-game-source");
 const {
   EXOPHASE_RARITY_SOURCE,
-  buildExophaseSlugVariants,
   fetchExophaseAchievementsMultiLang,
 } = require("./exophase-scraper");
 
@@ -27,16 +26,11 @@ function matchKey(title, description) {
   return normalizedTitle ? `${normalizedTitle}|${matchText(description)}` : "";
 }
 
-function buildSlugCandidates(config) {
+function exophaseTitle(config) {
   const title = (localizedText(config.displayName) || config.name || "")
     .replace(/\s*\((?:PS5|kytyps5)\)\s*$/i, "").replace(/[™®©]/g, "").trim();
   if (!title || /^PPSA\d+$/i.test(title)) throw new Error("PS5 game title is required for Exophase");
-  const variants = buildExophaseSlugVariants(title);
-  return [...new Set([
-    ...variants.map((slug) => `${slug}-ps5`),
-    ...variants.map((slug) => `${slug}-psn`),
-    ...variants,
-  ])];
+  return title;
 }
 
 function readSchema(schemaPath) {
@@ -118,10 +112,11 @@ async function refreshKytySchemaRarity(config, options = {}) {
   if (options.onlyMissing && initialEntries.every((entry) => normalizeRarityPercent(entry.rarityPct) !== null)) {
     return { skipped: true, updated: false, reason: "rarity-complete" };
   }
-  const slugCandidates = buildSlugCandidates(config);
-  options.logger?.info("kytyps5:exophase:start", { appid: config.appid, variants: slugCandidates.length });
+  const title = exophaseTitle(config);
+  options.logger?.info("kytyps5:exophase:start", { appid: config.appid, title });
   const fetched = await fetchExophaseAchievementsMultiLang({
-    slugCandidates, platform: "kytyps5", langKeys: ["english"], logger: options.logger,
+    title, platform: "kytyps5", schemaAchievements: initialEntries,
+    langKeys: ["english"], logger: options.logger,
   });
   if (options.isCancelled?.()) return { skipped: true, updated: false, reason: "cancelled" };
 

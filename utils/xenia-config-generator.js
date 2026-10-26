@@ -13,8 +13,6 @@ const {
   EXOPHASE_LANG_MAP,
   EXOPHASE_RARITY_SOURCE,
   mapExophasePlatform,
-  buildExophaseSlug,
-  buildExophaseSlugVariants,
   fetchExophaseAchievementsMultiLang,
   downloadExophaseIcon,
 } = require("./exophase-scraper");
@@ -290,66 +288,23 @@ async function enrichSchemaFromExophase(schemaDir, parsed, options = {}) {
     });
     return { updated: false, matched: 0, icons: 0 };
   }
-  const variants = buildExophaseSlugVariants(rawTitle);
-  if (!platform || variants.length === 0) {
-    schemaLogger.warn("xenia:exophase:skip", {
-      appid: String(parsed?.appid || ""),
-      reason: "missing-slug-or-platform",
-    });
-    return { updated: false, matched: 0, icons: 0 };
-  }
-  const primarySlug = variants[0];
-  schemaLogger.info("xenia:exophase:start", {
-    appid: String(parsed?.appid || ""),
-    slug: primarySlug,
-    platform,
-    variants: variants.length,
-  });
-
+  schemaLogger.info("xenia:exophase:start", { appid: String(parsed?.appid || ""), title: rawTitle, platform });
   let exoData;
-  let usedSlug = primarySlug;
-  let lastError = null;
-  for (const candidate of variants) {
-    try {
-      const storageState = process.env.EXOPHASE_STORAGE_STATE || "";
-      exoData = await fetchExophaseAchievementsMultiLang({
-        slug: candidate,
-        platform,
-        langKeys,
-        langMap: EXOPHASE_LANG_MAP,
-        storageState:
-          storageState && fs.existsSync(storageState) ? storageState : "",
-        logger: schemaLogger,
-      });
-      usedSlug = candidate;
-      break;
-    } catch (err) {
-      lastError = err;
-      schemaLogger.warn("xenia:exophase:retry", {
-        appid: String(parsed?.appid || ""),
-        slug: candidate,
-        platform,
-        error: err?.message || String(err),
-      });
-    }
-  }
-  if (!exoData) {
+  try {
+    const storageState = process.env.EXOPHASE_STORAGE_STATE || "";
+    exoData = await fetchExophaseAchievementsMultiLang({
+      title: rawTitle, platform, schemaAchievements: entries, langKeys, langMap: EXOPHASE_LANG_MAP,
+      storageState: storageState && fs.existsSync(storageState) ? storageState : "",
+      logger: schemaLogger,
+    });
+  } catch (error) {
     schemaLogger.warn("xenia:exophase:failed", {
-      appid: String(parsed?.appid || ""),
-      slug: primarySlug,
-      platform,
-      error: lastError?.message || String(lastError),
-      tried: variants,
+      appid: String(parsed?.appid || ""), title: rawTitle, platform,
+      code: error.code, error: error.message,
     });
     return { updated: false, matched: 0, icons: 0 };
   }
-  if (usedSlug !== primarySlug) {
-    schemaLogger.info("xenia:exophase:alt-slug", {
-      appid: String(parsed?.appid || ""),
-      slug: usedSlug,
-      platform,
-    });
-  }
+  const usedSlug = exoData.usedSlug;
 
   const items = exoData?.items || [];
   if (!items.length) {

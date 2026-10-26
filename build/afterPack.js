@@ -15,6 +15,10 @@ module.exports = async (context) => {
   if (context.electronPlatformName !== "win32") return;
 
   const requiredUnpackedUtilities = [
+    ["Electron browser host", "electron-browser-host.js"],
+    ["Electron browser runtime", "playwright-runtime.js"],
+    ["Exophase catalog lookup", "exophase-catalog.js"],
+    ["SteamDB images", "steamdb-image-url.js"],
     ["Screenshot capture", "screenshot-capture-worker.js"],
     ["Native screenshot capture", "native/achievements-hdr-screenshot.exe"],
     ["XLiveLessNess", "xlivelessness-worker.js"],
@@ -40,6 +44,7 @@ module.exports = async (context) => {
     }
   }
   const unpackedRuntimeDependencies = [
+    ["playwright-core", "index.js"],
     ["adm-zip", "adm-zip.js"],
     ["tar-stream", "index.js"],
     ["b4a", "index.js"],
@@ -79,6 +84,10 @@ module.exports = async (context) => {
   const { listPackage } = require("@electron/asar");
   const archive = path.join(appOutDir, "resources", "app.asar");
   const archiveEntries = listPackage(archive).map((entry) => entry.replace(/\\/g, "/"));
+  if (fs.existsSync(path.join(appOutDir, "resources", "playwright-browsers")) ||
+      archiveEntries.some((entry) => /\/node_modules\/playwright(?:\/|$)|\/\.local-browsers(?:\/|$)/i.test(entry))) {
+    throw new Error("afterPack: a separate Playwright browser runtime was bundled");
+  }
   if (archiveEntries.some((entry) => /^\/native\/[^/]+\/target(?:\/|$)/i.test(entry))) {
     throw new Error("afterPack: Rust build artifacts were bundled in the application archive");
   }

@@ -17,7 +17,6 @@ const logger = createLogger("schema-parse");
 const TOP_OWNERS_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const SCHEMA_PARSE_DIRNAME = "schema_parse";
 const SCHEMA_PARSE_ARCHIVE_NAME = "schema_parse.zip";
-const SCHEMA_PARSE_STATE_FILENAME = ".seed-state.json";
 const SCHEMA_PARSE_DEFAULT_USERNAME = "goldie_0003";
 const SCHEMA_PARSE_DEFAULT_PASSWORD = "BabaYaga0003";
 const SCHEMA_PARSE_BATCH_CHUNK_SIZE = 20;
@@ -128,10 +127,6 @@ function resolveSchemaParseExecutable(runtimeDir = "") {
   return realExecutablePath;
 }
 
-function resolveSchemaParseStatePath(runtimeDir = "") {
-  return path.join(path.resolve(String(runtimeDir || "").trim()), SCHEMA_PARSE_STATE_FILENAME);
-}
-
 function isValidSchemaParseSeedArchive(candidate = "") {
   const filePath = path.resolve(String(candidate || "").trim());
   return !!filePath && fs.existsSync(filePath) && fs.statSync(filePath).isFile();
@@ -158,25 +153,11 @@ function resolveSchemaParseSeedArchive(options = {}) {
   return "";
 }
 
-function computeFileHash(filePath = "") {
+async function computeFileHash(filePath = "") {
   const fullPath = path.resolve(String(filePath || "").trim());
   const hash = crypto.createHash("sha256");
-  const buffer = fs.readFileSync(fullPath);
-  hash.update(buffer);
+  for await (const chunk of fs.createReadStream(fullPath)) hash.update(chunk);
   return hash.digest("hex");
-}
-
-function readJsonFile(filePath = "") {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function writeJsonFile(filePath = "", value = {}) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(value, null, 2), "utf8");
 }
 
 function copyRecursive(sourceDir, destDir, options = {}) {
@@ -198,40 +179,11 @@ function copyRecursive(sourceDir, destDir, options = {}) {
   }
 }
 
-function copyPathRecursive(sourcePath, destPath) {
-  if (!fs.existsSync(sourcePath)) return;
-  const stat = fs.statSync(sourcePath);
-  if (stat.isDirectory()) {
-    copyRecursive(sourcePath, destPath);
-    return;
-  }
-  fs.mkdirSync(path.dirname(destPath), { recursive: true });
-  fs.copyFileSync(sourcePath, destPath);
-}
-
-function preserveRuntimeMutableEntries(runtimeDir, preserveRoot) {
-  fs.rmSync(preserveRoot, { recursive: true, force: true });
-  fs.mkdirSync(preserveRoot, { recursive: true });
-  for (const name of SCHEMA_PARSE_MUTABLE_NAMES) {
-    const sourcePath = path.join(runtimeDir, name);
-    if (!fs.existsSync(sourcePath)) continue;
-    copyPathRecursive(sourcePath, path.join(preserveRoot, name));
-  }
-}
-
-function restoreRuntimeMutableEntries(preserveRoot, runtimeDir) {
-  if (!fs.existsSync(preserveRoot)) return;
-  for (const name of SCHEMA_PARSE_MUTABLE_NAMES) {
-    const sourcePath = path.join(preserveRoot, name);
-    if (!fs.existsSync(sourcePath)) continue;
-    copyPathRecursive(sourcePath, path.join(runtimeDir, name));
-  }
-}
-
-async function extractSchemaParseArchive(archivePath, runtimeDir) {
+async function extractSchemaParseArchive(archivePath, runtimeDir, options = {}) {
   const archiveLiteral = String(path.resolve(archivePath)).replace(/'/g, "''");
   const runtimeLiteral = String(path.resolve(runtimeDir)).replace(/'/g, "''");
   const command =
+    "$ErrorActionPreference = 'Stop'; " +
     `$archive = '${archiveLiteral}'; ` +
     `$dest = '${runtimeLiteral}'; ` +
     "New-Item -ItemType Directory -Path $dest -Force | Out-Null; " +
@@ -249,16 +201,10 @@ async function extractSchemaParseArchive(archivePath, runtimeDir) {
     {
       windowsHide: true,
       maxBuffer: 8 * 1024 * 1024,
+      timeout: options.extractionTimeoutMs || 120000,
+      signal: options.signal,
     },
   );
-}
-
-function statMtimeMs(filePath = "") {
-  try {
-    return fs.statSync(filePath).mtimeMs || 0;
-  } catch {
-    return 0;
-  }
 }
 
 function normalizeAchievementTextObject(value) {
@@ -393,101 +339,21 @@ function readSchemaParseGeneratedDisplayName(appOutputDir = "", appid = "") {
   return "";
 }
 
+const { createRuntimePreparer } = require("./schema-parse-runtime-preparation");
+const runtimePreparer = createRuntimePreparer({
+  logger,
+  coordinate: coordinateSchemaParse,
+  resolveDir: resolveSchemaParseRuntimeDir,
+  resolveArchive: resolveSchemaParseSeedArchive,
+  hash: computeFileHash,
+  ensureEnv: ensureSchemaParseProcessEnv,
+  extract: extractSchemaParseArchive,
+  validate: resolveSchemaParseExecutable,
+  refreshOwners: updateTopOwnersIds,
+  mutableNames: SCHEMA_PARSE_MUTABLE_NAMES,
+});
 async function ensureSchemaParseRuntimeReady(options = {}) {
-  const userDataDir = normalizeUserDataDir(options.userDataDir);
-  const runtimeDir = resolveSchemaParseRuntimeDir(userDataDir);
-  const seedArchive = resolveSchemaParseSeedArchive(options);
-  if (!seedArchive) {
-    throw new Error("schema_parse seed archive not found");
-  }
-
-  ensureSchemaParseProcessEnv();
-
-  const runtimeExe = path.join(runtimeDir, "generate_emu_config.exe");
-  const runtimeStatePath = resolveSchemaParseStatePath(runtimeDir);
-  const bundledHash = computeFileHash(seedArchive);
-  const previousState = readJsonFile(runtimeStatePath) || {};
-  const requiresExtract =
-    !fs.existsSync(runtimeExe) ||
-    String(previousState.archiveHash || "").trim() !== bundledHash;
-  const bootstrapped = !fs.existsSync(runtimeExe);
-  const updated = requiresExtract && !bootstrapped;
-
-  if (requiresExtract) {
-    const preserveRoot = path.join(path.dirname(runtimeDir), `${SCHEMA_PARSE_DIRNAME}.preserve`);
-    logger.info("schema-parse:bootstrap:start", {
-      runtimeDir,
-      seedArchive,
-      reason: String(options.reason || "runtime"),
-      updated,
-    });
-    if (fs.existsSync(runtimeDir)) {
-      preserveRuntimeMutableEntries(runtimeDir, preserveRoot);
-      fs.rmSync(runtimeDir, { recursive: true, force: true });
-    } else {
-      fs.rmSync(preserveRoot, { recursive: true, force: true });
-    }
-    await extractSchemaParseArchive(seedArchive, runtimeDir);
-    restoreRuntimeMutableEntries(preserveRoot, runtimeDir);
-    fs.rmSync(preserveRoot, { recursive: true, force: true });
-    writeJsonFile(runtimeStatePath, {
-      archivePath: seedArchive,
-      archiveHash: bundledHash,
-      extractedAt: new Date().toISOString(),
-    });
-    logger.info("schema-parse:bootstrap:success", {
-      runtimeDir,
-      seedArchive,
-      updated,
-    });
-  } else if (
-    String(previousState.archivePath || "").trim() !== seedArchive ||
-    String(previousState.archiveHash || "").trim() !== bundledHash
-  ) {
-    writeJsonFile(runtimeStatePath, {
-      archivePath: seedArchive,
-      archiveHash: bundledHash,
-      extractedAt:
-        previousState?.extractedAt || new Date().toISOString(),
-    });
-  }
-
-  const topOwnersPath = path.join(runtimeDir, "top_owners_ids.txt");
-  let topOwnersRefreshed = false;
-  if (options.refreshTopOwners === true) {
-    await updateTopOwnersIds({
-      outputPath: topOwnersPath,
-      limit: options.topOwnersLimit || 250,
-      timeoutMs: options.topOwnersTimeoutMs || 30000,
-      headless: true,
-    });
-    topOwnersRefreshed = true;
-  } else if (!fs.existsSync(topOwnersPath)) {
-    await updateTopOwnersIds({
-      outputPath: topOwnersPath,
-      limit: options.topOwnersLimit || 250,
-      timeoutMs: options.topOwnersTimeoutMs || 30000,
-      headless: true,
-    });
-    topOwnersRefreshed = true;
-  } else {
-    const ageMs = Date.now() - statMtimeMs(topOwnersPath);
-    if (ageMs > TOP_OWNERS_TTL_MS) {
-      logger.info("schema-parse:top-owners:stale", {
-        outputPath: topOwnersPath,
-        ageMs,
-      });
-    }
-  }
-
-  return {
-    runtimeDir,
-    seedArchive,
-    bootstrapped,
-    updated,
-    topOwnersPath,
-    topOwnersRefreshed,
-  };
+  return runtimePreparer.prepare(options);
 }
 
 function startSchemaParseBootPreparation(options = {}) {
@@ -497,62 +363,37 @@ function startSchemaParseBootPreparation(options = {}) {
   logger.info("schema-parse:boot-preparation:start", {
     reason: String(options.reason || "boot"),
   });
-  // Let Electron create/present its first frame before any archive hashing or
-  // runtime migration work begins in the main process.
+  // Yield before archive preparation so Electron can present its first frame.
   bootPreparationPromise = new Promise((resolve) => setImmediate(resolve))
-    .then(() =>
-      ensureSchemaParseRuntimeReady({
-        ...options,
-        refreshTopOwners: true,
-        reason: options.reason || "boot",
-      }),
-    )
+    .then(() => ensureSchemaParseRuntimeReady({
+      ...options,
+      generationId: options.generationId || `boot-${crypto.randomUUID()}`,
+      refreshTopOwners: true,
+      reason: options.reason || "boot",
+    }))
     .then((runtime) => {
-      bootPreparationResult = {
-        ...runtime,
-        status: "ready",
-        fallback: false,
-      };
-      bootPreparationStatus = "ready";
-      logger.info("schema-parse:boot-preparation:ready", {
-        durationMs: Date.now() - startedAt,
-        fallback: false,
-        topOwnersRefreshed: runtime?.topOwnersRefreshed === true,
-      });
-      return bootPreparationResult;
+      // The preparer already falls back to a local owners list and records
+      // deferred cleanup. Preserve that state instead of claiming full success.
+      bootPreparationResult = runtime;
+      bootPreparationStatus = runtime.status;
+      logger[runtime.fallback ? "warn" : "info"](
+        runtime.fallback ? "schema-parse:boot-preparation:fallback" : "schema-parse:boot-preparation:ready",
+        { durationMs: Date.now() - startedAt, fallback: runtime.fallback,
+          topOwnersRefreshed: runtime.topOwnersRefreshed },
+      );
+      return runtime;
     })
-    .catch(async (error) => {
-      // Network refresh failure must not discard a previously valid runtime.
-      // Revalidate the local copy without requesting another forced refresh.
-      try {
-        const runtime = await ensureSchemaParseRuntimeReady({
-          ...options,
-          refreshTopOwners: false,
-          reason: "boot-fallback",
-        });
-        bootPreparationResult = {
-          ...runtime,
-          status: "ready-with-fallback",
-          fallback: true,
-          refreshError: error,
-        };
-        bootPreparationStatus = "ready-with-fallback";
-        logger.warn("schema-parse:boot-preparation:fallback", {
-          durationMs: Date.now() - startedAt,
-          error: error?.message || String(error),
-          topOwnersPath: runtime?.topOwnersPath || null,
-        });
-        return bootPreparationResult;
-      } catch (fallbackError) {
-        bootPreparationStatus = "failed";
-        logger.error("schema-parse:boot-preparation:failed", {
-          durationMs: Date.now() - startedAt,
-          error: error?.message || String(error),
-          fallbackError: fallbackError?.message || String(fallbackError),
-        });
-        bootPreparationPromise = null;
-        throw error;
-      }
+    .catch((error) => {
+      bootPreparationStatus = "failed";
+      bootPreparationResult = null;
+      logger.error("schema-parse:boot-preparation:failed", {
+        durationMs: Date.now() - startedAt,
+        error: error?.message || String(error), code: error?.code,
+        nativeCode: error?.nativeCode, stage: error?.stage,
+        syscall: error?.syscall, path: error?.path,
+      });
+      bootPreparationPromise = null;
+      throw error;
     });
   return bootPreparationPromise;
 }
@@ -1088,7 +929,7 @@ async function generateSteamSchemaWithSchemaParseUncoordinated(options = {}) {
     return { ok: false, reason: "invalid-output-dir" };
   }
 
-  const preparedRuntime = await waitForSchemaParseBootPreparation();
+  const preparedRuntime = options.__preparedRuntime || await waitForSchemaParseBootPreparation();
   const runtime = preparedRuntime || (await ensureSchemaParseRuntimeReady({
     userDataDir,
     reason: options.reason || "generate",
@@ -1115,7 +956,7 @@ async function generateSteamSchemasWithSchemaParseBatchUncoordinated(options = {
     return { ok: true, results };
   }
 
-  const preparedRuntime = await waitForSchemaParseBootPreparation();
+  const preparedRuntime = options.__preparedRuntime || await waitForSchemaParseBootPreparation();
   const runtime = preparedRuntime || (await ensureSchemaParseRuntimeReady({
     userDataDir: normalizeUserDataDir(options.userDataDir),
     reason: options.reason || "generate-batch",
@@ -1299,12 +1140,25 @@ async function generateSteamSchemasWithSchemaParseBatchUncoordinated(options = {
   }
 }
 
-function generateSteamSchemaWithSchemaParse(options = {}) {
-  return coordinateSchemaParse("single", options, () => generateSteamSchemaWithSchemaParseUncoordinated(options));
+async function generateSteamSchemaWithSchemaParse(options = {}) {
+  if (process.env.ACHIEVEMENTS_SCHEMA_PARSE_COORDINATED === "1") {
+    return coordinateSchemaParse("single", options, () => {});
+  }
+  if (!/^\d+$/.test(String(options.appid || "").trim())) {
+    return { ok: false, reason: "invalid-appid" };
+  }
+  const runtime = await ensureSchemaParseRuntimeReady(options);
+  return coordinateSchemaParse("single", options, () => generateSteamSchemaWithSchemaParseUncoordinated({ ...options, __preparedRuntime: runtime }));
 }
-
-function generateSteamSchemasWithSchemaParseBatch(options = {}) {
-  return coordinateSchemaParse("batch", options, () => generateSteamSchemasWithSchemaParseBatchUncoordinated(options));
+async function generateSteamSchemasWithSchemaParseBatch(options = {}) {
+  if (process.env.ACHIEVEMENTS_SCHEMA_PARSE_COORDINATED === "1") {
+    return coordinateSchemaParse("batch", options, () => {});
+  }
+  if (!Array.isArray(options.items) || !options.items.some((item) => /^\d+$/.test(String(item?.appid || "").trim()))) {
+    return { ok: true, results: new Map() };
+  }
+  const runtime = await ensureSchemaParseRuntimeReady(options);
+  return coordinateSchemaParse("batch", options, () => generateSteamSchemasWithSchemaParseBatchUncoordinated({ ...options, __preparedRuntime: runtime }));
 }
 
 module.exports = {

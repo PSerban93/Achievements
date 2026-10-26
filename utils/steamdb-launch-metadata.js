@@ -4,14 +4,14 @@ const { createLogger } = require("./logger");
 const { normalizeProcessNameValue } = require("./process-name-utils");
 
 const {
-  launchChromiumSafe: launchPlaywrightChromium,
+  launchBrowserSafe: launchPlaywrightBrowser,
 } = require("./playwright-runtime");
 
 const autoConfigLogger = createLogger("autoconfig");
 const baseLaunchArgs = ["--disable-blink-features=AutomationControlled"];
 
-async function launchChromiumSafe(opts = {}) {
-  return launchPlaywrightChromium("playwright-core", {
+async function launchBrowserSafe(opts = {}) {
+  return launchPlaywrightBrowser("playwright-core", {
     headless: true,
     args: baseLaunchArgs,
     ...opts,
@@ -162,7 +162,7 @@ async function fetchSteamDbLaunchMetadata(appid, sharedSession = null) {
 
   try {
     if (!page) {
-      browser = await launchChromiumSafe({
+      browser = await launchBrowserSafe({
         headless: true,
         args: ["--disable-blink-features=AutomationControlled"],
       });

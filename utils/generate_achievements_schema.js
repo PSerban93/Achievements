@@ -1,13 +1,23 @@
 // generate_achievements_schema.js
+const { resolveSteamDbImageUrl } = require("./steamdb-image-url");
 const path = require("path");
 const fsSync = require("fs");
 const { lookupSteamDbName } = require("./local-game-name-cache");
-const { withSchemaDownloadContext, setSchemaDownloadName, reportSchemaDownloadError,
-  schemaDownloadRequest, reportSchemaDownloadDiagnostics } = require("./schema-download-warning");
-const { normalizeUplayAchievementName, normalizeUplaySchema, createUplayNameResolver } = require("./uplay-achievement-identity");
+const {
+  withSchemaDownloadContext,
+  setSchemaDownloadName,
+  reportSchemaDownloadError,
+  schemaDownloadRequest,
+  reportSchemaDownloadDiagnostics,
+} = require("./schema-download-warning");
+const {
+  normalizeUplayAchievementName,
+  normalizeUplaySchema,
+  createUplayNameResolver,
+} = require("./uplay-achievement-identity");
 
 const {
-  launchChromiumSafe: launchPlaywrightChromium,
+  launchBrowserSafe: launchPlaywrightBrowser,
 } = require("./playwright-runtime");
 
 const { execFileSync } = require("child_process");
@@ -21,8 +31,6 @@ const { createLogger } = require("./logger");
 const {
   EXOPHASE_LANG_KEYS,
   EXOPHASE_LANG_MAP,
-  buildExophaseSlug,
-  buildExophaseSlugVariants,
   fetchExophaseAchievementsMultiLang: fetchExophaseSchema,
 } = require("./exophase-scraper");
 const {
@@ -38,16 +46,34 @@ const {
   fetchEpicAchievementSchemaBySandbox: fetchEpicSandboxSchema,
   fetchEpicPublicProductAchievements: fetchEpicPublicSchema,
 } = require("./epic-api");
-const { resolveEpicArtifactIdentity: resolveEpicSchemaIdentity } = require("./epic-identity");
-const fetchEpicAchievementSchemaBySandbox = (...args) => schemaDownloadRequest("epic-schema", () => fetchEpicSandboxSchema(...args));
-const fetchEpicPublicProductAchievements = (...args) => schemaDownloadRequest("epic-schema", () => fetchEpicPublicSchema(...args));
-const resolveEpicArtifactIdentity = (...args) => schemaDownloadRequest("epic-catalog", () => resolveEpicSchemaIdentity(...args));
-const fetchExophaseAchievementsMultiLang = (...args) => schemaDownloadRequest("exophase-schema", () => fetchExophaseSchema(...args));
+const {
+  resolveEpicArtifactIdentity: resolveEpicSchemaIdentity,
+} = require("./epic-identity");
+const fetchEpicAchievementSchemaBySandbox = (...args) =>
+  schemaDownloadRequest("epic-schema", () => fetchEpicSandboxSchema(...args));
+const fetchEpicPublicProductAchievements = (...args) =>
+  schemaDownloadRequest("epic-schema", () => fetchEpicPublicSchema(...args));
+const resolveEpicArtifactIdentity = (...args) =>
+  schemaDownloadRequest("epic-catalog", () =>
+    resolveEpicSchemaIdentity(...args),
+  );
+const fetchExophaseAchievementsMultiLang = (...args) =>
+  schemaDownloadRequest("exophase-schema", () => fetchExophaseSchema(...args));
 const { resolveEpicGameIdentityDetailed } = require("./epic-game-identity");
 const { probeSteamGame, probeGogGame } = require("./emulator-game-discovery");
-const { generationResult, blacklistScope, generationDetail, resolveEmulatorDiscoveryMeta,
-  getEmulatorProviderPlan, getEmulatorGenerationPreflight, getEpicIdentityAliases } = require("./emulator-generation-result");
-const { createBlacklistState, getBlacklistMatch } = require("./blacklist-identity");
+const {
+  generationResult,
+  blacklistScope,
+  generationDetail,
+  resolveEmulatorDiscoveryMeta,
+  getEmulatorProviderPlan,
+  getEmulatorGenerationPreflight,
+  getEpicIdentityAliases,
+} = require("./emulator-generation-result");
+const {
+  createBlacklistState,
+  getBlacklistMatch,
+} = require("./blacklist-identity");
 const { fetchSteamDbLaunchMetadata } = require("./steamdb-launch-metadata");
 const {
   generateSteamSchemaWithSchemaParse,
@@ -113,22 +139,36 @@ function configureUplayMapping(userDataDir) {
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
 const schemaDownloadContexts = new Map();
-function schemaWarningGameName(meta, platform = meta.platform || OUTPUT_PLATFORM) {
-  const mapping = platform === "uplay" ? uplayToSteam.get(String(meta.uplayId)) : null;
-  const steamId = String(mapping?.steam_appid || meta.steamId || meta.uplayId || "").replace(/^0+(?=\d)/, "");
+function schemaWarningGameName(
+  meta,
+  platform = meta.platform || OUTPUT_PLATFORM,
+) {
+  const mapping =
+    platform === "uplay" ? uplayToSteam.get(String(meta.uplayId)) : null;
+  const steamId = String(
+    mapping?.steam_appid || meta.steamId || meta.uplayId || "",
+  ).replace(/^0+(?=\d)/, "");
   // Friendly text only: local names must not become provider identity evidence.
-  const localName = ["steam", "uplay"].includes(platform) && /^\d+$/.test(steamId)
-    ? lookupSteamDbName(steamId, { userDataDir: USERDATA_DIR }) : null;
-  return localName || meta.title || mapping?.steam_name || mapping?.uplay_name || "";
+  const localName =
+    ["steam", "uplay"].includes(platform) && /^\d+$/.test(steamId)
+      ? lookupSteamDbName(steamId, { userDataDir: USERDATA_DIR })
+      : null;
+  return (
+    localName || meta.title || mapping?.steam_name || mapping?.uplay_name || ""
+  );
 }
 function runAppWithDownloadWarnings(meta, fn) {
   const appid = String(meta.uplayId);
   if (!schemaDownloadContexts.has(appid)) {
-    schemaDownloadContexts.set(appid, { appid, displayName: schemaWarningGameName(meta),
-      warned: false, onWarning: (message) => {
+    schemaDownloadContexts.set(appid, {
+      appid,
+      displayName: schemaWarningGameName(meta),
+      warned: false,
+      onWarning: (message) => {
         schemaLogger.warn("schema:download-warning", message);
         if (HAS_IPC) process.send(message);
-      } });
+      },
+    });
   }
   return withSchemaDownloadContext(schemaDownloadContexts.get(appid), fn);
 }
@@ -143,7 +183,12 @@ async function schemaProviderRequest(source, request) {
 const HAS_IPC = typeof process.send === "function";
 function emit(level, message, data = {}) {
   if (HAS_IPC) {
-    if (message !== "achschema:start" && !/^(?:schema:cleanup:|steam-scrape:route-failed$|generation:complete$)/.test(message)) {
+    if (
+      message !== "achschema:start" &&
+      !/^(?:schema:cleanup:|steam-scrape:route-failed$|generation:complete$)/.test(
+        message,
+      )
+    ) {
       try {
         process.send({ type: "achgen:log", level, message, ...data });
       } catch {}
@@ -238,6 +283,11 @@ function buildCommandFailureMeta(err) {
       Number.isFinite(Number(err?.code)) || typeof err?.code === "string"
         ? err.code
         : null,
+    nativeCode: err?.nativeCode,
+    stage: err?.stage,
+    syscall: err?.syscall,
+    path: err?.path,
+    dest: err?.dest,
     stdoutPreview: summarizeCommandOutput(err?.stdout),
     stderrPreview: summarizeCommandOutput(err?.stderr),
   };
@@ -343,9 +393,17 @@ function buildResolvedAppIds(ids, mode = "auto") {
     return ids.map((raw) => resolveAppMeta(raw, mode));
   }
   const needsRefresh = ids.some((raw) => {
-    if (EMULATOR_CASCADE && getEmulatorGenerationPreflight(resolveAppMeta(raw, mode), readDiscoveryBlacklistState(), {
-      explicitPlatform: EXPLICIT_PLATFORM ? mode : null,
-    }).skip) return false;
+    if (
+      EMULATOR_CASCADE &&
+      getEmulatorGenerationPreflight(
+        resolveAppMeta(raw, mode),
+        readDiscoveryBlacklistState(),
+        {
+          explicitPlatform: EXPLICIT_PLATFORM ? mode : null,
+        },
+      ).skip
+    )
+      return false;
     const mapping = uplayToSteam.get(String(raw));
     return !mapping || !mapping.steam_appid;
   });
@@ -383,7 +441,7 @@ const GOG_CLIENT_SECRET =
 const GOG_REDIRECT_URI = "https://embed.gog.com/on_login_success?origin=client";
 const GOG_MODE = ARGS.includes("--gog");
 const GOG_USER = getFlag("--gog-user", "jach_dum@mailinator.com");
-const GOG_PASS = getFlag("--gog-pass", "JokerVerse2009!");
+const GOG_PASS = getFlag("--gog-pass", "JokerVerse2077!");
 const gogTokensFlag = getFlag("--gog-tokens-file", "");
 const DEFAULT_GOG_TOKENS_FILE = USERDATA_DIR
   ? path.join(path.resolve(USERDATA_DIR), "gog_tokens.enc")
@@ -724,7 +782,7 @@ async function gogHeadlessLogin() {
   if (!GOG_USER || !GOG_PASS) {
     throw new Error("Provide --gog-user and --gog-pass for first login.");
   }
-  const browser = await launchChromiumSafe({ headless: !headed });
+  const browser = await launchBrowserSafe({ headless: !headed });
   try {
     const page = await browser.newPage();
     const authUrl = `${GOG_AUTH_BASE}/auth?client_id=${GOG_CLIENT_ID}&redirect_uri=${encodeURIComponent(
@@ -736,7 +794,11 @@ async function gogHeadlessLogin() {
       'button:has-text("Sign in"), a:has-text("Sign in"), button:has-text("Already have an account"), a:has-text("Already have an account")',
     );
     if (signInToggle) {
-      await signInToggle.click().catch(() => {});
+      await (
+        headed
+          ? signInToggle.click()
+          : signInToggle.evaluate((button) => button.click())
+      ).catch(() => {});
       await page.waitForTimeout(700);
     }
 
@@ -767,8 +829,24 @@ async function gogHeadlessLogin() {
       await submit
         .waitFor({ state: "visible", timeout: 30000 })
         .catch(() => {});
-      await submit.scrollIntoViewIfNeeded().catch(() => {});
-      await submit.click().catch(async () => {
+      if (!headed) {
+        // DOM click does not wait for actionability. GOG enables this button
+        // after its asynchronous form/security checks have completed.
+        const button = await submit.elementHandle();
+        try {
+          await page.waitForFunction(
+            (element) => element && !element.disabled && element.getAttribute("aria-disabled") !== "true",
+            button,
+            { polling: 100, timeout: 30000 },
+          );
+        } finally {
+          await button?.dispose();
+        }
+      }
+      if (headed) await submit.scrollIntoViewIfNeeded().catch(() => {});
+      await (
+        headed ? submit.click() : submit.evaluate((button) => button.click())
+      ).catch(async () => {
         try {
           await submit.click({ force: true });
         } catch {}
@@ -828,12 +906,14 @@ async function gogFetchAchievements(productId) {
       "Accept-Language": "en-US",
     },
   });
-  if (res.status === 404) return { items: [], userId: tok.user_id, httpStatus: 404 };
+  if (res.status === 404)
+    return { items: [], userId: tok.user_id, httpStatus: 404 };
   if (!res.ok) {
     throw new Error(`GOG ${productId} achievements HTTP ${res.status}`);
   }
   const data = await res.json();
-  if (!Array.isArray(data?.items)) throw new Error("GOG achievements response is invalid");
+  if (!Array.isArray(data?.items))
+    throw new Error("GOG achievements response is invalid");
   return { items: data.items, userId: tok.user_id, httpStatus: res.status };
 }
 
@@ -874,7 +954,9 @@ async function processGogApp(productId, outBaseDir) {
   const outDir = path.join(base, "gog", appid);
   const imgDir = path.join(outDir, "img");
 
-  const { items, httpStatus } = await schemaDownloadRequest("gog-schema", () => gogFetchAchievements(appid));
+  const { items, httpStatus } = await schemaDownloadRequest("gog-schema", () =>
+    gogFetchAchievements(appid),
+  );
   const results = [];
   const seenUrls = new Set();
   let imageDirReady = false;
@@ -908,8 +990,13 @@ async function processGogApp(productId, outBaseDir) {
   };
 
   for (const entry of items || []) {
-    if (EMULATOR_CASCADE && (!entry || !String(entry.achievement_key || "").trim())) {
-      throw new Error("GOG achievements response contains an invalid achievement");
+    if (
+      EMULATOR_CASCADE &&
+      (!entry || !String(entry.achievement_key || "").trim())
+    ) {
+      throw new Error(
+        "GOG achievements response contains an invalid achievement",
+      );
     }
     const unlocked = entry?.image_url_unlocked || "";
     const locked = entry?.image_url_locked || "";
@@ -1012,7 +1099,12 @@ const EPIC_LANGS = resolveEpicLangsToFetch();
 
 async function fetchEpicAchievements(appid, locale) {
   const url = `https://api.epicgames.dev/epic/achievements/v1/public/achievements/product/${appid}/locale/${locale}?includeAchievements=true`;
-  const r = await schemaDownloadRequest("epic-schema", () => fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(20000) }));
+  const r = await schemaDownloadRequest("epic-schema", () =>
+    fetch(url, {
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(20000),
+    }),
+  );
   if (!r.ok) {
     reportSchemaDownloadError({ status: r.status }, "epic-schema");
     throw new Error(`Epic ${r.status} ${r.statusText}`);
@@ -1105,38 +1197,6 @@ function mapExophasePlatformForScrape(meta, fallback = "steam") {
   if (raw === "uplay") return "steam";
   if (raw === "steam") return "steam";
   return fallback;
-}
-
-function stripSteamEditionSuffix(title = "") {
-  const raw = String(title || "").trim();
-  if (!raw) return "";
-  return raw
-    .replace(
-      /\s*[-:]\s*(the\s+)?(definitive|complete|deluxe|ultimate|gold|goty|game of the year)(\s+edition)?\s*$/i,
-      "",
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildSteamExophaseSlugCandidates(title = "") {
-  const baseTitle = String(title || "").trim();
-  const strippedTitle = stripSteamEditionSuffix(baseTitle);
-  const titleSources = [baseTitle];
-  if (strippedTitle && strippedTitle !== baseTitle) {
-    titleSources.push(strippedTitle);
-  }
-  const baseVariants = Array.from(
-    new Set(
-      titleSources.flatMap((sourceTitle) =>
-        buildExophaseSlugVariants(sourceTitle),
-      ),
-    ),
-  );
-  if (!baseVariants.length) return [];
-  return Array.from(
-    new Set([...baseVariants, ...baseVariants.map((slug) => `${slug}-steam`)]),
-  ).filter(Boolean);
 }
 
 async function enrichScrapedWithExophase(achievements, exoData, imgDir, appid) {
@@ -1256,10 +1316,10 @@ function createLimiter(concurrency = 1) {
 }
 const appLimit = createLimiter(appsConcurrency);
 
-async function launchChromiumSafe(opts = {}) {
+async function launchBrowserSafe(opts = {}) {
   const baseArgs = ["--disable-blink-features=AutomationControlled"];
 
-  return launchPlaywrightChromium("playwright", {
+  return launchPlaywrightBrowser("playwright-core", {
     headless: !headed,
     args: baseArgs,
     ...opts,
@@ -1345,12 +1405,19 @@ async function fetchSchemaLang(appid, key, lang) {
         );
         if (!r.ok)
           throw new Error(`Steam API ${appid} ${variant} HTTP ${r.status}`);
-        if (EMULATOR_CASCADE && (!j?.game || typeof j.game !== "object" || Array.isArray(j.game))) {
+        if (
+          EMULATOR_CASCADE &&
+          (!j?.game || typeof j.game !== "object" || Array.isArray(j.game))
+        ) {
           throw new Error("Steam schema response is incomplete");
         }
         const rawAchievements = j?.game?.availableGameStats?.achievements;
-        if (EMULATOR_CASCADE && j?.game?.availableGameStats != null &&
-            (typeof j.game.availableGameStats !== "object" || Array.isArray(j.game.availableGameStats))) {
+        if (
+          EMULATOR_CASCADE &&
+          j?.game?.availableGameStats != null &&
+          (typeof j.game.availableGameStats !== "object" ||
+            Array.isArray(j.game.availableGameStats))
+        ) {
           throw new Error("Steam schema stats response is invalid");
         }
         if (rawAchievements !== undefined && !Array.isArray(rawAchievements)) {
@@ -1359,8 +1426,12 @@ async function fetchSchemaLang(appid, key, lang) {
         const list = j?.game?.availableGameStats?.achievements || [];
         if (!list.length) {
           emit("warn", "steam-schema:empty", { appid, lang: variant, mode });
-          if (EMULATOR_CASCADE && typeof j?.game?.gameName === "string" && j.game.gameName.trim() &&
-              (j.game.availableGameStats || j.game.gameVersion !== undefined)) {
+          if (
+            EMULATOR_CASCADE &&
+            typeof j?.game?.gameName === "string" &&
+            j.game.gameName.trim() &&
+            (j.game.availableGameStats || j.game.gameVersion !== undefined)
+          ) {
             const empty = new Map();
             empty.noAchievements = true;
             empty.displayName = j.game.gameName;
@@ -1387,7 +1458,8 @@ async function fetchSchemaLang(appid, key, lang) {
           mode,
           count: map.size,
         });
-        if (EMULATOR_CASCADE && !map.size) throw new Error("Steam schema contains no valid achievement entries");
+        if (EMULATOR_CASCADE && !map.size)
+          throw new Error("Steam schema contains no valid achievement entries");
         return map;
       } catch (err) {
         lastErr = err;
@@ -1436,12 +1508,23 @@ async function fetchAchievementsLang(appid, key, lang) {
           throw new Error(
             `Steam Achievements API ${appid} ${variant} HTTP ${r.status}`,
           );
-        if (EMULATOR_CASCADE && (!j?.response || typeof j.response !== "object" || Array.isArray(j.response))) {
+        if (
+          EMULATOR_CASCADE &&
+          (!j?.response ||
+            typeof j.response !== "object" ||
+            Array.isArray(j.response))
+        ) {
           throw new Error("Steam achievements response is incomplete");
         }
-        if (j?.response?.success === false || j?.success === false ||
-            (j?.response?.achievements !== undefined && !Array.isArray(j.response.achievements))) {
-          throw new Error("Steam achievements request failed or returned an invalid list");
+        if (
+          j?.response?.success === false ||
+          j?.success === false ||
+          (j?.response?.achievements !== undefined &&
+            !Array.isArray(j.response.achievements))
+        ) {
+          throw new Error(
+            "Steam achievements request failed or returned an invalid list",
+          );
         }
         const list = j?.response?.achievements || [];
         if (!list.length) {
@@ -1479,7 +1562,8 @@ async function fetchAchievementsLang(appid, key, lang) {
           mode,
           count: map.size,
         });
-        if (EMULATOR_CASCADE && !map.size) throw new Error("Steam API contains no valid achievement entries");
+        if (EMULATOR_CASCADE && !map.size)
+          throw new Error("Steam API contains no valid achievement entries");
         return map;
       } catch (err) {
         lastErr = err;
@@ -1521,9 +1605,12 @@ async function writeAchievementPercentagesSidecar(
         fetchedCount: rawMap.size,
       });
     }
-    const resolveName = strip ? createUplayNameResolver(finalAchievements) : null;
+    const resolveName = strip
+      ? createUplayNameResolver(finalAchievements)
+      : null;
     const entries = buildRarityEntriesForSchema(rawMap, finalAchievements, {
-      normalizeName: (name) => resolveName ? resolveName(name) || "" : normalizeAchievementName(name),
+      normalizeName: (name) =>
+        resolveName ? resolveName(name) || "" : normalizeAchievementName(name),
     });
     const filePath = writeRaritySidecar(outDir, appid, entries, {
       source,
@@ -1655,6 +1742,7 @@ function extractSteamDbFromHtml(html, baseUrl, appid) {
   const $ = cheerio.load(html || "");
   const rows = [];
   const seen = new Set();
+  const communityAssets = $("#js-achievements").attr("data-community-assets");
 
   const list = $('[id^="achievement-"]');
   list.each((_, el) => {
@@ -1690,51 +1778,18 @@ function extractSteamDbFromHtml(html, baseUrl, appid) {
     );
     const { hidden, clean: descEN } = normalizeHidden(descEN0);
 
-    const iconImg = $el.find("div.achievement_inner > img").first();
-    let iconUrl =
-      iconImg.attr("src") ||
-      iconImg.attr("data-src") ||
-      iconImg.attr("data-original") ||
-      takeFromSrcset(iconImg.attr("srcset")) ||
-      takeFromSrcset(iconImg.attr("data-srcset")) ||
-      "";
-    if (!iconUrl) {
-      const picImg = $el.find(".achievement_inner picture img").first();
-      iconUrl =
-        picImg.attr("src") ||
-        picImg.attr("data-src") ||
-        takeFromSrcset(picImg.attr("srcset")) ||
-        takeFromSrcset(picImg.attr("data-srcset")) ||
-        "";
-      if (!iconUrl) {
-        const source = $el
-          .find(
-            "div.achievement_inner > img ~ source, picture div.achievement_inner > img source, picture .achievement_inner img source",
-          )
-          .first();
-        iconUrl =
-          takeFromSrcset(source.attr("srcset")) ||
-          takeFromSrcset(source.attr("data-srcset")) ||
-          "";
-      }
-    }
-    iconUrl = toAbs(baseUrl, iconUrl);
-
-    const grayImg = $el.find("div.achievement_checkmark > img").first();
-    let iconGrayUrl =
-      grayImg.attr("src") ||
-      grayImg.attr("data-src") ||
-      grayImg.attr("data-original") ||
-      takeFromSrcset(grayImg.attr("srcset")) ||
-      takeFromSrcset(grayImg.attr("data-srcset")) ||
-      "";
-    if (!iconGrayUrl) {
-      const dataName = grayImg.attr("data-name");
-      if (dataName) {
-        iconGrayUrl = `https://cdn.fastly.steamstatic.com/steamcommunity/public/images/apps/${appid}/${dataName}`;
-      }
-    }
-    iconGrayUrl = toAbs(baseUrl, iconGrayUrl);
+    const imageUrl = (selector) =>
+      resolveSteamDbImageUrl(
+        $el.find(selector).first().attr(),
+        baseUrl,
+        appid,
+        communityAssets,
+      );
+    const iconUrl =
+      imageUrl("div.achievement_inner > img") ||
+      imageUrl(".achievement_inner picture img") ||
+      imageUrl(".achievement_inner picture source");
+    const iconGrayUrl = imageUrl("div.achievement_checkmark > img");
 
     const key = apiName || nameEN;
     if (!key || seen.has(key)) return;
@@ -1755,7 +1810,11 @@ function extractSteamDbFromHtml(html, baseUrl, appid) {
 async function closeSchemaResources(resources, meta = {}) {
   const startedAt = Date.now();
   emit("info", "schema:cleanup:start", meta);
-  for (const [name, timeoutMs] of [["page", 2000], ["ctx", 2000], ["browser", 5000]]) {
+  for (const [name, timeoutMs] of [
+    ["page", 2000],
+    ["ctx", 2000],
+    ["browser", 5000],
+  ]) {
     if (!resources[name]) continue;
     let timer;
     try {
@@ -1773,21 +1832,37 @@ async function closeSchemaResources(resources, meta = {}) {
     } catch (error) {
       // Resource cleanup never replaces an achievements result or prevents
       // attempts to close the remaining resources.
-      warn(error.code === "SCHEMA_CLEANUP_TIMEOUT" ? "schema:cleanup:timeout" : "schema:cleanup:failed", {
-        ...meta, resource: name, error: String(error.message || error),
-      });
-    } finally { clearTimeout(timer); }
+      warn(
+        error.code === "SCHEMA_CLEANUP_TIMEOUT"
+          ? "schema:cleanup:timeout"
+          : "schema:cleanup:failed",
+        {
+          ...meta,
+          resource: name,
+          error: String(error.message || error),
+        },
+      );
+    } finally {
+      clearTimeout(timer);
+    }
   }
-  emit("info", "schema:cleanup:finished", { ...meta, durationMs: Date.now() - startedAt });
+  emit("info", "schema:cleanup:finished", {
+    ...meta,
+    durationMs: Date.now() - startedAt,
+  });
 }
 
 async function createSteamScrapeSession(appid) {
-  const browser = await launchChromiumSafe({
+  const browser = await launchBrowserSafe({
     headless: !headed,
     args: ["--disable-blink-features=AutomationControlled"],
   });
   let ctx, page, closing;
-  const close = () => closing ||= closeSchemaResources({ page, ctx, browser }, { appid, source: "steam-scrape" });
+  const close = () =>
+    (closing ||= closeSchemaResources(
+      { page, ctx, browser },
+      { appid, source: "steam-scrape" },
+    ));
   try {
     ctx = await browser.newContext({
       userAgent:
@@ -1801,7 +1876,11 @@ async function createSteamScrapeSession(appid) {
         if (/\.(mp4|webm|gif|woff2?|ttf|otf)$/i.test(u)) await route.abort();
         else await route.continue();
       } catch (error) {
-        if (!closing) warn("steam-scrape:route-failed", { appid, error: String(error.message || error) });
+        if (!closing)
+          warn("steam-scrape:route-failed", {
+            appid,
+            error: String(error.message || error),
+          });
       }
     });
 
@@ -1816,21 +1895,44 @@ async function createSteamScrapeSession(appid) {
 }
 
 async function classifyEmptySteamPage(page, appid, source, response) {
-  if (response?.status() === 404) return { rows: [], title: "", outcome: "not-found" };
-  if (response && response.status() >= 400) throw new Error(`${source} HTTP ${response.status()}`);
+  if (response?.status() === 404)
+    return { rows: [], title: "", outcome: "not-found" };
+  if (response && response.status() >= 400)
+    throw new Error(`${source} HTTP ${response.status()}`);
   const body = await page.locator("body").innerText();
-  if (/cloudflare|just a moment|verify you are human|access denied/i.test(body)) {
+  if (
+    /cloudflare|just a moment|verify you are human|access denied/i.test(body)
+  ) {
     throw new Error(`${source} page is blocked`);
   }
-  if (/\b(?:app|game|application)\b.{0,50}(?:not found|does not exist)|requested (?:page|resource).{0,30}not found/i.test(body)) {
+  if (
+    /\b(?:app|game|application)\b.{0,50}(?:not found|does not exist)|requested (?:page|resource).{0,30}not found/i.test(
+      body,
+    )
+  ) {
     return { rows: [], title: "", outcome: "not-found" };
   }
-  let title = safeText(await page.locator(source === "steamhunters"
-    ? "h1 > a > span.flex-link-underline" : "h1").first().textContent().catch(() => ""));
-  if (/^(?:SteamDB|SteamHunters|Error|Not Found|Unknown App)$/i.test(title)) title = "";
-  const explicitEmpty = /\bno achievements\b|\b0 achievements\b|does not have (?:any )?achievements|no stats (?:are )?available/i.test(body);
-  return { rows: [], title, outcome: explicitEmpty && title
-    ? "identified-no-achievements" : "ambiguous" };
+  let title = safeText(
+    await page
+      .locator(
+        source === "steamhunters" ? "h1 > a > span.flex-link-underline" : "h1",
+      )
+      .first()
+      .textContent()
+      .catch(() => ""),
+  );
+  if (/^(?:SteamDB|SteamHunters|Error|Not Found|Unknown App)$/i.test(title))
+    title = "";
+  const explicitEmpty =
+    /\bno achievements\b|\b0 achievements\b|does not have (?:any )?achievements|no stats (?:are )?available/i.test(
+      body,
+    );
+  return {
+    rows: [],
+    title,
+    outcome:
+      explicitEmpty && title ? "identified-no-achievements" : "ambiguous",
+  };
 }
 
 async function scrapeSteamDB(appid, sharedSession = null) {
@@ -1840,19 +1942,25 @@ async function scrapeSteamDB(appid, sharedSession = null) {
   const session = sharedSession || (await createSteamScrapeSession(appid));
   const ownsSession = !sharedSession;
   const { page } = session;
-  const response = await schemaDownloadRequest("steamdb-schema", () => page.goto(url, { waitUntil: "domcontentloaded" }));
-  if (response) reportSchemaDownloadError({ status: response.status() }, "steamdb-schema");
+  const response = await schemaDownloadRequest("steamdb-schema", () =>
+    page.goto(url, { waitUntil: "domcontentloaded" }),
+  );
+  if (response)
+    reportSchemaDownloadError({ status: response.status() }, "steamdb-schema");
 
   const list = page.locator('[id^="achievement-"]');
   await list
     .first()
-    .waitFor({ state: "visible" })
+    .waitFor({ state: "attached" })
     .catch(() => {});
   const count = await list.count();
   if (!count) {
     if (EMULATOR_CASCADE) {
-      try { return await classifyEmptySteamPage(page, appid, "steamdb", response); }
-      finally { if (ownsSession) await session.close(); }
+      try {
+        return await classifyEmptySteamPage(page, appid, "steamdb", response);
+      } finally {
+        if (ownsSession) await session.close();
+      }
     }
     if (ownsSession) {
       await session.close();
@@ -1860,13 +1968,6 @@ async function scrapeSteamDB(appid, sharedSession = null) {
     throw new Error("No achievements found");
   }
   log(`[${appid}] achievements: ${count}`);
-
-  for (let i = 0; i < count; i++) {
-    const item = list.nth(i);
-    await item.scrollIntoViewIfNeeded().catch(() => {});
-    await item.hover().catch(() => {});
-    await sleep(12);
-  }
 
   // HTML-first extraction (faster), DOM fallback if needed
   let html = "";
@@ -1882,56 +1983,26 @@ async function scrapeSteamDB(appid, sharedSession = null) {
   let gameTitle = extracted.title || "";
 
   if (!rows.length) {
-    async function extractImgUrl(el, sel, baseUrl) {
-      const img = el.locator(sel).first();
-      if ((await img.count()) === 0) return "";
-      let url = await img.getAttribute("src").catch(() => null);
-      if (!url) {
-        const [ds, dor, ss, dss] = await Promise.all([
-          img.getAttribute("data-src").catch(() => null),
-          img.getAttribute("data-original").catch(() => null),
-          img.getAttribute("srcset").catch(() => null),
-          img.getAttribute("data-srcset").catch(() => null),
-        ]);
-        url = ds || dor || takeFromSrcset(ss) || takeFromSrcset(dss) || "";
-      }
-      if (!url) {
-        const source = el
-          .locator(`${sel} ~ source, picture ${sel} source`)
-          .first();
-        if (await source.count()) {
-          const s1 = await source.getAttribute("srcset").catch(() => null);
-          const s2 = await source.getAttribute("data-srcset").catch(() => null);
-          url = takeFromSrcset(s1) || takeFromSrcset(s2) || "";
-        }
-      }
-      return toAbs(baseUrl, url);
+    async function extractImgUrl(el, selector, baseUrl) {
+      const img = el.locator(selector).first();
+      if (!(await img.count())) return "";
+      const attributes = await img.evaluate((node) => ({
+        image: Object.fromEntries(
+          Array.from(node.attributes, (attr) => [attr.name, attr.value]),
+        ),
+        communityAssets: document
+          .querySelector("#js-achievements")
+          ?.getAttribute("data-community-assets"),
+      }));
+      return resolveSteamDbImageUrl(
+        attributes.image,
+        baseUrl,
+        appid,
+        attributes.communityAssets,
+      );
     }
-    async function extractGrayUrl(el, baseUrl) {
-      await el.hover().catch(() => {});
-      const img = el.locator("div.achievement_checkmark > img").first();
-      await img.waitFor({ state: "attached" }).catch(() => {});
-      let url = await img.getAttribute("src").catch(() => null);
-      if (!url) {
-        const [ds, dor, ss, dss] = await Promise.all([
-          img.getAttribute("data-src").catch(() => null),
-          img.getAttribute("data-original").catch(() => null),
-          img.getAttribute("srcset").catch(() => null),
-          img.getAttribute("data-srcset").catch(() => null),
-        ]);
-        url = ds || dor || takeFromSrcset(ss) || takeFromSrcset(dss) || "";
-      }
-      if (!url) {
-        const dataName = await img.getAttribute("data-name").catch(() => null);
-        if (dataName)
-          url = `https://cdn.fastly.steamstatic.com/steamcommunity/public/images/apps/${appid}/${dataName}`;
-      }
-      if (!url)
-        url = await img
-          .evaluate((n) => (n && (n.currentSrc || n.src)) || "")
-          .catch(() => "");
-      return toAbs(baseUrl, url || "");
-    }
+    const extractGrayUrl = (el, baseUrl) =>
+      extractImgUrl(el, "div.achievement_checkmark > img", baseUrl);
 
     rows = [];
     for (let i = 0; i < count; i++) {
@@ -2006,8 +2077,14 @@ async function scrapeSteamHunters(appid, sharedSession = null) {
   const session = sharedSession || (await createSteamScrapeSession(appid));
   const ownsSession = !sharedSession;
   const { page } = session;
-  const response = await schemaDownloadRequest("steamhunters-schema", () => page.goto(url, { waitUntil: "domcontentloaded" }));
-  if (response) reportSchemaDownloadError({ status: response.status() }, "steamhunters-schema");
+  const response = await schemaDownloadRequest("steamhunters-schema", () =>
+    page.goto(url, { waitUntil: "domcontentloaded" }),
+  );
+  if (response)
+    reportSchemaDownloadError(
+      { status: response.status() },
+      "steamhunters-schema",
+    );
 
   const SH_ROWS_SELECTOR = "#collapse0 > li > div";
   const SH_NAME_SELECTOR = "p.achievement-name > a";
@@ -2187,8 +2264,16 @@ async function scrapeSteamHunters(appid, sharedSession = null) {
     );
   }
   if (EMULATOR_CASCADE && !rows.length) {
-    try { return await classifyEmptySteamPage(page, appid, "steamhunters", response); }
-    finally { if (ownsSession) await session.close(); }
+    try {
+      return await classifyEmptySteamPage(
+        page,
+        appid,
+        "steamhunters",
+        response,
+      );
+    } finally {
+      if (ownsSession) await session.close();
+    }
   }
   if (ownsSession) {
     await session.close();
@@ -2223,7 +2308,8 @@ async function buildAchievementsFromScrape(
   const collectEvidence = (data, source) => {
     if (!meta.evidence) return;
     setFallbackGameName(meta.evidence, data?.title);
-    if ((Array.isArray(data) ? data : data?.rows)?.length) meta.evidence.source = source;
+    if ((Array.isArray(data) ? data : data?.rows)?.length)
+      meta.evidence.source = source;
     if (data?.outcome === "identified-no-achievements") {
       meta.evidence.noAchievements = true;
       meta.evidence.source = source;
@@ -2275,7 +2361,10 @@ async function buildAchievementsFromScrape(
           )} -> trying SteamHunters`,
         );
       }
-      if (steamDbFailed || (EMULATOR_CASCADE && !scraped.length && !meta.evidence?.noAchievements)) {
+      if (
+        steamDbFailed ||
+        (EMULATOR_CASCADE && !scraped.length && !meta.evidence?.noAchievements)
+      ) {
         await runSteamHunters();
       }
     }
@@ -2338,57 +2427,19 @@ async function buildAchievementsFromScrape(
 
   const platform = mapExophasePlatformForScrape(meta, "steam");
   const title = (meta && meta.title) || scrapedTitle || "";
-  const slugCandidates = title
-    ? platform === "steam"
-      ? buildSteamExophaseSlugCandidates(title)
-      : buildExophaseSlugVariants(title)
-    : [];
-  if (slugCandidates.length && platform && results.length) {
-    emitProgress({
-      appid,
-      phase: "fetchExtraLanguages",
-      detail: "Fetching extra languages",
-      percent: 64,
-    });
-    const primarySlug = slugCandidates[0];
-    emit("info", "steam-scrape:exophase:start", {
-      appid,
-      slug: primarySlug,
-      platform,
-      variants: slugCandidates.length,
-    });
+  if (title && platform && results.length) {
+    emitProgress({ appid, phase: "fetchExtraLanguages", detail: "Fetching extra languages", percent: 64 });
+    emit("info", "steam-scrape:exophase:start", { appid, title, platform });
     let exoData = null;
     let lastError = null;
-    let usedSlug = primarySlug;
-    for (const candidate of slugCandidates) {
-      try {
-        exoData = await fetchExophaseAchievementsMultiLang({
-          slug: candidate,
-          platform,
-          langKeys: EXOPHASE_LANGS,
-          langMap: EXOPHASE_LANG_MAP,
-          page: session?.page,
-        });
-        usedSlug = candidate;
-        break;
-      } catch (err) {
-        lastError = err;
-        warn("steam-scrape:exophase:retry", {
-          appid,
-          slug: candidate,
-          platform,
-          error: err?.message || String(err),
-        });
-      }
-    }
+    try {
+      exoData = await fetchExophaseAchievementsMultiLang({
+        title, platform, schemaAchievements: results,
+        langKeys: EXOPHASE_LANGS, langMap: EXOPHASE_LANG_MAP, page: session?.page,
+        logger: schemaLogger,
+      });
+    } catch (error) { lastError = error; }
     if (exoData) {
-      if (usedSlug !== primarySlug) {
-        emit("info", "steam-scrape:exophase:alt-slug", {
-          appid,
-          slug: usedSlug,
-          platform,
-        });
-      }
       await enrichScrapedWithExophase(results, exoData, imgDir, appid);
       emitProgress({
         appid,
@@ -2399,10 +2450,8 @@ async function buildAchievementsFromScrape(
     } else if (lastError) {
       warn("steam-scrape:exophase:failed", {
         appid,
-        slug: primarySlug,
-        platform,
+        title, platform, code: lastError.code,
         error: lastError?.message || String(lastError),
-        tried: slugCandidates,
       });
     }
   }
@@ -2430,7 +2479,8 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
       : { uplayId: String(appMeta), steamId: String(appMeta), strip: false };
   const { uplayId, steamId, strip } = meta;
   const wantsGog =
-    (meta && meta.platform === "gog") || (!options.emulatorCascade && (PLATFORM_MODE === "gog" || GOG_MODE));
+    (meta && meta.platform === "gog") ||
+    (!options.emulatorCascade && (PLATFORM_MODE === "gog" || GOG_MODE));
   const wantsEpic = meta && meta.platform === "epic";
   const folderId = String(uplayId);
   const appid = String(steamId);
@@ -2441,7 +2491,9 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
     ? "gog"
     : wantsEpic
       ? "epic"
-      : options.emulatorCascade ? meta.platform || "steam" : OUTPUT_PLATFORM;
+      : options.emulatorCascade
+        ? meta.platform || "steam"
+        : OUTPUT_PLATFORM;
   const epicNamespace = options.epicIdentity?.namespace || EPIC_NAMESPACE;
   const outDir = path.join(base, targetPlatform, folderId);
   const imgDir = path.join(outDir, "img");
@@ -2506,14 +2558,20 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
         schemaParseBatchResults && schemaParseBatchResults.has(folderId)
           ? schemaParseBatchResults.get(folderId)
           : await generateSteamSchemaWithSchemaParse({
+              generationId: process.env?.ACHIEVEMENTS_SCHEMA_PARSE_OPERATION || `cli-${process.pid}`,
               appid,
               outDir,
               userDataDir: USERDATA_DIR,
               reason: "achievements-generator",
-              onQueueState: ({ state }) => emitProgress({
-                appid: folderId, phase: state === "queued" ? "waitingSchemaParse" : "schemaParse",
-                detail: state === "queued" ? "" : "Generating local Steam schema", percent,
-              }),
+              onQueueState: ({ state }) =>
+                emitProgress({
+                  appid: folderId,
+                  phase:
+                    state === "queued" ? "waitingSchemaParse" : "schemaParse",
+                  detail:
+                    state === "queued" ? "" : "Generating local Steam schema",
+                  percent,
+                }),
             });
       setSchemaDownloadName(result?.displayName);
       reportSchemaDownloadDiagnostics(result, "schema-parse");
@@ -2527,14 +2585,19 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
           }
           // Two independent metadata sources confirm that this Steam ID does
           // not exist. A scraper error must not overturn that confirmation.
-          if (result?.status === "not-found" && options.evidence.storeNotFound &&
-              !options.evidence.displayName) {
+          if (
+            result?.status === "not-found" &&
+            options.evidence.storeNotFound &&
+            !options.evidence.displayName
+          ) {
             options.evidence.notFound = true;
             options.evidence.source = "steam-store+schema-parse";
             return true;
           }
-          if (result?.status === "technical-error") options.evidence.errors.push(result.error || result.reason);
-          else if (result?.status !== "not-found") options.evidence.ambiguous = true;
+          if (result?.status === "technical-error")
+            options.evidence.errors.push(result.error || result.reason);
+          else if (result?.status !== "not-found")
+            options.evidence.ambiguous = true;
         }
         return false;
       }
@@ -2557,16 +2620,20 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
         emitLaunchMetadata({
           appid,
           ...(result.launchMetadata || {}),
-          displayName: String(options.evidence?.displayName || result.displayName || "").trim() || undefined,
+          displayName:
+            String(
+              options.evidence?.displayName || result.displayName || "",
+            ).trim() || undefined,
         });
       }
       return true;
     } catch (err) {
-      if (err?.code === "SCHEMA_PARSE_CANCELLED") throw err;
+      if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(err?.code)) throw err;
       // Process deadlines are not proof of a network problem. Only the
       // schema request diagnostics extracted by the adapter are reported.
       reportSchemaDownloadDiagnostics(err?.downloadWarnings, "schema-parse");
-      if (options.evidence) options.evidence.errors.push(String(err.message || err));
+      if (options.evidence)
+        options.evidence.errors.push(String(err.message || err));
       warn("schema-parse:failed", {
         appid,
         error: err?.message || String(err),
@@ -2602,24 +2669,34 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
       const perLangByApi = {};
 
       await Promise.all(
-        (options.emulatorCascade ? ["english"] : langsToFetch).map(async (lang) => {
-          const locale = epicLocaleForLang(lang);
-          try {
-            const items = await fetchEpicAchievements(epicNamespace || appid, locale);
-            perLangByApi[lang] = buildEpicAchievementMap(items);
-            if (items.length && !perLangByApi[lang].size && options.evidence) {
-              options.evidence.ambiguous = true;
+        (options.emulatorCascade ? ["english"] : langsToFetch).map(
+          async (lang) => {
+            const locale = epicLocaleForLang(lang);
+            try {
+              const items = await fetchEpicAchievements(
+                epicNamespace || appid,
+                locale,
+              );
+              perLangByApi[lang] = buildEpicAchievementMap(items);
+              if (
+                items.length &&
+                !perLangByApi[lang].size &&
+                options.evidence
+              ) {
+                options.evidence.ambiguous = true;
+              }
+            } catch (e) {
+              emit("warn", `[${appid}] Epic API failed for ${lang}`, {
+                appid,
+                lang: locale,
+                error: String(e?.message || e),
+              });
+              perLangByApi[lang] = new Map();
+              if (options.evidence && !/\b404\b/.test(String(e.message || e)))
+                options.evidence.errors.push(String(e.message || e));
             }
-          } catch (e) {
-            emit("warn", `[${appid}] Epic API failed for ${lang}`, {
-              appid,
-              lang: locale,
-              error: String(e?.message || e),
-            });
-            perLangByApi[lang] = new Map();
-            if (options.evidence && !/\b404\b/.test(String(e.message || e))) options.evidence.errors.push(String(e.message || e));
-          }
-        }),
+          },
+        ),
       );
 
       if (!hasEpicAchievementRows(perLangByApi)) {
@@ -2653,7 +2730,8 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
             }
           }
         } catch (e) {
-          if (options.evidence) options.evidence.errors.push(String(e.message || e));
+          if (options.evidence)
+            options.evidence.errors.push(String(e.message || e));
           emit("warn", "epic:artifact-fallback-failed", {
             appid,
             error: String(e?.message || e),
@@ -2662,16 +2740,27 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
       }
 
       if (options.emulatorCascade && hasEpicAchievementRows(perLangByApi)) {
-        await Promise.all(langsToFetch.filter((lang) => lang !== "english").map(async (lang) => {
-          if (perLangByApi[lang]?.size) return;
-          try {
-            const rows = await fetchEpicAchievements(epicNamespace || appid, epicLocaleForLang(lang));
-            const map = buildEpicAchievementMap(rows);
-            if (map.size) perLangByApi[lang] = map;
-          } catch (error) {
-            warn("epic:localization-failed", { appid, lang, error: String(error.message || error) });
-          }
-        }));
+        await Promise.all(
+          langsToFetch
+            .filter((lang) => lang !== "english")
+            .map(async (lang) => {
+              if (perLangByApi[lang]?.size) return;
+              try {
+                const rows = await fetchEpicAchievements(
+                  epicNamespace || appid,
+                  epicLocaleForLang(lang),
+                );
+                const map = buildEpicAchievementMap(rows);
+                if (map.size) perLangByApi[lang] = map;
+              } catch (error) {
+                warn("epic:localization-failed", {
+                  appid,
+                  lang,
+                  error: String(error.message || error),
+                });
+              }
+            }),
+        );
       }
 
       let enMap = perLangByApi["english"];
@@ -2751,7 +2840,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
       // ===== API-ONLY =====
       // 1) langs
       const langsToFetch = options.emulatorCascade
-        ? ["english", ...uniqueLangsWithEnglish(STEAM_LANGS).filter((lang) => lang !== "english")]
+        ? [
+            "english",
+            ...uniqueLangsWithEnglish(STEAM_LANGS).filter(
+              (lang) => lang !== "english",
+            ),
+          ]
         : uniqueLangsWithEnglish(STEAM_LANGS);
       emitProgress({
         appid: folderId,
@@ -2770,29 +2864,51 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
         try {
           map = await fetchAchievementsLang(appid, apiKey, lang);
         } catch (error) {
-          if (options.evidence) options.evidence.errors.push(String(error.message || error));
+          if (options.evidence)
+            options.evidence.errors.push(String(error.message || error));
           map = null;
         }
-        if (lang === "english" && map?.noAchievements && options.evidence?.displayName) {
-          return { outDir, count: 0, outcome: "identified-no-achievements", source: "steam-api" };
+        if (
+          lang === "english" &&
+          map?.noAchievements &&
+          options.evidence?.displayName
+        ) {
+          return {
+            outDir,
+            count: 0,
+            outcome: "identified-no-achievements",
+            source: "steam-api",
+          };
         }
         if (map && map.size) {
           perLangByApi[lang] = map;
-          if (lang === "english" && options.evidence) options.evidence.source = "steam-api";
+          if (lang === "english" && options.evidence)
+            options.evidence.source = "steam-api";
         } else {
           emit("info", "steam-achievements:fallback-schema", { appid, lang });
           try {
             map = await fetchSchemaLang(appid, apiKey, lang);
           } catch (error) {
-            if (options.evidence) options.evidence.errors.push(String(error.message || error));
+            if (options.evidence)
+              options.evidence.errors.push(String(error.message || error));
             map = null;
           }
-          if (lang === "english" && map?.noAchievements && (map.displayName || options.evidence?.displayName)) {
+          if (
+            lang === "english" &&
+            map?.noAchievements &&
+            (map.displayName || options.evidence?.displayName)
+          ) {
             setFallbackGameName(options.evidence, map.displayName);
-            return { outDir, count: 0, outcome: "identified-no-achievements", source: "steam-schema-api" };
+            return {
+              outDir,
+              count: 0,
+              outcome: "identified-no-achievements",
+              source: "steam-schema-api",
+            };
           }
           perLangByApi[lang] = map || new Map();
-          if (lang === "english" && map?.size && options.evidence) options.evidence.source = "steam-schema-api";
+          if (lang === "english" && map?.size && options.evidence)
+            options.evidence.source = "steam-schema-api";
         }
         setFallbackGameName(options.evidence, map?.displayName);
         if (options.emulatorCascade && lang === "english" && !map?.size) break;
@@ -2943,7 +3059,11 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
 
   const gogCredentialsReady =
     fsSync.existsSync(GOG_TOKENS_FILE) || (GOG_USER && GOG_PASS);
-  if (!options.emulatorCascade && achievements.length === 0 && gogCredentialsReady) {
+  if (
+    !options.emulatorCascade &&
+    achievements.length === 0 &&
+    gogCredentialsReady
+  ) {
     try {
       return await processGogApp(folderId, outBaseDir);
     } catch (err) {
@@ -2962,9 +3082,12 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
     detail: "Writing achievements schema",
     percent: 88,
   });
-  const finalAchievements = strip ? normalizeUplaySchema(achievements) : achievements.map((ach) => ({
-    ...ach, name: normalizeAchievementName(ach.name),
-  }));
+  const finalAchievements = strip
+    ? normalizeUplaySchema(achievements)
+    : achievements.map((ach) => ({
+        ...ach,
+        name: normalizeAchievementName(ach.name),
+      }));
   const count = finalAchievements.length;
   if (count > 0) {
     await fs.writeFile(
@@ -3008,13 +3131,22 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
     if (options.emulatorCascade) {
       // The cascade emits the final typed result after considering all sources.
       emit("info", "generation:empty-schema", {
-        appid: folderId, confirmedEmpty: options.evidence?.noAchievements === true,
+        appid: folderId,
+        confirmedEmpty: options.evidence?.noAchievements === true,
         notFound: options.evidence?.notFound === true,
         hasTechnicalErrors: !!options.evidence?.errors?.length,
       });
     } else {
-      emit("info", `⏭ [${folderId}] Achievements schema skipped. No Achievements found!`);
-      emitProgress({ appid: folderId, phase: "completed", detail: "No achievements found", percent: 100 });
+      emit(
+        "info",
+        `⏭ [${folderId}] Achievements schema skipped. No Achievements found!`,
+      );
+      emitProgress({
+        appid: folderId,
+        phase: "completed",
+        detail: "No achievements found",
+        percent: 100,
+      });
     }
   } else {
     if (
@@ -3040,67 +3172,16 @@ async function processOneApp(appMeta, apiKey, outBaseDir, options = {}) {
     // RPCS3: attempt Exophase multilanguage (trophies)
     if (meta.platform === "rpcs3") {
       const title = meta.title || meta.name || folderId;
-      const baseVariants = buildExophaseSlugVariants(title);
-      const slugCandidates = Array.from(
-        new Set([
-          ...baseVariants,
-          ...baseVariants.map((s) => `${s}-ps3`),
-          ...baseVariants.map((s) => `${s}-psn`),
-        ]),
-      );
-      emit("info", "rpcs3:exophase:start", {
-        appid: folderId,
-        slug: slugCandidates[0],
-        variants: slugCandidates.length,
-      });
-      let exoData = null;
-      let lastError = null;
-      let usedSlug = slugCandidates[0];
-      for (const candidate of slugCandidates) {
-        try {
-          exoData = await fetchExophaseAchievementsMultiLang({
-            slug: candidate,
-            platform: "rpcs3",
-            langKeys: EXOPHASE_LANGS,
-            langMap: EXOPHASE_LANG_MAP,
-            logger: schemaLogger,
-            outputDir: outDir,
-            mergeIntoSchema: true,
-            expectedCount: count,
-          });
-          usedSlug = candidate;
-          break;
-        } catch (err) {
-          lastError = err;
-          warn("rpcs3:exophase:retry", {
-            appid: folderId,
-            slug: candidate,
-            platform: "rpcs3",
-            error: err?.message || String(err),
-          });
-        }
-      }
-      if (exoData) {
-        if (usedSlug !== slugCandidates[0]) {
-          emit("info", "rpcs3:exophase:alt-slug", {
-            appid: folderId,
-            slug: usedSlug,
-            platform: "rpcs3",
-          });
-        }
-        emit("info", "rpcs3:exophase:merged", {
-          appid: folderId,
-          slug: usedSlug,
-          expected: count,
+      emit("info", "rpcs3:exophase:start", { appid: folderId, title });
+      try {
+        const exoData = await fetchExophaseAchievementsMultiLang({
+          title, platform: "rpcs3", schemaAchievements: finalAchievements,
+          langKeys: EXOPHASE_LANGS, langMap: EXOPHASE_LANG_MAP,
+          logger: schemaLogger, outputDir: outDir, mergeIntoSchema: true, expectedCount: count,
         });
-      } else if (lastError) {
-        warn("rpcs3:exophase:failed", {
-          appid: folderId,
-          slug: slugCandidates[0],
-          platform: "rpcs3",
-          error: lastError?.message || String(lastError),
-          tried: slugCandidates,
-        });
+        emit("info", "rpcs3:exophase:merged", { appid: folderId, slug: exoData.usedSlug, expected: count });
+      } catch (error) {
+        warn("rpcs3:exophase:failed", { appid: folderId, title, platform: "rpcs3", code: error.code, error: error.message });
       }
     }
   }
@@ -3150,7 +3231,12 @@ function hasEpicAchievementRows(perLangByApi) {
   );
 }
 
-async function fetchEpicArtifactAchievementsFallback(appid, langsToFetch, knownNamespace = "", classify = false) {
+async function fetchEpicArtifactAchievementsFallback(
+  appid,
+  langsToFetch,
+  knownNamespace = "",
+  classify = false,
+) {
   const identity = knownNamespace
     ? { namespace: knownNamespace }
     : await resolveEpicArtifactIdentity(appid);
@@ -3177,7 +3263,12 @@ async function fetchEpicArtifactAchievementsFallback(appid, langsToFetch, knownN
     if (classify && !Array.isArray(publicResult.raw?.achievements)) {
       errors.push("Epic public achievements response is incomplete");
     }
-    if (classify && Array.isArray(publicResult.raw?.achievements) && !seedItems.length) confirmedEmpty = true;
+    if (
+      classify &&
+      Array.isArray(publicResult.raw?.achievements) &&
+      !seedItems.length
+    )
+      confirmedEmpty = true;
     productId = String(publicResult.productId || "").trim();
     if (seedItems.length) seedSource = "public-sandbox";
   } catch (error) {
@@ -3199,36 +3290,68 @@ async function fetchEpicArtifactAchievementsFallback(appid, langsToFetch, knownN
         const raw = sandboxResult.raw;
         // Epic returns a successful record with every selected field null for
         // a known sandbox without an achievements product (e.g. Truck).
-        const emptyRecord = raw && ["productId", "sandboxId", "totalAchievements", "totalProductXP", "achievements"]
-          .every((key) => Object.hasOwn(raw, key) && raw[key] === null);
-        const total = typeof raw?.totalAchievements === "number" ||
-          (typeof raw?.totalAchievements === "string" && /^\d+$/.test(raw.totalAchievements))
-          ? Number(raw.totalAchievements) : null;
+        const emptyRecord =
+          raw &&
+          [
+            "productId",
+            "sandboxId",
+            "totalAchievements",
+            "totalProductXP",
+            "achievements",
+          ].every((key) => Object.hasOwn(raw, key) && raw[key] === null);
+        const total =
+          typeof raw?.totalAchievements === "number" ||
+          (typeof raw?.totalAchievements === "string" &&
+            /^\d+$/.test(raw.totalAchievements))
+            ? Number(raw.totalAchievements)
+            : null;
         const hasRows = Array.isArray(raw?.achievements);
-        const emptyRows = hasRows && raw.achievements.length === 0 && !(total > 0);
-        const zeroTotal = total === 0 && (raw?.achievements === null || emptyRows);
+        const emptyRows =
+          hasRows && raw.achievements.length === 0 && !(total > 0);
+        const zeroTotal =
+          total === 0 && (raw?.achievements === null || emptyRows);
         const validEmpty = emptyRecord || emptyRows || zeroTotal;
-        const validRows = hasRows && raw.achievements.length > 0 && seedItems.length > 0;
+        const validRows =
+          hasRows && raw.achievements.length > 0 && seedItems.length > 0;
         emit("info", "epic:sandbox-achievements:response", {
-          appid, sandboxId, totalAchievements: raw?.totalAchievements ?? null,
-          achievementsType: raw?.achievements === null ? "null" : hasRows ? "array" : typeof raw?.achievements,
+          appid,
+          sandboxId,
+          totalAchievements: raw?.totalAchievements ?? null,
+          achievementsType:
+            raw?.achievements === null
+              ? "null"
+              : hasRows
+                ? "array"
+                : typeof raw?.achievements,
           rowCount: hasRows ? raw.achievements.length : null,
-          outcome: validRows ? "achievements-found" : validEmpty ? "identified-no-achievements" : "incomplete",
+          outcome: validRows
+            ? "achievements-found"
+            : validEmpty
+              ? "identified-no-achievements"
+              : "incomplete",
         });
         if (validEmpty && !seedItems.length) confirmedEmpty = true;
-        else if (!validRows) errors.push("Epic sandbox achievements response is incomplete");
+        else if (!validRows)
+          errors.push("Epic sandbox achievements response is incomplete");
       }
       productId = String(sandboxResult.productId || productId || "").trim();
       if (seedItems.length) seedSource = "sandbox";
     } catch (error) {
-      if (/schema-missing|\b404\b/.test(String(error.message || error))) confirmedEmpty = true;
+      if (/schema-missing|\b404\b/.test(String(error.message || error)))
+        confirmedEmpty = true;
       else errors.push(String(error.message || error));
     }
   }
 
   if (!seedItems.length) {
-    return { identity, productId, source: "", perLangByApi: {}, errors,
-      confirmedEmpty: confirmedEmpty && errors.length === 0 };
+    return {
+      identity,
+      productId,
+      source: "",
+      perLangByApi: {},
+      errors,
+      confirmedEmpty: confirmedEmpty && errors.length === 0,
+    };
   }
 
   const perLangByApi = {
@@ -3282,12 +3405,21 @@ async function fetchEpicArtifactAchievementsFallback(appid, langsToFetch, knownN
 
 function readDiscoveryBlacklistState() {
   try {
-    const prefs = JSON.parse(fsSync.readFileSync(path.join(USERDATA_DIR, "preferences.json"), "utf8"));
+    const prefs = JSON.parse(
+      fsSync.readFileSync(path.join(USERDATA_DIR, "preferences.json"), "utf8"),
+    );
     return createBlacklistState(prefs);
-  } catch { return createBlacklistState(); }
+  } catch {
+    return createBlacklistState();
+  }
 }
 function getDiscoveryBlacklistMatch(appid, platform, aliases = []) {
-  return getBlacklistMatch(appid, platform, readDiscoveryBlacklistState(), aliases);
+  return getBlacklistMatch(
+    appid,
+    platform,
+    readDiscoveryBlacklistState(),
+    aliases,
+  );
 }
 
 const terminalAppIds = new Set();
@@ -3299,10 +3431,22 @@ function emitGenerationOutcome(result) {
   emit("info", "generation:result", result);
   if (HAS_IPC) process.send({ type: "achgen:result", result });
   const status = result.status;
-  emitProgress({ appid, phase: status === "achievements-found" ? "completed"
-      : ["technical-error", "ambiguous"].includes(status) ? "failed" : "skipped",
-    detail: status === "achievements-found" ? "Achievements schema generated" : generationDetail(result),
-    percent: 100, status, platform: result.platform || null });
+  emitProgress({
+    appid,
+    phase:
+      status === "achievements-found"
+        ? "completed"
+        : ["technical-error", "ambiguous"].includes(status)
+          ? "failed"
+          : "skipped",
+    detail:
+      status === "achievements-found"
+        ? "Achievements schema generated"
+        : generationDetail(result),
+    percent: 100,
+    status,
+    platform: result.platform || null,
+  });
   return result;
 }
 
@@ -3314,36 +3458,66 @@ async function processEmulatorApp(meta, apiKey, base) {
   let hasKnownIdentity = false;
   let hasUnknownBlacklist = false;
   const finish = (status, details = {}) => {
-    const result = generationResult(appid, status, { ...details, attempts, platformResults,
-      hasKnownIdentity, hasUnknownBlacklist, durationMs: Date.now() - startedAt });
+    const result = generationResult(appid, status, {
+      ...details,
+      attempts,
+      platformResults,
+      hasKnownIdentity,
+      hasUnknownBlacklist,
+      durationMs: Date.now() - startedAt,
+    });
     return emitGenerationOutcome(result);
   };
   const attempt = async (platform, fn) => {
     const start = Date.now();
     try {
       const result = await fn();
-      attempts.push({ platform, status: result.status, reason: result.reason,
-        source: result.source, displayName: result.displayName, durationMs: Date.now() - start,
-        errors: result.errors, error: result.error });
-      emit("info", "generation:platform-result", { appid, ...attempts[attempts.length - 1] });
+      attempts.push({
+        platform,
+        status: result.status,
+        reason: result.reason,
+        source: result.source,
+        displayName: result.displayName,
+        durationMs: Date.now() - start,
+        errors: result.errors,
+        error: result.error,
+      });
+      emit("info", "generation:platform-result", {
+        appid,
+        ...attempts[attempts.length - 1],
+      });
       return result;
     } catch (error) {
-      const result = { platform, status: "technical-error", error: String(error.message || error) };
+      if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(error?.code)) throw error;
+      const result = {
+        platform,
+        status: "technical-error",
+        error: String(error.message || error),
+      };
       attempts.push({ ...result, durationMs: Date.now() - start });
-      emit("warn", "generation:platform-result", { appid, ...attempts[attempts.length - 1] });
+      emit("warn", "generation:platform-result", {
+        appid,
+        ...attempts[attempts.length - 1],
+      });
       return result;
     }
   };
 
-  const { hasMapping, initialProviders, providers } = getEmulatorProviderPlan(meta);
-  if (meta.platform === "uplay" && !hasMapping) emit("info", "generation:uplay-unmapped", { appid });
+  const { hasMapping, initialProviders, providers } =
+    getEmulatorProviderPlan(meta);
+  if (meta.platform === "uplay" && !hasMapping)
+    emit("info", "generation:uplay-unmapped", { appid });
   // Keep the existing hinted order. Only clear negative lookups extend it to
   // the omitted providers before a global blacklist decision. Technical or
   // ambiguous failures do not justify extending the original discovery flow.
   const checkedProviders = new Set();
-  const preflight = getEmulatorGenerationPreflight(meta, readDiscoveryBlacklistState(), {
-    explicitPlatform: EXPLICIT_PLATFORM ? PLATFORM_MODE : null,
-  });
+  const preflight = getEmulatorGenerationPreflight(
+    meta,
+    readDiscoveryBlacklistState(),
+    {
+      explicitPlatform: EXPLICIT_PLATFORM ? PLATFORM_MODE : null,
+    },
+  );
   if (preflight.skip) {
     attempts.push(...(preflight.result.attempts || []));
     hasKnownIdentity = preflight.result.hasKnownIdentity === true;
@@ -3351,108 +3525,253 @@ async function processEmulatorApp(meta, apiKey, base) {
     return finish("blacklisted", preflight.result);
   }
   for (const provider of providers) {
-    if (!initialProviders.includes(provider) &&
-        attempts.some((entry) => !["not-found", "not-applicable", "blacklisted"].includes(entry.status))) break;
+    if (
+      !initialProviders.includes(provider) &&
+      attempts.some(
+        (entry) =>
+          !["not-found", "not-applicable", "blacklisted"].includes(
+            entry.status,
+          ),
+      )
+    )
+      break;
     const platform = provider === "steam" && hasMapping ? "uplay" : provider;
     const blacklistMatch = getDiscoveryBlacklistMatch(appid, platform);
-    if (blacklistMatch?.scope === "global") return finish("blacklisted", { platform, matchedScope: "global" });
+    if (blacklistMatch?.scope === "global")
+      return finish("blacklisted", { platform, matchedScope: "global" });
     if (blacklistMatch) {
       hasKnownIdentity ||= blacklistMatch.identified;
       hasUnknownBlacklist ||= blacklistMatch.status === "unknown";
       checkedProviders.add(provider);
-      attempts.push({ platform, status: "blacklisted", cachedStatus: blacklistMatch.status, durationMs: 0 });
-      emit("info", "generation:platform-skipped-blacklist", { appid, ...attempts[attempts.length - 1] });
-      if (blacklistMatch.identified) return finish("blacklisted", {
-        platform, matchedScope: "platform", reason: "known-blacklisted-identity",
+      attempts.push({
+        platform,
+        status: "blacklisted",
+        cachedStatus: blacklistMatch.status,
+        durationMs: 0,
       });
+      emit("info", "generation:platform-skipped-blacklist", {
+        appid,
+        ...attempts[attempts.length - 1],
+      });
+      if (blacklistMatch.identified)
+        return finish("blacklisted", {
+          platform,
+          matchedScope: "platform",
+          reason: "known-blacklisted-identity",
+        });
       continue;
     }
     let identifiedName = "";
-    setSchemaDownloadName(schemaWarningGameName(meta, platform), { clear: true });
+    setSchemaDownloadName(schemaWarningGameName(meta, platform), {
+      clear: true,
+    });
     const result = await attempt(platform, async () => {
       if (provider === "steam") {
-        const identity = await schemaProviderRequest("steam-store", () => probeSteamGame(meta.steamId));
-        if (identity.status === "not-applicable") return { ...identity, platform };
-        const mapping = hasMapping ? uplayToSteam.get(String(meta.uplayId)) : null;
-        const mappedName = [mapping?.steam_name, mapping?.uplay_name]
-          .find((name) => typeof name === "string" && name.trim());
+        const identity = await schemaProviderRequest("steam-store", () =>
+          probeSteamGame(meta.steamId),
+        );
+        if (identity.status === "not-applicable")
+          return { ...identity, platform };
+        const mapping = hasMapping
+          ? uplayToSteam.get(String(meta.uplayId))
+          : null;
+        const mappedName = [mapping?.steam_name, mapping?.uplay_name].find(
+          (name) => typeof name === "string" && name.trim(),
+        );
         identifiedName = identity.displayName || mappedName?.trim() || "";
         setSchemaDownloadName(identifiedName);
-        if (identity.status === "identified-no-achievements") return { ...identity, platform };
-        const evidence = { errors: [], ambiguous: false, displayName: identifiedName,
-          storeNotFound: identity.status === "not-found" };
-        if (identity.status === "technical-error") evidence.errors.push(identity.error);
-        const generated = await processOneApp({ ...meta, platform, strip: hasMapping }, apiKey, base,
-          { emulatorCascade: true, evidence });
-        if (generated.count > 0) return { ...generated, platform, status: "achievements-found",
-          displayName: evidence.displayName, source: generated.source || evidence.source };
-        if (generated.outcome === "identified-no-achievements" || evidence.noAchievements) {
-          return { status: "identified-no-achievements", platform, identified: !!evidence.displayName,
-            displayName: evidence.displayName, count: 0, source: generated.source || evidence.source };
+        if (identity.status === "identified-no-achievements")
+          return { ...identity, platform };
+        const evidence = {
+          errors: [],
+          ambiguous: false,
+          displayName: identifiedName,
+          storeNotFound: identity.status === "not-found",
+        };
+        if (identity.status === "technical-error")
+          evidence.errors.push(identity.error);
+        const generated = await processOneApp(
+          { ...meta, platform, strip: hasMapping },
+          apiKey,
+          base,
+          { emulatorCascade: true, evidence },
+        );
+        if (generated.count > 0)
+          return {
+            ...generated,
+            platform,
+            status: "achievements-found",
+            displayName: evidence.displayName,
+            source: generated.source || evidence.source,
+          };
+        if (
+          generated.outcome === "identified-no-achievements" ||
+          evidence.noAchievements
+        ) {
+          return {
+            status: "identified-no-achievements",
+            platform,
+            identified: !!evidence.displayName,
+            displayName: evidence.displayName,
+            count: 0,
+            source: generated.source || evidence.source,
+          };
         }
-        if (evidence.notFound) return { platform, status: "not-found", source: evidence.source };
-        return { platform, status: evidence.errors.length ? "technical-error" : evidence.ambiguous || evidence.displayName ? "ambiguous" : "not-found",
-          identified: !!evidence.displayName, displayName: evidence.displayName, errors: evidence.errors };
+        if (evidence.notFound)
+          return { platform, status: "not-found", source: evidence.source };
+        return {
+          platform,
+          status: evidence.errors.length
+            ? "technical-error"
+            : evidence.ambiguous || evidence.displayName
+              ? "ambiguous"
+              : "not-found",
+          identified: !!evidence.displayName,
+          displayName: evidence.displayName,
+          errors: evidence.errors,
+        };
       }
       if (provider === "gog") {
         if (!/^\d+$/.test(appid)) return { platform, status: "not-applicable" };
-        const identity = await schemaProviderRequest("gog-catalog", () => probeGogGame(appid));
+        const identity = await schemaProviderRequest("gog-catalog", () =>
+          probeGogGame(appid),
+        );
         if (identity.status !== "identified") return identity;
         identifiedName = identity.displayName;
         setSchemaDownloadName(identifiedName);
         const generated = await processGogApp(appid, base);
-        return { ...generated, platform, identified: true, displayName: identity.displayName,
-          status: generated.count > 0 ? "achievements-found" : "identified-no-achievements" };
+        return {
+          ...generated,
+          platform,
+          identified: true,
+          displayName: identity.displayName,
+          status:
+            generated.count > 0
+              ? "achievements-found"
+              : "identified-no-achievements",
+        };
       }
-      const discovery = await schemaProviderRequest("epic-catalog", () => resolveEpicGameIdentityDetailed(appid));
+      const discovery = await schemaProviderRequest("epic-catalog", () =>
+        resolveEpicGameIdentityDetailed(appid),
+      );
       if (!discovery.identity) return { ...discovery, platform };
       const identity = discovery.identity;
       identifiedName = identity.title;
       setSchemaDownloadName(identifiedName);
       const aliases = getEpicIdentityAliases(identity);
-      const aliasBlacklist = getDiscoveryBlacklistMatch(appid, platform, aliases);
-      if (aliasBlacklist) return { status: "blacklisted", platform, identified: true,
-        matchedScope: aliasBlacklist.scope };
-      const evidence = { errors: [], ambiguous: false, displayName: identity.title };
-      const generated = await processOneApp({ uplayId: appid, steamId: appid, platform }, apiKey, base,
-        { emulatorCascade: true, evidence, epicIdentity: identity });
-      return { ...generated, platform, identified: true, displayName: identity.title, aliases, epicIdentity: identity,
-        status: generated.count > 0 ? "achievements-found" : evidence.noAchievements ? "identified-no-achievements"
-          : evidence.errors.length ? "technical-error" : "ambiguous", errors: evidence.errors };
+      const aliasBlacklist = getDiscoveryBlacklistMatch(
+        appid,
+        platform,
+        aliases,
+      );
+      if (aliasBlacklist)
+        return {
+          status: "blacklisted",
+          platform,
+          identified: true,
+          matchedScope: aliasBlacklist.scope,
+        };
+      const evidence = {
+        errors: [],
+        ambiguous: false,
+        displayName: identity.title,
+      };
+      const generated = await processOneApp(
+        { uplayId: appid, steamId: appid, platform },
+        apiKey,
+        base,
+        { emulatorCascade: true, evidence, epicIdentity: identity },
+      );
+      return {
+        ...generated,
+        platform,
+        identified: true,
+        displayName: identity.title,
+        aliases,
+        epicIdentity: identity,
+        status:
+          generated.count > 0
+            ? "achievements-found"
+            : evidence.noAchievements
+              ? "identified-no-achievements"
+              : evidence.errors.length
+                ? "technical-error"
+                : "ambiguous",
+        errors: evidence.errors,
+      };
     });
     checkedProviders.add(provider);
     if (identifiedName || result.identified) hasKnownIdentity = true;
-    if (result.status === "not-found" && !identifiedName && !result.identified && !result.error &&
-        !result.errors?.length && result.ambiguous !== true && result.hasTechnicalErrors !== true) {
-      platformResults.push(generationResult(appid, "not-found", {
-        platform, platformChecked: true, identified: false,
-        source: result.source || `${provider}-discovery`,
-        durationMs: attempts[attempts.length - 1].durationMs,
-      }));
+    if (
+      result.status === "not-found" &&
+      !identifiedName &&
+      !result.identified &&
+      !result.error &&
+      !result.errors?.length &&
+      result.ambiguous !== true &&
+      result.hasTechnicalErrors !== true
+    ) {
+      platformResults.push(
+        generationResult(appid, "not-found", {
+          platform,
+          platformChecked: true,
+          identified: false,
+          source: result.source || `${provider}-discovery`,
+          durationMs: attempts[attempts.length - 1].durationMs,
+        }),
+      );
     }
-    if (["achievements-found", "identified-no-achievements", "blacklisted"].includes(result.status)) {
+    if (
+      [
+        "achievements-found",
+        "identified-no-achievements",
+        "blacklisted",
+      ].includes(result.status)
+    ) {
       return finish(result.status, result);
     }
     // A confirmed identity must not be reassigned to a different platform
     // because its achievement provider failed or returned an ambiguous payload.
     if (identifiedName || result.identified) {
-      return finish(result.status, { ...result, identified: true,
-        displayName: result.displayName || identifiedName });
+      return finish(result.status, {
+        ...result,
+        identified: true,
+        displayName: result.displayName || identifiedName,
+      });
     }
   }
-  const hasTechnicalErrors = attempts.some((entry) => entry.status === "technical-error");
+  const hasTechnicalErrors = attempts.some(
+    (entry) => entry.status === "technical-error",
+  );
   const ambiguous = attempts.some((entry) => entry.status === "ambiguous");
-  const allProvidersChecked = ["steam", "gog", "epic"].every((provider) => checkedProviders.has(provider));
-  return finish(hasTechnicalErrors ? "technical-error" : ambiguous ? "ambiguous"
-      : hasKnownIdentity || hasUnknownBlacklist ? "blacklisted" : "not-found",
-    { exhausted: allProvidersChecked, allProvidersChecked,
-      checkedProviders: Array.from(checkedProviders), hasTechnicalErrors, ambiguous });
+  const allProvidersChecked = ["steam", "gog", "epic"].every((provider) =>
+    checkedProviders.has(provider),
+  );
+  return finish(
+    hasTechnicalErrors
+      ? "technical-error"
+      : ambiguous
+        ? "ambiguous"
+        : hasKnownIdentity || hasUnknownBlacklist
+          ? "blacklisted"
+          : "not-found",
+    {
+      exhausted: allProvidersChecked,
+      allProvidersChecked,
+      checkedProviders: Array.from(checkedProviders),
+      hasTechnicalErrors,
+      ambiguous,
+    },
+  );
 }
 
 /* ---------- MAIN (multi-APPID) ---------- */
 function completeGenerator(exitCode) {
   process.exitCode = exitCode;
-  emit("info", "generation:complete", { exitCode, appCount: resolvedAppIds.length });
+  emit("info", "generation:complete", {
+    exitCode,
+    appCount: resolvedAppIds.length,
+  });
   // A browser/driver whose close timed out must not keep this worker or its
   // IPC channel alive after every game's result has been sent.
   const exitTimer = setTimeout(() => process.exit(exitCode), 3000);
@@ -3462,7 +3781,9 @@ function completeGenerator(exitCode) {
       process.send({ type: "achgen:complete", ok: exitCode === 0 }, () => {
         if (process.connected) process.disconnect();
       });
-    } catch { if (process.connected) process.disconnect(); }
+    } catch {
+      if (process.connected) process.disconnect();
+    }
   }
 }
 
@@ -3476,7 +3797,12 @@ function completeGenerator(exitCode) {
         : "ℹ Steam API key not found. Running in SteamDB/SteamHunters mode. (English only)",
     );
     let schemaParseBatchResults = null;
-    if (!EMULATOR_CASCADE && !DISABLE_SCHEMA_PARSE && !apiKey && resolvedAppIds.length > 1) {
+    if (
+      !EMULATOR_CASCADE &&
+      !DISABLE_SCHEMA_PARSE &&
+      !apiKey &&
+      resolvedAppIds.length > 1
+    ) {
       const batchItems = resolvedAppIds
         .map((meta) => buildSchemaParseBatchItem(meta, OUT_BASE))
         .filter(Boolean);
@@ -3486,14 +3812,19 @@ function completeGenerator(exitCode) {
             count: batchItems.length,
           });
           const batchResult = await generateSteamSchemasWithSchemaParseBatch({
+            generationId: process.env?.ACHIEVEMENTS_SCHEMA_PARSE_OPERATION || `cli-${process.pid}`,
             items: batchItems,
             userDataDir: USERDATA_DIR,
             reason: "achievements-generator-batch",
-            onQueueState: ({ state }) => emitProgress({
-              appid: batchItems[0]?.resultKey || batchItems[0]?.appid,
-              phase: state === "queued" ? "waitingSchemaParse" : "schemaParse",
-              detail: state === "queued" ? "" : "Generating local Steam schema", percent: 18,
-            }),
+            onQueueState: ({ state }) =>
+              emitProgress({
+                appid: batchItems[0]?.resultKey || batchItems[0]?.appid,
+                phase:
+                  state === "queued" ? "waitingSchemaParse" : "schemaParse",
+                detail:
+                  state === "queued" ? "" : "Generating local Steam schema",
+                percent: 18,
+              }),
             onProgress: (progress = {}) => {
               const current =
                 Number.isFinite(Number(progress.current)) &&
@@ -3544,7 +3875,7 @@ function completeGenerator(exitCode) {
             });
           }
         } catch (err) {
-          if (err?.code === "SCHEMA_PARSE_CANCELLED") throw err;
+          if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(err?.code)) throw err;
           warn("schema-parse:batch-failed", {
             error: err?.message || String(err),
             count: batchItems.length,
@@ -3557,19 +3888,27 @@ function completeGenerator(exitCode) {
     let failedApps = 0;
     const appResults = await Promise.allSettled(
       resolvedAppIds.map((meta) =>
-        appLimit(() => runAppWithDownloadWarnings(meta, async () => {
-          try {
-            return await (EMULATOR_CASCADE ? processEmulatorApp(meta, apiKey, OUT_BASE)
-              : processOneApp(meta, apiKey, OUT_BASE, { schemaParseBatchResults }));
-          } catch (error) {
-            if (error?.code === "SCHEMA_PARSE_CANCELLED") throw error;
-            failedApps++;
-            reportSchemaDownloadError(error);
-            return emitGenerationOutcome(generationResult(String(meta.uplayId), "technical-error", {
-              platform: meta.platform || OUTPUT_PLATFORM, error: String(error.message || error),
-            }));
-          }
-        })),
+        appLimit(() =>
+          runAppWithDownloadWarnings(meta, async () => {
+            try {
+              return await (EMULATOR_CASCADE
+                ? processEmulatorApp(meta, apiKey, OUT_BASE)
+                : processOneApp(meta, apiKey, OUT_BASE, {
+                    schemaParseBatchResults,
+                  }));
+            } catch (error) {
+              if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(error?.code)) throw error;
+              failedApps++;
+              reportSchemaDownloadError(error);
+              return emitGenerationOutcome(
+                generationResult(String(meta.uplayId), "technical-error", {
+                  platform: meta.platform || OUTPUT_PLATFORM,
+                  error: String(error.message || error),
+                }),
+              );
+            }
+          }),
+        ),
       ),
     );
     const rejectedApp = appResults.find((entry) => entry.status === "rejected");

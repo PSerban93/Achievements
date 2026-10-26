@@ -6,7 +6,8 @@ const { execFile } = require("child_process");
 const axios = require("axios");
 const { live, xnet } = require("@xboxreplay/xboxlive-auth");
 const { createLogger } = require("./logger");
-const { writeJsonAtomicSync } = require("./atomic-json-store");
+const { writeJsonAtomic, writeJsonAtomicSync } = require("./atomic-json-store");
+const { withAuthFile, getAsyncSafeStorage, decryptAuthString, isAuthStorageUnavailable } = require("./auth-safe-storage");
 const {
   RARITY_SOURCES,
   writeAchievementPercentagesSidecar,
@@ -164,30 +165,15 @@ function resolveLegacyKeyPath(userDataDir) {
   );
 }
 
-function getElectronSafeStorage() {
-  try {
-    const electron = require("electron");
-    const safeStorage = electron?.safeStorage;
-    if (
-      safeStorage &&
-      typeof safeStorage.isEncryptionAvailable === "function" &&
-      safeStorage.isEncryptionAvailable()
-    ) {
-      return safeStorage;
-    }
-  } catch {}
-  return null;
-}
-
-function encryptAuthPayload(payload) {
+async function encryptAuthPayload(payload, options = {}) {
   const serialized = JSON.stringify(payload);
-  const safeStorage = getElectronSafeStorage();
+  const safeStorage = await getAsyncSafeStorage(options);
   if (safeStorage) {
     return Buffer.from(
       JSON.stringify({
         v: 2,
         mode: "electron-safe-storage",
-        data: safeStorage.encryptString(serialized).toString("base64"),
+        data: (await safeStorage.encryptStringAsync(serialized)).toString("base64"),
       }),
       "utf8",
     );
@@ -212,13 +198,12 @@ function encryptAuthPayload(payload) {
   );
 }
 
-function decryptAuthPayload(buffer) {
+async function decryptAuthPayload(buffer, options = {}) {
   const payload = JSON.parse(Buffer.from(buffer).toString("utf8"));
   if (payload?.v === 2 && payload?.mode === "electron-safe-storage") {
-    const safeStorage = getElectronSafeStorage();
-    if (!safeStorage) throw new Error("xbox-pc-safe-storage-unavailable");
+    const safeStorage = await getAsyncSafeStorage(options);
     return JSON.parse(
-      safeStorage.decryptString(Buffer.from(payload.data, "base64")),
+      await decryptAuthString(safeStorage, Buffer.from(payload.data, "base64")),
     );
   }
   if (payload?.v !== 1) throw new Error("xbox-pc-auth-version-unsupported");
@@ -258,45 +243,52 @@ function normalizeStoredAuth(payload = {}) {
   };
 }
 
-async function saveXboxDirectAuth(userDataDir, auth) {
+async function saveXboxDirectAuth(userDataDir, auth, options = {}) {
   const normalized = normalizeStoredAuth(auth);
   if (!normalized) throw new Error("xbox-pc-auth-invalid");
   const filePath = resolveAuthPath(userDataDir);
-  await fsp.mkdir(path.dirname(filePath), { recursive: true });
-  await fsp.writeFile(filePath, encryptAuthPayload(normalized));
-  try {
-    await fsp.unlink(resolveLegacyKeyPath(userDataDir));
-  } catch (error) {
-    if (error?.code !== "ENOENT") {
-      xboxPcLogger.warn("xbox-pc:legacy-openxbl-key-remove-failed", {
-        error: error?.message || String(error),
-      });
+  return withAuthFile(filePath, async () => {
+    const encrypted = await encryptAuthPayload(normalized, options);
+    await writeJsonAtomic(filePath, JSON.parse(encrypted.toString("utf8")));
+    try {
+      await fsp.unlink(resolveLegacyKeyPath(userDataDir));
+    } catch (error) {
+      if (error?.code !== "ENOENT") {
+        xboxPcLogger.warn("xbox-pc:legacy-openxbl-key-remove-failed", {
+          error: error?.message || String(error),
+        });
+      }
     }
-  }
-  return filePath;
+    return filePath;
+  });
 }
 
-async function loadXboxDirectAuth(userDataDir) {
-  try {
-    return normalizeStoredAuth(
-      decryptAuthPayload(await fsp.readFile(resolveAuthPath(userDataDir))),
-    );
-  } catch {
-    return null;
-  }
+async function loadXboxDirectAuth(userDataDir, options = {}) {
+  return withAuthFile(resolveAuthPath(userDataDir), async () => {
+    try {
+      return normalizeStoredAuth(
+        await decryptAuthPayload(await fsp.readFile(resolveAuthPath(userDataDir)), options),
+      );
+    } catch (error) {
+      if (isAuthStorageUnavailable(error)) throw error;
+      return null;
+    }
+  });
 }
 
 async function clearXboxDirectAuth(userDataDir) {
-  for (const filePath of [
-    resolveAuthPath(userDataDir),
-    resolveLegacyKeyPath(userDataDir),
-  ]) {
-    try {
-      await fsp.unlink(filePath);
-    } catch (error) {
-      if (error?.code !== "ENOENT") throw error;
+  return withAuthFile(resolveAuthPath(userDataDir), async () => {
+    for (const filePath of [
+      resolveAuthPath(userDataDir),
+      resolveLegacyKeyPath(userDataDir),
+    ]) {
+      try {
+        await fsp.unlink(filePath);
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
     }
-  }
+  });
 }
 
 function buildXboxDirectAuthorizeUrl(clientId, state = "") {
@@ -477,7 +469,7 @@ async function completeXboxDirectAuthentication(userDataDir, authResult) {
 }
 
 async function ensureXboxDirectSession(options = {}) {
-  let auth = await loadXboxDirectAuth(options.userDataDir);
+  let auth = await loadXboxDirectAuth(options.userDataDir, options);
   if (!auth) throw new Error("xbox-pc-microsoft-login-required");
   if (
     options.allowStoredClientId !== true &&
@@ -509,7 +501,7 @@ async function ensureXboxDirectSession(options = {}) {
   }
   if (!refreshed.refresh_token) refreshed.refresh_token = auth.refreshToken;
   auth = await exchangeLiveTokenForXboxSession(refreshed, auth.clientId);
-  await saveXboxDirectAuth(options.userDataDir, auth);
+  await saveXboxDirectAuth(options.userDataDir, auth, options);
   return auth;
 }
 
@@ -585,7 +577,14 @@ async function xboxNetworkGetAll(endpoint, keys, options = {}) {
 }
 
 async function getXboxPcStatus(options = {}) {
-  const stored = await loadXboxDirectAuth(options.userDataDir);
+  let stored;
+  try {
+    stored = await loadXboxDirectAuth(options.userDataDir, options);
+  } catch (error) {
+    if (!isAuthStorageUnavailable(error)) throw error;
+    return { connected: false, configured: fs.existsSync(resolveAuthPath(options.userDataDir)),
+      temporarilyUnavailable: true, provider: "Microsoft / Xbox Network" };
+  }
   if (!stored) {
     return {
       connected: false,
@@ -609,6 +608,7 @@ async function getXboxPcStatus(options = {}) {
       configured: true,
       provider: "Microsoft / Xbox Network",
       clientId: stored.clientId,
+      ...(isAuthStorageUnavailable(error) ? { temporarilyUnavailable: true } : {}),
       error: error?.message || String(error),
     };
   }

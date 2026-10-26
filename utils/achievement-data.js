@@ -514,7 +514,7 @@ function resolveConfigSchemaPath(meta, fallbackConfigPath = null) {
         "xbox-pc",
         "retroachievements",
         "x360recomp",
-        "ps4recomp",
+        "ps3recomp", "ps4recomp",
         "pcports",
         "xenia",
         "rpcs3",
@@ -858,7 +858,7 @@ function isRuneUplayConfig(configMeta) {
   );
 }
 
-function parseRuneKeyValuesText(rawText) {
+function parseRuneKeyValuesText(rawText, options = {}) {
   const text = String(rawText || "").replace(/^\uFEFF/, "");
   const tokens = [];
   let index = 0;
@@ -910,8 +910,12 @@ function parseRuneKeyValuesText(rawText) {
     const result = {};
     while (tokenIndex < tokens.length) {
       const key = tokens[tokenIndex++];
-      if (key === "}") return result;
+      if (key === "}") {
+        if (options.rejectDuplicates && depth === 0) throw new Error("rune-uplay:unexpected-close-brace");
+        return result;
+      }
       if (key === "{") throw new Error("rune-uplay:unexpected-open-brace");
+      if (options.rejectDuplicates && Object.hasOwn(result, key)) throw new Error("rune-uplay:duplicate-key");
       if (tokenIndex >= tokens.length) {
         throw new Error("rune-uplay:missing-value");
       }
@@ -976,6 +980,55 @@ function alignUplaySnapshotToConfig(snapshot, configMeta, fullSchemaPath = null)
   return index.resolveUplayName ? alignUplaySnapshot(snapshot, index.resolveUplayName) : snapshot;
 }
 
+function hasAchievementProgressFields(item) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+  return [
+    "achieved", "Achieved", "ACHIEVED", "earned", "unlocked", "Unlocked",
+    "UnlockTime", "unlockTime", "timestamp", "earned_time", "earnedTime",
+    "unlock_time", "time", "CurProgress", "curProgress", "progress", "Progress",
+    "MaxProgress", "maxProgress", "max_progress", "Max", "max",
+  ].some((key) => Object.hasOwn(item, key) &&
+    ["boolean", "number", "string"].includes(typeof item[key]));
+}
+
+function looksLikeSaveJson(json) {
+  if (!json || typeof json !== "object") return false;
+  return Object.values(json).some(hasAchievementProgressFields);
+}
+
+// Keep the same source order for selection, boot seeding and live reads. A
+// definition-only JSON is never a save. An unreadable/partial save retains its
+// priority so a temporary write cannot switch monitoring to another source.
+function resolveSaveFilePath(saveBase, appid) {
+  const id = String(appid ?? "").trim();
+  const candidates = [
+    ...(id ? [
+      path.join(saveBase, "steam_settings", id, "achievements.json"),
+      path.join(saveBase, id, "achievements.json"),
+      path.join(saveBase, "remote", id, "achievements.json"),
+    ] : []),
+    path.join(saveBase, "achievements.json"),
+  ];
+  for (const file of candidates) {
+    if (!fs.existsSync(file)) continue;
+    let parsed;
+    try {
+      parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return file;
+    }
+    if (looksLikeSaveJson(parsed)) return file;
+    // Empty/invalid state may be a save being replaced. The reader will keep
+    // its previous snapshot; only recognisable definitions can be skipped.
+    const entries = parsed && typeof parsed === "object" ? Object.values(parsed) : [];
+    const definitionsOnly = entries.length > 0 && entries.every((entry) =>
+      entry && typeof entry === "object" &&
+      ("displayName" in entry || "description" in entry || "icon" in entry || "icon_gray" in entry));
+    if (!definitionsOnly) return file;
+  }
+  return id ? path.join(saveBase, id, "achievements.json") : path.join(saveBase, "achievements.json");
+}
+
 function loadAchievementsFromSaveFile(saveDir, fallback = {}, options = {}) {
   if (String(options?.configMeta?.platform || "").trim().toLowerCase() !== "uplay") {
     return loadAchievementsFromSaveFileRaw(saveDir, fallback, options);
@@ -1008,6 +1061,10 @@ function loadAchievementsFromSaveFileRaw(saveDir, fallback = {}, options = {}) {
   }
   if (normalizedPlatform === "ps4recomp") {
     const parsed = require("./ps4-recomp").loadConfigSnapshot(configMeta, fallback);
+    return parsed.valid ? parsed.snapshot : fallback;
+  }
+  if (normalizedPlatform === "ps3recomp") {
+    const parsed = require("./ps3-recomp").loadConfigSnapshot(configMeta, fallback);
     return parsed.valid ? parsed.snapshot : fallback;
   }
   if (normalizedPlatform === "pcports") {
@@ -1117,9 +1174,7 @@ function loadAchievementsFromSaveFileRaw(saveDir, fallback = {}, options = {}) {
     return null;
   };
 
-  const saveJsonPath =
-    findCaseInsensitive(saveDir, "achievements.json") ||
-    path.join(saveDir, "achievements.json");
+  const saveJsonPath = resolveSaveFilePath(saveDir, appid);
   if (normalizedPlatform === "gog-official") {
     const gameplayDbPath =
       findCaseInsensitive(saveDir, "gameplay.db") ||
@@ -1226,15 +1281,16 @@ function loadAchievementsFromSaveFileRaw(saveDir, fallback = {}, options = {}) {
   if (fs.existsSync(saveJsonPath)) {
     try {
       const parsed = JSON.parse(fs.readFileSync(saveJsonPath, "utf-8"));
-      if (parsed === null) return fallback || {};
+      if (!looksLikeSaveJson(parsed)) return fallback || {};
 
       const out = {};
       const hasRawUnlockTime = (item) =>
         item && typeof item.unlock_time !== "undefined";
       const put = (name, item) => {
-        if (!name) return;
+        if (!name || !hasAchievementProgressFields(item)) return;
         const achRaw =
-          item?.achieved ?? item?.Achieved ?? item?.ACHIEVED ?? item?.earned;
+          item?.achieved ?? item?.Achieved ?? item?.ACHIEVED ?? item?.earned ??
+          item?.unlocked ?? item?.Unlocked;
         const earned =
           typeof achRaw === "boolean"
             ? achRaw
@@ -1260,7 +1316,8 @@ function loadAchievementsFromSaveFileRaw(saveDir, fallback = {}, options = {}) {
           item?.timestamp ??
           item?.earned_time ??
           item?.earnedTime ??
-          item?.unlock_time;
+          item?.unlock_time ??
+          item?.time;
         const ts = Number(tsRaw) || 0;
 
         out[name] = {
@@ -1301,7 +1358,7 @@ function loadAchievementsFromSaveFileRaw(saveDir, fallback = {}, options = {}) {
       const epicOut = {};
       if (Array.isArray(parsed)) {
         for (const item of parsed) {
-          if (!item || typeof item !== "object") continue;
+          if (!hasAchievementProgressFields(item)) continue;
           const rawName =
             item.AchievementId ||
             item.achievementId ||
@@ -1337,7 +1394,7 @@ function loadAchievementsFromSaveFileRaw(saveDir, fallback = {}, options = {}) {
       const gogOut = {};
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         for (const [rawName, item] of Object.entries(parsed)) {
-          if (!rawName || !item || typeof item !== "object") continue;
+          if (!rawName || !hasAchievementProgressFields(item)) continue;
           const t =
             Number(
               item.unlock_time ??
@@ -1475,6 +1532,9 @@ module.exports = {
   readRuneUplayAchievementsCfg,
   mergeEarnedTimeFromCached,
   loadAchievementsFromSaveFile,
+  hasAchievementProgressFields,
+  looksLikeSaveJson,
+  resolveSaveFilePath,
   alignUplaySnapshotToConfig,
   parseAchievementIniSection,
   parseOnlineFixStatsIni,

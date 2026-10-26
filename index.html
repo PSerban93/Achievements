@@ -1888,6 +1888,124 @@
 
                 <hr style="margin: 18px 0 14px" />
                 <details
+                  id="settings-ps3recompNotificationControls"
+                  class="settings-section settings-disclosure settings-notification-disclosure"
+                  aria-labelledby="settings-ps3recompNotificationTitle"
+                >
+                <summary
+                  id="settings-ps3recompNotificationTitle"
+                  data-i18n="settings-ps3recompNotificationTitle"
+                >
+                  PS3 Recomp Notification
+                </summary>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps3recompPositionDropdown"
+                    data-i18n="label.settings-ps3recompPositionDropdown"
+                    >PS3 Recomp Achievement Position:</label
+                  >
+                  <select id="settings-ps3recompPositionDropdown">
+                    <option
+                      value="center-bottom"
+                      data-i18n="option.positionDropdown.center-bottom"
+                    >
+                      Center Bottom
+                    </option>
+                    <option
+                      value="center-top"
+                      data-i18n="option.positionDropdown.center-top"
+                    >
+                      Center Top
+                    </option>
+                    <option
+                      value="top-right"
+                      data-i18n="option.positionDropdown.top-right"
+                    >
+                      Top Right
+                    </option>
+                    <option
+                      value="bottom-right"
+                      data-i18n="option.positionDropdown.bottom-right"
+                    >
+                      Bottom Right
+                    </option>
+                    <option
+                      value="middle-right"
+                      data-i18n="option.positionDropdown.middle-right"
+                    >
+                      Middle Right
+                    </option>
+                    <option
+                      value="top-left"
+                      data-i18n="option.positionDropdown.top-left"
+                    >
+                      Top Left
+                    </option>
+                    <option
+                      value="bottom-left"
+                      data-i18n="option.positionDropdown.bottom-left"
+                    >
+                      Bottom Left
+                    </option>
+                    <option
+                      value="middle-left"
+                      data-i18n="option.positionDropdown.middle-left"
+                    >
+                      Middle Left
+                    </option>
+                  </select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps3recompPresetDropdown"
+                    data-i18n="label.settings-ps3recompPresetDropdown"
+                    >PS3 Recomp Achievement Preset:</label
+                  >
+                  <select id="settings-ps3recompPresetDropdown"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps3recompSoundSelect"
+                    data-i18n="label.settings-ps3recompSoundSelect"
+                    >PS3 Recomp Achievement Sound:</label
+                  >
+                  <select id="settings-ps3recompSoundSelect"></select>
+                </div>
+                <div class="settings-control">
+                  <label
+                    for="settings-ps3recompSanPresetDropdown"
+                    data-i18n="label.settings-ps3recompSanPresetDropdown"
+                    >PS3 Recomp Achievement SAN Preset:</label
+                  >
+                  <select id="settings-ps3recompSanPresetDropdown"></select>
+                </div>
+                <h4 data-i18n="settings-notificationTimingTitle">Notification Scale &amp; Timing</h4>
+                <div class="settings-slider">
+                  <label for="settings-ps3recompScaleSlider">Notification Scale: <span id="settings-ps3recompScaleValue">100%</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-ps3recompScaleSlider" min="0.01" max="3.5" step="0.01" value="1" />
+                    <span class="value" id="settings-ps3recompScaleValueDisplay">100%</span>
+                  </div>
+                </div>
+                <div class="settings-slider">
+                  <label for="settings-ps3recompDurationSlider">Notification Duration: <span id="settings-ps3recompDurationValue">Auto</span></label>
+                  <div class="slider-control">
+                    <input type="range" id="settings-ps3recompDurationSlider" min="0" max="60" step="0.5" value="0" />
+                    <span class="value" id="settings-ps3recompDurationValueDisplay">Auto</span>
+                  </div>
+                </div>
+                <button
+                  id="settings-testPs3RecompNotificationBtn"
+                  class="settings-test-button"
+                  data-i18n="settings-testPs3RecompNotificationBtn"
+                  style="width: 100%; margin: 10px 0; padding: 10px"
+                >
+                  Test PS3 Recomp Notification
+                </button>
+
+                </details>
+
+                <details
                   id="settings-ps4recompNotificationControls"
                   class="settings-section settings-disclosure settings-notification-disclosure"
                   aria-labelledby="settings-ps4recompNotificationTitle"
@@ -2473,6 +2591,12 @@
                     </option>
                   </select>
                 </div>
+                <div class="settings-control" id="settings-progressPresetControl">
+                  <label for="settings-progressPresetDropdown" data-i18n="label.settings-progressPresetDropdown">Progress Notification Style:</label>
+                  <select id="settings-progressPresetDropdown">
+                    <option value="" data-i18n="option.settings-progressPresetDropdown.default">Default Progress Notification</option>
+                  </select>
+                </div>
                 <div class="settings-control">
                   <label
                     for="settings-progressPositionDropdown"
@@ -2858,6 +2982,12 @@
                 <hr style="margin: 18px 0 14px" />
                 <details class="settings-section settings-disclosure settings-options-disclosure" id="settings-advancedRenderingControls" aria-labelledby="settings-advancedRenderingTitle">
                   <summary id="settings-advancedRenderingTitle">Tweaks</summary>
+                  <div class="checkbox-control">
+                    <input type="checkbox" id="settings-compactModeCheckbox" title="Turn off to expand all settings sections." checked />
+                    <label for="settings-compactModeCheckbox" data-i18n="label.settings-compactModeCheckbox">
+                      Compact mode
+                    </label>
+                  </div>
                   <div class="checkbox-control">
                     <input
                       type="checkbox"
@@ -5893,6 +6023,7 @@
                             <option value="retroachievements" disabled>
                               RetroAchievements
                             </option>
+                            <option value="ps3recomp" disabled data-i18n="option.platformSelect.ps3recomp">PS3 Recomp</option>
                             <option value="ps4recomp" disabled data-i18n="option.platformSelect.ps4recomp">PS4 Recomp</option>
                             <option value="pcports" disabled data-i18n="option.platformSelect.pcports">PC Ports</option>
                             <option value="x360recomp" disabled data-i18n="option.platformSelect.x360recomp">Xbox 360 Recomp</option>
@@ -7377,6 +7508,7 @@
     <script src="utils/notification-customisation-editor.js"></script>
     <script src="utils/notification-preset-dimensions.js"></script>
     <script src="utils/notification-placement.js"></script>
+    <script src="utils/notification-progress.js"></script>
     <script src="utils/notification-placement-controls.js"></script>
     <script src="utils/notification-monitor-controls.js"></script>
     <script src="utils/playtime-duration.js"></script>
@@ -7650,6 +7782,28 @@
         return window.__preferencesCache || {};
       }
 
+      let appliedSettingsCompactMode;
+      function applySettingsCompactMode(value) {
+        const compact = value !== false;
+        const checkbox = document.getElementById("settings-compactModeCheckbox");
+        if (checkbox) checkbox.checked = compact;
+        if (appliedSettingsCompactMode === compact) return;
+        appliedSettingsCompactMode = compact;
+        const menu = document.getElementById("settingsMenu");
+        if (!menu) return;
+        menu.dataset.compactMode = String(compact);
+        const activeSection = document.activeElement?.closest("details.settings-disclosure");
+        // Only Settings option sections; Documentation and editor subgroups
+        // retain their own navigation and disclosure behavior.
+        menu.querySelectorAll("details.settings-disclosure").forEach((section) => {
+          section.open = !compact;
+        });
+        if (compact && activeSection) {
+          activeSection.querySelector(":scope > summary")?.focus({ preventScroll: true });
+        }
+        menu.dispatchEvent(new Event("settings-compact-mode-changed"));
+      }
+
       async function refreshPreferencesCache() {
         try {
           await loadPreferencesCached();
@@ -7753,6 +7907,9 @@
                   };
             delete merged.steamApiKeyMasked;
             window.__preferencesCache = merged;
+            if (Object.prototype.hasOwnProperty.call(pending, "settingsCompactMode")) {
+              applySettingsCompactMode(pending.settingsCompactMode);
+            }
             if (Object.prototype.hasOwnProperty.call(pending, "appTheme")) {
               applyAppTheme(pending.appTheme);
             }
@@ -7865,7 +8022,7 @@
         function isSteamGridOnlyPlatform(value) {
           const platform = normalizeCoverPlatform(value);
           return (
-            platform === "ps4recomp" ||
+            platform === "ps3recomp" || platform === "ps4recomp" ||
             platform === "pcports" ||
             platform === "x360recomp" ||
             platform === "xenia" ||
@@ -10641,6 +10798,20 @@
         actionBtn.className = "dash-menu-item";
         actionBtn.dataset.action = "manual-achievement-state";
         menu.appendChild(actionBtn);
+        for (const action of ["manual-achievement-lock", "manual-achievement-restore"]) {
+          const button = document.createElement("button");
+          button.type = "button"; button.className = "dash-menu-item hidden";
+          button.dataset.action = action; menu.appendChild(button);
+        }
+        menu.addEventListener("keydown", event => {
+          if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+          const items = Array.from(menu.querySelectorAll(".dash-menu-item:not(.hidden):not(:disabled)"));
+          if (!items.length) return;
+          event.preventDefault(); event.stopPropagation();
+          const index = items.indexOf(document.activeElement);
+          items[event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
+            (index + (event.key === "ArrowUp" ? -1 : 1) + items.length) % items.length].focus();
+        });
         document.body.appendChild(menu);
         return menu;
       }
@@ -10723,8 +10894,10 @@
           action === "clear-manual"
             ? manualRows.map((item) => item.dataset.achievementName)
             : unlockableRows.map((item) => item.dataset.achievementName);
-        if (!actionableNames.length) return false;
-        if (!action) return false;
+        const lockableNames = rows.filter(item => item.dataset.earned === "1" && item.dataset.lockSupported === "1")
+          .map(item => item.dataset.achievementName);
+        const restorable = rows.some(item => item.dataset.lockRestorable === "1");
+        if (!actionableNames.length && !lockableNames.length && !restorable) return false;
         const configName = document.getElementById("configList")?.value || "";
         if (!configName) return false;
         const menu = getAchievementManualContextMenu();
@@ -10736,7 +10909,17 @@
           configName,
           achievementNames: actionableNames,
           action,
+          lockableNames,
+          focusName: row?.dataset.achievementName || "",
         };
+        actionBtn.classList.toggle("hidden", !actionableNames.length);
+        const lockBtn = menu.querySelector('[data-action="manual-achievement-lock"]');
+        lockBtn.classList.toggle("hidden", !lockableNames.length);
+        lockBtn.textContent = tUiFmt("achievementManualLock", { count: lockableNames.length },
+          `Mark as Manually Locked (${lockableNames.length})`);
+        const restoreBtn = menu.querySelector('[data-action="manual-achievement-restore"]');
+        restoreBtn.classList.toggle("hidden", !restorable);
+        restoreBtn.textContent = tUi("achievementManualLockRestore", "Restore Last Achievement Backup");
         const count = actionableNames.length;
         actionBtn.textContent =
           action === "clear-manual"
@@ -10762,8 +10945,40 @@
           event.clientX,
           event.clientY,
         );
-        actionBtn.focus({ preventScroll: true });
+        menu.querySelector(".dash-menu-item:not(.hidden)")?.focus({ preventScroll: true });
         return true;
+      }
+
+      async function runAchievementSourceLock(target, action) {
+        const restoring = action === "restore-locked";
+        let result;
+        try {
+          const prepared = await window.api.setAchievementManualState({ configName: target.configName,
+            achievementNames: target.lockableNames, action: restoring ? "prepare-restore" : "prepare-lock" });
+          if (!prepared?.success) throw new Error(prepared?.error || "Unable to prepare achievement edit");
+          const confirmed = await showAppConfirm({
+            title: tUi(restoring ? "achievementManualLockRestore" : "achievementManualLockTitle",
+              restoring ? "Restore Last Achievement Backup" : "Lock achievements"),
+            message: restoring ? tUi("achievementManualLockRestoreConfirm", "Restore the achievement files and cache from the last backup? Changes made since that backup will be replaced.") :
+              tUiFmt("achievementManualLockConfirm", { count: prepared.updatedCount }, `Lock ${prepared.updatedCount} selected achievement(s) in the local save?`),
+            detail: [...(prepared.achievements || []).map(name => `• ${name}`), "", ...(prepared.files || []).map(file => `• ${file}`)].join("\n"),
+            preformattedDetail: true,
+            notes: tUi("achievementManualLockNotes", "Close the game first. A backup is created before editing. Game saves and shared progress counters are preserved; the game may unlock an achievement again."),
+          });
+          if (!confirmed) return;
+          result = await window.api.setAchievementManualState({ configName: target.configName, action, token: prepared.token });
+          if (!result?.success) throw new Error(result?.error || "Unable to update achievement state");
+          showNotification(tUi(restoring ? "achievementManualLockRestored" : "achievementManualLockDone",
+            restoring ? "Achievement backup restored." : "Selected achievements locked. A backup was saved."), "#4CAF50");
+          if (document.getElementById("configList")?.value === target.configName) {
+            await buildMainAchievementsTable(target.configName, getCurrentAchievementLanguage(), { skipPlatinumCheck: true });
+          }
+        } catch (error) {
+          console.error("Achievement source edit failed:", error);
+          showNotification(tUi("achievementManualLockFailed", "The achievement files could not be updated. No successful reset was applied. Check the logs for details."), "#f44336");
+        } finally {
+          if (target.focusName) focusAchievementRowByName(target.focusName);
+        }
       }
 
       function ensureAchievementManualContextMenuAttached() {
@@ -10838,6 +11053,10 @@
             const returnName = achievementControllerMenuReturnName;
             achievementControllerMenuReturnName = "";
             closeAchievementManualContextMenu();
+            if (btn.dataset.action === "manual-achievement-lock" || btn.dataset.action === "manual-achievement-restore") {
+              await runAchievementSourceLock(target, btn.dataset.action === "manual-achievement-lock" ? "mark-locked" : "restore-locked");
+              return;
+            }
             const result = await window.api?.setAchievementManualState?.({
               configName: target.configName,
               achievementNames: target.achievementNames,
@@ -10937,6 +11156,12 @@
         }
         const currentConfig = await window.api.getConfigByName(selectedConfig);
         if (isSelectionStale()) return;
+        let manualLockCapability = { supported: false, restorable: false };
+        if (["steam", "uplay", "gog", "epic", "rpcs3", "shadps4", "xenia", "kytyps5", "x360recomp"].includes(String(currentConfig?.platform || "").toLowerCase())) {
+          try { manualLockCapability = await window.api.setAchievementManualState({ configName: selectedConfig, action: "lock-capabilities" }); }
+          catch { /* Existing read-only table actions remain available. */ }
+          if (isSelectionStale()) return;
+        }
         const cacheOnlyEpicOfficial =
           String(currentConfig?.platform || "")
             .trim()
@@ -11168,7 +11393,7 @@
         const useTrophyTypeRaritySortFallback =
           platformForRaritySort === "rpcs3" ||
           platformForRaritySort === "shadps4" ||
-          platformForRaritySort === "ps4recomp" ||
+          platformForRaritySort === "ps3recomp" || platformForRaritySort === "ps4recomp" ||
           platformForRaritySort === "kytyps5";
 
         for (const achievement of unique) {
@@ -11241,6 +11466,8 @@
           row.dataset.achievementName = achievement.name || "";
           row.dataset.earned = saved?.earned ? "1" : "0";
           row.dataset.manual = saved?.manual === true ? "1" : "0";
+          row.dataset.lockSupported = manualLockCapability?.supported ? "1" : "0";
+          row.dataset.lockRestorable = manualLockCapability?.restorable ? "1" : "0";
           row.setAttribute(
             "aria-selected",
             achievementSelection.has(achievement.name) ? "true" : "false",
@@ -12140,7 +12367,8 @@
         notif.style.padding = "10px 20px";
         notif.style.borderRadius = "5px";
         notif.style.boxShadow = "0px 2px 8px rgba(0,0,0,0.3)";
-        notif.style.zIndex = 9999;
+        // Keep feedback above Settings and other modal layers.
+        notif.style.zIndex = 200002;
         notif.style.fontWeight = "bold";
         notif.style.fontFamily = "sans-serif";
         notif.style.opacity = "0";
@@ -12710,7 +12938,7 @@
               "gog-official",
               "xbox-pc",
               "retroachievements",
-              "ps4recomp",
+              "ps3recomp", "ps4recomp",
               "pcports",
               "x360recomp",
               "xenia",
@@ -14713,6 +14941,9 @@
           opts.message || tUi("main.dialog.confirm.message", "Are you sure?");
         if (opts.detail) {
           confirmDetailEl.textContent = opts.detail;
+          confirmDetailEl.style.whiteSpace = opts.preformattedDetail ? "pre-wrap" : "";
+          confirmDetailEl.style.maxHeight = opts.preformattedDetail ? "30vh" : "";
+          confirmDetailEl.style.overflowY = opts.preformattedDetail ? "auto" : "";
           confirmDetailEl.classList.remove("hidden");
         } else {
           confirmDetailEl.textContent = "";
@@ -15880,6 +16111,15 @@
           ],
         },
         {
+          presetId: "settings-ps3recompPresetDropdown",
+          controlIds: [
+            "settings-ps3recompPositionDropdown",
+            "settings-ps3recompScaleSlider",
+            "settings-ps3recompDurationSlider",
+            "settings-ps3recompSanPresetDropdown",
+          ],
+        },
+        {
           presetId: "settings-ps4recompPresetDropdown",
           controlIds: [
             "settings-ps4recompPositionDropdown",
@@ -16130,6 +16370,34 @@
           presetDropdown.value = previousValue;
         }
         refreshNativeWindowsNotificationControls();
+        populateProgressPresetControl();
+      }
+
+      function populateProgressPresetControl(prefs = getCachedPreferences()) {
+        const select = document.getElementById("settings-progressPresetDropdown");
+        if (!select) return;
+        const selected = prefs.progressPreset || "";
+        select.replaceChildren();
+        const original = new Option(tUi("option.settings-progressPresetDropdown.default", "Default Progress Notification"), "");
+        original.dataset.i18n = "option.settings-progressPresetDropdown.default";
+        select.appendChild(original);
+        const native = document.getElementById("presetDropdown");
+        for (const source of native?.querySelectorAll("optgroup") || []) {
+          const group = document.createElement("optgroup"); group.label = source.label;
+          for (const option of source.querySelectorAll("option")) {
+            if (["native windows", "game bar notifications"].includes(option.value.trim().toLowerCase())) continue;
+            group.appendChild(new Option(option.textContent, `native:${option.value}`));
+          }
+          if (group.children.length) select.appendChild(group);
+        }
+        const san = document.createElement("optgroup"); san.label = "SAN";
+        for (const preset of cachedSanPresets) san.appendChild(new Option(preset.displayLabel || preset.label || preset.fileName || preset.id, `san:${preset.id}`));
+        if (san.children.length) select.appendChild(san);
+        // SAN inventory can arrive after native presets. Retain the stored
+        // selection until that inventory finishes, without saving a fallback.
+        if (selected && ![...select.options].some(option => option.value === selected)) select.appendChild(new Option(selected, selected));
+        select.value = selected;
+        applyProgressNotificationMethodPreferences(prefs);
       }
 
       document.addEventListener("change", (event) => {
@@ -17148,6 +17416,16 @@
           testButtonId: "settings-testX360RecompNotificationBtn",
         },
         {
+          platform: "ps3recomp",
+          prefix: "ps3recomp",
+          label: "PS3 Recomp",
+          positionId: "settings-ps3recompPositionDropdown",
+          presetId: "settings-ps3recompPresetDropdown",
+          soundId: "settings-ps3recompSoundSelect",
+          sanPresetId: "settings-ps3recompSanPresetDropdown",
+          testButtonId: "settings-testPs3RecompNotificationBtn",
+        },
+        {
           platform: "ps4recomp",
           prefix: "ps4recomp",
           label: "PS4 Recomp",
@@ -17194,7 +17472,7 @@
         { key: "rare", prefix: "rare", presetId: "settings-rarePresetDropdown", sanPresetId: "settings-rareSanPresetDropdown" },
         { key: "platinum", prefix: "platinum", presetId: "settings-platinumPresetDropdown", sanPresetId: "settings-platinumSanPresetDropdown" },
         ...EMULATOR_NOTIFICATION_SETTINGS.map((setting) => ({ key: setting.prefix, prefix: setting.prefix, presetId: setting.presetId, sanPresetId: setting.sanPresetId })),
-        { key: "progress", prefix: "progress" },
+        { key: "progress", prefix: "progress", presetId: "settings-progressPresetDropdown" },
         { key: "playtime", prefix: "playtime" },
       ]);
       const notificationPlacementPositionControl = (profile) => document.getElementById(
@@ -17306,6 +17584,7 @@
         if (useSanCheckbox) {
           useSanCheckbox.checked = prefs?.useSanPreset === true;
         }
+        populateProgressPresetControl(prefs);
         await hydrateNotificationTimingPreferences(prefs);
       }
 
@@ -17524,6 +17803,7 @@
           const importBtn = document.getElementById("settings-xboxPcImportBtn");
           if (!statusEl || !window.api?.getXboxPcStatus) return null;
           const status = await window.api.getXboxPcStatus();
+          if (status?.temporarilyUnavailable) return status;
           if (status?.connected) {
             const account =
               String(status.gamertag || "").trim() ||
@@ -17595,6 +17875,7 @@
           }
 
           const status = await window.api.getRetroAchievementsStatus();
+          if (status?.temporarilyUnavailable) return status;
           if (status?.connected) {
             const account = String(status.username || "").trim();
             statusEl.textContent = tUiFmt(
@@ -17686,6 +17967,8 @@
         );
         const method = normalizeProgressNotificationMethod(prefs?.progressNotificationMethod);
         if (methodSelect) methodSelect.value = method;
+        const presetSelect = document.getElementById("settings-progressPresetDropdown");
+        if (presetSelect) presetSelect.disabled = method !== "animated";
         for (const field of ["scale", "duration"]) {
           setNativeWindowsControlDisabled(document.getElementById(`settings-progress${field[0].toUpperCase()}${field.slice(1)}Slider`), method !== "animated");
         }
@@ -17970,6 +18253,7 @@
         try {
           await loadPreferencesCached();
           const prefs = getCachedPreferences();
+          applySettingsCompactMode(prefs.settingsCompactMode);
           await loadAppThemeRegistry();
           applyAppTheme(prefs.appTheme);
           applyHardwareAccelerationPreference(
@@ -19015,6 +19299,16 @@
                 await buildMainAchievementsTable(cfg, lang);
               } catch {}
             }
+          });
+        }
+
+        const compactModeEl = document.getElementById("settings-compactModeCheckbox");
+        if (compactModeEl) {
+          applySettingsCompactMode(prefs.settingsCompactMode);
+          compactModeEl.addEventListener("change", async (event) => {
+            const compact = event.target.checked;
+            await window.api.savePreferences({ settingsCompactMode: compact });
+            applySettingsCompactMode(compact);
           });
         }
 
@@ -20359,6 +20653,7 @@
           "gog-official": "GOG Official",
           "xbox-pc": "Xbox PC",
           retroachievements: "RetroAchievements",
+          ps3recomp: "PS3 Recomp",
           ps4recomp: "PS4 Recomp",
           pcports: "PC Ports",
           x360recomp: "Xbox 360 Recomp",
@@ -21835,7 +22130,7 @@
           });
         settingsSearchNoResults.classList.add("hidden");
         for (const [disclosure, wasOpen] of settingsSearchDisclosureStates) {
-          disclosure.open = wasOpen;
+          disclosure.open = getCachedPreferences().settingsCompactMode === false || wasOpen;
         }
         settingsSearchDisclosureStates.clear();
       }
@@ -21847,6 +22142,13 @@
         }
         section.open = true;
       }
+
+      document.getElementById("settingsMenu")?.addEventListener("settings-compact-mode-changed", () => {
+        // Search may have saved the previous mode's open states. Rebuild that
+        // snapshot so clearing the query cannot undo Expand All or Collapse All.
+        settingsSearchDisclosureStates.clear();
+        if (settingsSearchInput?.value.trim()) filterSettings(settingsSearchInput.value);
+      });
 
       function filterSettings(queryValue) {
         const query = String(queryValue || "")
@@ -25940,7 +26242,14 @@
           const position =
             document.getElementById("settings-progressPositionDropdown")
               ?.value || "bottom-left";
-          window.api.showTestProgressNotification({ position, ...readNotificationPlacementControls("progress") });
+          window.api.showTestProgressNotification({
+            position,
+            progressPreset: document.getElementById("settings-progressPresetDropdown")?.value || "",
+            notificationMethod: document.getElementById("settings-progressNotificationMethodDropdown")?.value || "animated",
+            scale: Number(document.getElementById("settings-progressScaleSlider")?.value) || 1,
+            notificationDuration: Number(document.getElementById("settings-progressDurationSlider")?.value) || 0,
+            ...readNotificationPlacementControls("progress"),
+          });
         });
 
       document
@@ -26117,7 +26426,12 @@
             const presetKey = profile.key === "main" ? "preset" : `${profile.key}Preset`;
             const sanKey = profile.key === "main" ? "sanPreset" : `${profile.key}SanPreset`;
             try {
-              layout = await window.api.getNotificationPresetLayout({
+              const progressStyle = profile.key === "progress" ? window.AchievementsProgress.parseProgressPreset(
+                resetToPreset ? document.getElementById(profile.presetId)?.value : prefs.progressPreset,
+              ) : null;
+              layout = progressStyle?.type === "default" ? null : await window.api.getNotificationPresetLayout(progressStyle ? {
+                preset: progressStyle.preset || "default", useSanPreset: progressStyle.type === "san", sanPreset: progressStyle.sanPreset || "",
+              } : {
                 preset: resetToPreset ? document.getElementById(profile.presetId)?.value : prefs[presetKey] || prefs.preset || "default",
                 useSanPreset: resetToPreset ? document.getElementById("settings-useSanPresetCheckbox")?.checked : prefs.useSanPreset === true,
                 sanPreset: resetToPreset ? document.getElementById(profile.sanPresetId)?.value : prefs[sanKey] || "",
@@ -26182,7 +26496,7 @@
         }
       }
       document.getElementById("settings-useSanPresetCheckbox")?.addEventListener("change", () => {
-        for (const profile of NOTIFICATION_TIMING_PROFILES.filter((item) => item.presetId)) {
+        for (const profile of NOTIFICATION_TIMING_PROFILES.filter((item) => item.presetId && item.key !== "progress")) {
           void syncNotificationTimingProfile(profile, getCachedPreferences(), true);
         }
       });
@@ -26390,6 +26704,10 @@
           await window.api.savePreferences({ progressNotificationMethod });
         });
 
+      document.getElementById("settings-progressPresetDropdown")?.addEventListener("change", async (event) => {
+        await window.api.savePreferences({ progressPreset: event.target.value });
+      });
+
       document
         .getElementById("settings-presetDropdown")
         .addEventListener("change", (e) =>
@@ -26466,6 +26784,8 @@
       // Function to sync values between main UI and settings menu
       function syncSettingsToModal(options = {}) {
         const prefs = getCachedPreferences() || {};
+        populateProgressPresetControl(prefs);
+        applySettingsCompactMode(prefs.settingsCompactMode);
         if (!options.skipAppTheme) applyAppTheme(prefs.appTheme);
         applyHardwareAccelerationPreference(prefs?.disableHardwareAcceleration);
         if (globalAchievementLanguageSelect) {
@@ -26884,6 +27204,7 @@
           disableHardwareAcceleration: checkbox(
             "settings-disableHardwareAccelerationCheckbox",
           ),
+          settingsCompactMode: checkbox("settings-compactModeCheckbox"),
           enableHdrScreenshots: checkbox(
             "settings-enableHdrScreenshotsCheckbox",
           ),
@@ -26944,6 +27265,7 @@
           getVal("settings-progressNotificationMethodDropdown"),
           base.progressNotificationMethod || "animated",
         );
+        snapshot.progressPreset = getVal("settings-progressPresetDropdown") || "";
         snapshot.platinumSound = pick(
           getVal("settings-platinumSoundSelect") ||
             getVal("platinumSoundValue"),
@@ -32988,7 +33310,7 @@
             normalizedPlatform === "gog" ||
             normalizedPlatform === "gog-official";
           const supportsPlayStationStoreMetadata =
-            normalizedPlatform === "ps4recomp" ||
+            normalizedPlatform === "ps3recomp" || normalizedPlatform === "ps4recomp" ||
             normalizedPlatform === "shadps4" ||
             normalizedPlatform === "kytyps5";
           const supportsRpcs3WikiMetadata = normalizedPlatform === "rpcs3";
@@ -33624,6 +33946,7 @@
               return "Xbox PC";
             case "retroachievements":
               return "RetroAchievements";
+            case "ps3recomp": return "PS3 Recomp";
             case "ps4recomp": return "PS4 Recomp";
             case "pcports": return "PC Ports";
             case "x360recomp": return "Xbox 360 Recomp";
@@ -39528,16 +39851,17 @@
               return;
             }
             if (action === A.CONFIRM) {
-              const item = achievementMenu.querySelector(
-                ".dash-menu-item:not(:disabled)",
-              );
+              const items = Array.from(achievementMenu.querySelectorAll(".dash-menu-item:not(.hidden):not(:disabled)"));
+              const focused = document.activeElement?.closest?.(".dash-menu-item");
+              const item = items.includes(focused) ? focused : items[0];
               item?.click();
               return;
             }
             if ([A.UP, A.DOWN, A.LEFT, A.RIGHT].includes(action)) {
-              achievementMenu
-                .querySelector(".dash-menu-item:not(:disabled)")
-                ?.focus({ preventScroll: true });
+              const items = Array.from(achievementMenu.querySelectorAll(".dash-menu-item:not(.hidden):not(:disabled)"));
+              const index = items.indexOf(document.activeElement);
+              const direction = action === A.UP || action === A.LEFT ? -1 : 1;
+              items[(index + direction + items.length) % items.length]?.focus({ preventScroll: true });
               return;
             }
           }
@@ -40061,10 +40385,19 @@
             e.stopImmediatePropagation();
             return route(A.BACK);
           }
+          const isSettingsTextEntry =
+            overlayNow === "settings" &&
+            (e.target?.isContentEditable ||
+              e.target?.tagName === "TEXTAREA" ||
+              (e.target?.tagName === "INPUT" &&
+                ["text", "search", "password", "email", "url", "tel"].includes(
+                  e.target.type,
+                )));
           const allowSettingsNavKey =
             overlayNow === "settings" &&
-            // Keep text entry and caret navigation native in Settings search.
-            e.target?.id !== "settingsSearchInput" &&
+            // Text fields keep Space and caret navigation; other controls
+            // continue to use the Settings keyboard/controller navigation.
+            !isSettingsTextEntry &&
             [
               "ArrowUp",
               "ArrowDown",

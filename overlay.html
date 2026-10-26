@@ -736,6 +736,37 @@
       .empty-state-message {
         font-size: 16px;
       }
+      .overlay-action-menu, .overlay-action-panel, .overlay-action-notice {
+        background: var(--dracula-background, #282a36);
+        color: var(--dracula-foreground, #f8f8f2);
+        border: 1px solid var(--dracula-purple, #bd93f9);
+        border-radius: 8px;
+        box-shadow: 0 6px 24px #0008;
+        box-sizing: border-box;
+      }
+      .overlay-action-menu {
+        position: fixed; z-index: 100; padding: 6px;
+        max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto;
+      }
+      .overlay-action-menu button, .overlay-action-buttons button {
+        color: inherit; background: transparent; border: 0; border-radius: 5px;
+        padding: 10px 12px; font: inherit; cursor: pointer; overflow-wrap: anywhere;
+      }
+      .overlay-action-menu button { display: block; width: 100%; text-align: start; }
+      .overlay-action-menu button:hover, .overlay-action-buttons button:hover {
+        background: var(--dracula-current-line, #44475a);
+      }
+      .achievement-item.overlay-action-selected { outline: 1px solid var(--dracula-purple, #bd93f9); outline-offset: -1px; }
+      .overlay-action-backdrop { position: fixed; inset: 0; z-index: 101; background: #0008; display: grid; place-items: center; padding: 12px; }
+      .overlay-action-panel { padding: 16px; width: 100%; max-height: calc(100vh - 24px); overflow: auto; }
+      .overlay-action-panel h3 { margin: 0 0 12px; font-size: 17px; }
+      .overlay-action-panel p { margin: 12px 0; font-size: 13px; line-height: 1.5; }
+      .overlay-action-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; max-height: 25vh; overflow: auto; }
+      .overlay-action-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+      .overlay-action-buttons button { background: var(--dracula-current-line, #44475a); }
+      .overlay-action-notice { position: fixed; z-index: 102; bottom: 12px; left: 12px; right: 12px; padding: 12px; font-size: 13px; pointer-events: none; }
+      .overlay-action-notice.is-error { border-color: var(--dracula-red, #ff5555); }
+      #overlayAchievementMenu[hidden], #overlayAchievementDialog[hidden], #overlayAchievementNotice[hidden] { display: none; }
     </style>
   </head>
 
@@ -783,6 +814,7 @@
     </div>
 
     <script src="utils/i18n-ui.js"></script>
+    <script src="utils/overlay-achievement-actions.js"></script>
     <script>
       let overlayLang = "english";
       let overlayUiLang = "english";
@@ -1085,6 +1117,11 @@
       const NOTIFICATION_NAVIGATION_TARGET_TIMEOUT_MS = 10000;
       let notificationNavigationTargetTimer = null;
       let pendingVisibilityAckPayload = null;
+      const overlayAchievementActions = window.createOverlayAchievementActions({
+        api: window.api, list: document.getElementById("achievements-list"), t: tUi,
+        closeFilters: closeOverlayFilterMenus,
+        reload: async (name) => { currentDataHash = null; await loadAchievements(name); },
+      });
 
       function dispatchOverlayVisibilityAck(payload, reason = "immediate") {
         if (!payload) return;
@@ -1267,7 +1304,7 @@
             const earned = savedData.earned ? "1" : "0";
             const progress = savedData.progress ?? "";
             const max = savedData.max_progress ?? "";
-            return `${name}-${display}-${rarity}-${trophyType}-${earned}-${progress}-${max}`;
+            return `${name}-${display}-${rarity}-${trophyType}-${earned}-${progress}-${max}-${savedData.manual === true}-${savedData.earned_time || ""}`;
           })
           .join("|");
       }
@@ -1705,7 +1742,7 @@
           const useTrophyTypeRaritySortFallback =
             platformForRaritySort === "rpcs3" ||
             platformForRaritySort === "shadps4" ||
-            platformForRaritySort === "ps4recomp" ||
+            platformForRaritySort === "ps3recomp" || platformForRaritySort === "ps4recomp" ||
             platformForRaritySort === "kytyps5";
           const achievementsDataObj =
             await window.api.loadAchievementData(configName, {
@@ -1726,6 +1763,7 @@
             document.body.classList.add("overlay-compact");
             currentConfigName = configName;
             currentDataHash = null;
+            overlayAchievementActions.setData(configName, {});
             return;
           }
 
@@ -1935,6 +1973,7 @@
 
           currentConfigName = configName;
           currentDataHash = newHash;
+          overlayAchievementActions.setData(configName, savedAchievementsObj?.achievements);
           flushPendingNotificationNavigation();
         } finally {
           isLoading = false;
@@ -1987,6 +2026,7 @@
       });
 
       window.api.onLoadOverlayData((configName) => {
+        overlayAchievementActions.setConfig(configName);
         const achievementsList = document.getElementById("achievements-list");
         const emptyState = document.getElementById("empty-state");
 
@@ -2079,6 +2119,7 @@
       });
 
       function setOverlayVisible(visible, source = null) {
+        overlayAchievementActions.setVisible(!!visible);
         if (!visible) closeOverlayFilterMenus();
         document.body.classList.toggle("overlay-hidden", !visible);
         const ackPayload = {
@@ -2116,6 +2157,7 @@
       });
 
       window.api.on("overlay:interactive-state", (payload) => {
+        overlayAchievementActions.setInteractive(payload?.interactive === true);
         if (payload?.interactive === false) closeOverlayFilterMenus();
       });
 

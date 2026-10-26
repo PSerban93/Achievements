@@ -19,7 +19,19 @@ function snapshotFolder(config) {
 }
 function timestampSource(name) { return /^(?:trophies\.log|unlocked\.txt|progress_user\d+\.txt)$/i.test(path.basename(name)); }
 function snapshotSource(name) { return /^progress_user\d+\.txt$/i.test(path.basename(name)); }
-function binarySource(name) { return /^CUSA\d{5}-user\d+\.bin$/i.test(path.basename(name)); }
+function bitsetSource(name) { return /^trophies\.dat$/i.test(path.basename(name)); }
+function binarySource(name) { return bitsetSource(name) || /^CUSA\d{5}-user\d+\.bin$/i.test(path.basename(name)); }
+function decodeBitset(data, schema) {
+  if (data.length !== 16) throw new Error(data.length < 16 ? "Incomplete PS4 Recomp binary progress" : "Invalid PS4 Recomp binary progress size");
+  const ids = new Set(Array.isArray(schema) ? schema.map((entry) => Number(entry.name)) : []);
+  if (!ids.size || [...ids].some((id) => !Number.isInteger(id) || id < 0 || id >= 128)) throw new Error("PS4 Recomp schema is incompatible with 128-bit progress");
+  const unlocked = [];
+  for (let id = 0; id < 128; id++) if (data.readUInt32LE(Math.floor(id / 32) * 4) & (1 << (id % 32))) {
+    if (!ids.has(id)) throw new Error("PS4 Recomp binary progress contains a trophy outside its schema");
+    unlocked.push(id);
+  }
+  return unlocked;
+}
 function profileUser(name) { return path.basename(name).match(/(?:progress_user|CUSA\d{5}-user)(\d+)\.(?:txt|bin)$/i)?.[1] || ""; }
 function binaryProfiles(config, user) {
   const title = config.ps4_recomp_title_id;
@@ -72,6 +84,13 @@ function files(config) {
     if (regular(unlocked)) return [unlocked];
     pending.push(unlocked);
   }
+  // This convention has no title/profile header. Bind it only to the resolved
+  // single-game user root, after the existing explicitly identified sources.
+  // Keep a selected source through deletion/truncation; the reader retries it
+  // without interpreting an unrelated log as a replacement save.
+  const bitset = path.join(user, "trophies.dat");
+  if (!config.ps4_recomp_user_id && (regular(bitset) || typeof config.save_path === "string" &&
+      path.resolve(config.save_path).toLowerCase() === path.resolve(bitset).toLowerCase())) return [bitset];
   const persistent = path.join(user, "trophies.log");
   if (regular(persistent)) return [persistent];
   pending.push(persistent);
@@ -100,10 +119,22 @@ function files(config) {
 }
 function preferred(config) {
   const candidates = files(config), existing = candidates.find(regular);
-  if (existing) return existing;
+  if (existing) {
+    if (bitsetSource(existing) && config.config_path) {
+      // Validate a bounded read against the generated schema before exposing
+      // this candidate as Save Path. Live reads use the same decoder.
+      const bytes = Buffer.alloc(17);
+      const fd = fs.openSync(existing, "r");
+      try { decodeBitset(bytes.subarray(0, fs.readSync(fd, bytes, 0, bytes.length, 0)),
+        JSON.parse(fs.readFileSync(path.join(config.config_path, "achievements.json"), "utf8"))); }
+      finally { fs.closeSync(fd); }
+    }
+    return existing;
+  }
+  if (candidates.length === 1 && bitsetSource(candidates[0])) return candidates[0];
   if (config.ps4_recomp_progress_format === "title-unlocks") return candidates.find((file) => path.basename(file) === "unlocked.txt") || candidates[0];
   const declared = candidates.find((file) => (config.ps4_recomp_log_files || []).includes(file));
   if (declared) return declared;
   return candidates.find((file) => path.basename(file) === "last_run.log") || candidates[0];
 }
-module.exports = { files, preferred, timestampSource, snapshotSource, binarySource, profileUser };
+module.exports = { files, preferred, timestampSource, snapshotSource, bitsetSource, binarySource, decodeBitset, profileUser };

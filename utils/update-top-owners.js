@@ -2,7 +2,7 @@ const path = require("path");
 const fs = require("fs");
 
 const {
-  launchChromiumSafe: launchPlaywrightChromium,
+  launchBrowserSafe: launchPlaywrightBrowser,
 } = require("./playwright-runtime");
 
 const cheerio = require("cheerio");
@@ -45,7 +45,7 @@ async function scrapeSteamIdsWithPlaywright(options = {}) {
   const headless = options.headless !== false;
   let browser = null;
   try {
-    browser = await launchPlaywrightChromium("playwright", {
+    browser = await launchPlaywrightBrowser("playwright-core", {
       headless,
       args: ["--disable-blink-features=AutomationControlled"],
     });

@@ -1,7 +1,7 @@
 const path = require("path");
 
 const {
-  launchChromiumSafe: launchPlaywrightChromium,
+  launchBrowserSafe: launchPlaywrightBrowser,
 } = require("./playwright-runtime");
 const { createLogger } = require("./logger");
 
@@ -41,8 +41,8 @@ function markSteamGridNotFound(err, message) {
   return error;
 }
 
-async function launchChromiumSafe(opts = {}) {
-  return launchPlaywrightChromium("playwright-core", {
+async function launchBrowserSafe(opts = {}) {
+  return launchPlaywrightBrowser("playwright-core", {
     headless: true,
     args: baseLaunchArgs,
     ...opts,
@@ -56,7 +56,7 @@ async function getBrowserForApp(appid, opts = {}) {
     entry = { browser: null, users: 0, promise: null };
     // Publish the pending launch, so concurrent acquisitions share one browser.
     browserByApp.set(key, entry);
-    entry.promise = launchChromiumSafe(opts).then((browser) => {
+    entry.promise = launchBrowserSafe(opts).then((browser) => {
       entry.browser = browser;
       return browser;
     });
@@ -343,7 +343,7 @@ module.exports = {
   buildSteamGridSearchUrl,
   fetchSteamDbLibraryCover,
   fetchSteamGridDbImage,
-  launchChromiumSafe,
+  launchBrowserSafe,
   STEAM_DB_NOT_FOUND_TAG,
   STEAMGRID_NOT_FOUND_TAG,
 };

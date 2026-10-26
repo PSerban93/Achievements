@@ -132,14 +132,30 @@ function runtimeProcessName(root, env, port) {
   if (!literal) return "";
   return literal[1] + (literal[2] && process.platform === "win32" ? ".exe" : "");
 }
-function discoveryRootForFile(file) {
+function discoveryRootForFile(file, options = {}) {
   const name = path.basename(file).toLowerCase(), parent = path.dirname(file);
+  const directory = path.basename(parent).toLowerCase();
+  const nestedSettings = ["settings.json", "launcher.json", "launcher.ini", "run.py", "run.sh"].includes(name);
+  const launcherFile = directory === "launcher" && (nestedSettings || /\.py$/i.test(name) || PORTS.some((port) =>
+    identityFiles(port).some((relative) => path.basename(relative).toLowerCase() === name)));
+  // Resolve owned subfolders before treating a neighbouring run.py as a
+  // standalone installation. A separately watched port may itself be named
+  // user/data/launcher; never move that explicit root outside its watch scope.
+  if (launcherFile || ["data", "user"].includes(directory) && nestedSettings) {
+    const owner = path.dirname(parent);
+    if (options.watchRoot && samePath(options.watchRoot, parent)) return parent;
+    try {
+      if (!installation(owner) && installation(parent)) return parent;
+    } catch {} // Settings being rewritten remain associated with their owner.
+    return owner;
+  }
   if (name === "run.py" || name === "run.sh" || ["settings.json", "launcher.ini"].includes(name) &&
-      (regularFile(path.join(parent, "run.py")) || regularFile(path.join(parent, "run.sh")) || regularFile(path.join(parent, "launcher.ini"))) ||
+      (regularFile(path.join(parent, "run.py")) || regularFile(path.join(parent, "run.sh"))) ||
       PORTS.some((port) => port.launcher.toLowerCase() === name)) return parent;
-  if (path.basename(parent).toLowerCase() === "launcher" && (name === "settings.json" || /\.py$/i.test(name) || PORTS.some((port) =>
-    identityFiles(port).some((relative) => path.basename(relative).toLowerCase() === name)))) return path.dirname(parent);
-  if (["data", "user"].includes(path.basename(parent).toLowerCase()) && ["settings.json", "launcher.json", "launcher.ini"].includes(name)) return path.dirname(parent);
+  // A nested user/launcher.ini configures its parent installation. Checking
+  // the file against itself before handling nested settings invented a new
+  // installation rooted at user, with another user subfolder for progress.
+  if (["settings.json", "launcher.ini"].includes(name) && regularFile(path.join(parent, "launcher.ini"))) return parent;
   if (name === "trophies.tsv" && /^CUSA\d{5}$/.test(path.basename(parent)) && path.basename(path.dirname(parent)) === "trophies") {
     // Only associate exports with an actual runner installation, never an
     // arbitrary Documents/save directory or another platform's TSV.
@@ -396,7 +412,7 @@ async function generateConfig(game, configsDir, options = {}) {
   }
   const nativePlatinum = schemaHasNativePlatinum(json(path.join(schemaDir, "achievements.json")));
   const config = { ...previous, ...gameIdentity(game.gameRoot), name: finalName, displayName: previous.displayName || game.title, appid: game.appid, platform: "ps4recomp", native_platinum: nativePlatinum,
-    ...progressConfig(game, previous), config_path: schemaDir, save_path: progressPath(progressConfig(game, previous)),
+    ...progressConfig(game, previous), config_path: schemaDir, save_path: progressPath({ ...progressConfig(game, previous), config_path: schemaDir }),
     ps4_recomp_game: game.game, ps4_recomp_port: game.port, ps4_recomp_install_root: game.installRoot,
     ps4_recomp_game_root: game.gameRoot, ps4_recomp_user_root: game.userRoot, ps4_recomp_settings_file: game.settingsFile,
     ...(!collections.collection(game.port) ? { ps4_recomp_title_id: game.ps4_recomp_title_id,
@@ -682,15 +698,16 @@ function binaryCollector(name, config) {
     finish(target, stat) {
       if (length !== 16) throw new Error("Incomplete PS4 Recomp binary progress");
       const match = /^(CUSA\d{5})-user(\d+)\.bin$/.exec(path.basename(name));
-      if (!match || match[1] !== config.ps4_recomp_title_id || config.ps4_recomp_user_id && match[2] !== String(config.ps4_recomp_user_id)) {
+      const bitset = progressSources.bitsetSource(name);
+      const matchesIdentity = bitset ? !collections.collection(config.ps4_recomp_port) && !config.ps4_recomp_user_id &&
+        samePath(target, path.join(source(config), "trophies.dat")) :
+        match && match[1] === config.ps4_recomp_title_id && (!config.ps4_recomp_user_id || match[2] === String(config.ps4_recomp_user_id));
+      if (!matchesIdentity) {
         throw new Error("PS4 Recomp binary progress identity does not match the config");
       }
       const schema = json(path.join(config.config_path, "achievements.json"), []);
-      const ids = new Set(schema.map((entry) => Number(entry.name)));
-      if (!ids.size || [...ids].some((id) => !Number.isInteger(id) || id < 0 || id >= 128)) throw new Error("PS4 Recomp schema is incompatible with 128-bit progress");
       const data = Buffer.concat(chunks), records = [];
-      for (let id = 0; id < 128; id++) if (data.readUInt32LE(Math.floor(id / 32) * 4) & (1 << (id % 32))) {
-        if (!ids.has(id)) throw new Error("PS4 Recomp binary progress contains a trophy outside its schema");
+      for (const id of progressSources.decodeBitset(data, schema)) {
         records.push({ key: `${id}:1`, id: String(id), context: "", time: 0 });
       }
       return { name, hash: crypto.createHash("sha256").update(data).digest("hex"), size: 16, mtimeMs: stat.mtimeMs,
@@ -719,7 +736,7 @@ function logCollector(name, config) {
       const next = gameFromText(text, config.ps4_recomp_port);
       if (next) { context = next; hasMarkers = true; }
     }
-    const match = snapshot ? /^unlocked (\d{1,4}) (\d+)$/.exec(text) : timestampSource(name) ? /^(\d{1,4})\s+(\d+)\s*$/.exec(text) : /(?:Runtime|Trophies): trophy (\d{1,4}) unlocked\b/.exec(text);
+    const match = snapshot ? /^unlocked (\d{1,4}) (\d+)$/.exec(text) : timestampSource(name) ? /^(\d{1,4})\s+(\d+)\s*$/.exec(text) : /(?:Runtime|Trophies): trophy (\d{1,4})(?: \(platinum\))? unlocked\b/.exec(text);
     if (!match) return;
     const id = String(Number(match[1])), count = (counts.get(id) || 0) + 1;
     counts.set(id, count);
@@ -865,7 +882,7 @@ function loadConfigSnapshot(config, previous = {}, options = {}) {
       if (failed) throw new Error(failed.name + ": " + failed.error);
       if (!config.ps4_recomp_user_id) {
         const profileNames = new Set([...Object.keys(state.sources || {}), ...logRead.files.filter((entry) => !entry.missing).map((entry) => entry.name)]
-          .filter((name) => progressSources.snapshotSource(name) || progressSources.binarySource(name)).map(progressSources.profileUser));
+          .filter((name) => progressSources.snapshotSource(name) || progressSources.binarySource(name)).map(progressSources.profileUser).filter(Boolean));
         if (profileNames.size > 1) throw new Error("PS4 Recomp progress user changed; select the intended user ID before monitoring");
       }
       if (!collection) {

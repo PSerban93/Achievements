@@ -80,6 +80,12 @@ function rebasePlaytimeSession(configName, timestamp = Date.now()) {
   }
 }
 
+// Synchronous persistence finishes before Electron exits. Keep trackers alive
+// if another quit handler cancels the exit; their next save starts here.
+function flushPlaytimeSessions() {
+  for (const tracker of activeWatchers.values()) tracker.flush?.();
+}
+
 function notifyError(message) {
   try {
     const { webContents } = require("electron");
@@ -445,9 +451,9 @@ function notifyHeaderImageUpdated(appid, platform) {
 
 async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
   const platform = normalizePlatform(options?.platform) || "steam";
-  const supportsHeroFallback = platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp";
+  const supportsHeroFallback = platform === "ps3recomp" || platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp";
   const preferLocalOnly =
-    platform === "ps4recomp" ||
+    platform === "ps3recomp" || platform === "ps4recomp" ||
     platform === "pcports" ||
     platform === "x360recomp" ||
     platform === "gog" ||
@@ -904,7 +910,7 @@ function startPlaytimeLogWatcher(configData, options = {}) {
   const platform = normalizePlatform(configData?.platform) || "steam";
   const requiresPs4Runtime = platform === "ps4recomp";
   const isSteamGridOnly =
-    platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp" || platform === "xenia" || platform === "rpcs3" || platform === "shadps4" || platform === "kytyps5";
+    platform === "ps3recomp" || platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp" || platform === "xenia" || platform === "rpcs3" || platform === "shadps4" || platform === "kytyps5";
   const launchPid =
     Number.isFinite(Number(configData?.__launchPid)) &&
     Number(configData.__launchPid) > 0
@@ -912,7 +918,10 @@ function startPlaytimeLogWatcher(configData, options = {}) {
       : null;
   const normalizedProcessNames = getProcessExecutableNames(processNames);
   const processNameSignature = getProcessNameSignature(processNames);
-  const existing = activeWatchers.get(appid);
+  const watcherKey = platform === "ps3recomp" ? `ps3recomp:${configData.__playtimeKey || configData.name}:${require("./ps3-recomp").cacheScope(configData)}` : appid;
+  const ps3Pids = new Set();
+  if (launchPid) ps3Pids.add(launchPid);
+  const existing = activeWatchers.get(watcherKey);
   if (existing) {
     if (configData?.__playtimeKey) {
       existing.playtimeKey = configData.__playtimeKey;
@@ -934,8 +943,8 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     return () => {};
   }
 
-  if (!requiresPs4Runtime && !playtimeStartMap.has(appid)) {
-    playtimeStartMap.set(appid, Date.now());
+  if (!requiresPs4Runtime && !playtimeStartMap.has(watcherKey)) {
+    playtimeStartMap.set(watcherKey, Date.now());
   }
 
   const { preferencesPath } = require("./paths");
@@ -997,17 +1006,17 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     cleanup: () => {},
     processNameSignature,
   };
-  activeWatchers.set(appid, tracker);
+  activeWatchers.set(watcherKey, tracker);
   const cleanup = () => {
     closed = true;
-    playtimeStartMap.delete(appid);
+    playtimeStartMap.delete(watcherKey);
     if (unsubscribe) {
       try {
         unsubscribe();
       } catch {}
       unsubscribe = null;
     }
-    activeWatchers.delete(appid);
+    activeWatchers.delete(watcherKey);
   };
   tracker.cleanup = cleanup;
 
@@ -1023,8 +1032,8 @@ function startPlaytimeLogWatcher(configData, options = {}) {
   const sendStart = (headerUrl) => {
     if (startNotified) return;
     startNotified = true;
-    if (!playtimeStartMap.has(appid)) {
-      playtimeStartMap.set(appid, Date.now());
+    if (!playtimeStartMap.has(watcherKey)) {
+      playtimeStartMap.set(watcherKey, Date.now());
     }
     if (requiresPs4Runtime) playtimeLogger.info("ps4recomp:session:start", { configName: tracker.playtimeKey, appid });
     lastHeaderUrl = headerUrl || lastHeaderUrl || null;
@@ -1039,16 +1048,15 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     }
   };
 
-  const sendStop = async (headerUrlLocal) => {
-    const startedAt = playtimeStartMap.get(appid) || Date.now();
-    const endedAt = Date.now();
-    const playedMs = Math.max(0, endedAt - startedAt);
+  const persistSession = (endedAt) => {
+    if (!seenRunning || !playtimeStartMap.has(watcherKey)) return null;
+    const startedAt = playtimeStartMap.get(watcherKey);
     const unsavedMs = Math.max(0, endedAt - Math.max(startedAt, tracker.persistedSince || startedAt));
     const key = tracker.playtimeKey;
-    if (requiresPs4Runtime) playtimeLogger.info("ps4recomp:session:stop", { configName: key, appid, playedMs });
-    let savedTotalMs = null;
     try {
-      savedTotalMs = accumulatePlaytime(key, unsavedMs);
+      const savedTotalMs = accumulatePlaytime(key, unsavedMs);
+      tracker.persistedSince = Math.max(startedAt, tracker.persistedSince || startedAt, endedAt);
+      return savedTotalMs;
     } catch (error) {
       playtimeLogger.error("playtime:save-failed", {
         appid: String(appid),
@@ -1063,6 +1071,19 @@ function startPlaytimeLogWatcher(configData, options = {}) {
         ),
       );
     }
+    return null;
+  };
+  tracker.flush = () => {
+    if (!closed) persistSession(Date.now());
+  };
+
+  const sendStop = async (headerUrlLocal) => {
+    const startedAt = playtimeStartMap.get(watcherKey) || Date.now();
+    const endedAt = Date.now();
+    const playedMs = Math.max(0, endedAt - startedAt);
+    const key = tracker.playtimeKey;
+    if (requiresPs4Runtime) playtimeLogger.info("ps4recomp:session:stop", { configName: key, appid, playedMs });
+    const savedTotalMs = persistSession(endedAt);
     if (savedTotalMs !== null) {
       try {
         ipcMain.emit("playtime:session-ended", null, {
@@ -1079,7 +1100,7 @@ function startPlaytimeLogWatcher(configData, options = {}) {
       }
     }
 
-    playtimeStartMap.delete(appid);
+    playtimeStartMap.delete(watcherKey);
     const desc = formatDuration(playedMs);
     if (!isPlaytimeDisabled()) {
       sendPlaytimeNotification({
@@ -1122,7 +1143,12 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     if (closed || requiresPs4Runtime && stopping) return;
     const list = Array.isArray(processes) ? processes : [];
     if (!list.length) return;
+    if (platform === "ps3recomp") for (const pid of ps3Pids) { if (!list.some((p) => p.pid === pid)) ps3Pids.delete(pid); }
     const running = list.some((p) => {
+      if (platform === "ps3recomp") {
+        if (require("./ps3-recomp").matchesProcess(configData, p)) ps3Pids.add(p.pid);
+        return ps3Pids.has(p.pid) && normalizedProcessNames.includes(String(p.name || "").toLowerCase());
+      }
       if (platform === "ps4recomp") return require("./ps4-recomp").matchesProcess(configData, p);
       if (launchPid && p.pid === launchPid) return true;
       if (!normalizedProcessNames.length) return false;
@@ -1195,6 +1221,7 @@ function startPlaytimeLogWatcher(configData, options = {}) {
 
 module.exports = {
   startPlaytimeLogWatcher,
+  flushPlaytimeSessions,
   rebasePlaytimeSession,
   getActiveLastPlayed,
   cacheHeaderImage,

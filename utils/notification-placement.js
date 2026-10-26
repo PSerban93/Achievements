@@ -6,7 +6,7 @@
   else root.AchievementsNotificationPlacement = api;
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   const profiles = Object.freeze([
-    "main", "rare", "platinum", "xenia", "x360recomp", "ps4recomp",
+    "main", "rare", "platinum", "xenia", "x360recomp", "ps3recomp", "ps4recomp",
     "rpcs3", "shadps4", "kytyps5", "progress", "playtime",
   ]);
   const limit = 4096;
@@ -32,20 +32,17 @@
       vertical: position.startsWith("middle") ? "center" : position.includes("top") ? "top" : "bottom",
     };
   }
-  function apply({ x, y, width, height, position, workArea, insets = {}, ...offsets }) {
+  function apply({ x, y, position, ...offsets }) {
     const anchor = axes(position);
     const dx = normalizeOffset(offsets.notificationOffsetX);
     const dy = normalizeOffset(offsets.notificationOffsetY);
     // Zero must preserve authored margins and existing oversized-window behavior.
     if (!dx && !dy) return { x, y };
-    x += anchor.horizontal === "right" ? -Math.max(0, dx) : anchor.horizontal === "left" ? Math.max(0, dx) : dx;
-    y += anchor.vertical === "bottom" ? -Math.max(0, dy) : anchor.vertical === "top" ? Math.max(0, dy) : dy;
-    // Keep the layout visible, allowing transparent paint gutters off-screen.
-    const minX = workArea.x - (insets.left || 0);
-    const minY = workArea.y - (insets.top || 0);
-    const maxX = Math.max(minX, workArea.x + workArea.width - width + (insets.right || 0));
-    const maxY = Math.max(minY, workArea.y + workArea.height - height + (insets.bottom || 0));
-    return { x: Math.round(Math.max(minX, Math.min(maxX, x))), y: Math.round(Math.max(minY, Math.min(maxY, y))) };
+    // Positive edge offsets move inward; negative ones move outward. Centered
+    // axes retain their screen directions. Deliberately allow off-screen content.
+    x += anchor.horizontal === "right" ? -dx : dx;
+    y += anchor.vertical === "bottom" ? -dy : dy;
+    return { x: Math.round(x), y: Math.round(y) };
   }
   return { profiles, limit, normalizeOffset, preferenceKey, defaults, read, axes, apply };
 });

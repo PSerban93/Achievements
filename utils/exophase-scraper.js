@@ -7,13 +7,16 @@ if (typeof global.File === "undefined") {
 }
 
 const cheerio = require("cheerio");
+const {
+  cleanExophaseTitle, normalizeTitle, rankCatalogCandidates, compareAchievements,
+  selectCatalogResult, searchExophaseCatalog,
+} = require("./exophase-catalog");
 
 const {
-  launchChromiumSafe: launchPlaywrightChromium,
+  launchBrowserSafe: launchPlaywrightBrowser,
 } = require("./playwright-runtime");
 
 const DEFAULT_WAIT_MS = 30000;
-const BASE_EXOPHASE_URL = "https://www.exophase.com/game/";
 const EXOPHASE_RARITY_SOURCE = "exophase-achievement-percentages";
 const DEFAULT_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
@@ -21,6 +24,7 @@ const DEFAULT_UA =
 const EXOPHASE_PLATFORM_MAP = {
   x360recomp: "xbox-360",
   xenia: "xbox-360",
+  ps3recomp: "ps3",
   rpcs3: "ps3",
   ps4recomp: "ps4",
   shadps4: "ps4",
@@ -97,11 +101,11 @@ function ensureDir(p) {
   fs.mkdirSync(p, { recursive: true });
 }
 
-async function launchChromiumSafe(opts = {}) {
+async function launchBrowserSafe(opts = {}) {
   const baseArgs = ["--disable-blink-features=AutomationControlled"];
 
-  return launchPlaywrightChromium(
-    "playwright",
+  return launchPlaywrightBrowser(
+    "playwright-core",
     {
       headless: true,
       args: baseArgs,
@@ -120,90 +124,6 @@ function mapExophasePlatform(platform) {
     .toLowerCase();
   if (!key) return "";
   return EXOPHASE_PLATFORM_MAP[key] || key;
-}
-
-function buildExophaseSlug(input) {
-  const raw = String(input || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/['\u2019]s\b/g, " s")
-    .replace(/['\u2019]/g, "")
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return raw || "game";
-}
-
-const ROMAN_NUMERAL_MAP = {
-  i: "1",
-  ii: "2",
-  iii: "3",
-  iv: "4",
-  v: "5",
-  vi: "6",
-  vii: "7",
-  viii: "8",
-  ix: "9",
-  x: "10",
-  xi: "11",
-  xii: "12",
-  xiii: "13",
-  xiv: "14",
-  xv: "15",
-  xvi: "16",
-  xvii: "17",
-  xviii: "18",
-  xix: "19",
-  xx: "20",
-};
-
-function replaceRomanNumerals(input) {
-  return String(input || "").replace(/\b[ivxlcdm]+\b/g, (match) => {
-    const key = match.toLowerCase();
-    return ROMAN_NUMERAL_MAP[key] || match;
-  });
-}
-
-function slugify(input) {
-  const raw = String(input || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-  return raw || "game";
-}
-
-function buildExophaseSlugVariants(input) {
-  const rawBase = String(input || "").trim();
-  const cleaned = rawBase
-    .replace(/\b(trophies?|trophy)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  const base = cleaned || rawBase;
-  if (!base) return ["game"];
-  const normalized = base.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-  const lower = normalized.toLowerCase();
-
-  const variants = new Set();
-  variants.add(buildExophaseSlug(base));
-
-  const apostropheVariant = slugify(lower.replace(/['\u2019]s\b/g, " s"));
-  variants.add(apostropheVariant);
-
-  const romanVariant = slugify(replaceRomanNumerals(lower));
-  variants.add(romanVariant);
-
-  const comboVariant = slugify(
-    replaceRomanNumerals(lower.replace(/['\u2019]s\b/g, " s")),
-  );
-  variants.add(comboVariant);
-
-  const noApos = lower.replace(/['\u2019]/g, "");
-  variants.add(slugify(noApos));
-  variants.add(slugify(replaceRomanNumerals(noApos)));
-
-  return Array.from(variants).filter(Boolean);
 }
 
 function ensureLangUrl(baseUrl, code) {
@@ -381,15 +301,24 @@ async function looksBlocked(page) {
 
 async function loadAwardsPage(page, url, deadline = Infinity) {
   const remaining = deadline - Date.now();
-  if (remaining <= 0) throw new Error("Exophase lookup deadline exceeded");
-  const resp = await page.goto(url, {
-    waitUntil: "domcontentloaded",
-    timeout: Math.min(DEFAULT_WAIT_MS, remaining),
-  });
-  if (Number.isFinite(deadline) && resp && resp.status() >= 400) {
-    throw new Error(`Exophase HTTP ${resp.status()}`);
+  if (remaining <= 0) throw Object.assign(new Error("Exophase lookup timed out"), { code: "EXOPHASE_TIMEOUT" });
+  let resp;
+  try {
+    resp = await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: Math.min(DEFAULT_WAIT_MS, remaining),
+    });
+  } catch (error) {
+    throw Object.assign(new Error(`Exophase page request failed: ${error.message}`), {
+      code: error.name === "TimeoutError" ? "EXOPHASE_TIMEOUT" : "EXOPHASE_NETWORK_ERROR", cause: error,
+    });
   }
-  if (Date.now() >= deadline) throw new Error("Exophase lookup deadline exceeded");
+  if (resp && resp.status() >= 400) {
+    throw Object.assign(new Error(`Exophase HTTP ${resp.status()}`), {
+      code: "EXOPHASE_HTTP_ERROR", statusCode: resp.status(),
+    });
+  }
+  if (Date.now() >= deadline) throw Object.assign(new Error("Exophase lookup timed out"), { code: "EXOPHASE_TIMEOUT" });
   await page
     .waitForSelector("[class*=award-detail]", {
       timeout: Math.max(1, Math.min(15000, deadline - Date.now())),
@@ -435,7 +364,9 @@ function extractAchievementsFromHtml(html, baseUrl) {
       const imgEl = card.find("[class*=award-image]").first();
       const bg = imgEl.css("background-image") || "";
       const m = bg.match(/url\(["']?(.*?)["']?\)/i);
-      if (m && m[1]) iconUrl = abs(m[1]);
+      const directSrc = imgEl.attr("src") || "";
+      if (directSrc) iconUrl = abs(directSrc);
+      else if (m && m[1]) iconUrl = abs(m[1]);
     }
 
     const rarityPct = extractRarityPctFromCard($, card);
@@ -473,9 +404,9 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
   if (!platform) {
     throw new Error("Missing platform for Exophase");
   }
-  const slugCandidates = options.slugCandidates || [
-    options.slug || buildExophaseSlug(options.title || ""),
-  ];
+  const title = cleanExophaseTitle(options.title);
+  if (!title) throw new Error("Missing game title for Exophase catalog lookup");
+  const schemaAchievements = Array.isArray(options.schemaAchievements) ? options.schemaAchievements : [];
 
   const langMap = options.langMap || EXOPHASE_LANG_MAP;
   const langKeysRaw = options.langKeys || EXOPHASE_LANG_KEYS;
@@ -512,7 +443,7 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
     page = await context.newPage();
     ownsPage = true;
   } else {
-    browser = await launchChromiumSafe({ headless: !headed });
+    browser = await launchBrowserSafe({ headless: !headed });
     ownsBrowser = true;
     if (storageState && fs.existsSync(storageState)) {
       ctxOpts.storageState = storageState;
@@ -550,63 +481,40 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
   }
 
   try {
-    // Bound optional PS5 enrichment without changing existing platform lookups.
-    const deadline = platform === "ps5" ? Date.now() + 60000 : Infinity;
-    let baseUrl = null;
-    let firstErr = null;
-    let baseItems = [];
-    let selectedHtml = "";
-    for (const slug of slugCandidates) {
-      if (Date.now() >= deadline) break;
-      const candidateBase =
-        platform === "ps3" || platform === "ps4" || platform === "ps5"
-          ? `${BASE_EXOPHASE_URL}${slug}/trophies/`
-          : `${BASE_EXOPHASE_URL}${slug}-${platform}/achievements/`;
-      const testUrl = ensureLangUrl(candidateBase, langMap.english);
-      try {
-        const { html } = await loadAwardsPage(page, testUrl, deadline);
-        if (platform === "ps5") {
-          const documentTitle = cheerio.load(html)("title").text();
-          if (!/[-|]\s*PS5\s*[-|]\s*Exophase\.com/i.test(documentTitle)) {
-            throw new Error("Exophase page is not a PS5 trophy list");
-          }
-        }
-        const items = extractAchievementsFromHtml(html, testUrl);
-        if (items.length) {
-          baseUrl = candidateBase;
-          baseItems = items;
-          selectedHtml = html;
-          break;
-        }
-      } catch (err) {
-        if (platform === "ps5") logger?.info("exophase:ps5:candidate-failed", {
-          slug, error: err?.message || String(err),
-        });
-        firstErr = firstErr || err;
+    const deadline = Date.now() + 60000;
+    const games = await searchExophaseCatalog(page, title, { deadline, logger });
+    const ranked = rankCatalogCandidates(games, title, platform);
+    const exact = ranked.filter(candidate => candidate.rank === 2);
+    const candidates = exact.length ? exact : ranked;
+    if (!candidates.length) throw Object.assign(new Error(`No Exophase ${platform} achievement list matches ${title}`), { code: "EXOPHASE_NOT_FOUND" });
+    if (candidates.length > 6) throw Object.assign(new Error("Exophase catalog returned too many matching lists"), { code: "EXOPHASE_AMBIGUOUS" });
+    const results = [];
+    for (const candidate of candidates) {
+      const testUrl = ensureLangUrl(candidate.baseUrl, langMap.english);
+      const { html } = await loadAwardsPage(page, testUrl, deadline);
+      const $ = cheerio.load(html);
+      const gameTitle = $("h1, h2").first().text().replace(/\s+/g, " ").trim();
+      const pageTitles = [candidate.title, ...candidate.title.split(/\s*[|｜]\s*/)].map(normalizeTitle);
+      if (!pageTitles.includes(normalizeTitle(gameTitle))) {
+        logger?.warn("exophase:catalog:page-mismatch", { title, platform, url: candidate.baseUrl, gameTitle });
         continue;
       }
+      if (/^ps[345]$/.test(platform) &&
+          !new RegExp(`[-|][^-|]*\\b${platform}\\b[^-|]*[-|]\\s*Exophase\\.com`, "i").test($("title").text())) continue;
+      const items = extractAchievementsFromHtml(html, testUrl);
+      if (!items.length) throw Object.assign(new Error("No achievements extracted for english baseline."), { code: "EXOPHASE_EMPTY_PAGE" });
+      const comparison = compareAchievements(schemaAchievements, items);
+      logger?.info("exophase:catalog:candidate", { title, platform, url: candidate.baseUrl, ...comparison });
+      results.push({ candidate, comparison, items, gameTitle });
     }
-    if (!baseUrl) {
-      if (Date.now() >= deadline) throw new Error("Exophase lookup deadline exceeded");
-      throw firstErr || new Error("No working Exophase URL");
-    }
-
-    const englishUrl = ensureLangUrl(baseUrl, langMap.english);
-    const baseHtml = platform === "ps5"
-      ? selectedHtml
-      : (await loadAwardsPage(page, englishUrl)).html;
-    const gameTitle =
-      (await page
-        .locator("h1, h2")
-        .first()
-        .textContent()
-        .catch(() => "")) || "";
-    if (!baseItems.length) {
-      baseItems = extractAchievementsFromHtml(baseHtml, englishUrl);
-    }
-    if (!baseItems.length) {
-      throw new Error("No achievements extracted for english baseline.");
-    }
+    const selected = selectCatalogResult(results);
+    const baseUrl = selected.candidate.baseUrl;
+    const baseItems = selected.items;
+    const gameTitle = selected.gameTitle;
+    logger?.info("exophase:catalog:selected", {
+      title, platform, baseUrl, masterId: selected.candidate.masterId,
+      fetchedCount: baseItems.length, ...selected.comparison,
+    });
 
     const achievements = baseItems.map((it) => ({
       index: it.index,
@@ -680,6 +588,8 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
     return {
       baseUrl,
       gameTitle: String(gameTitle || "").trim(),
+      masterId: selected.candidate.masterId,
+      usedSlug: new URL(baseUrl).pathname.split("/")[2],
       items: achievements,
     };
   } finally {
@@ -700,8 +610,6 @@ module.exports = {
   EXOPHASE_LANG_MAP,
   EXOPHASE_RARITY_SOURCE,
   mapExophasePlatform,
-  buildExophaseSlug,
-  buildExophaseSlugVariants,
   fetchExophaseAchievementsMultiLang,
   downloadExophaseIcon,
 };

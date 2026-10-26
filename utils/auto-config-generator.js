@@ -1955,6 +1955,7 @@ function runAchievementsGenerator(
       env: {
         ...process.env,
         [SCHEMA_PARSE_IPC_ENV]: "1",
+        ACHIEVEMENTS_SCHEMA_PARSE_OPERATION: opts.generationId || `generator-${process.pid}-${Date.now()}`,
         LOGGER_DIR: logDir,
         LOGGER_SUPPRESS_CLEAR: "1",
       },
@@ -2284,6 +2285,7 @@ async function runAchievementsGeneratorBatch(
         if (generated.displayName) displayNameByAppId.set(appid, generated.displayName);
         if (generated.launchMetadata) launchMetadataByAppId.set(appid, generated.launchMetadata);
       } catch (error) {
+        if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(error?.code)) throw error;
         const outcome = { appid, platform: opts.platform || null,
           status: "technical-error", error: String(error.message || error) };
         generationResults.set(appid, outcome);
@@ -2429,6 +2431,7 @@ async function runAchievementsGeneratorBatch(
       env: {
         ...process.env,
         [SCHEMA_PARSE_IPC_ENV]: "1",
+        ACHIEVEMENTS_SCHEMA_PARSE_OPERATION: opts.generationId || `generator-${process.pid}-${Date.now()}`,
         LOGGER_DIR: logDir,
         LOGGER_SUPPRESS_CLEAR: "1",
       },
@@ -2708,6 +2711,7 @@ async function runAchievementsGeneratorBatch(
   });
 }
 async function generateGameConfigs(folderPath, outputDir, opts = {}) {
+  opts = { ...opts, generationId: opts.generationId || `operation-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}` };
   const onSeedCache = opts.onSeedCache || null;
   const onGenerationProgress =
     typeof opts.onGenerationProgress === "function"
@@ -2899,6 +2903,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
         try {
           if (!outcome) {
             const generated = await runAchievementsGeneratorSafe(appid, schemaBase, app.getPath("userData"), {
+              generationId: opts.generationId,
               platform: itemForcedPlatform || (mappingForRun?.steam_appid ? "uplay" : "auto"),
               platformIsExplicit: !!itemForcedPlatform,
               epicNamespace: epicIdentity?.namespace,
@@ -2930,6 +2935,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
             epicIdentity = outcome.epicIdentity || epicIdentity;
           }
         } catch (error) {
+          if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(error?.code)) throw error;
           const result = { appid, status: "technical-error", error: String(error.message || error) };
           generationResults.set(appid, result);
           failed++;
@@ -3094,6 +3100,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
                 schemaBase,
                 userDataDir,
                 {
+                  generationId: opts.generationId,
                   platform: platformMode,
                   epicNamespace: epicIdentity?.namespace,
                   langs: itemSchemaLanguages,
@@ -3140,6 +3147,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
               generated = true;
               break;
             } catch (err) {
+              if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(err?.code)) throw err;
               lastError = err;
               autoConfigLogger.warn("achgen:attempt-failed", {
                 appid: uplayId,
@@ -3209,6 +3217,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
           }
         }
       } catch (e) {
+        if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(e?.code)) throw e;
         autoConfigLogger.error("achgen:schema-failed", {
           appid,
           error: e?.message || String(e),
@@ -3735,6 +3744,7 @@ function pickGeneratedConfigForTask(entries, task = {}) {
   return candidates[0] || null;
 }
 async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
+  opts = { ...opts, generationId: opts.generationId || `operation-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}` };
   const onSeedCache = opts.onSeedCache || null;
   const onTaskProgress =
     typeof opts.onTaskProgress === "function" ? opts.onTaskProgress : null;
@@ -3914,6 +3924,7 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
               !!normalizePlatform(normalizedTasks.find((task) => task.appid === appid)?.forcePlatform)),
             langs: schemaLanguages,
             schemaParseProgressIds,
+            generationId: opts.generationId,
             onProgress: (progress = {}) => {
             const progressAppId = String(progress?.appid || "").trim();
             const fallbackBatchIndex =
@@ -4057,6 +4068,7 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
       }
     }
     const scanResult = await generateGameConfigs(tmpRoot, outputDir, {
+      generationId: opts.generationId,
       onSeedCache,
       schemaLanguages,
       taskOverrides,
@@ -4113,6 +4125,7 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
   }
 }
 async function generateConfigForAppId(appid, outputDir, opts = {}) {
+  opts = { ...opts, generationId: opts.generationId || `operation-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}` };
   const onSeedCache = opts.onSeedCache || null;
   const onGenerationProgress =
     typeof opts.onGenerationProgress === "function"
@@ -4193,6 +4206,7 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
     tmpRoot,
   });
   const scanResult = await generateGameConfigs(tmpRoot, outputDir, {
+    generationId: opts.generationId,
     onSeedCache,
     onGenerationProgress,
     forcePlatform: effectivePlatform,

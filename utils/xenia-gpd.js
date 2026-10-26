@@ -397,6 +397,7 @@ function buildSchemaFromGpd(parsed, options = {}) {
 }
 
 module.exports = {
+  parseXdbfEntries,
   parseGpdFile,
   buildSnapshotFromGpd,
   buildSchemaFromGpd,

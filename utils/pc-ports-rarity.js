@@ -8,7 +8,7 @@ const { EXOPHASE_RARITY_SOURCE, fetchExophaseAchievementsMultiLang } = require("
 
 // LADXHD adapted this set from the GBC game. These percentages describe
 // Exophase's Retro/GBC players, not a population of PC-port players.
-const LADXHD_SLUG = "legend-of-zelda-links-awakening-dx-the";
+const LADXHD_TITLE = "The Legend of Zelda: Link's Awakening DX";
 
 function supportsConfig(config) {
   return config?.platform === "pcports" && config.appid === "ladxhd" && config.pc_port_game === "ladxhd";
@@ -67,7 +67,8 @@ async function refreshPcPortSchemaRarity(config, options = {}) {
   }
   options.logger?.info("pcports:exophase:start", { appid: config.appid, onlyMissing: options.onlyMissing === true });
   const fetched = await fetchExophaseAchievementsMultiLang({
-    slug: LADXHD_SLUG, platform: "retro", langKeys: ["english"], logger: options.logger,
+    title: LADXHD_TITLE, platform: "retro", schemaAchievements: initialEntries,
+    langKeys: ["english"], logger: options.logger,
   });
   if (cancelled()) return { skipped: true, updated: false, reason: "cancelled" };
   // Re-read after fetching so a concurrent rescan's definitions are preserved.

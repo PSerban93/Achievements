@@ -101,7 +101,7 @@ function requestRemote(kind, options) {
     process.once("disconnect", onDisconnect);
     process.send({ type: "schema-parse:request", id, kind, options: {
       appid: options.appid, outDir: options.outDir, items: options.items,
-      reason: options.reason, chunkSize: options.chunkSize,
+      reason: options.reason, generationId: options.generationId, chunkSize: options.chunkSize,
     } }, error => { if (error) finish(error); });
   });
 }
@@ -113,7 +113,7 @@ function coordinateSchemaParse(kind, options, execute) {
 function errorData(error) {
   return { message: String(error?.message || error), code: error?.code,
     stdout: error?.stdout, stderr: error?.stderr,
-    downloadWarnings: error?.downloadWarnings };
+    downloadWarnings: error?.downloadWarnings, nativeCode: error?.nativeCode, stage: error?.stage, syscall: error?.syscall, path: error?.path, dest: error?.dest, committed: error?.committed };
 }
 
 function attachSchemaParseCoordinator(child, { userDataDir, schemaRoot, deadline }) {
@@ -141,7 +141,7 @@ function attachSchemaParseCoordinator(child, { userDataDir, schemaRoot, deadline
     Promise.resolve().then(async () => {
       const input = message.options || {};
       if (stopping) throw cancelled("Application is closing");
-      const options = { userDataDir, reason: String(input.reason || "generator"), signal: controller.signal,
+      const options = { userDataDir, reason: String(input.reason || "generator"), generationId: String(input.generationId || "session"), signal: controller.signal,
         onQueueState: state => {
           if (state.state === "queued" && !record.waiting) {
             record.waiting = true; waiting++; deadline?.pause();

@@ -39,11 +39,10 @@ window.createNotificationPlacementControls = function (options) {
       state.group.classList.toggle("is-disabled", disabled);
       for (const axis of ["X", "Y"]) {
         const control = state[axis];
-        const centered = (axis === "X" ? anchor.horizontal : anchor.vertical) === "center";
         const label = `${text(...labels[axis])} (px)`;
         control.label.textContent = label;
         for (const input of [control.range, control.number]) {
-          input.min = String(centered ? -placement.limit : 0);
+          input.min = String(-placement.limit);
           input.setAttribute("aria-label", label);
           input.disabled = disabled;
         }
@@ -110,7 +109,7 @@ window.createNotificationPlacementControls = function (options) {
     const hint = document.createElement("p");
     hint.className = "notification-placement-hint";
     hint.dataset.i18n = "settings.notificationPlacement.hint";
-    hint.textContent = text("hint", "Additional distance in logical px, independent of Scale. Center offsets can be negative. 0 keeps the current position.");
+    hint.textContent = text("hint", "Offset in logical px, independent of Scale. At screen edges: + inward, − outward. Center directions follow the labels. Values can move the notification off-screen; 0 keeps the current position.");
     const reset = document.createElement("button");
     reset.type = "button";
     reset.className = "settings-action-btn";

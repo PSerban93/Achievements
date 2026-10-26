@@ -5,7 +5,8 @@ const fsp = require("fs/promises");
 const path = require("path");
 const axios = require("axios");
 const { createLogger } = require("./logger");
-const { writeJsonAtomicSync } = require("./atomic-json-store");
+const { writeJsonAtomic, writeJsonAtomicSync } = require("./atomic-json-store");
+const { withAuthFile, getAsyncSafeStorage, decryptAuthString, isAuthStorageUnavailable } = require("./auth-safe-storage");
 const { writeAchievementPercentagesSidecar } = require("./achievement-rarity");
 
 const RETROACHIEVEMENTS_PLATFORM = "retroachievements";
@@ -76,21 +77,6 @@ function resolveAuthPath(userDataDir) {
   );
 }
 
-function getElectronSafeStorage(options = {}) {
-  if (options?.safeStorage) return options.safeStorage;
-  try {
-    const safeStorage = require("electron")?.safeStorage;
-    if (
-      safeStorage &&
-      typeof safeStorage.isEncryptionAvailable === "function" &&
-      safeStorage.isEncryptionAvailable()
-    ) {
-      return safeStorage;
-    }
-  } catch {}
-  return null;
-}
-
 function normalizeStoredAuth(payload = {}) {
   const username = normalizeRetroAchievementsUsername(payload.username);
   const webApiKey = normalizeRetroAchievementsApiKey(payload.webApiKey);
@@ -107,51 +93,53 @@ function normalizeStoredAuth(payload = {}) {
 async function saveRetroAchievementsAuth(userDataDir, auth, options = {}) {
   const normalized = normalizeStoredAuth(auth);
   if (!normalized) throw new Error("retroachievements-auth-invalid");
-  const safeStorage = getElectronSafeStorage(options);
-  if (!safeStorage) {
-    throw new Error("retroachievements-safe-storage-unavailable");
-  }
-  const encrypted = safeStorage
-    .encryptString(JSON.stringify(normalized))
-    .toString("base64");
   const filePath = resolveAuthPath(userDataDir);
-  writeJsonAtomicSync(filePath, {
-    version: 1,
-    mode: "electron-safe-storage",
-    data: encrypted,
+  return withAuthFile(filePath, async () => {
+    const safeStorage = await getAsyncSafeStorage(options);
+    if (!safeStorage) throw new Error("retroachievements-safe-storage-unavailable");
+    const encrypted = await safeStorage.encryptStringAsync(JSON.stringify(normalized));
+    await writeJsonAtomic(filePath, {
+      version: 1,
+      mode: "electron-safe-storage",
+      data: encrypted.toString("base64"),
+    });
+    return filePath;
   });
-  return filePath;
 }
 
 async function loadRetroAchievementsAuth(userDataDir, options = {}) {
-  try {
-    const wrapper = JSON.parse(
-      await fsp.readFile(resolveAuthPath(userDataDir), "utf8"),
-    );
-    if (
-      wrapper?.version !== 1 ||
-      wrapper?.mode !== "electron-safe-storage" ||
-      !wrapper?.data
-    ) {
+  return withAuthFile(resolveAuthPath(userDataDir), async () => {
+    try {
+      const wrapper = JSON.parse(
+        await fsp.readFile(resolveAuthPath(userDataDir), "utf8"),
+      );
+      if (
+        wrapper?.version !== 1 ||
+        wrapper?.mode !== "electron-safe-storage" ||
+        !wrapper?.data
+      ) {
+        return null;
+      }
+      const safeStorage = await getAsyncSafeStorage(options);
+      const decrypted = await decryptAuthString(safeStorage,
+        Buffer.from(String(wrapper.data), "base64"),
+      );
+      return normalizeStoredAuth(JSON.parse(decrypted));
+    } catch (error) {
+      if (isAuthStorageUnavailable(error)) throw error;
       return null;
     }
-    const safeStorage = getElectronSafeStorage(options);
-    if (!safeStorage) return null;
-    const decrypted = safeStorage.decryptString(
-      Buffer.from(String(wrapper.data), "base64"),
-    );
-    return normalizeStoredAuth(JSON.parse(decrypted));
-  } catch {
-    return null;
-  }
+  });
 }
 
 async function clearRetroAchievementsAuth(userDataDir) {
-  try {
-    await fsp.unlink(resolveAuthPath(userDataDir));
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
+  return withAuthFile(resolveAuthPath(userDataDir), async () => {
+    try {
+      await fsp.unlink(resolveAuthPath(userDataDir));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  });
 }
 
 function makeApiError(status, payload = null) {
@@ -314,7 +302,13 @@ async function ensureRetroAchievementsAuth(options = {}) {
 
 async function getRetroAchievementsStatus(options = {}) {
   const configured = fs.existsSync(resolveAuthPath(options.userDataDir));
-  const auth = await loadRetroAchievementsAuth(options.userDataDir, options);
+  let auth;
+  try {
+    auth = await loadRetroAchievementsAuth(options.userDataDir, options);
+  } catch (error) {
+    if (!isAuthStorageUnavailable(error)) throw error;
+    return { connected: false, configured, temporarilyUnavailable: true };
+  }
   if (!auth) {
     return { connected: false, configured };
   }

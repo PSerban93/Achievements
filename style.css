@@ -7017,8 +7017,11 @@ kbd {
 
 #mainScroll .ms-hero-side {
   flex: none;
-  display: flex;
-  flex-direction: column;
+  width: max-content;
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: 1fr;
   align-items: stretch;
   gap: 8px;
   border-left: 1px solid var(--dracula-comment);
@@ -7032,6 +7035,8 @@ kbd {
 
 #mainScroll .ms-view-cluster {
   display: flex;
+  min-width: 0;
+  max-width: 100%;
   gap: 6px;
   justify-content: flex-end;
 }
@@ -7055,16 +7060,24 @@ kbd {
 #mainScroll .ms-hero-play,
 #mainScroll .ms-card-actions #createNewConfigBtn {
   box-sizing: border-box;
-  width: 180px;
+  /* Localised labels can exceed the original 180px button width. */
+  width: max-content;
+  min-width: min(180px, 100%);
+  max-width: 100%;
   min-height: 44px;
   padding: 10px 16px;
+  white-space: normal;
+  overflow-wrap: anywhere;
   justify-content: center;
   margin: 0;
 }
 
 #mainScroll .ms-view-cluster button,
 #mainScroll .ms-hero-play {
-  align-self: flex-end;
+  /* Share both dimensions, including translated labels that wrap. */
+  width: 100%;
+  height: 100%;
+  align-self: stretch;
 }
 
 #mainScroll #playBtn::before,
@@ -7226,6 +7239,10 @@ html:not(.fa-ready) #mainScroll #toggleBtn::before {
   margin: 0;
   padding: 10px 20px;
   white-space: nowrap;
+}
+
+#mainScroll .ms-card-actions {
+  max-width: 100%;
 }
 
 #mainScroll #createNewConfigBtn::before {
@@ -7522,10 +7539,13 @@ html:not(.fa-ready) #mainScroll #toggleBtn::before {
   #mainScroll .ms-hero-side {
     border-left: none;
     padding-left: 0;
-    width: 100%;
-    flex-direction: row;
+    width: fit-content;
+    margin-left: auto;
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     justify-content: flex-end;
-    align-items: center;
+    align-items: stretch;
   }
 
   #mainScroll .ms-config-columns {
@@ -7561,10 +7581,6 @@ html:not(.fa-ready) #mainScroll #toggleBtn::before {
   }
 
   #mainScroll .ms-hero-identity {
-    flex-wrap: wrap;
-  }
-
-  #mainScroll .ms-hero-side {
     flex-wrap: wrap;
   }
 

@@ -1,3 +1,8 @@
+if (process.env.ACHIEVEMENTS_BROWSER_HELPER === "1") {
+  require("./utils/electron-browser-host");
+  return;
+}
+
 const {
   app,
   BrowserWindow,
@@ -11,11 +16,15 @@ const {
   Notification,
   nativeImage,
 } = require("electron");
+process.env.ACHIEVEMENTS_ELECTRON_EXECUTABLE = process.execPath;
 const x360Recomp = require("./utils/x360-recomp-state");
 const ps4Recomp = require("./utils/ps4-recomp");
 const pcPorts = require("./utils/pc-ports");
+const ps3Recomp = require("./utils/ps3-recomp");
 const x360RecompArt = require("./utils/x360-recomp-art");
 const kytyTrophy = require("./utils/kytyps5-trophy");
+const achievementLock = require("./utils/achievement-lock");
+const achievementLockRuntime = require("./utils/achievement-lock-runtime");
 const { refreshKytySchemaRarity } = require("./utils/kytyps5-rarity");
 const { supportsConfig: supportsPcPortRarity, refreshPcPortSchemaRarity } = require("./utils/pc-ports-rarity");
 // Polyfill File for environments where undici expects it (Electron main may lack global File)
@@ -39,6 +48,7 @@ if (process.platform === "win32") {
 }
 const { spawn, fork, execFile, spawnSync } = require("child_process");
 const { Worker } = require("worker_threads");
+const { watchGenerationProcess } = require("./utils/generation-process-timeout");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -52,6 +62,8 @@ const AdmZip = require("adm-zip");
 const SanPresetCapabilities = require("./utils/san-preset-capabilities");
 const NativePresetDimensions = require("./utils/notification-preset-dimensions");
 const NotificationPlacement = require("./utils/notification-placement");
+const { parseProgressPreset, getProgressValues, installProgressNotificationRenderer } = require("./utils/notification-progress");
+const progressPresetWindows = new WeakSet();
 const { NotificationDisplayService } = require("./utils/notification-display");
 const notificationDisplays = new NotificationDisplayService({
   screen,
@@ -241,6 +253,7 @@ const {
 } = require("./utils/schema-parse-coordinator");
 const {
   startPlaytimeLogWatcher,
+  flushPlaytimeSessions,
   rebasePlaytimeSession,
   cacheHeaderImage,
   redownloadHeaderImage,
@@ -2432,6 +2445,7 @@ const DEFAULT_PREFERENCES = {
   showDashboardOnStart: false,
   startMaximized: false,
   disableHardwareAcceleration: true,
+  settingsCompactMode: true,
   disableUpdate: false,
   disablePlaytime: false,
   showNotificationRarityPercentage: true,
@@ -2440,10 +2454,15 @@ const DEFAULT_PREFERENCES = {
   trophyModeSilverThreshold: 50,
   progressPosition: "bottom-left",
   progressNotificationMethod: "animated",
+  progressPreset: "",
   useSanPreset: false,
   sanPreset: "",
   rareSanPreset: "",
   platinumSanPreset: "",
+  ps3recompSanPreset: "",
+  ps3recompSound: "mute",
+  ps3recompPreset: "default",
+  ps3recompPosition: "center-bottom",
   ps4recompSanPreset: "",
   ps4recompSound: "mute",
   ps4recompPreset: "default",
@@ -3038,27 +3057,7 @@ function looksLikeSchemaArray(json) {
 }
 
 function looksLikeSaveJson(json) {
-  if (!json || typeof json !== "object") return false;
-  if (Array.isArray(json)) {
-    const a = json[0] || {};
-    return (
-      "Achieved" in a ||
-      "UnlockTime" in a ||
-      "CurProgress" in a ||
-      "MaxProgress" in a ||
-      "earned" in a
-    );
-  }
-  const firstVal = Object.values(json)[0];
-  return (
-    firstVal &&
-    typeof firstVal === "object" &&
-    ("Achieved" in firstVal ||
-      "UnlockTime" in firstVal ||
-      "CurProgress" in firstVal ||
-      "MaxProgress" in firstVal ||
-      "earned" in firstVal)
-  );
+  return require("./utils/achievement-data").looksLikeSaveJson(json);
 }
 
 function readJsonSafe(fp) {
@@ -3144,17 +3143,7 @@ function findSaveBaseFromSelection(selDir, appid) {
 }
 
 function resolveSaveFilePath(saveBase, appid) {
-  const candidates = [
-    path.join(saveBase, "steam_settings", String(appid), "achievements.json"),
-    path.join(saveBase, String(appid), "achievements.json"),
-    path.join(saveBase, "achievements.json"),
-  ];
-  for (const p of candidates) {
-    try {
-      if (fs.existsSync(p)) return p;
-    } catch {}
-  }
-  return path.join(saveBase, String(appid), "achievements.json");
+  return require("./utils/achievement-data").resolveSaveFilePath(saveBase, appid);
 }
 
 function isRuneUplayConfigMeta(configMeta) {
@@ -4007,6 +3996,12 @@ configureSchemaDownloadNotifications(({ appid, displayName }) => {
   notifyWarn(tUi("main.message.schemaConnectionProblem", {
     game: displayName || tUi("main.message.schemaUnknownGame", {}, "Game"), appid,
   }, "A connection problem occurred while downloading the schema for “{game}” ({appid})."));
+});
+
+const { configureSchemaParseRuntimeNotifications } = require("./utils/schema-parse-runtime-preparation");
+configureSchemaParseRuntimeNotifications(() => {
+  notifyWarn(tUi("main.message.schemaParseUnavailable", {},
+    "Schema Parse could not be prepared. Trying alternative sources."));
 });
 
 const infoOnceKeys = new Set();
@@ -5422,6 +5417,7 @@ function armOverlayVisibilityAckTimeout(visible, source) {
 
 function sendOverlayVisibility(visible, source) {
   const requestedVisible = !!visible;
+  if (!requestedVisible) overlayAchievementActionEpoch++;
   const resolvedSource = String(source || "unknown");
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     overlayLogger.warn("overlay:visibility-dispatch:skipped", {
@@ -5948,6 +5944,7 @@ function applyOverlayKeyboardScrollShortcutRegistration() {
 
 function setOverlayInteractive(next) {
   overlayInteractive = !!next;
+  if (!overlayInteractive) overlayAchievementActionEpoch++;
   if (!overlayInteractive) stopOverlayGlobalDrag();
   applyOverlayInputMode();
   applyOverlayFocusMode();
@@ -6873,6 +6870,11 @@ function applyPreferenceSideEffects(
     "rareSanPreset",
     "platinumPreset",
     "platinumSanPreset",
+    "progressPreset",
+    "progressNotificationMethod",
+    "disableProgress",
+    "ps3recompPreset",
+    "ps3recompSanPreset",
     "ps4recompPreset",
     "ps4recompSanPreset",
     "x360recompPreset",
@@ -8177,12 +8179,14 @@ async function runAchievementsGenerator(
       env: {
         ...process.env,
         [SCHEMA_PARSE_IPC_ENV]: "1",
+        ACHIEVEMENTS_SCHEMA_PARSE_OPERATION: opts.generationId || `manual-${process.pid}-${Date.now()}`,
         LOGGER_DIR: logDir,
         LOGGER_SUPPRESS_CLEAR: "1",
       },
       windowsHide: true,
     });
-    attachSchemaParseCoordinator(cp, { userDataDir, schemaRoot: schemaBaseDir });
+    const deadline = watchGenerationProcess(cp, 15 * 60 * 1000, { signal: opts.signal });
+    attachSchemaParseCoordinator(cp, { userDataDir, schemaRoot: schemaBaseDir, deadline });
 
     // forward logs to UI (same topic as auto-configs)
     const receiveDownloadWarning = createSchemaDownloadWarningReceiver();
@@ -8190,6 +8194,8 @@ async function runAchievementsGenerator(
     const finishGeneration = (code) => {
       if (settled) return;
       settled = true;
+      deadline.clear();
+      if (deadline.error) { reject(deadline.error); return; }
       code === 0 ? resolve() : reject(new Error(`Code: ${code}`));
     };
     const flushLines = (chunk, level) => {
@@ -8237,6 +8243,7 @@ async function runAchievementsGenerator(
     cp.on("error", (error) => {
       if (settled) return;
       settled = true;
+      deadline.clear();
       reject(error);
     });
     cp.on("close", finishGeneration);
@@ -8381,7 +8388,7 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
   appid = sanitizedAppId;
 
   const schemaBase = SCHEMA_ROOT_PATH; // %APPDATA%\Achievements\configs\schema
-  if (normalizedPlatform === "ps4recomp" || normalizedPlatform === "x360recomp" || normalizedPlatform === "pcports") {
+  if (normalizedPlatform === "ps3recomp" || normalizedPlatform === "ps4recomp" || normalizedPlatform === "x360recomp" || normalizedPlatform === "pcports") {
     const configFiles = fs.readdirSync(configsDir).filter((file) => file.endsWith(".json"));
     for (const file of configFiles) {
       const cfg = readJsonSafe(path.join(configsDir, file));
@@ -12983,31 +12990,10 @@ function getConfigTitleForExophaseRarity(config = {}, fallback = "") {
     fallback ||
     "";
   return String(raw || "")
-    .replace(/\((?:PS4 Recomp|Xenia|RPCS3|PS4|shadps4)\)\s*$/i, "")
+    .replace(/\((?:PS3 Recomp|PS4 Recomp|Xenia|RPCS3|PS4|shadps4)\)\s*$/i, "")
     .replace(/[™®©]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function buildExophaseRaritySlugCandidates(config = {}, platform = "") {
-  const title = getConfigTitleForExophaseRarity(
-    config,
-    config?.appid != null ? String(config.appid).trim() : "",
-  );
-  const variants = buildExophaseSlugVariants(title);
-  if (platform === "shadps4" || platform === "ps4recomp") {
-    return Array.from(
-      new Set([...variants, ...variants.map((slug) => `${slug}-ps4`)]),
-    );
-  }
-  if (platform !== "rpcs3") return variants;
-  return Array.from(
-    new Set([
-      ...variants,
-      ...variants.map((slug) => `${slug}-ps3`),
-      ...variants.map((slug) => `${slug}-psn`),
-    ]),
-  );
 }
 
 function buildExophaseRarityMatchMaps(items = []) {
@@ -13102,36 +13088,11 @@ async function refreshExophaseRarityForConfig(
   schemaAchievements,
 ) {
   const appid = config?.appid != null ? String(config.appid).trim() : "";
-  const slugCandidates = buildExophaseRaritySlugCandidates(config, platform);
-  if (!slugCandidates.length) {
-    throw new Error("No Exophase slug candidates could be built.");
-  }
-
-  let exoData = null;
-  let usedSlug = slugCandidates[0];
-  let lastError = null;
-  for (const slug of slugCandidates) {
-    try {
-      exoData = await fetchExophaseAchievementsMultiLang({
-        slug,
-        platform,
-        langKeys: ["english"],
-        langMap: EXOPHASE_LANG_MAP,
-        logger: rarityLogger,
-      });
-      usedSlug = slug;
-      break;
-    } catch (err) {
-      lastError = err;
-      rarityLogger.warn("rarity:exophase:retry", {
-        platform,
-        appid,
-        slug,
-        error: err?.message || String(err),
-      });
-    }
-  }
-  if (!exoData) throw lastError || new Error("No working Exophase URL");
+  const title = getConfigTitleForExophaseRarity(config, appid);
+  const exoData = await fetchExophaseAchievementsMultiLang({
+    title, platform, schemaAchievements,
+    langKeys: ["english"], langMap: EXOPHASE_LANG_MAP, logger: rarityLogger,
+  });
 
   const items = Array.isArray(exoData?.items) ? exoData.items : [];
   const fetchedCount = items.reduce(
@@ -13143,7 +13104,7 @@ async function refreshExophaseRarityForConfig(
   return {
     ...merged,
     fetchedCount,
-    usedSlug,
+    usedSlug: exoData.usedSlug,
     baseUrl: exoData?.baseUrl || "",
   };
 }
@@ -13476,7 +13437,7 @@ ipcMain.handle(
 
       const normalizedPlatform = normalizePlatform(config?.platform);
       const cacheFallbackPlatforms = new Set([
-        "ps4recomp",
+        "ps3recomp", "ps4recomp",
         "pcports",
         "x360recomp",
         "xenia",
@@ -13685,6 +13646,12 @@ ipcMain.handle(
         const parsed = ps4Recomp.loadConfigSnapshot({ ...config, name: configName }, cached);
         return { achievements: await applyManualOverridesForReturn(parsed.snapshot, null, cached),
           save_path: ps4Recomp.progressPath(config), ...(parsed.valid || parsed.missing ? {} : { error: parsed.error }) };
+      }
+      if (normalizedPlatform === "ps3recomp") {
+        const cached = (await loadPreviousAchievements(configName, normalizedPlatform, ps3Recomp.cacheOptions(config))) || {};
+        const parsed = ps3Recomp.loadConfigSnapshot(config, cached);
+        return { achievements: await applyManualOverridesForReturn(parsed.snapshot, null, cached),
+          save_path: ps3Recomp.progressPath(config), ...(parsed.valid || parsed.missing ? {} : { error: parsed.error }) };
       }
       if (normalizedPlatform === "pcports") {
         const cached = (await loadPreviousAchievements(configName, normalizedPlatform, pcPorts.cacheOptions(config))) || {};
@@ -14537,7 +14504,7 @@ function collectConfigSaveDeletionDirectories({
 }) {
   const appidStr = String(appid || "").trim();
   // A Kyty config owns the active user's set files, never the whole title directory.
-  if (["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(normalizePlatform(platform))) return [];
+  if (["ps3recomp", "ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(normalizePlatform(platform))) return [];
   if (!appidStr) return [];
   const targets = new Set();
   const addTarget = (candidate) => {
@@ -14681,6 +14648,8 @@ ipcMain.handle("delete-config", async (_event, payload) => {
       const appid =
         (normalizePlatform(configData?.platform) === "ps4recomp"
           ? sanitizeAppIdForPlatform(configData?.appid, "ps4recomp") : "") ||
+        (normalizePlatform(configData?.platform) === "ps3recomp"
+          ? sanitizeAppIdForPlatform(configData?.appid, "ps3recomp") : "") ||
         (normalizePlatform(configData?.platform) === "pcports"
           ? sanitizeAppIdForPlatform(configData?.appid, "pcports") : "") ||
         (normalizePlatform(configData?.platform) === "kytyps5"
@@ -14794,7 +14763,7 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         }
       }
 
-      const preserveKytySharedAssets = ["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform) &&
+      const preserveKytySharedAssets = ["ps3recomp", "ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform) &&
         fs.readdirSync(configsDir).filter((file) => file.toLowerCase().endsWith(".json"))
           .some((file) => {
             try {
@@ -15517,6 +15486,9 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
     platform = platform || "steam";
     if (platform === "ps4recomp") {
       return { success: false, message: tUi("main.message.schemaPs4RecompRescan", {}, "Rescan the PS4 port installation folder to regenerate its schema.") };
+    }
+    if (platform === "ps3recomp") {
+      return { success: false, message: tUi("main.message.schemaPs3RecompRescan", {}, "Rescan the PS3 Recomp installation folder to regenerate its schema.") };
     }
     if (platform === "pcports") {
       return { success: false, message: tUi("main.message.schemaPcPortsRescan", {}, "Rescan the PC port installation folder to regenerate its schema.") };
@@ -17082,13 +17054,14 @@ function getNotificationTimingPreferences(
   const validDuration = durationValue != null && Number.isFinite(duration) && duration >= 0;
   if (validScale && validDuration) return { scale, duration };
 
-  const preset = selection.preset ||
+  const progressStyle = profile === "progress" ? parseProgressPreset(selection.progressPreset ?? prefs.progressPreset) : null;
+  const preset = progressStyle?.preset || selection.preset ||
     prefs[profile === "main" ? "preset" : `${profile}Preset`] || prefs.preset || "default";
-  const sanPreset = selection.sanPreset ??
+  const sanPreset = progressStyle?.sanPreset ?? selection.sanPreset ??
     prefs[profile === "main" ? "sanPreset" : `${profile}SanPreset`] ?? "";
-  const useSanPreset = selection.useSanPreset ?? (prefs.useSanPreset === true);
+  const useSanPreset = progressStyle ? progressStyle.type === "san" : selection.useSanPreset ?? (prefs.useSanPreset === true);
   let defaults = { scale: 1, duration: 0 };
-  if (profile !== "progress" && profile !== "playtime" &&
+  if (progressStyle?.type !== "default" && profile !== "playtime" &&
       !isNativeWindowsNotificationPreset(preset) && !isGameBarNotificationPreset(preset)) {
     try {
       if (useSanPreset && sanPreset) {
@@ -17404,7 +17377,18 @@ function createNotificationWindow(message) {
         });
       }
     }
+    if (message.notificationType === "progress") {
+      try {
+        await notificationWindow.webContents.executeJavaScript(`(${installProgressNotificationRenderer.toString()})()`);
+      } catch (error) {
+        notificationLogger.warn("progress-preset:renderer-install-failed", { error: error?.message || String(error) });
+        notificationWindow.close();
+        return;
+      }
+    }
     notificationWindow.webContents.send("show-notification", {
+      notificationType: message.notificationType || "achievement",
+      progressValues: message.notificationType === "progress" ? getProgressValues(message) : null,
       name: message.name || "",
       hidden: sanTruthy(message.hidden),
       displayName: message.displayName,
@@ -18173,7 +18157,7 @@ ipcMain.on("show-test-emulator-notification", (_event, options = {}) => {
         ? "ShadPS4"
         : platform === "kytyps5"
           ? "KytyPS5"
-          : platform === "ps4recomp" ? "PS4 Recomp" : platform === "x360recomp" ? "Xbox 360 Recomp" : "Xenia";
+          : platform === "ps3recomp" ? "PS3 Recomp" : platform === "ps4recomp" ? "PS4 Recomp" : platform === "x360recomp" ? "Xbox 360 Recomp" : "Xenia";
   const tierLabel = trophyType
     ? trophyType.charAt(0).toUpperCase() + trophyType.slice(1)
     : "";
@@ -22235,13 +22219,13 @@ function normalizeNotificationTrophyType(value) {
 
 function isPlayStationEmulatorNotificationPlatform(platform) {
   const normalized = normalizePlatform(platform);
-  return ["ps4recomp", "rpcs3", "shadps4", "kytyps5"].includes(normalized);
+  return ["ps3recomp", "ps4recomp", "rpcs3", "shadps4", "kytyps5"].includes(normalized);
 }
 
 function isTrophyTierNotificationPlatform(platform) {
   const normalized = normalizePlatform(platform);
   return (
-    normalized === "ps4recomp" ||
+    normalized === "ps3recomp" || normalized === "ps4recomp" ||
     normalized === "rpcs3" ||
     normalized === "shadps4" ||
     normalized === "kytyps5" ||
@@ -22252,6 +22236,7 @@ function isTrophyTierNotificationPlatform(platform) {
 
 function getEmulatorNotificationPreferencePrefix(platform) {
   const normalized = normalizePlatform(platform);
+  if (normalized === "ps3recomp") return "ps3recomp";
   if (normalized === "ps4recomp") return "ps4recomp";
   if (normalized === "x360recomp") return "x360recomp";
   if (normalized === "xenia") return "xenia";
@@ -22623,7 +22608,12 @@ function getConfigGameArtworkSelections(config = {}, activePreset = "") {
   // Xenia/X360 keep their platform profile unless Trophy Mode routes to Rare;
   // PlayStation grades keep their platform profile. Other games can use Rare.
   if (!emulatorPreferencePrefix && !normalUsesRareProfile) profiles.push({ usesRareProfile: true });
-  return profiles.map((profile) => resolveAchievementPresetSelection({ normalPreset, emulatorPreferencePrefix, ...profile }, prefs));
+  const selections = profiles.map((profile) => resolveAchievementPresetSelection({ normalPreset, emulatorPreferencePrefix, ...profile }, prefs));
+  const progressStyle = parseProgressPreset(prefs.progressPreset);
+  if (prefs.disableProgress !== true && normalizeProgressNotificationMethod(prefs.progressNotificationMethod) === "animated" && progressStyle.type !== "default") {
+    selections.push({ preset: progressStyle.preset || "default", sanPreset: progressStyle.sanPreset || "", useSanPreset: progressStyle.type === "san" });
+  }
+  return selections;
 }
 
 function configUsesGameCoverPreset(config = {}, activePreset = "", savedSelection = null) {
@@ -24111,7 +24101,8 @@ function queueProgressNotification(data) {
       cachedPreferences?.progressNotificationMethod ||
       "animated",
   );
-  data = { ...(data || {}), scale, notificationDuration, notificationMethod };
+  data = { ...(data || {}), scale, notificationDuration, notificationMethod,
+    progressPreset: data?.progressPreset ?? cachedPreferences?.progressPreset ?? "" };
   notificationLogger.info("queue-progress", {
     displayName: data?.displayName || "",
     progress: data?.progress ?? null,
@@ -24138,6 +24129,17 @@ function processNextProgressNotification() {
     processNextProgressNotification();
   };
 
+  const showAnimatedProgress = (payload = data, onFinished = finishProgressNotification) => {
+    try {
+      const window = showProgressNotification(payload);
+      if (window && !window.isDestroyed?.()) window.once("closed", onFinished);
+      else onFinished();
+    } catch (error) {
+      notificationLogger.warn("progress-notification:show-failed", { error: error?.message || String(error) });
+      onFinished();
+    }
+  };
+
   if (data?.notificationMethod === "native") {
     let timer = null;
     let shown = false;
@@ -24153,14 +24155,7 @@ function processNextProgressNotification() {
       notificationLogger.warn("native-windows-progress:fallback", {
         displayName: data?.displayName || "", reason, error: error ? String(error.message || error) : null,
       });
-      try {
-        const window = showProgressNotification({ ...data, notificationMethod: "animated" });
-        if (window) window.once("closed", finishNative);
-        else finishNative();
-      } catch (fallbackError) {
-        notificationLogger.warn("native-windows-progress:fallback-failed", { error: String(fallbackError.message || fallbackError) });
-        finishNative();
-      }
+      showAnimatedProgress({ ...data, notificationMethod: "animated" }, finishNative);
     };
     try {
       const notification = showNativeWindowsProgressNotification(data, {
@@ -24242,12 +24237,7 @@ function processNextProgressNotification() {
             reason: result?.reason || null,
             fallback: "animated-progress",
           });
-          const fallbackWindow = showProgressNotification(data);
-          if (fallbackWindow) {
-            fallbackWindow.on("closed", finishProgressNotification);
-          } else {
-            finishProgressNotification();
-          }
+          showAnimatedProgress();
         })
         .catch((error) => {
           notificationLogger.warn("gamebar-notification:fallback", {
@@ -24255,24 +24245,13 @@ function processNextProgressNotification() {
             error: error?.message || String(error),
             fallback: "animated-progress",
           });
-          const fallbackWindow = showProgressNotification(data);
-          if (fallbackWindow) {
-            fallbackWindow.on("closed", finishProgressNotification);
-          } else {
-            finishProgressNotification();
-          }
+          showAnimatedProgress();
         });
       return;
     }
   }
 
-  const progressWindow = showProgressNotification(data);
-
-  if (progressWindow) {
-    progressWindow.on("closed", finishProgressNotification);
-  } else {
-    finishProgressNotification();
-  }
+  showAnimatedProgress();
 }
 
 let currentAchievementsFilePath = null;
@@ -24320,6 +24299,9 @@ function makeCacheKey(configName, platform = "steam", options = null) {
   const parts = [safeName, safePlatform];
   if (safePlatform === "ps4recomp") {
     return [...parts, "profile_" + ps4Recomp.cacheScope(readConfigForAchievementCache(configName), options || {})].join("_");
+  }
+  if (safePlatform === "ps3recomp") {
+    return [...parts, "profile_" + ps3Recomp.cacheScope(readConfigForAchievementCache(configName), options || {})].join("_");
   }
   if (safePlatform === "pcports") {
     return [...parts, "profile_" + pcPorts.cacheScope(readConfigForAchievementCache(configName), options || {})].join("_");
@@ -24389,7 +24371,7 @@ function listScopedAchievementCachePaths(configName, platform = "steam") {
     normalizedPlatform !== "epic-official" &&
     normalizedPlatform !== "shadps4" &&
     normalizedPlatform !== "xlivelessness" &&
-    normalizedPlatform !== "ps4recomp" && normalizedPlatform !== "pcports" && normalizedPlatform !== "x360recomp" && normalizedPlatform !== "kytyps5"
+    normalizedPlatform !== "ps3recomp" && normalizedPlatform !== "ps4recomp" && normalizedPlatform !== "pcports" && normalizedPlatform !== "x360recomp" && normalizedPlatform !== "kytyps5"
   ) {
     const exactPath = getCachePath(configName, normalizedPlatform);
     return exactPath ? [exactPath] : [];
@@ -24874,6 +24856,7 @@ function normalizeCacheSeedPath(input) {
 function buildCacheSeedKey(config) {
   if (!config || typeof config !== "object") return "";
   if (normalizePlatform(config.platform) === "ps4recomp") return `ps4recomp:${config.appid}:${config.ps4_recomp_install_root}:${ps4Recomp.cacheScope(config)}`;
+  if (normalizePlatform(config.platform) === "ps3recomp") return `ps3recomp:${config.appid}:${ps3Recomp.cacheScope(config)}`;
   if (normalizePlatform(config.platform) === "pcports") return "pcports:" + pcPorts.progressPath(config);
   if (normalizePlatform(config.platform) === "x360recomp") {
     return `x360recomp:${x360Recomp.cacheScope(config)}:${x360Recomp.progressPath(config)}`;
@@ -25040,7 +25023,7 @@ async function loadPreviousAchievements(
       scopedAccountId
     ) &&
     !(normalizedPlatform === "shadps4" && scopedShadPs4UserId) &&
-    normalizedPlatform !== "ps4recomp" && normalizedPlatform !== "pcports" && normalizedPlatform !== "x360recomp" && normalizedPlatform !== "kytyps5" &&
+    normalizedPlatform !== "ps3recomp" && normalizedPlatform !== "ps4recomp" && normalizedPlatform !== "pcports" && normalizedPlatform !== "x360recomp" && normalizedPlatform !== "kytyps5" &&
     !(normalizedPlatform === "xlivelessness" && scopedXLiveLessNessProfile)
   ) {
     const legacyPath = path.join(
@@ -25539,6 +25522,7 @@ async function monitorAchievementsFile(filePath) {
     shadps4UserId: getPs4UserIdFromProgressPath(selectedPs4ProgressPath),
   };
   const kytyPendingBaselines = new Set();
+  const manualLockSourceVersions = new Map([[filePath, achievementLockRuntime.revision(filePath)]]);
   const loadedPreviousAchievements =
     (await loadPreviousAchievements(
       configName,
@@ -25626,6 +25610,7 @@ async function monitorAchievementsFile(filePath) {
       const progressPath = progressFile?.progressPath || "";
       if (!progressPath || !fs.existsSync(progressPath)) continue;
       const cacheOptions = makePs4CacheOptionsForPath(progressPath);
+      manualLockSourceVersions.set(progressPath, achievementLockRuntime.revision(progressPath));
       const previous =
         (await loadPreviousAchievements(
           configName,
@@ -25701,6 +25686,17 @@ async function monitorAchievementsFile(filePath) {
       if (opts?.updatePs4User === true) {
         maybeUpdateSelectedPs4User(activePs4ProgressPath);
       }
+    }
+    const lockRevision = achievementLockRuntime.revision(activeFilePath);
+    const previousLockRevision = manualLockSourceVersions.get(activeFilePath) || 0;
+    if (lockRevision !== previousLockRevision) {
+      previousAchievements = achievementLockRuntime.rebase(previousAchievements, activeFilePath, previousLockRevision);
+      manualLockSourceVersions.set(activeFilePath, lockRevision);
+      const currentConfig = readConfigForAchievementCache(configName);
+      if (currentConfig) configMeta.platinum = currentConfig.platinum === true;
+      if (isPs4 && ps4ProgressKey) ps4PreviousByPath.set(ps4ProgressKey, previousAchievements);
+      isFirstLoad = false;
+      if (isPs4 && ps4ProgressKey) ps4FirstLoadByPath.set(ps4ProgressKey, false);
     }
     let currentAchievements = null;
     let touchedInLoop = false;
@@ -26627,6 +26623,7 @@ async function clearActiveConfigSelection(options = {}) {
   achievementsFilePath = null;
   fullAchievementsConfigPath = null;
   selectedConfigPath = null;
+  overlayAchievementActionEpoch++;
   selectedConfig = null;
   selectedPlatform = null;
   refreshActiveAchievementLanguage();
@@ -26822,6 +26819,7 @@ async function applyActiveConfigUpdate(
 
   selectedPreset = preset || "default";
   selectedPosition = position || "center-bottom";
+  if (selectedConfig !== safeName) overlayAchievementActionEpoch++;
   selectedConfig = safeName;
   selectedPlatform = normalizedPlatform;
   refreshActiveAchievementLanguage(config);
@@ -27057,6 +27055,17 @@ async function applyActiveConfigUpdate(
   if (normalizedPlatform === "ps4recomp") {
     currentAppId = String(config.appid || "") || null;
     achievementsFilePath = ps4Recomp.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
+  if (normalizedPlatform === "ps3recomp") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = ps3Recomp.progressPath(config) || null;
     if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
     await monitorAchievementsFile(null);
     if (overlayWindow && !overlayWindow.isDestroyed()) {
@@ -27474,6 +27483,17 @@ async function applyActiveConfigUpdate(
     }
     return;
   }
+  if (normalizedPlatform === "ps3recomp") {
+    currentAppId = String(config.appid || "") || null;
+    achievementsFilePath = ps3Recomp.progressPath(config) || null;
+    if (isNonEmptyString(configName)) pendingMissingAchievementFiles.delete(configName);
+    await monitorAchievementsFile(null);
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+      overlayWindow.webContents.send("set-language", { language: selectedLanguage, uiLanguage: selectedUiLanguage });
+    }
+    return;
+  }
   if (normalizedPlatform === "pcports") {
     currentAppId = String(config.appid || "") || null;
     achievementsFilePath = pcPorts.progressPath(config) || null;
@@ -27815,7 +27835,7 @@ ipcMain.handle("get-config-by-name", async (_event, name) => {
       }
     }
 
-    if (!foundSchemaPath && hasAppId && !["ps4recomp", "x360recomp", "pcports"].includes(normalizePlatform(data.platform))) {
+    if (!foundSchemaPath && hasAppId && !["ps3recomp", "ps4recomp", "x360recomp", "pcports"].includes(normalizePlatform(data.platform))) {
       const schemaBase = path.join(configsDir, "schema");
       const platformDir = resolveSchemaDirForPlatform(appid, data?.platform);
       const platformJson = path.join(platformDir, "achievements.json");
@@ -28399,6 +28419,9 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
 ipcMain.on("close-notification-window", (event) => {
   if (activePresetPreviewWebContents.has(event.sender.id)) return;
   const win = BrowserWindow.fromWebContents(event.sender);
+  // Progress preset windows own their deadline; an authored template's close
+  // request must not inherit the last achievement's global animation duration.
+  if (win && progressPresetWindows.has(win)) return;
 
   setTimeout(() => {
     if (win && !win.isDestroyed()) {
@@ -28409,6 +28432,7 @@ ipcMain.on("close-notification-window", (event) => {
 
 let overlayWindow = null;
 let overlayInteractive = false;
+let overlayAchievementActionEpoch = 0;
 let overlayPresented = false;
 let overlayVisibilityAckTimer = null;
 let overlayVisibilityAckState = null;
@@ -29754,6 +29778,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       selectedConfig: selectedConfig || null,
     });
     overlayWindow.webContents.send("load-overlay-data", selectedConfig);
+    overlayWindow.webContents.send("overlay:interactive-state", { interactive: overlayInteractive });
     overlayWindow.webContents.send("set-language", {
       language: selectedLanguage,
       uiLanguage: selectedUiLanguage,
@@ -30060,12 +30085,15 @@ ipcMain.handle(
         notifyError(tUi("main.notify.executable.pathMissing"));
         return { success: false, error: "executable-path-missing" };
       }
+      const ps3Launch = normalizePlatform(configData?.platform) === "ps3recomp" &&
+        ps3Recomp.samePath(exePath, configData.ps3_recomp_launch?.executable) ?
+        ps3Recomp.launchContract(configData.ps3_recomp_install_root) : null;
       const waitForPs4Runtime = normalizePlatform(configData?.platform) === "ps4recomp";
-      const args = splitArgsString(waitForPs4Runtime ? ps4Recomp.launchArguments(effectiveArgs, configData.ps4_recomp_port) : effectiveArgs);
+      const args = ps3Launch && !effectiveArgs ? ps3Launch.arguments : splitArgsString(waitForPs4Runtime ? ps4Recomp.launchArguments(effectiveArgs, configData.ps4_recomp_port) : effectiveArgs);
       const isAppsFolderTarget = /^shell:AppsFolder\\/i.test(
         String(exePath || "").trim(),
       );
-      const requestedCwd = String(effectiveWorkingDirectory || "").trim();
+      const requestedCwd = String(effectiveWorkingDirectory || ps3Launch?.cwd || "").trim();
       const cwd =
         requestedCwd && fs.existsSync(requestedCwd)
           ? requestedCwd
@@ -30077,6 +30105,7 @@ ipcMain.handle(
       const child = spawn(launchExecutable, launchArgs, {
         cwd,
         detached: true,
+        ...(ps3Launch ? { env: { ...process.env, ...ps3Launch.env } } : {}),
         stdio: waitForPs4Runtime ? ["ignore", "ignore", "pipe"] : "ignore",
       });
       if (waitForPs4Runtime) {
@@ -31633,7 +31662,66 @@ app.on("will-quit", () => {
   overlayShortcutManager.shutdown();
 });
 
+function showPresetProgressNotification(data, style) {
+  const scale = normalizeNotificationScale(data?.scale ?? getNotificationTimingPreferences("progress").scale).scale;
+  const seconds = Number(data?.notificationDuration ?? getNotificationTimingPreferences("progress").duration);
+  let durationMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 0;
+  let sanTheme = null;
+  const preset = style.preset || "default";
+  if (style.type === "san") {
+    sanTheme = buildSanThemeForNotification(style.sanPreset, scale, true);
+    if (!sanTheme) throw new Error("Progress SAN preset unavailable");
+    if (!durationMs) durationMs = (Number(sanTheme.customisation.displaytime) || 8) * 1000;
+    const progressLabel = tUi("settings-progressNotificationTitle", {}, "Achievement Progress");
+    sanTheme.notificationText.unlocked = progressLabel;
+    sanTheme.customisation = { ...sanTheme.customisation, displaytime: durationMs / 1000,
+      showpoints: false, usepercent: false, percentbadge: false,
+      usecustomtext: false, usegametitle: false, customtext: "", unlockmsg: progressLabel };
+  } else {
+    const { presetFolder } = resolveNotificationPresetFolder(preset);
+    if (!durationMs) {
+      const html = fs.readFileSync(path.join(presetFolder, "index.html"), "utf8");
+      durationMs = Number(html.match(/<meta\s+name=["']duration["']\s+content=["'](\d+)["']/i)?.[1]) || 10000;
+    }
+  }
+  const iconPath = data?.iconPath || resolveIconAbsolutePath(data?.config_path, data?.icon || data?.icon_gray);
+  const selection = { preset, sanTheme, sanPreset: style.sanPreset, useSanPreset: !!sanTheme };
+  const artwork = getNotificationGameArtworkUsage(selection, { sanTheme });
+  const headerPath = artwork.needed ? resolveGameCoverHeaderPathForNotification(data, {
+    useRandomTestImage: data?.isTestProgress === true, useFallbackImage: artwork.useFallbackImage,
+  }) : "";
+  const values = getProgressValues(data);
+  const win = createNotificationWindow({ ...data, preset, sanTheme, scale: sanTheme ? 1 : scale,
+    notificationType: "progress", notificationProfile: "progress", iconPath, headerPath,
+    gameIconPath: sanTheme?.customisation?.usegameicon ? resolveGameBarWidgetGameImagePath(data) : "",
+    displayName: data?.displayName || tUi("progress.achievementFallback", {}, "Achievement"),
+    description: `${values.count} • ${values.percent}`, position: data?.position || cachedPreferences?.progressPosition || "bottom-left",
+    isTest: data?.isTestProgress === true, isPlatinum: false, isRare: false,
+    hidden: false, points: null, rarityPct: null, showRarityPercentage: false,
+    screenshotRequested: false, durationMs, durationOverridden: true,
+    ...NotificationPlacement.read("progress", cachedPreferences, data?.isTestProgress ? data : null),
+  });
+  progressPresetWindows.add(win);
+  let closeTimer = setTimeout(() => { if (!win.isDestroyed()) win.close(); }, durationMs + 15000);
+  win.webContents.once("did-finish-load", () => {
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => { if (!win.isDestroyed()) win.close(); }, durationMs);
+  });
+  win.webContents.once("did-fail-load", () => { if (!win.isDestroyed()) win.close(); });
+  win.webContents.once("render-process-gone", () => { if (!win.isDestroyed()) win.close(); });
+  win.once("closed", () => clearTimeout(closeTimer));
+  notificationLogger.info("show-progress:preset", { preset: data.progressPreset, displayName: data?.displayName, durationMs });
+  return win;
+}
+
 function showProgressNotification(data) {
+  const style = parseProgressPreset(data?.progressPreset ?? cachedPreferences?.progressPreset);
+  if (style.type !== "default") {
+    try { return showPresetProgressNotification(data, style); }
+    catch (error) {
+      notificationLogger.warn("progress-preset:fallback", { preset: data?.progressPreset, error: error?.message || String(error) });
+    }
+  }
   const targetDisplay = getNotificationDisplay();
   const scale = normalizeNotificationScale(
     data?.scale ?? getNotificationTimingPreferences("progress").scale,
@@ -31771,7 +31859,23 @@ function showProgressNotification(data) {
   progressWindow.setVisibleOnAllWorkspaces(true);
   progressWindow.setFullScreenable(false);
   progressWindow.setFocusable(false);
-  progressWindow.loadFile(progressHtmlPath);
+  let failed = false;
+  const closeFailedProgress = (reason, error = null) => {
+    if (failed || progressWindow.isDestroyed()) return;
+    failed = true;
+    notificationLogger.warn("progress-notification:window-failed", {
+      reason, error: error?.message || (error ? String(error) : null),
+    });
+    progressWindow.destroy();
+  };
+  let closeTimer = setTimeout(() => closeFailedProgress("load-timeout"), progressDurationMs + 15000);
+  progressWindow.once("closed", () => clearTimeout(closeTimer));
+  progressWindow.webContents.once("did-fail-load", (_event, code, description, _url, isMainFrame) => {
+    if (isMainFrame !== false) closeFailedProgress("load-failed", `${code}: ${description}`);
+  });
+  progressWindow.webContents.once("render-process-gone", (_event, details) => {
+    closeFailedProgress("renderer-gone", details?.reason);
+  });
   windowLogger.info("create-progress-window:browserwindow-created", {
     size: { width: scaledProgressWidth, height: scaledProgressHeight },
     baseSize: { width: progressWidth, height: progressHeight },
@@ -31787,22 +31891,28 @@ function showProgressNotification(data) {
   });
 
   progressWindow.once("ready-to-show", () => {
-    notificationLogger.info("show-progress", {
-      displayName: data?.displayName || "",
-      progress: data?.progress ?? null,
-      max: data?.max_progress ?? null,
-      config: data?.config_path || null,
-    });
-    windowLogger.info("create-progress-window:ready-to-show");
-    progressWindow.show();
-    progressWindow.webContents.send("show-progress", {
-      ...data, scale, durationMs: progressDurationMs,
-    });
-    const closeTimer = setTimeout(() => {
+    if (failed || progressWindow.isDestroyed()) return;
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => {
       if (!progressWindow.isDestroyed()) progressWindow.close();
     }, progressDurationMs);
-    progressWindow.once("closed", () => clearTimeout(closeTimer));
+    try {
+      notificationLogger.info("show-progress", {
+        displayName: data?.displayName || "",
+        progress: data?.progress ?? null,
+        max: data?.max_progress ?? null,
+        config: data?.config_path || null,
+      });
+      windowLogger.info("create-progress-window:ready-to-show");
+      progressWindow.show();
+      progressWindow.webContents.send("show-progress", {
+        ...data, scale, durationMs: progressDurationMs,
+      });
+    } catch (error) { closeFailedProgress("show-failed", error); }
   });
+  try {
+    void progressWindow.loadFile(progressHtmlPath).catch((error) => closeFailedProgress("load-failed", error));
+  } catch (error) { closeFailedProgress("load-failed", error); }
   return progressWindow;
 }
 ipcMain.on("disable-progress-check", (event) => {
@@ -32073,6 +32183,10 @@ ipcMain.on("show-test-progress-notification", (_event, options = {}) => {
     progress,
     max_progress: maxProgress,
     position,
+    progressPreset: options?.progressPreset,
+    notificationMethod: options?.notificationMethod,
+    scale: options?.scale,
+    notificationDuration: options?.notificationDuration,
     icon: "",
     config_path: "",
     isTestProgress: true,
@@ -32366,6 +32480,11 @@ ipcMain.on("notify-from-child", (_event, message) => {
 // notification-render-ready remains the loading signal used by Customisation.
 // Real screenshots use a separate content/animation readiness signal.
 ipcMain.on("notification-render-ready", (event) => {
+  if (progressPresetWindows.has(BrowserWindow.fromWebContents(event.sender))) {
+    // SAN rebuilds its DOM asynchronously after loading local CSS. Retry via
+    // its existing ready signal even if the bounded initial observer expired.
+    void event.sender.executeJavaScript("window.__achievementsProgressRenderer?.refresh()").catch(() => {});
+  }
   if (!pendingNotificationScreenshots.has(event.sender.id)) return;
   void event.sender.executeJavaScript(
     "window.__achievementsScreenshotReadiness?.assetReady()",
@@ -32906,6 +33025,7 @@ function normalizeProcessCmdLine(proc) {
 }
 
 function getConfigProcessArgTokens(configData) {
+  if (normalizePlatform(configData?.platform) === "ps3recomp") return configData.executable ? [configData.executable.toLowerCase()] : [];
   if (!configData || typeof configData !== "object") return [];
   if (Array.isArray(configData.__processArgsTokens)) {
     return configData.__processArgsTokens;
@@ -32954,12 +33074,12 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
       const entry = autoSelectIndex.configEntries.get(configName);
       return (
         getConfigProcessArgTokens(entry?.data).length > 0 ||
-        isXLiveLessNessConfig(entry?.data) || normalizePlatform(entry?.data?.platform) === "ps4recomp"
+        isXLiveLessNessConfig(entry?.data) || ["ps3recomp", "ps4recomp"].includes(normalizePlatform(entry?.data?.platform))
       );
     });
     if (!requiresArguments) continue;
     const requiresPs4RuntimeIdentity = Array.from(configNames).some((configName) =>
-      normalizePlatform(autoSelectIndex.configEntries.get(configName)?.data?.platform) === "ps4recomp");
+      ["ps3recomp", "ps4recomp"].includes(normalizePlatform(autoSelectIndex.configEntries.get(configName)?.data?.platform)));
 
     for (const proc of Array.isArray(procs) ? procs : []) {
       const pid = Math.floor(Number(proc?.pid));
@@ -33022,6 +33142,9 @@ async function enrichProcessCommandLinesForAutoSelect(procsByExe) {
 }
 
 function getProcessConfigMatchKind(proc, configData, configName) {
+  if (normalizePlatform(configData?.platform) === "ps3recomp") {
+    return ps3Recomp.matchesProcess(configData, proc || {}) ? PROCESS_CONFIG_MATCH.EXACT_ARGUMENTS : PROCESS_CONFIG_MATCH.NONE;
+  }
   if (normalizePlatform(configData?.platform) === "ps4recomp") {
     return ps4Recomp.matchesProcess(configData, proc || {}) ? PROCESS_CONFIG_MATCH.EXACT_ARGUMENTS : PROCESS_CONFIG_MATCH.NONE;
   }
@@ -33582,7 +33705,7 @@ async function reconcileDashboardSummaryEntry(
       getDashboardSummaryFingerprintPart(schemaFile),
       getDashboardSummaryFingerprintPart(cachePath),
     ]);
-  if (["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform)) {
+  if (["ps3recomp", "ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform)) {
     try {
       if (!deepEqual(JSON.parse(fs.readFileSync(configPath, "utf8")), config)) {
         queueDashboardSummaryReconcile(safeName, "kytyps5-profile-superseded");
@@ -33592,7 +33715,7 @@ async function reconcileDashboardSummaryEntry(
   }
   const entry = {
     platform,
-    ...(["ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform) ? {
+    ...(["ps3recomp", "ps4recomp", "kytyps5", "x360recomp", "pcports"].includes(platform) ? {
       platinum: total > 0 && unlocked === total,
       nativePlatinum: config.native_platinum === true,
     } : {}),
@@ -35090,7 +35213,6 @@ async function buildGameBarWidgetBridgeResponse({
 const {
   EXOPHASE_LANG_MAP,
   EXOPHASE_RARITY_SOURCE,
-  buildExophaseSlugVariants,
   fetchExophaseAchievementsMultiLang,
 } = require("./utils/exophase-scraper");
 const {
@@ -35239,6 +35361,14 @@ async function seedManualConfigsAtBoot() {
       const previous = (await loadPreviousAchievements(configFileName, platform, options)) || {};
       try { if (!deepEqual(JSON.parse(fs.readFileSync(full, "utf8")), config)) return; } catch { return; }
       const parsed = ps4Recomp.loadConfigSnapshot({ ...config, name: configFileName }, previous);
+      if (parsed.valid) seedCacheFromSnapshot(configFileName, parsed.snapshot, platform, options);
+      return;
+    }
+    if (platform === "ps3recomp") {
+      const options = ps3Recomp.cacheOptions(config);
+      const previous = (await loadPreviousAchievements(configFileName, platform, options)) || {};
+      try { if (!deepEqual(JSON.parse(fs.readFileSync(full, "utf8")), config)) return; } catch { return; }
+      const parsed = ps3Recomp.loadConfigSnapshot(config, previous);
       if (parsed.valid) seedCacheFromSnapshot(configFileName, parsed.snapshot, platform, options);
       return;
     }
@@ -35971,6 +36101,11 @@ function startGenerationPrerequisites() {
                 ok: false,
                 error:
                   schemaResult.reason?.message || String(schemaResult.reason),
+                code: schemaResult.reason?.code,
+                nativeCode: schemaResult.reason?.nativeCode,
+                stage: schemaResult.reason?.stage,
+                syscall: schemaResult.reason?.syscall,
+                path: schemaResult.reason?.path,
               },
         uplay:
           uplayResult.status === "fulfilled"
@@ -36015,7 +36150,7 @@ function startGenerationPrerequisites() {
   tracked.then((state) => {
     if (
       generationPrerequisitesPromise === tracked &&
-      (state?.schema?.ok !== true || state?.uplay?.ok !== true)
+      state?.uplay?.ok !== true
     ) {
       // Do not permanently poison generation after a transient boot failure.
       // A later file event/rescan can retry the prerequisites.
@@ -36027,19 +36162,10 @@ function startGenerationPrerequisites() {
 
 async function waitForGenerationPrerequisites(reason = "generation") {
   const state = await startGenerationPrerequisites();
-  if (state?.schema?.ok !== true) {
-    const error = new Error(
-      state?.schema?.error || "Schema Parse boot preparation failed",
-    );
-    error.code = "GENERATION_PREREQUISITES_UNAVAILABLE";
-    error.reason = reason;
-    throw error;
-  }
+  // Schema Parse is optional: its own preparation failure is handled by the
+  // existing source cascade. Keep the Uplay identity mapping safeguard.
   if (state?.uplay?.ok !== true) {
-    const error = new Error(
-      state?.uplay?.error ||
-        "Uplay mapping boot refresh failed without fallback",
-    );
+    const error = new Error(state?.uplay?.error || "Uplay mapping boot refresh failed without fallback");
     error.code = "UPLAY_MAPPING_PREREQUISITE_UNAVAILABLE";
     error.reason = reason;
     throw error;
@@ -36068,7 +36194,7 @@ function applyConfigPlatformDefaults(payload = {}) {
   if (!payload || typeof payload !== "object") return payload;
   const normalizedPlatform = normalizePlatform(payload.platform);
   if (
-    normalizedPlatform === "ps4recomp" ||
+    normalizedPlatform === "ps3recomp" || normalizedPlatform === "ps4recomp" ||
     normalizedPlatform === "pcports" ||
     normalizedPlatform === "x360recomp" ||
     normalizedPlatform === "xenia" ||
@@ -36135,7 +36261,7 @@ const SCHEMA_PLATFORM_DIRS = [
   "epic-official",
   "xbox-pc",
   "retroachievements",
-  "ps4recomp",
+  "ps3recomp", "ps4recomp",
   "pcports",
   "x360recomp",
   "xenia",
@@ -36159,6 +36285,7 @@ function normalizeStoragePlatform(platform) {
   if (normalized === "epic-official") return "epic-official";
   if (normalized === "xbox-pc") return "xbox-pc";
   if (normalized === "retroachievements") return "retroachievements";
+  if (normalized === "ps3recomp") return "ps3recomp";
   if (normalized === "ps4recomp") return "ps4recomp";
   if (normalized === "pcports") return "pcports";
   if (normalized === "x360recomp") return "x360recomp";
@@ -36186,7 +36313,7 @@ function isManagedSchemaPath(p) {
 function schemaPathMatchesPlatform(appid, platform, schemaPath) {
   if (!isManagedSchemaPath(schemaPath)) return false;
   const expected = resolveSchemaDirForPlatform(appid, platform);
-  if (["ps4recomp", "x360recomp", "pcports"].includes(normalizePlatform(platform))) {
+  if (["ps3recomp", "ps4recomp", "x360recomp", "pcports"].includes(normalizePlatform(platform))) {
     const relative = path.relative(expected, schemaPath || "");
     return !!relative && !relative.startsWith("..") && !path.isAbsolute(relative);
   }
@@ -36237,7 +36364,7 @@ function getPlatformForAppId(appid) {
           "gog",
           "epic",
           "epic-official",
-          "ps4recomp",
+          "ps3recomp", "ps4recomp",
           "pcports",
           "x360recomp",
           "xenia",
@@ -36258,7 +36385,7 @@ function getPlatformForAppId(appid) {
           "ubisoft-official",
           "uplay",
           "gog",
-          "ps4recomp",
+          "ps3recomp", "ps4recomp",
           "pcports",
           "x360recomp",
           "xenia",
@@ -36887,7 +37014,7 @@ ipcMain.handle(
       platform === "gog-official" ||
       platform === "xbox-pc" ||
       platform === "retroachievements" ||
-      platform === "ps4recomp" ||
+      platform === "ps3recomp" || platform === "ps4recomp" ||
       platform === "x360recomp" ||
       platform === "xenia" ||
       platform === "rpcs3" ||
@@ -37143,7 +37270,7 @@ ipcMain.handle(
     }
 
     if (
-      platform === "ps4recomp" ||
+      platform === "ps3recomp" || platform === "ps4recomp" ||
       platform === "x360recomp" ||
       platform === "xenia" ||
       platform === "rpcs3" ||
@@ -38482,6 +38609,22 @@ watchedFoldersApi = makeWatchedFolders({
       overlayWindow.webContents.send("load-overlay-data", result.name);
     }
   },
+  onPs3RecompConfigChanged: async (result) => {
+    if (result.configUpdated || result.schemaUpdated) await invalidateDashboardSummaryEntry(result.name, "ps3recomp-updated");
+    if (!result.rarityOnly && (result.created || result.configUpdated || result.schemaUpdated)) {
+      void ensureLocalGameHeader(result.appid, "ps3recomp", result.name, result.displayName)
+        .catch((error) => ipcLogger.warn("ps3recomp:landscape:failed", { error: error.message }));
+    }
+    if (selectedConfig !== result.name || normalizePlatform(selectedPlatform) !== "ps3recomp") return;
+    selectedConfigPath = result.config_path;
+    fullAchievementsConfigPath = path.join(result.config_path, "achievements.json");
+    currentAppId = result.appid;
+    achievementsFilePath = ps3Recomp.progressPath(result);
+    broadcastToAll("refresh-achievements-table");
+    if (result.rarityOnly && overlayWindow && !overlayWindow.isDestroyed()) {
+      overlayWindow.webContents.send("load-overlay-data", result.name);
+    }
+  },
   onPcPortConfigChanged: async (result) => {
     if (result.configUpdated || result.schemaUpdated) await invalidateDashboardSummaryEntry(result.name, "pcports-updated");
     if (!result.rarityOnly && (result.created || result.configUpdated || result.schemaUpdated)) {
@@ -38538,6 +38681,7 @@ watchedFoldersApi = makeWatchedFolders({
     x360RecompRoot,
     x360RecompGeneration,
     ps4RecompSource,
+    ps3RecompSource,
     pcPortsSource,
   }) => {
     try {
@@ -38559,6 +38703,7 @@ watchedFoldersApi = makeWatchedFolders({
         filePath: filePath || null,
         ...(plat === "x360recomp" ? { x360RecompProfile, x360RecompRoot, x360RecompGeneration } : {}),
         ...(plat === "ps4recomp" ? { ps4RecompSource } : {}),
+        ...(plat === "ps3recomp" ? { ps3RecompSource } : {}),
         ...(plat === "pcports" ? { pcPortsSource } : {}),
       });
     } catch (e) {
@@ -38765,7 +38910,154 @@ ipcMain.handle("x360recomp:set-profile", (_event, payload = {}) => {
   return operation;
 });
 
+const achievementLockPlans = new Map();
+function readAchievementLockSource(context, schema) {
+  const { config, platform } = context;
+  if (platform === "x360recomp") {
+    const parsed = x360Recomp.loadConfigSnapshot(config, {});
+    if (!parsed.valid) throw new Error(parsed.error || "Invalid recomp achievement state");
+    return parsed.snapshot;
+  }
+  if (platform === "kytyps5") {
+    const parsed = kytyTrophy.loadConfigSnapshot(config, {});
+    if (!parsed.valid || parsed.failures?.length) throw new Error("Invalid trophy state");
+    return parsed.snapshot;
+  }
+  if (platform === "xenia") {
+    const reader = require("./utils/xenia-gpd");
+    return reader.buildSnapshotFromGpd(reader.parseGpdFile(resolveGpdPathForConfig(config)));
+  }
+  if (platform === "rpcs3") {
+    const reader = require("./utils/rpcs3-trophy");
+    return reader.buildSnapshotFromTrophy(reader.parseTrophySetDir(resolveRpcs3TrophyDirForConfig(config)));
+  }
+  if (platform === "shadps4") {
+    const reader = require("./utils/shadps4-trophy"), file = resolvePs4ProgressPathForConfig(config);
+    return file && fs.existsSync(file) ? reader.buildSnapshotFromPs4ProgressFile(file, {}) :
+      reader.buildSnapshotFromPs4(reader.parsePs4TrophySetDir(resolvePs4TrophyDirForConfig(config)), {});
+  }
+  return loadAchievementsFromSaveFile(fs.statSync(config.save_path).isFile() ? path.dirname(config.save_path) : config.save_path,
+    {}, { configMeta: config, fullSchemaPath: resolveAchievementsSchemaPath(config) });
+}
+function achievementLockResolvedPaths(config) {
+  // Use the same scoped paths as normal reads; source writers never guess a
+  // different profile or walk an emulator installation.
+  return {
+    gpdPath: config.platform === "xenia" ? resolveGpdPathForConfig(config) : "",
+    tropusrPath: config.platform === "rpcs3" ? resolveTropusrPathForConfig(config) : "",
+    ps4ProgressPath: config.platform === "shadps4" ? resolvePs4ProgressPathForConfig(config) : "",
+    ps4TrophyDir: config.platform === "shadps4" ? resolvePs4TrophyDirForConfig(config) : "",
+  };
+}
+function broadcastAchievementLockResult(context, reason) {
+  broadcastToAll("refresh-achievements-table", { configName: context.safeName, skipPlatinumCheck: true, reason });
+  broadcastToAll("achievements:file-updated", { appid: context.config.appid, configName: context.safeName });
+  requestDashboardRefresh({ mode: "targeted", reason, configNames: [context.safeName] });
+}
+function achievementActionOwner(event, configName) {
+  const senderId = event.sender?.id;
+  if (senderId === mainWindow?.webContents?.id) return { senderId, overlay: false };
+  if (senderId === overlayWindow?.webContents?.id && overlayInteractive && isOverlayControllable() &&
+      String(configName || "") === String(selectedConfig || "")) {
+    return { senderId, overlay: true, epoch: overlayAchievementActionEpoch };
+  }
+  throw new Error("Achievement actions require the active interactive overlay or main window");
+}
+function validateAchievementActionOwner(event, configName, owner) {
+  const current = achievementActionOwner(event, configName);
+  if (current.senderId !== owner.senderId || current.overlay !== owner.overlay ||
+      (owner.overlay && current.epoch !== owner.epoch)) {
+    throw new Error("Achievement action interaction changed");
+  }
+}
+async function handleAchievementLockAction(event, payload) {
+  let context;
+  try {
+    const owner = achievementActionOwner(event, payload.configName);
+    context = resolveManualAchievementCacheContext(String(payload.configName || ""));
+    if (!context || !achievementLock.PLATFORMS.has(context.platform)) throw new Error("Unsupported achievement source");
+    context.config.platform = context.platform;
+    const backupRoot = path.join(app.getPath("userData"), "achievement_backups");
+    const resolved = achievementLockResolvedPaths(context.config);
+    if (payload.action === "lock-capabilities") {
+      try {
+        const files = achievementLock.sources(context.config, resolved);
+        return { success: true, supported: files.length > 0,
+          restorable: !!achievementLock.latestBackup(backupRoot, achievementLock.identity(context.safeName, context.config, files)) };
+      } catch { return { success: true, supported: false, restorable: false }; }
+    }
+    if (payload.action === "prepare-lock" || payload.action === "prepare-restore") {
+      const schemaPath = resolveAchievementsSchemaPath(context.config);
+      const schema = JSON.parse(fs.readFileSync(schemaPath, "utf8"));
+      const cached = (await loadPreviousAchievements(context.safeName, context.platform, context.options)) || {};
+      validateAchievementActionOwner(event, payload.configName, owner);
+      const names = Array.isArray(payload.achievementNames) ? payload.achievementNames.map(String) : [];
+      const plan = payload.action === "prepare-restore" ? achievementLock.prepareRestore({ configName: context.safeName,
+        config: context.config, resolved, backupRoot, schemaPath, cached }) : achievementLock.prepare({
+          configName: context.safeName, config: context.config, schema, schemaPath, achievementNames: names, cached, resolved });
+      plan.sourceBefore = readAchievementLockSource(context, schema);
+      plan.schema = schema;
+      plan.requestOwner = owner;
+      plan.configDocument = fs.readFileSync(path.join(configsDir, `${context.safeName}.json`), "utf8");
+      const token = crypto.randomUUID();
+      for (const [id, entry] of achievementLockPlans) if (Date.now() - entry.createdAt > 300000) achievementLockPlans.delete(id);
+      const planSize = entry => entry.files.reduce((size, file) => size + file.before.length + file.after.length, 0);
+      while (achievementLockPlans.size && (achievementLockPlans.size >= 8 ||
+        [...achievementLockPlans.values()].reduce((size, entry) => size + planSize(entry), planSize(plan)) > 64 * 1024 * 1024)) {
+        achievementLockPlans.delete(achievementLockPlans.keys().next().value);
+      }
+      achievementLockPlans.set(token, plan);
+      return { success: true, token, updatedCount: plan.ids.length, files: plan.files.map(f => f.file),
+        achievements: plan.ids.map(id => getSafeLocalizedText(schema.find(e => String(e.name) === id)?.displayName, selectedUiLanguage) || id) };
+    }
+    const plan = achievementLockPlans.get(String(payload.token || ""));
+    achievementLockPlans.delete(String(payload.token || ""));
+    if (!plan || plan.configName !== context.safeName || Date.now() - plan.createdAt > 300000 ||
+        Boolean(plan.restore) !== (payload.action === "restore-locked") ||
+        fs.readFileSync(path.join(configsDir, `${context.safeName}.json`), "utf8") !== plan.configDocument ||
+        achievementLock.identity(context.safeName, context.config, achievementLock.sources(context.config, resolved)) !== plan.identity) {
+      throw new Error("Achievement configuration changed; reopen the menu and try again");
+    }
+    validateAchievementActionOwner(event, payload.configName, plan.requestOwner);
+    const current = readCacheSilent(context.safeName, context.platform, context.options) || {};
+    if (!deepEqual(current, plan.cached)) throw new Error("Achievement state changed; reopen the menu and try again");
+    const result = achievementLock.commit(plan, backupRoot, snapshot => {
+      if (!plan.restore && snapshot === plan.snapshot) {
+        const actual = readAchievementLockSource(context, plan.schema);
+        if (plan.ids.some(id => actual[id]?.earned === true || actual[id]?.earned === 1)) throw new Error("Achievement reset verification failed");
+        for (const id of new Set([...Object.keys(plan.sourceBefore), ...Object.keys(actual)])) {
+          if (!plan.ids.includes(id) && Boolean(plan.sourceBefore[id]?.earned) !== Boolean(actual[id]?.earned)) throw new Error("Unselected achievement state changed");
+        }
+      }
+      const saved = savePreviousAchievements(context.safeName, snapshot, context.platform, { ...context.options, skipManualMerge: true });
+      if (saved === false && !deepEqual(readCacheSilent(context.safeName, context.platform, context.options) || {}, snapshot)) throw new Error("Achievement cache could not be saved");
+      const document = JSON.parse(plan.configDocument);
+      if (snapshot !== plan.cached) {
+        const completed = plan.schema.every(entry => snapshot[String(entry.name)]?.earned);
+        if (document.platinum === true || completed) document.platinum = completed;
+      }
+      const configFile = path.join(configsDir, `${context.safeName}.json`);
+      if (!deepEqual(JSON.parse(fs.readFileSync(configFile, "utf8")), document)) {
+        writeJsonAtomicSync(configFile, document, { backup: true });
+      }
+    });
+    const changes = plan.restore ? result.snapshot : Object.fromEntries(plan.ids.map(id => [id, result.snapshot[id]]));
+    achievementLockRuntime.publish(plan.files.map(f => f.file), changes);
+    watchedFoldersApi?.applyManualAchievementSourceEdit(context.safeName, plan.files.map(f => f.file), changes,
+      plan.schema.every(entry => result.snapshot[String(entry.name)]?.earned));
+    persistenceLogger.info("achievement-source:manual-lock", { config: context.safeName, platform: context.platform,
+      achievements: plan.ids, restore: plan.restore === true, backup: result.backupPath });
+    broadcastAchievementLockResult(context, "manual-achievement-lock");
+    return { success: true, changed: true, updatedCount: result.updatedCount, backupPath: result.backupPath };
+  } catch (error) {
+    persistenceLogger.error("achievement-source:manual-lock-failed", { config: context?.safeName || payload.configName, error: error.message });
+    return { success: false, error: error.message, errorKey: "achievementManualLockFailed" };
+  }
+}
 ipcMain.handle("achievement:manual-state", async (_event, payload = {}) => {
+  if (["lock-capabilities", "prepare-lock", "mark-locked", "prepare-restore", "restore-locked"].includes(payload.action)) {
+    return handleAchievementLockAction(_event, payload);
+  }
   const configName = String(payload?.configName || "").trim();
   const achievementNames = Array.from(
     new Set(
@@ -38790,6 +39082,7 @@ ipcMain.handle("achievement:manual-state", async (_event, payload = {}) => {
     return { success: false, error: "unsupported manual achievement action" };
   }
   try {
+    const owner = achievementActionOwner(_event, configName);
     const context = resolveManualAchievementCacheContext(configName);
     if (!context) {
       return { success: false, error: "config not found" };
@@ -38801,6 +39094,12 @@ ipcMain.handle("achievement:manual-state", async (_event, payload = {}) => {
         context.options,
       )) || {};
     const next = { ...(cached && typeof cached === "object" ? cached : {}) };
+    validateAchievementActionOwner(_event, configName, owner);
+    if (owner.overlay) {
+      const schema = JSON.parse(fs.readFileSync(resolveAchievementsSchemaPath(context.config), "utf8"));
+      const ids = new Set(schema.map(entry => String(entry.name)));
+      if (achievementNames.some(id => !ids.has(id))) throw new Error("Unknown achievement in overlay selection");
+    }
     let updatedCount = 0;
 
     for (const achievementName of achievementNames) {
@@ -39151,6 +39450,7 @@ app.on("before-quit", (event) => {
     } catch {}
   }
   activeProfileBackupWorkers.clear();
+  flushPlaytimeSessions();
   achievementCacheMetaStore.flushSync();
   ps4RecompCacheWriter.close();
   dashboardSummaryStore.flush().catch(() => {});
