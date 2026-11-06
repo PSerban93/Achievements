@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { normalizeSteamIconUrl } = require("./steam-community-images");
 
 function readCString(buf, off) {
   let i = off;
@@ -528,13 +529,6 @@ function buildSnapshotFromAppcache(schemaEntries, userStats) {
     snap[a.api] = item;
   }
   return snap;
-}
-
-function normalizeSteamIconUrl(appid, hash) {
-  if (!hash) return "";
-  if (/^https?:\/\//i.test(hash)) return hash;
-  if (hash.startsWith("//")) return "https:" + hash;
-  return `https://steamcdn-a.akamaihd.net/steamcommunity/public/images/apps/${appid}/${hash}`;
 }
 
 function extractGameName(rootObj) {

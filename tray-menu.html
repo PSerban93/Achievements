@@ -9,6 +9,8 @@
   </head>
   <body class="tray-menu-body">
     <div class="tray-menu">
+      <div id="trayMenuRecentGames" class="tray-menu__recent hidden" role="group" data-i18n-aria-label="dashboard.sort.lastPlayed"></div>
+      <div id="trayMenuRecentSeparator" class="tray-menu__separator hidden" role="separator"></div>
       <button
         id="trayMenuShow"
         class="tray-menu__item"
@@ -29,6 +31,7 @@
         id="trayMenuResumeStartup"
         class="tray-menu__item hidden"
         data-action="resume-startup"
+        data-i18n="trayMenuResumeStartup"
       >
         Resume Startup (Mute all)
       </button>

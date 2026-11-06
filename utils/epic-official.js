@@ -227,22 +227,7 @@ async function downloadEpicStoreImage(url, outPath, timeoutMs = 20000) {
     }
   } catch {}
   try {
-    const res = await axios.get(sourceUrl, {
-      responseType: "arraybuffer",
-      timeout: timeoutMs,
-      validateStatus: (status) => status >= 200 && status < 500,
-    });
-    const contentType = String(res.headers?.["content-type"] || "").toLowerCase();
-    if (
-      res.status >= 400 ||
-      !res.data ||
-      !res.data.byteLength ||
-      /^(text\/|application\/(?:json|xml))/.test(contentType)
-    ) {
-      return false;
-    }
-    fs.mkdirSync(path.dirname(outPath), { recursive: true });
-    fs.writeFileSync(outPath, res.data);
+    await require("./game-artwork-storage").importUrl(sourceUrl, outPath, { source: "epic-store", timeoutMs });
     return true;
   } catch (err) {
     return false;
@@ -359,6 +344,7 @@ async function cacheEpicOfficialStoreImages(asset = {}, options = {}) {
       };
     }
     const data = res.data || {};
+    require("./game-presentation-metadata").store({ userDataDir, platform: "epic-official", appid: productId, kind: "epic", payload: data });
     const hero = extractEpicHero(data);
     const title = firstNonEmpty(
       data?.productName,
@@ -462,8 +448,8 @@ function getEpicOfficialStoreImageState(userDataDir, productId) {
     "epic-official",
     safeProductId,
   );
-  const portraitPath = path.join(imageDir, `${safeProductId}.jpg`);
-  const headerPath = path.join(imageDir, "header.jpg");
+  const portraitPath = require("./game-artwork-storage").existingAt(imageDir, safeProductId) || path.join(imageDir, `${safeProductId}.jpg`);
+  const headerPath = require("./game-artwork-storage").existingAt(imageDir, "header") || path.join(imageDir, "header.jpg");
   const portraitExists = hasNonEmptyFile(portraitPath);
   const headerExists = hasNonEmptyFile(headerPath);
   return {
@@ -1043,6 +1029,11 @@ async function writeEpicOfficialSchema(
     fs.unlinkSync(sidecarExpectedPath);
   }
 
+  if (options.refreshPresentation || achievementsChanged || !fs.existsSync(path.join(destDir, "game-details.json"))) {
+    await require("./game-presentation-service").refresh({
+      userDataDir: options.userDataDir || "", config: { ...options, appid: safeAppId, platform: "epic-official", config_path: destDir },
+      force: options.refreshPresentation === true, reason: "epic-official-schema" });
+  }
   return {
     dir: destDir,
     productId: schema.productId || safeAppId,
@@ -1088,6 +1079,7 @@ async function ensureEpicOfficialSchema(appid, destDir, options = {}) {
   const result = await writeEpicOfficialSchema(safeAppId, destDir, schema, {
     ...options,
     timeoutMs,
+    refreshPresentation: true,
   });
   epicOfficialLogger.info("epic-official:schema:ensure-success", {
     appid: safeAppId,
@@ -1970,7 +1962,7 @@ async function importEpicOfficialLibrary(outputDir, options = {}) {
           productId,
           sandboxId: schema.sandboxId || asset.namespace,
         },
-        { timeoutMs },
+        { timeoutMs, userDataDir, epic_store_slug: catalogStoreSlug, epic_namespace: asset.namespace },
       );
       const existing =
         configIndex.byProductId.get(productId) ||

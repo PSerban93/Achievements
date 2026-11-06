@@ -505,6 +505,7 @@ async function downloadImage(url, outputPath, options = {}) {
       return outputPath;
     }
   } catch {}
+  if (options.gameArtwork) return require("./game-artwork-storage").importUrl(url, outputPath, { source: "retroachievements", httpClient: options.httpClient || axios, timeoutMs: options.timeoutMs });
   const httpClient = options.httpClient || axios;
   const response = await httpClient.get(url, {
     timeout: Math.max(3000, Number(options.timeoutMs) || 15000),
@@ -705,11 +706,11 @@ async function cacheGameArtwork(game, userDataDir, options = {}) {
       await downloadImage(
         coverUrl,
         path.join(coverDir, `${game.gameId}.jpg`),
-        options,
+        { ...options, gameArtwork: true },
       );
     }
     if (headerUrl) {
-      await downloadImage(headerUrl, path.join(coverDir, "header.jpg"), options);
+      await downloadImage(headerUrl, path.join(coverDir, "header.jpg"), { ...options, gameArtwork: true });
     }
   } catch (error) {
     retroAchievementsLogger.warn("retroachievements:artwork-failed", {
@@ -808,6 +809,7 @@ async function importRetroAchievementsLibrary(configsDir, options = {}) {
         options,
       );
       await cacheGameArtwork(game, userDataDir, options);
+      require("./game-presentation-metadata").store({ directory: schemaDir, userDataDir, platform: RETROACHIEVEMENTS_PLATFORM, appid: gameId, kind: "retroachievements", payload: game });
       writeJsonAtomicSync(path.join(stateDir, "achievements.json"), snapshot);
 
       const previousEntry = existing.get(gameId);

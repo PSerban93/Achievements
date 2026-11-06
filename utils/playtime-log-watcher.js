@@ -7,7 +7,7 @@ const https = require("https");
 const crypto = require("crypto");
 const { preferencesPath } = require("./paths");
 const { pathToFileURL } = require("url");
-const { accumulatePlaytime, sanitizeConfigName } = require("./playtime-store");
+const { accumulatePlaytime, accumulatePlaytimeAsync, sanitizeConfigName } = require("./playtime-store");
 const {
   fetchSteamGridDbImage,
   STEAMGRID_GRID_LANDSCAPE_DIMENSIONS,
@@ -24,6 +24,7 @@ const { lookupSteamDbAppIdByName } = require("./local-game-name-cache");
 const { createLogger } = require("./logger");
 const uplayMappingStore = require("./uplay-mapping-store");
 const processPoller = require("./process-poller");
+const { performance } = require("perf_hooks");
 const coverLogger = createLogger("covers");
 const playtimeLogger = createLogger("playtime");
 const {
@@ -58,6 +59,14 @@ function resolveSteamAppId(appid) {
   const lookup = loadUplaySteamMap();
   const entry = lookup.get(key);
   return entry?.steam_appid ? String(entry.steam_appid) : null;
+}
+
+function artworkSteamAppId(config) {
+  const declared = String(config.platform || "").trim().toLowerCase();
+  const platform = normalizePlatform(declared) || declared || "steam";
+  const explicit = require("./game-presentation-sources").steamId({ ...config, platform });
+  if (explicit) return explicit;
+  return ["uplay", "ubisoft-official"].includes(platform) ? resolveSteamAppId(config.appid) || "" : "";
 }
 
 const playtimeStartMap = new Map();
@@ -100,13 +109,24 @@ function notifyError(message) {
   }
 }
 
+let playtimePreferencesProvider = null;
+let fallbackPreferences = null;
+function configurePlaytimePreferences(provider) {
+  playtimePreferencesProvider = typeof provider === "function" ? provider : null;
+  fallbackPreferences = null;
+}
 function readPrefsSafe() {
+  if (playtimePreferencesProvider) {
+    const value = playtimePreferencesProvider();
+    return value && typeof value === "object" ? value : {};
+  }
+  if (fallbackPreferences) return fallbackPreferences;
   try {
     if (fs.existsSync(preferencesPath)) {
-      return JSON.parse(fs.readFileSync(preferencesPath, "utf8"));
+      fallbackPreferences = JSON.parse(fs.readFileSync(preferencesPath, "utf8"));
     }
   } catch {}
-  return {};
+  return fallbackPreferences || (fallbackPreferences = {});
 }
 
 const UI_LOCALE_DIR = path.join(__dirname, "..", "assets", "locales");
@@ -450,388 +470,33 @@ function notifyHeaderImageUpdated(appid, platform) {
 }
 
 async function cacheHeaderImage(userDataDir, appid, headerUrl, options = {}) {
-  const platform = normalizePlatform(options?.platform) || "steam";
-  const supportsHeroFallback = platform === "ps3recomp" || platform === "ps4recomp" || platform === "pcports" || platform === "x360recomp";
-  const preferLocalOnly =
-    platform === "ps3recomp" || platform === "ps4recomp" ||
-    platform === "pcports" ||
-    platform === "x360recomp" ||
-    platform === "gog" ||
-    platform === "gog-official" ||
-    platform === "epic" ||
-    platform === "epic-official" ||
-    platform === "ea-official" ||
-    platform === "xbox-pc";
-  const imageDir = path.join(userDataDir, "images", platform, String(appid));
-  try {
-    if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
-  } catch {}
-  const headerPath = path.join(imageDir, "header.jpg");
-  const localUrl = () => pathToFileURL(headerPath).toString();
-  try {
-    if (!options.forceDownload && fs.existsSync(headerPath)) {
-      const stats = fs.statSync(headerPath);
-      if (stats.size === 0) {
-        fs.unlinkSync(headerPath);
-      } else {
-        return { headerUrl: localUrl() };
-      }
-    }
-  } catch {}
-  const fallbackName = String(options?.gameName || "").trim();
-  const stripCoverSuffix = (name) => {
-    let out = String(name || "").trim();
-    if (!out) return "";
-    const rx =
-      /\s*\((?:steam|steam[-\s]?official|epic|epic[-\s]?official|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|ps4 recomp|pc port|pc ports|xbox 360 recomp|xenia|rpcs3|ps4|shadps4|ps5|kytyps5)\)\s*$/i;
-    while (rx.test(out)) out = out.replace(rx, "").trim();
-    return out;
-  };
-  const coverName = stripCoverSuffix(fallbackName) || fallbackName;
-  const fallbackSize = STEAMGRID_GRID_LANDSCAPE_DIMENSIONS;
-  const fallbackSizes = [fallbackSize].filter(Boolean);
-  const downloadToLocal = async (url) => {
-    await downloadHeaderImageAtomic(url, headerPath);
-    if (options.forceDownload || supportsHeroFallback) await writeLandscapeSourceAtomic(imageDir, "header");
-    coverLogger.info("header:source-hit", {
-      appid: String(appid),
-      platform,
-      source: activeHeaderSource || "remote",
-      url,
-    });
-    notifyHeaderImageUpdated(appid, platform);
-    return { headerUrl: localUrl() };
-  };
-  let activeHeaderSource = "";
-  const tryHeaderUrls = async (source, urls = []) => {
-    const unique = [...new Set(urls.map((url) => String(url || "").trim()).filter(Boolean))];
-    for (const url of unique) {
-      try {
-        activeHeaderSource = source;
-        return await downloadToLocal(url);
-      } catch (error) {
-        coverLogger.warn("header:source-miss", {
-          appid: String(appid),
-          platform,
-          source,
-          url,
-          error: error?.message || String(error),
-        });
-      }
-    }
-    return null;
-  };
-  if (platform === "x360recomp") {
-    const official = await tryHeaderUrls("xbox360-marketplace", require("./x360-recomp-art").artworkUrls(appid, "landscape"));
-    if (official) return official;
-  }
-  try {
-    const productAssets = resolveSteamProductAssetUrls({
-      appid: options?.steamAppId || appid,
-      configPath:
-        options?.configPath ||
-        options?.configData?.config_path ||
-        options?.configData?.configPath ||
-        "",
-      purpose: "header",
-    });
-    const productResult = await tryHeaderUrls(
-      "steam-product-assets",
-      productAssets.urls || [],
-    );
-    if (productResult) return productResult;
-  } catch {
-    // fallthrough to the regular Steam CDN and SteamGridDB fallbacks
-  }
-  if (!preferLocalOnly && headerUrl) {
-    const directResult = await tryHeaderUrls("platform-header", [headerUrl]);
-    if (directResult) return directResult;
-  }
-  if (platform === "epic" || platform === "epic-official") {
-    try {
-      const epicHeaderUrl = await fetchEpicStoreHeaderUrl(
-        appid,
-        options?.configData || null,
-      );
-      if (epicHeaderUrl) {
-        const epicResult = await tryHeaderUrls("epic-store", [epicHeaderUrl]);
-        if (epicResult) return epicResult;
-      }
-    } catch {
-      // The catalog remains available when the Store request fails.
-    }
-    try {
-      const catalogImages = await resolveEpicCatalogImageUrls(appid, {
-        catalogItemId:
-          options?.configData?.epic_catalog_item_id ||
-          options?.configData?.epicCatalogItemId,
-        namespace:
-          options?.configData?.epic_namespace ||
-          options?.configData?.epicNamespace,
-      });
-      const catalogResult = await tryHeaderUrls(
-        "epic-catalog",
-        catalogImages.headerUrls,
-      );
-      if (catalogResult) return catalogResult;
-    } catch (error) {
-      coverLogger.warn("header:epic-catalog-failed", {
-        appid: String(appid),
-        platform,
-        error: error?.message || String(error),
-      });
-    }
-  }
-  const mappedSteamAppId =
-    String(options?.steamAppId || "").trim() ||
-    lookupSteamDbAppIdByName(coverName, { userDataDir });
-  if (/^\d+$/.test(mappedSteamAppId)) {
-    const steamFallbackResult = await tryHeaderUrls("steam-title-match", [
-      `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${mappedSteamAppId}/header.jpg`,
-      `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${mappedSteamAppId}/header.jpg`,
-      `https://cdn.akamai.steamstatic.com/steam/apps/${mappedSteamAppId}/header.jpg`,
-      `https://cdn.steamstatic.com/steam/apps/${mappedSteamAppId}/header.jpg`,
-    ]);
-    if (steamFallbackResult) return steamFallbackResult;
-  }
-  if (coverName) {
-    for (const size of fallbackSizes) {
-      try {
-        const gridUrl = await fetchSteamGridDbImage(coverName, {
-          size,
-          assetType: "grids",
-          ...(supportsHeroFallback ? { appid: `${platform}:${appid}:header-landscape-grid` } : {}),
-        });
-        try {
-          activeHeaderSource = "steamgriddb";
-          return await downloadToLocal(gridUrl);
-        } catch (error) {
-          if (!supportsHeroFallback) return { headerUrl: gridUrl };
-          coverLogger.warn("header:source-miss", {
-            appid: String(appid), platform, source: "steamgriddb-landscape-grid", url: gridUrl,
-            error: error?.message || String(error),
-          });
-        }
-      } catch (gridErr) {
-        if (size === fallbackSizes[fallbackSizes.length - 1]) {
-          console.warn(
-            `steamgriddb header fallback failed for ${appid}:`,
-            gridErr.message || gridErr,
-          );
-        }
-      }
-    }
-  }
-  if (supportsHeroFallback && coverName) {
-    try {
-      const heroUrl = await fetchSteamGridDbImage(coverName, {
-        size: STEAMGRID_HERO_DIMENSIONS,
-        assetType: "heroes",
-        appid: `${platform}:${appid}:header-hero-fallback`,
-      });
-      const heroPath = await downloadGameCoverHero(heroUrl, imageDir);
-      await writeLandscapeSourceAtomic(imageDir, "hero");
-      coverLogger.info("header:source-hit", {
-        appid: String(appid), platform, source: "steamgriddb-hero", url: heroUrl,
-      });
-      notifyHeaderImageUpdated(appid, platform);
-      return { headerUrl: pathToFileURL(heroPath).toString() };
-    } catch (error) {
-      coverLogger.warn("header:source-miss", {
-        appid: String(appid), platform, source: "steamgriddb-hero", error: error?.message || String(error),
-      });
-    }
-  }
-  coverLogger.warn("header:all-sources-failed", {
-    appid: String(appid),
-    platform,
-    gameName: coverName || null,
-    mappedSteamAppId: mappedSteamAppId || null,
-  });
+  const config = { ...(options.configData || {}), appid: String(appid), platform: normalizePlatform(options.platform) || "steam",
+    config_path: options.configPath || options.configData?.config_path, displayName: options.gameName || options.configData?.displayName || "",
+    ...(options.steamAppId ? { steamAppId: String(options.steamAppId) } : {}) };
+  const response = await require("./game-artwork-service").get().ensure({ userDataDir, config }, { type: "header", force: options.forceDownload === true, repair: options.forceDownload === true });
+  const image = response.results[0];
+  if (image.ok && image.path) { notifyHeaderImageUpdated(appid, config.platform); return { headerUrl: pathToFileURL(image.path).href }; }
   return { headerUrl };
 }
 
 async function redownloadHeaderImage(userDataDir, appid, options = {}) {
-  const platform = normalizePlatform(options.platform) || "steam";
-  const configData = options.configData || null;
-  const gameName = String(options.gameName || "")
-    .replace(/\s*\((?:steam|steam-official|epic|epic-official|uplay|ubisoft|ubisoft-official|ea|ea-official|gog|gog-official|xbox-pc|retroachievements|ps4 recomp|pc port|pc ports|xbox 360 recomp|xenia|rpcs3|ps4|shadps4|ps5|kytyps5|markerpatch|madnesspatch|xlivelessness)\)\s*$/i, "")
-    .trim();
-  const imageDir = path.join(userDataDir, "images", platform, String(appid));
-  const headerPath = path.join(imageDir, "header.jpg");
-  const sources = [];
-  const addSource = (id, resolveUrls, imageKind = "header") =>
-    sources.push({ id, resolveUrls, imageKind });
-  const writeLandscapeSource = (imageKind) =>
-    writeLandscapeSourceAtomic(imageDir, imageKind);
-  if (platform === "x360recomp") addSource("xbox360-marketplace", async () =>
-    require("./x360-recomp-art").artworkUrls(appid, "landscape"));
-  const primarySteamPlatform = [
-    "steam",
-    "steam-official",
-    "markerpatch",
-    "madnesspatch",
-  ].includes(platform);
-  const mappedSteamPlatform = ["uplay", "ubisoft-official"].includes(platform);
-  const explicitSteamId = String(options.steamAppId || "").trim();
-  const steamId = primarySteamPlatform
-    ? (/^\d+$/.test(explicitSteamId) ? explicitSteamId : String(appid))
-    : mappedSteamPlatform &&
-        /^\d+$/.test(explicitSteamId) &&
-        explicitSteamId !== String(appid)
-      ? explicitSteamId
-      : "";
-
-  if (/^\d+$/.test(steamId)) {
-    addSource("steam-product-header", async () => {
-      const assets = resolveSteamProductAssetUrls({
-        appid: steamId,
-        configPath: configData?.config_path || configData?.configPath || "",
-        purpose: "header",
-      });
-      return assets.urls || [];
-    });
-    addSource("steam-cdn-header", async () => [
-      `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${steamId}/header.jpg`,
-      `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${steamId}/header.jpg`,
-      `https://cdn.akamai.steamstatic.com/steam/apps/${steamId}/header.jpg`,
-      `https://cdn.steamstatic.com/steam/apps/${steamId}/header.jpg`,
-    ]);
-    addSource("steam-store-header", async () => {
-      const data = await fetchJson(
-        `https://store.steampowered.com/api/appdetails?appids=${steamId}`,
-      );
-      const url = String(data?.[steamId]?.data?.header_image || "").trim();
-      return url ? [url] : [];
-    });
-  }
-
-  if (platform === "epic" || platform === "epic-official") {
-    addSource("epic-store-header", async () => {
-      const url = await fetchEpicStoreHeaderUrl(appid, configData, {
-        landscapeOnly: true,
-      });
-      return url ? [url] : [];
-    });
-    addSource("epic-catalog-header", async () => {
-      const images = await resolveEpicCatalogImageUrls(appid, {
-        catalogItemId:
-          configData?.epic_catalog_item_id || configData?.epicCatalogItemId,
-        namespace: configData?.epic_namespace || configData?.epicNamespace,
-      });
-      return images.headerUrls || [];
-    });
-  }
-
-  if (platform === "xbox-pc") {
-    addSource("xbox-title-header", async () => {
-      try {
-        const saved = JSON.parse(
-          await fs.promises.readFile(path.join(imageDir, "sources.json"), "utf8"),
-        );
-        const url = String(saved?.headerUrl || "").trim();
-        return url ? [url] : [];
-      } catch {
-        return [];
-      }
-    });
-  }
-
-  let matchedSteamId = "";
-  if (gameName) {
-    try {
-      matchedSteamId = String(
-        lookupSteamDbAppIdByName(gameName, { userDataDir }) || "",
-      ).trim();
-    } catch {}
-  }
-  if (/^\d+$/.test(matchedSteamId) && matchedSteamId !== steamId) {
-    addSource("steam-title-header", async () => [
-      `https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/${matchedSteamId}/header.jpg`,
-      `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${matchedSteamId}/header.jpg`,
-      `https://cdn.akamai.steamstatic.com/steam/apps/${matchedSteamId}/header.jpg`,
-    ]);
-  }
-  if (gameName) {
-    addSource("steamgriddb-landscape-grid", async () => [
-      await fetchSteamGridDbImage(gameName, {
-        size: STEAMGRID_GRID_LANDSCAPE_DIMENSIONS,
-        assetType: "grids",
-        appid: `${platform}:${appid}:redownload-header`,
-      }),
-    ]);
-    addSource(
-      "steamgriddb-hero",
-      async () => [
-        await fetchSteamGridDbImage(gameName, {
-          size: STEAMGRID_HERO_DIMENSIONS,
-          assetType: "heroes",
-          appid: `${platform}:${appid}:redownload-hero`,
-        }),
-      ],
-      "hero",
-    );
-  }
-
-  const lastSourceId = String(options.lastSourceId || "").trim();
-  const lastIndex = sources.findIndex((source) => source.id === lastSourceId);
-  const startIndex = lastIndex < 0 ? 0 : (lastIndex + 1) % sources.length;
-  await fs.promises.mkdir(imageDir, { recursive: true });
-  for (let offset = 0; offset < sources.length; offset += 1) {
-    const source = sources[(startIndex + offset) % sources.length];
-    try {
-      const urls = [...new Set(await source.resolveUrls())]
-        .map((url) => String(url || "").trim())
-        .filter((url) => /^https:\/\//i.test(url));
-      for (const url of urls) {
-        try {
-          if (source.imageKind === "hero") {
-            const heroPath = await downloadGameCoverHero(url, imageDir);
-            await writeLandscapeSource("hero");
-            coverLogger.info("header:redownload:source-hit", {
-              appid: String(appid),
-              platform,
-              source: source.id,
-              url,
-            });
-            notifyHeaderImageUpdated(appid, platform);
-            return { success: true, sourceId: source.id, path: heroPath };
-          }
-          await downloadHeaderImageAtomic(url, headerPath);
-          await writeLandscapeSource("header");
-          coverLogger.info("header:redownload:source-hit", {
-            appid: String(appid),
-            platform,
-            source: source.id,
-            url,
-          });
-          notifyHeaderImageUpdated(appid, platform);
-          return { success: true, sourceId: source.id, path: headerPath };
-        } catch (error) {
-          coverLogger.warn("header:redownload:source-miss", {
-            appid: String(appid),
-            platform,
-            source: source.id,
-            url,
-            error: error?.message || String(error),
-          });
-        }
-      }
-    } catch (error) {
-      coverLogger.warn("header:redownload:source-miss", {
-        appid: String(appid),
-        platform,
-        source: source.id,
-        error: error?.message || String(error),
-      });
-    }
-  }
-  return { success: false, error: "no-header-source" };
+  const config = { ...(options.configData || {}), appid: String(appid), platform: normalizePlatform(options.platform) || "steam",
+    displayName: options.gameName || options.configData?.displayName || "", ...(options.steamAppId ? { steamAppId: String(options.steamAppId) } : {}) };
+  const response = await require("./game-artwork-service").get().ensure({ userDataDir, config }, { type: "header", source: options.source || "automatic", manual: true });
+  const result = response.results[0];
+  if (result.ok) notifyHeaderImageUpdated(appid, config.platform);
+  return { ...result, success: result.ok, sourceId: result.source };
 }
 
 function sendPlaytimeNotification(playData) {
+  const startedAt = performance.now();
   try {
     ipcMain.emit("show-playtime", null, playData);
+    playtimeLogger.info("playtime:notification-dispatched", {
+      phase: playData?.phase,
+      displayName: playData?.displayName,
+      dispatchMs: Math.round(performance.now() - startedAt),
+    });
   } catch (e) {
     notifyError(`Failed to emit playtime: ${e.message}`);
   }
@@ -922,7 +587,11 @@ function startPlaytimeLogWatcher(configData, options = {}) {
   const ps3Pids = new Set();
   if (launchPid) ps3Pids.add(launchPid);
   const existing = activeWatchers.get(watcherKey);
-  if (existing) {
+  if (existing?.stopping) {
+    // The old session owns its queued final write, not the next runtime.
+    activeWatchers.delete(watcherKey);
+    playtimeStartMap.delete(watcherKey);
+  } else if (existing) {
     if (configData?.__playtimeKey) {
       existing.playtimeKey = configData.__playtimeKey;
     }
@@ -951,8 +620,8 @@ function startPlaytimeLogWatcher(configData, options = {}) {
   const userDataDir = path.dirname(preferencesPath);
 
   // Header URLs
-  const effectiveAppId = resolveSteamAppId(appid) || appid;
-  const remoteHeaderUrl = isSteamGridOnly
+  const effectiveAppId = artworkSteamAppId(configData);
+  const remoteHeaderUrl = isSteamGridOnly || !effectiveAppId
     ? ""
     : `https://cdn.steamstatic.com/steam/apps/${effectiveAppId}/header.jpg`;
   const logoFallbackPath = path.join(
@@ -961,25 +630,12 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     "assets",
     "achievements-logo.png",
   );
-  const headerPathLocal = path.join(
-    userDataDir,
-    "images",
-    platform,
-    String(appid),
-    "header.jpg",
-  );
   const localHeaderIfExists = () => {
-    try {
-      if (fs.existsSync(headerPathLocal)) {
-        const stats = fs.statSync(headerPathLocal);
-        if (stats.size > 0) {
-          return pathToFileURL(headerPathLocal).toString();
-        }
-        // cleanup empty file
-        fs.unlinkSync(headerPathLocal);
-      }
-    } catch {}
-    return null;
+    const storage = require("./game-artwork-storage"), dir = path.join(userDataDir, "images", platform, String(appid));
+    let preferHero = false;
+    try { preferHero = fs.readFileSync(path.join(dir, "landscape-source.txt"), "utf8").trim() === "hero"; } catch {}
+    const file = (preferHero ? storage.existingAt(dir, "game-cover-hero") : "") || storage.existingAt(dir, "header") || storage.existingAt(dir, "game-cover-hero");
+    return file ? pathToFileURL(file).href : null;
   };
   const fallbackHeaderUrl =
     platform === "gog" ||
@@ -1009,14 +665,16 @@ function startPlaytimeLogWatcher(configData, options = {}) {
   activeWatchers.set(watcherKey, tracker);
   const cleanup = () => {
     closed = true;
-    playtimeStartMap.delete(watcherKey);
     if (unsubscribe) {
       try {
         unsubscribe();
       } catch {}
       unsubscribe = null;
     }
-    activeWatchers.delete(watcherKey);
+    if (activeWatchers.get(watcherKey) === tracker) {
+      playtimeStartMap.delete(watcherKey);
+      activeWatchers.delete(watcherKey);
+    }
   };
   tracker.cleanup = cleanup;
 
@@ -1048,16 +706,16 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     }
   };
 
-  const persistSession = (endedAt) => {
+  const persistSession = (endedAt, asyncWrite = false) => {
     if (!seenRunning || !playtimeStartMap.has(watcherKey)) return null;
     const startedAt = playtimeStartMap.get(watcherKey);
-    const unsavedMs = Math.max(0, endedAt - Math.max(startedAt, tracker.persistedSince || startedAt));
+    const unsavedMs = () => Math.max(0, endedAt - Math.max(startedAt, tracker.persistedSince || startedAt));
     const key = tracker.playtimeKey;
-    try {
-      const savedTotalMs = accumulatePlaytime(key, unsavedMs);
+    const committed = (savedTotalMs) => {
       tracker.persistedSince = Math.max(startedAt, tracker.persistedSince || startedAt, endedAt);
       return savedTotalMs;
-    } catch (error) {
+    };
+    const failed = (error) => {
       playtimeLogger.error("playtime:save-failed", {
         appid: String(appid),
         configName: key,
@@ -1070,8 +728,11 @@ function startPlaytimeLogWatcher(configData, options = {}) {
           "Could not save playtime: {error}",
         ),
       );
-    }
-    return null;
+      return null;
+    };
+    if (asyncWrite) return accumulatePlaytimeAsync(key, unsavedMs, endedAt).then(committed, failed);
+    try { return committed(accumulatePlaytime(key, unsavedMs())); }
+    catch (error) { return failed(error); }
   };
   tracker.flush = () => {
     if (!closed) persistSession(Date.now());
@@ -1083,13 +744,20 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     const playedMs = Math.max(0, endedAt - startedAt);
     const key = tracker.playtimeKey;
     if (requiresPs4Runtime) playtimeLogger.info("ps4recomp:session:stop", { configName: key, appid, playedMs });
-    const savedTotalMs = persistSession(endedAt);
+    const persistenceStartedAt = performance.now();
+    const savedTotalMs = await persistSession(endedAt, true);
+    playtimeLogger.info("playtime:session-persisted", {
+      configName: key,
+      persistenceMs: Math.round(performance.now() - persistenceStartedAt),
+      ok: savedTotalMs !== null,
+    });
     if (savedTotalMs !== null) {
       try {
         ipcMain.emit("playtime:session-ended", null, {
           configName: key,
           appid: String(appid),
           totalMs: savedTotalMs,
+          updatedAt: endedAt,
         });
       } catch (error) {
         playtimeLogger.warn("playtime:update-notification-failed", {
@@ -1100,7 +768,7 @@ function startPlaytimeLogWatcher(configData, options = {}) {
       }
     }
 
-    playtimeStartMap.delete(watcherKey);
+    if (activeWatchers.get(watcherKey) === tracker) playtimeStartMap.delete(watcherKey);
     const desc = formatDuration(playedMs);
     if (!isPlaytimeDisabled()) {
       sendPlaytimeNotification({
@@ -1128,19 +796,19 @@ function startPlaytimeLogWatcher(configData, options = {}) {
     steamAppId: effectiveAppId,
   })
     .then(({ headerUrl }) => {
-      if (closed) return;
+      if (closed || stopping) return;
       lastHeaderUrl = headerUrl || initialHeader || fallbackHeaderUrl;
       if (!requiresPs4Runtime || seenRunning && !stopping) sendStart(lastHeaderUrl);
     })
     .catch((err) => {
       notifyError(`Header cache failed: ${err.message}`);
-      if (!closed && (!requiresPs4Runtime || seenRunning && !stopping)) {
+      if (!closed && !stopping && (!requiresPs4Runtime || seenRunning)) {
         sendStart(initialHeader || fallbackHeaderUrl);
       }
     });
 
   const handleSnapshot = (processes) => {
-    if (closed || requiresPs4Runtime && stopping) return;
+    if (closed || stopping) return;
     const list = Array.isArray(processes) ? processes : [];
     if (!list.length) return;
     if (platform === "ps3recomp") for (const pid of ps3Pids) { if (!list.some((p) => p.pid === pid)) ps3Pids.delete(pid); }
@@ -1165,29 +833,13 @@ function startPlaytimeLogWatcher(configData, options = {}) {
       if (!seenRunning && Date.now() < startGraceUntil) {
         return;
       }
-      if (requiresPs4Runtime) stopping = true;
+      stopping = true;
+      tracker.stopping = true;
       (async () => {
         try {
-          const headerPathNew = path.join(
-            userDataDir,
-            "images",
-            platform,
-            String(appid),
-            "header.jpg",
-          );
-          const headerPathLegacy = path.join(
-            userDataDir,
-            "images",
-            String(appid),
-            "header.jpg",
-          );
-          let headerLocal =
-            remoteHeaderUrl || lastHeaderUrl || fallbackHeaderUrl;
-          if (fs.existsSync(headerPathNew)) {
-            headerLocal = pathToFileURL(headerPathNew).toString();
-          } else if (fs.existsSync(headerPathLegacy)) {
-            headerLocal = pathToFileURL(headerPathLegacy).toString();
-          }
+          const storage = require("./game-artwork-storage");
+          const legacy = storage.existingAt(path.join(userDataDir, "images", String(appid)), "header");
+          const headerLocal = localHeaderIfExists() || (legacy ? pathToFileURL(legacy).href : "") || lastHeaderUrl || remoteHeaderUrl || fallbackHeaderUrl;
           await sendStop(headerLocal);
         } catch {
           await sendStop(remoteHeaderUrl);
@@ -1221,9 +873,11 @@ function startPlaytimeLogWatcher(configData, options = {}) {
 
 module.exports = {
   startPlaytimeLogWatcher,
+  configurePlaytimePreferences,
   flushPlaytimeSessions,
   rebasePlaytimeSession,
   getActiveLastPlayed,
   cacheHeaderImage,
   redownloadHeaderImage,
+  artworkSteamAppId,
 };

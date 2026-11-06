@@ -252,6 +252,7 @@ async function generateConfigImpl(game, configsDir, options = {}) {
     ps3_recomp_install_root: game.installRoot, ...progressConfig(game, previous), executable: previous.executable || game.launch?.executable || "",
     process_name: previous.process_name || (game.launch?.executable ? path.basename(game.launch.executable) : ""),
     arguments: previous.arguments || "", language: previous.language || "english" };
+  if (!existing) await require("./game-executable-finder").autoFindExecutable(config);
   cancel(); options.onProgress?.({ phase: "finalizingConfig", percent: 90, appid: game.appid, itemName: game.title });
   const configUpdated = changedWrite(path.join(configsDir, `${name}.json`), config);
   return { ...config, config, schemaDir, created: !existing, schemaUpdated, configUpdated };

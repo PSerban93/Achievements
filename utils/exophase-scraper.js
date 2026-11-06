@@ -373,9 +373,17 @@ function extractAchievementsFromHtml(html, baseUrl) {
 
     items.push({
       index: idx + 1,
+      awardId: (() => {
+        try {
+          const url = new URL($(detail).find("[class*=award-title] a[href]").first().attr("href"), baseUrl);
+          return url.origin === new URL(baseUrl).origin ? url.pathname.match(/^\/(?:trophy|achievement)\/[^/]+\/(\d+)(?:-|\/|$)/)?.[1] || "" : "";
+        } catch { return ""; }
+      })(),
       title,
       description,
       icon_url: iconUrl,
+      trophyType: ["platinum", "gold", "silver", "bronze"].find(type =>
+        card.find(`.exo-icon-trophy-${type}`).length > 0) || "",
       rarityPct,
       raritySource: rarityPct !== null ? EXOPHASE_RARITY_SOURCE : "",
     });
@@ -505,9 +513,11 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
       if (!items.length) throw Object.assign(new Error("No achievements extracted for english baseline."), { code: "EXOPHASE_EMPTY_PAGE" });
       const comparison = compareAchievements(schemaAchievements, items);
       logger?.info("exophase:catalog:candidate", { title, platform, url: candidate.baseUrl, ...comparison });
-      results.push({ candidate, comparison, items, gameTitle });
+      results.push({ candidate, comparison, items, gameTitle, ...(options.selectionPurpose === "platinum" ? { html } : {}) });
     }
-    const selected = selectCatalogResult(results);
+    const selected = options.selectionPurpose === "platinum"
+      ? await require("./exophase-platinum-selection").selectPlatinumCatalogResult(results, { deadline, logger, imagePage: page })
+      : selectCatalogResult(results);
     const baseUrl = selected.candidate.baseUrl;
     const baseItems = selected.items;
     const gameTitle = selected.gameTitle;
@@ -521,6 +531,7 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
       titles: { english: it.title },
       descriptions: { english: it.description },
       icon_url: it.icon_url || "",
+      trophyType: it.trophyType || "",
       rarityPct: normalizeExophaseRarityPercent(it.rarityPct),
       raritySource:
         normalizeExophaseRarityPercent(it.rarityPct) !== null
@@ -538,7 +549,13 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
       .map((it) => normalizePair(it.title, it.description))
       .join("\n");
 
-    for (const langKey of langKeys) {
+    let platinumLanguages;
+    if (options.selectionPurpose === "platinum") {
+      platinumLanguages = await require("./exophase-platinum-languages").loadPlatinumLanguages({
+        html: selected.html, baseUrl, baseItems, achievements, langMap, requested: langKeys,
+        loadPage: url => loadAwardsPage(page, url), extract: extractAchievementsFromHtml, logger });
+    }
+    for (const langKey of options.selectionPurpose === "platinum" ? [] : langKeys) {
       if (langKey === "english") continue;
       const exoCode = langMap[langKey];
       if (!exoCode) continue;
@@ -591,6 +608,7 @@ async function fetchExophaseAchievementsMultiLang(options = {}) {
       masterId: selected.candidate.masterId,
       usedSlug: new URL(baseUrl).pathname.split("/")[2],
       items: achievements,
+      ...(platinumLanguages ? { platinumLanguages } : {}),
     };
   } finally {
     if (ownsPage && page) {

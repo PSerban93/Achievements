@@ -15,5 +15,11 @@
     const millis = (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000;
     return Number.isSafeInteger(millis) ? millis : null;
   }
-  return { formatInput, parseInput };
+  function formatMinutes(totalMs) {
+    const value = Number(totalMs);
+    const totalMinutes = Number.isFinite(value) ? Math.floor(Math.max(0, value) / 60000) : 0;
+    const hours = Math.floor(totalMinutes / 60), minutes = totalMinutes % 60;
+    return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+  }
+  return { formatInput, parseInput, formatMinutes };
 });

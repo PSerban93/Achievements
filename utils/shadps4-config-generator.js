@@ -565,7 +565,22 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
   parsed.appid = baseAppId;
   const title = parsed.title || baseAppId;
   const trophyCount = parsed.trophies?.length || 0;
-  const progressPath = String(options.progressPath || "").trim();
+  const existing = findExistingPs4Config(configsDir, baseAppId, npcommid);
+  const savedProgress = String(existing?.data?.shadps4_progress_path || existing?.data?.save_path || "").trim();
+  let progressPath = String(options.progressPath || "").trim();
+  let userId = String(options.userId || "").trim();
+  // Definition-only discovery must not clear or rotate an established user's
+  // source. Actual active-user changes use the existing runtime selection path.
+  if (savedProgress && path.basename(savedProgress).toLowerCase() === `${npcommid}.xml`.toLowerCase()) {
+    let keepSaved = !progressPath;
+    try {
+      keepSaved ||= fs.statSync(savedProgress).isFile();
+    } catch (error) { keepSaved ||= !["ENOENT", "ENOTDIR"].includes(error.code); }
+    if (keepSaved) {
+      progressPath = savedProgress;
+      userId = String(existing.data.shadps4_user_id || path.basename(path.dirname(path.dirname(savedProgress))));
+    }
+  }
   const snapshot =
     progressPath && fs.existsSync(progressPath)
       ? buildSnapshotFromPs4ProgressFile(progressPath)
@@ -582,7 +597,6 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     };
   }
 
-  const existing = findExistingPs4Config(configsDir, baseAppId, npcommid);
   const existingName = existing
     ? path.basename(existing.filePath, ".json")
     : "";
@@ -634,7 +648,7 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
     shadps4_npcommid: npcommid,
     shadps4_schema_path: trophyDir,
     shadps4_progress_path: progressPath,
-    shadps4_user_id: String(options.userId || ""),
+    shadps4_user_id: userId,
     executable: "",
     arguments: "",
     process_name: "",
@@ -661,6 +675,10 @@ async function generateConfigFromPs4Dir(trophyDir, configsDir, options = {}) {
         name: merged.name,
         filePath: existing.filePath,
         schemaDir,
+        changedFields: PS4_CONFIG_FIELDS.filter((key) =>
+          normalizeComparableValue(key, existing.data[key]) !== normalizeComparableValue(key, merged[key])),
+        previousUserId: existing.data.shadps4_user_id || "",
+        userId: merged.shadps4_user_id || "",
       });
     }
     return {

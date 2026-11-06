@@ -192,7 +192,7 @@ function buildSteamGridSearchUrl(
   const sanitized = String(term || "")
     .trim()
     .replace(/\+/g, " ")
-    .replace(/\s+/g, "+");
+    .replace(/\s+/g, " ");
   if (!sanitized.length) throw markSteamGridNotFound(null, "term-empty");
   const normalizedAssetType = normalizeSteamGridAssetType(assetType);
   const dimensions =
@@ -211,7 +211,7 @@ function buildSteamGridSearchUrl(
   ) {
     throw new Error(`SteamGridDB ${normalizedAssetType} cannot use ${dimensions}`);
   }
-  return `https://www.steamgriddb.com/search/${normalizedAssetType}/${dimensions}/all/all?term=${sanitized}`;
+  return `https://www.steamgriddb.com/search/${normalizedAssetType}/${dimensions}/all/all?term=${encodeURIComponent(sanitized).replace(/%20/g, "+")}`;
 }
 
 async function fetchSteamGridDbImage(term, options = {}) {
@@ -283,7 +283,7 @@ async function fetchSteamGridDbImageRequest(term, options = {}) {
         document.querySelector("div.asset-container img") ||
         document.querySelector("img.grid-image");
       if (!target) return "";
-      if (requestedAssetType === "heroes") {
+      {
         const assetContainer = target.closest("div.asset-container");
         const downloadLink = assetContainer?.querySelector(
           ".btn-download a[href]",

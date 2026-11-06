@@ -15,9 +15,13 @@ body.tray-menu-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  overflow: hidden;
-  scrollbar-width: none;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dracula-purple) transparent;
   height: 100%;
+  width: 100%;
+  min-width: 0;
+  overflow-x: hidden;
   box-sizing: border-box;
 }
 
@@ -29,7 +33,17 @@ body.tray-menu-body {
   padding: 10px 12px;
   border-radius: var(--app-radius-md);
   margin: 0;
+  flex-shrink: 0;
 }
+
+.tray-menu__recent{display:flex;flex-direction:column;gap:4px;flex-shrink:0;width:100%;min-width:0;max-width:100%}
+.tray-menu__game-row{display:grid;grid-template-columns:minmax(0,1fr);align-items:center;gap:4px;height:36px;flex-shrink:0;width:100%;min-width:0;max-width:100%}
+.tray-menu__game-row--play{grid-template-columns:minmax(0,1fr) 30px}
+.tray-menu__game{display:flex;align-items:center;gap:9px;height:36px;min-height:36px;padding:7px 10px;font-weight:500;min-width:0;max-width:100%;overflow:hidden}
+.tray-menu__play{display:flex;align-items:center;justify-content:center;width:30px;height:30px;min-width:30px;min-height:30px;padding:0;margin:0;flex-shrink:0;color:var(--app-text);border-radius:var(--app-radius-md)}
+.tray-menu__game-icon{width:20px;height:20px;object-fit:contain;flex-shrink:0}
+.tray-menu__game-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.tray-menu__recent.hidden,.tray-menu__separator.hidden{display:none}
 
 .tray-menu__item--danger {
   color: var(--dracula-red);
@@ -39,6 +53,7 @@ body.tray-menu-body {
   height: 1px;
   background: rgba(255, 255, 255, 0.08);
   margin: 2px 0;
+  flex-shrink: 0;
 }
 
 body.tray-menu-body::-webkit-scrollbar,

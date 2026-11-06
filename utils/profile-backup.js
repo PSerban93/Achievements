@@ -14,6 +14,7 @@ const PROFILE_BACKUP_HEADER_BYTES = PROFILE_BACKUP_MAGIC.length + 8;
 const PROFILE_BACKUP_PREFIX = "profile/";
 const PROFILE_BACKUP_DIRECTORIES = Object.freeze([
   "ach_cache",
+  "game-metadata", // Preserve legacy inputs for rollback; new metadata lives under configs/schema.
   "collection-images",
   "configs",
   "custom-covers",
@@ -31,6 +32,7 @@ const PROFILE_BACKUP_FILES = Object.freeze([
   "ach_cache_meta.json",
   "collections.json",
   "dashboard-summary.json",
+  "config-added-times.json",
   "epic-official-import-meta.json",
   "playtime-totals.json",
   "preferences.json",

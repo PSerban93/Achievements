@@ -6,6 +6,10 @@
     <link rel="stylesheet" href="assets/vendor/fontawesome/css/all.min.css" />
     <script src="utils/app-theme.js"></script>
     <script src="utils/trophy-mode.js"></script>
+    <script src="utils/achievement-order.js"></script>
+    <script src="utils/overlay-opacity.js"></script>
+    <script src="utils/achievement-pins-view.js"></script>
+    <link rel="stylesheet" href="utils/achievement-pins.css" />
     <script>
       (() => {
         let readyMarked = false;
@@ -289,7 +293,7 @@
         scrollbar-width: thin;
         -ms-overflow-style: none;
         scrollbar-color: var(--dracula-purple) var(--dracula-background);
-        background-color: var(--app-overlay-bg);
+        background-color: color-mix(in srgb, var(--app-overlay-bg) var(--overlay-background-opacity, 100%), transparent);
         border-radius: 0 0 12px 12px;
         /* box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
         backdrop-filter: blur(8px); */
@@ -320,7 +324,7 @@
       .overlay-top {
         flex: 0 0 auto;
         z-index: 10;
-        background: var(--app-overlay-bg-strong);
+        background: color-mix(in srgb, var(--app-overlay-bg-strong) var(--overlay-background-opacity, 100%), transparent);
         /* backdrop-filter: blur(8px); */
         pointer-events: auto;
         border-radius: 12px 12px 0 0;
@@ -331,7 +335,7 @@
       }
 
       .overlay-header {
-        background-color: var(--app-overlay-surface);
+        background-color: color-mix(in srgb, var(--app-overlay-surface) var(--overlay-background-opacity, 100%), transparent);
         padding: 12px 16px;
         display: flex;
         justify-content: space-between;
@@ -365,7 +369,7 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 8px;
         padding: 10px 16px;
-        background: var(--app-overlay-bg-strong);
+        background: color-mix(in srgb, var(--app-overlay-bg-strong) var(--overlay-background-opacity, 100%), transparent);
         border: 1px solid var(--dracula-purple);
         border-top: 0;
         border-bottom-color: var(--dracula-current-line);
@@ -480,7 +484,7 @@
       }
 
       .overlay-stats {
-        background-color: var(--app-overlay-surface-soft);
+        background-color: color-mix(in srgb, var(--app-overlay-surface-soft) var(--overlay-background-opacity, 100%), transparent);
         padding: 10px 16px;
         display: flex;
         justify-content: space-between;
@@ -505,8 +509,9 @@
         align-items: center;
         justify-content: center;
         line-height: 1;
-        font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Segoe UI", Tahoma,
-          Geneva, Verdana, sans-serif;
+        font-family:
+          "Segoe UI Emoji", "Segoe UI Symbol", "Segoe UI", Tahoma, Geneva,
+          Verdana, sans-serif;
       }
 
       html:not(.fa-ready) .fa-icon {
@@ -589,6 +594,13 @@
           0 0 12px rgba(249, 199, 79, 0.72);
       }
 
+      .achievement-icon.rarity-tier-platinum {
+        border-color: #8fd8ec;
+        box-shadow:
+          0 0 0 1px rgba(143, 216, 236, 0.5),
+          0 0 12px rgba(143, 216, 236, 0.72);
+      }
+
       .achievement-icon.rarity-tier-silver {
         border-color: #c7d0d9;
         box-shadow:
@@ -648,6 +660,30 @@
       .achievement-progress {
         font-size: 0.8em;
         color: var(--dracula-comment);
+      }
+
+      .achievement-progress-meter {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 4px;
+        max-width: 90%;
+      }
+
+      .achievement-progress-meter > .progress-bar {
+        flex: 1;
+        min-width: 0;
+        width: auto;
+        margin-top: 0;
+        height: 4px;
+      }
+
+      .achievement-progress-percent {
+        flex-shrink: 0;
+        min-width: 4ch;
+        text-align: right;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
       }
 
       .achievement-status {
@@ -736,7 +772,9 @@
       .empty-state-message {
         font-size: 16px;
       }
-      .overlay-action-menu, .overlay-action-panel, .overlay-action-notice {
+      .overlay-action-menu,
+      .overlay-action-panel,
+      .overlay-action-notice {
         background: var(--dracula-background, #282a36);
         color: var(--dracula-foreground, #f8f8f2);
         border: 1px solid var(--dracula-purple, #bd93f9);
@@ -745,28 +783,95 @@
         box-sizing: border-box;
       }
       .overlay-action-menu {
-        position: fixed; z-index: 100; padding: 6px;
-        max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto;
+        position: fixed;
+        z-index: 100;
+        padding: 6px;
+        max-width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+        overflow: auto;
       }
-      .overlay-action-menu button, .overlay-action-buttons button {
-        color: inherit; background: transparent; border: 0; border-radius: 5px;
-        padding: 10px 12px; font: inherit; cursor: pointer; overflow-wrap: anywhere;
+      .overlay-action-menu button,
+      .overlay-action-buttons button {
+        color: inherit;
+        background: transparent;
+        border: 0;
+        border-radius: 5px;
+        padding: 10px 12px;
+        font: inherit;
+        cursor: pointer;
+        overflow-wrap: anywhere;
       }
-      .overlay-action-menu button { display: block; width: 100%; text-align: start; }
-      .overlay-action-menu button:hover, .overlay-action-buttons button:hover {
+      .overlay-action-menu button {
+        display: block;
+        width: 100%;
+        text-align: start;
+      }
+      .overlay-action-menu button:hover,
+      .overlay-action-buttons button:hover {
         background: var(--dracula-current-line, #44475a);
       }
-      .achievement-item.overlay-action-selected { outline: 1px solid var(--dracula-purple, #bd93f9); outline-offset: -1px; }
-      .overlay-action-backdrop { position: fixed; inset: 0; z-index: 101; background: #0008; display: grid; place-items: center; padding: 12px; }
-      .overlay-action-panel { padding: 16px; width: 100%; max-height: calc(100vh - 24px); overflow: auto; }
-      .overlay-action-panel h3 { margin: 0 0 12px; font-size: 17px; }
-      .overlay-action-panel p { margin: 12px 0; font-size: 13px; line-height: 1.5; }
-      .overlay-action-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; max-height: 25vh; overflow: auto; }
-      .overlay-action-buttons { display: flex; justify-content: flex-end; gap: 8px; }
-      .overlay-action-buttons button { background: var(--dracula-current-line, #44475a); }
-      .overlay-action-notice { position: fixed; z-index: 102; bottom: 12px; left: 12px; right: 12px; padding: 12px; font-size: 13px; pointer-events: none; }
-      .overlay-action-notice.is-error { border-color: var(--dracula-red, #ff5555); }
-      #overlayAchievementMenu[hidden], #overlayAchievementDialog[hidden], #overlayAchievementNotice[hidden] { display: none; }
+      .achievement-item.overlay-action-selected {
+        outline: 1px solid var(--dracula-purple, #bd93f9);
+        outline-offset: -1px;
+      }
+      .overlay-action-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 101;
+        background: #0008;
+        display: grid;
+        place-items: center;
+        padding: 12px;
+      }
+      .overlay-action-panel {
+        padding: 16px;
+        width: 100%;
+        max-height: calc(100vh - 24px);
+        overflow: auto;
+      }
+      .overlay-action-panel h3 {
+        margin: 0 0 12px;
+        font-size: 17px;
+      }
+      .overlay-action-panel p {
+        margin: 12px 0;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .overlay-action-panel pre {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font: inherit;
+        font-size: 12px;
+        max-height: 25vh;
+        overflow: auto;
+      }
+      .overlay-action-buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+      .overlay-action-buttons button {
+        background: var(--dracula-current-line, #44475a);
+      }
+      .overlay-action-notice {
+        position: fixed;
+        z-index: 102;
+        bottom: 12px;
+        left: 12px;
+        right: 12px;
+        padding: 12px;
+        font-size: 13px;
+        pointer-events: none;
+      }
+      .overlay-action-notice.is-error {
+        border-color: var(--dracula-red, #ff5555);
+      }
+      #overlayAchievementMenu[hidden],
+      #overlayAchievementDialog[hidden],
+      #overlayAchievementNotice[hidden] {
+        display: none;
+      }
     </style>
   </head>
 
@@ -809,7 +914,12 @@
         </div>
 
         <ul id="achievements-list" class="achievements-list"></ul>
-        <div id="overlayFilterEmpty" class="overlay-filter-empty" role="status" hidden></div>
+        <div
+          id="overlayFilterEmpty"
+          class="overlay-filter-empty"
+          role="status"
+          hidden
+        ></div>
       </div>
     </div>
 
@@ -842,7 +952,10 @@
         document.documentElement.dataset.theme = normalizeAppTheme(value);
       }
       function registerOverlayThemes(payload) {
-        if (window.AppTheme?.registerAppThemes && Array.isArray(payload?.themes)) {
+        if (
+          window.AppTheme?.registerAppThemes &&
+          Array.isArray(payload?.themes)
+        ) {
           window.AppTheme.registerAppThemes(payload.themes);
         }
       }
@@ -867,25 +980,54 @@
         `<i class="${iconClasses} fa-icon" aria-hidden="true"></i><span class="fa-fallback" aria-hidden="true">${fallbackChar}</span>`;
 
       const overlayFilterDefinitions = [
-        { key: "status", label: ["achievements.statusFilterLabel", "Status"], title: ["aria.achFilterStatusBtn", "Status filter"], options: [
-          ["all", "achievements.statusFilterAll", "All"],
-          ["locked", "achievements.statusFilterLocked", "Locked"],
-          ["unlocked", "achievements.statusFilterUnlocked", "Unlocked"],
-        ] },
-        { key: "timeSort", label: ["achievements.sortDateLabel", "Date"], title: ["aria.achSortTimeBtn", "Sort by unlock date"], options: [
-          ["off", "settings.notificationCustomisation.category.default", "Default"],
-          ["desc", "achievements.sortDirectionNewOld", "New-Old"],
-          ["asc", "achievements.sortDirectionOldNew", "Old-New"],
-        ] },
-        { key: "nameSort", label: ["achievements.sortNameLabel", "Name"], title: ["aria.achSortNameBtn", "Sort by name"], options: [
-          ["off", "settings.notificationCustomisation.category.default", "Default"],
-          ["asc", "", "A-Z"], ["desc", "", "Z-A"],
-        ] },
-        { key: "raritySort", label: ["achievements.raritySortLabel", "Rarity"], title: ["aria.achSortRarityBtn", "Sort by rarity"], options: [
-          ["off", "achievements.statusFilterAll", "All"],
-          ["asc", "achievements.sortDirectionRareCommon", "Rare-Common"],
-          ["desc", "achievements.sortDirectionCommonRare", "Common-Rare"],
-        ] },
+        {
+          key: "status",
+          label: ["achievements.statusFilterLabel", "Status"],
+          title: ["aria.achFilterStatusBtn", "Status filter"],
+          options: [
+            ["all", "achievements.statusFilterAll", "All"],
+            ["locked", "achievements.statusFilterLocked", "Locked"],
+            ["unlocked", "achievements.statusFilterUnlocked", "Unlocked"],
+          ],
+        },
+        {
+          key: "timeSort",
+          label: ["achievements.sortDateLabel", "Date"],
+          title: ["aria.achSortTimeBtn", "Sort by unlock date"],
+          options: [
+            [
+              "off",
+              "settings.notificationCustomisation.category.default",
+              "Default",
+            ],
+            ["desc", "achievements.sortDirectionNewOld", "New-Old"],
+            ["asc", "achievements.sortDirectionOldNew", "Old-New"],
+          ],
+        },
+        {
+          key: "nameSort",
+          label: ["achievements.sortNameLabel", "Name"],
+          title: ["aria.achSortNameBtn", "Sort by name"],
+          options: [
+            [
+              "off",
+              "settings.notificationCustomisation.category.default",
+              "Default",
+            ],
+            ["asc", "", "A-Z"],
+            ["desc", "", "Z-A"],
+          ],
+        },
+        {
+          key: "raritySort",
+          label: ["achievements.raritySortLabel", "Rarity"],
+          title: ["aria.achSortRarityBtn", "Sort by rarity"],
+          options: [
+            ["off", "achievements.statusFilterAll", "All"],
+            ["asc", "achievements.sortDirectionRareCommon", "Rare-Common"],
+            ["desc", "achievements.sortDirectionCommonRare", "Common-Rare"],
+          ],
+        },
       ];
       const overlayFilterControls = new Map();
       let overlayViewStateVersion = 0;
@@ -895,14 +1037,17 @@
           if (key === exceptKey) continue;
           control.menu.hidden = true;
           control.trigger.setAttribute("aria-expanded", "false");
-          for (const option of control.menu.children) option.classList.remove("is-highlighted");
+          for (const option of control.menu.children)
+            option.classList.remove("is-highlighted");
         }
       }
 
       function updateOverlayFilterControls() {
         const list = document.getElementById("achievements-list");
         const toolbar = document.getElementById("overlayFilters");
-        toolbar.hidden = list.style.display === "none" || !list.querySelector("li.achievement-item");
+        toolbar.hidden =
+          list.style.display === "none" ||
+          !list.querySelector("li.achievement-item");
         if (toolbar.hidden) closeOverlayFilterMenus();
         for (const definition of overlayFilterDefinitions) {
           const control = overlayFilterControls.get(definition.key);
@@ -910,31 +1055,51 @@
           const value = overlayAchievementTableViewState[definition.key];
           control.label.textContent = tUi(...definition.label);
           control.trigger.title = tUi(...definition.title);
-          control.trigger.classList.toggle("is-active", value !== (definition.key === "status" ? "all" : "off"));
-          for (const [index, [optionValue, localeKey, fallback]] of definition.options.entries()) {
+          control.trigger.classList.toggle(
+            "is-active",
+            value !== (definition.key === "status" ? "all" : "off"),
+          );
+          for (const [
+            index,
+            [optionValue, localeKey, fallback],
+          ] of definition.options.entries()) {
             const text = localeKey ? tUi(localeKey, fallback) : fallback;
             control.menu.children[index].textContent = text;
-            control.menu.children[index].setAttribute("aria-checked", String(optionValue === value));
+            control.menu.children[index].setAttribute(
+              "aria-checked",
+              String(optionValue === value),
+            );
             if (optionValue === value) control.value.textContent = text;
           }
-          control.trigger.setAttribute("aria-label", `${tUi(...definition.title)}: ${control.value.textContent}`);
+          control.trigger.setAttribute(
+            "aria-label",
+            `${tUi(...definition.title)}: ${control.value.textContent}`,
+          );
           control.menu.setAttribute("aria-label", tUi(...definition.title));
         }
-        document.getElementById("overlayFilterEmpty").textContent = tUi("overlay.noFilterResults", "No achievements match the selected filter.");
+        document.getElementById("overlayFilterEmpty").textContent = tUi(
+          "overlay.noFilterResults",
+          "No achievements match the selected filter.",
+        );
       }
 
       function chooseOverlayFilter(key, value) {
         if (key === "status") {
-          overlayAchievementTableViewState.status = normalizeOverlayAchievementTableStatus(value);
+          overlayAchievementTableViewState.status =
+            normalizeOverlayAchievementTableStatus(value);
         } else {
-          for (const sort of ["nameSort", "timeSort", "raritySort"]) overlayAchievementTableViewState[sort] = "off";
-          overlayAchievementTableViewState[key] = normalizeOverlayAchievementTableSort(value);
+          for (const sort of ["nameSort", "timeSort", "raritySort"])
+            overlayAchievementTableViewState[sort] = "off";
+          overlayAchievementTableViewState[key] =
+            normalizeOverlayAchievementTableSort(value);
         }
         overlayViewStateVersion += 1;
         closeOverlayFilterMenus();
         persistOverlayAchievementTableViewStateToStorage();
         applyOverlayAchievementViewState();
-        window.api?.syncAchievementTableViewState?.({ ...overlayAchievementTableViewState });
+        window.api?.syncAchievementTableViewState?.({
+          ...overlayAchievementTableViewState,
+        });
       }
 
       function setupOverlayFilterControls() {
@@ -947,7 +1112,8 @@
           trigger.className = "overlay-filter-trigger";
           trigger.setAttribute("aria-haspopup", "menu");
           trigger.setAttribute("aria-expanded", "false");
-          const label = document.createElement("span"), value = document.createElement("span");
+          const label = document.createElement("span"),
+            value = document.createElement("span");
           label.className = "overlay-filter-label";
           value.className = "overlay-filter-value";
           trigger.append(label, value);
@@ -962,7 +1128,9 @@
             option.type = "button";
             option.className = "overlay-filter-option";
             option.setAttribute("role", "menuitemradio");
-            option.addEventListener("click", () => chooseOverlayFilter(definition.key, optionValue));
+            option.addEventListener("click", () =>
+              chooseOverlayFilter(definition.key, optionValue),
+            );
             menu.appendChild(option);
           }
           trigger.addEventListener("click", () => {
@@ -980,25 +1148,49 @@
             if (event.key === "Escape") {
               closeOverlayFilterMenus();
               event.preventDefault();
-            } else if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+            } else if (
+              ["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)
+            ) {
               const options = [...menu.children];
-              const current = options.findIndex((option) => option.classList.contains("is-highlighted"));
-              const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
-                : current < 0 ? (event.key === "ArrowUp" ? options.length - 1 : 0)
-                : (current + (event.key === "ArrowUp" ? -1 : 1) + options.length) % options.length;
+              const current = options.findIndex((option) =>
+                option.classList.contains("is-highlighted"),
+              );
+              const next =
+                event.key === "Home"
+                  ? 0
+                  : event.key === "End"
+                    ? options.length - 1
+                    : current < 0
+                      ? event.key === "ArrowUp"
+                        ? options.length - 1
+                        : 0
+                      : (current +
+                          (event.key === "ArrowUp" ? -1 : 1) +
+                          options.length) %
+                        options.length;
               closeOverlayFilterMenus(definition.key);
               menu.hidden = false;
               trigger.setAttribute("aria-expanded", "true");
-              options.forEach((option, index) => option.classList.toggle("is-highlighted", index === next));
+              options.forEach((option, index) =>
+                option.classList.toggle("is-highlighted", index === next),
+              );
               event.preventDefault();
             } else if (!menu.hidden && ["Enter", " "].includes(event.key)) {
               const highlighted = menu.querySelector(".is-highlighted");
-              if (highlighted) { highlighted.click(); event.preventDefault(); }
+              if (highlighted) {
+                highlighted.click();
+                event.preventDefault();
+              }
             }
           });
           group.append(trigger, menu);
           toolbar.appendChild(group);
-          overlayFilterControls.set(definition.key, { trigger, label, value, menu });
+          overlayFilterControls.set(definition.key, {
+            trigger,
+            label,
+            value,
+            menu,
+          });
         }
         document.addEventListener("pointerdown", (event) => {
           if (!toolbar.contains(event.target)) closeOverlayFilterMenus();
@@ -1093,11 +1285,18 @@
         );
       }
 
+      let overlayBackgroundRevision = 0;
+      function applyOverlayBackgroundTransparency(value) {
+        const transparency = window.OverlayOpacity.normalizeTransparency(value);
+        document.documentElement.style.setProperty("--overlay-background-opacity", `${100 - transparency}%`);
+      }
       async function loadOverlayPrefs() {
         if (overlayPrefsLoaded && overlayPrefs) return overlayPrefs;
+        const backgroundRevision = overlayBackgroundRevision;
         try {
           await loadOverlayThemes();
           overlayPrefs = await window.api.loadPreferences?.();
+          if (backgroundRevision === overlayBackgroundRevision) applyOverlayBackgroundTransparency(overlayPrefs?.overlayBackgroundTransparency);
           applyAppTheme(overlayPrefs?.appTheme);
           overlayPrefsLoaded = true;
         } catch (e) {
@@ -1113,14 +1312,25 @@
       let currentDataHash = null;
       let isLoading = false;
       let pendingConfigName = null;
+      let overlayLoadGeneration = 0;
       let pendingNotificationNavigation = null;
       const NOTIFICATION_NAVIGATION_TARGET_TIMEOUT_MS = 10000;
       let notificationNavigationTargetTimer = null;
       let pendingVisibilityAckPayload = null;
       const overlayAchievementActions = window.createOverlayAchievementActions({
-        api: window.api, list: document.getElementById("achievements-list"), t: tUi,
+        api: window.api,
+        list: document.getElementById("achievements-list"),
+        t: tUi,
         closeFilters: closeOverlayFilterMenus,
-        reload: async (name) => { currentDataHash = null; await loadAchievements(name); },
+        reload: async (name) => {
+          currentDataHash = null;
+          await loadAchievements(name);
+        },
+      });
+      const achievementPinsView = window.createAchievementPinsView({
+        api: window.api, getConfig: () => currentConfigName,
+        rows: () => [...document.querySelectorAll(".achievement-item[data-achievement-name]")],
+        sort: () => applyOverlayAchievementViewState(), t: tUi,
       });
 
       function dispatchOverlayVisibilityAck(payload, reason = "immediate") {
@@ -1258,7 +1468,10 @@
           show: true,
           progress: rawProgress,
           max: rawMax,
-          percent: Math.min(100, Math.round((rawProgress / rawMax) * 100)),
+          percent: Math.max(
+            0,
+            Math.min(100, Math.round((rawProgress / rawMax) * 100)),
+          ),
         };
       }
 
@@ -1275,7 +1488,13 @@
         const d = new Date(ms);
         return isNaN(d)
           ? tUi("overlay.notAvailable", "N/A")
-          : d.toLocaleString();
+          : d.toLocaleString(undefined, {
+              year: "2-digit",
+              month: "2-digit",
+              day: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
       }
 
       function computeAchievementsHash(achievements, saved, lang) {
@@ -1292,11 +1511,11 @@
               ach?.global_percent ??
               ach?.percent ??
               (typeof ach?.rarity === "object"
-                ? ach?.rarity?.pct ??
+                ? (ach?.rarity?.pct ??
                   ach?.rarity?.percent ??
                   ach?.rarity?.value ??
-                  ""
-                : ach?.rarity ?? "");
+                  "")
+                : (ach?.rarity ?? ""));
             const trophyType = formatTrophyTypeAsRarity(
               ach?.trophyType || ach?.trophy_type,
             );
@@ -1383,6 +1602,12 @@
         achievement,
         { useNativeTrophyType = false } = {},
       ) {
+        if (
+          mapTrophyTypeToRaritySortValue(
+            achievement?.trophyType || achievement?.trophy_type,
+          ) === 0
+        )
+          return "platinum";
         if (useNativeTrophyType) {
           const nativeTier = formatTrophyTypeAsRarity(
             achievement?.trophyType || achievement?.trophy_type,
@@ -1411,11 +1636,18 @@
         achievement,
         { trophyModeEnabled = false, useNativeTrophyType = false } = {},
       ) {
+        if (
+          mapTrophyTypeToRaritySortValue(
+            achievement?.trophyType || achievement?.trophy_type,
+          ) === 0
+        ) {
+          return "rarity-tier-platinum";
+        }
         if (trophyModeEnabled) {
           const tier = resolveTrophyModeDisplayTier(achievement, {
             useNativeTrophyType,
           });
-          return tier === "platinum" ? "" : `rarity-tier-${tier}`;
+          return `rarity-tier-${tier}`;
         }
         const rarityPct = resolveRarityPercent(achievement);
         if (rarityPct === null) return "";
@@ -1482,6 +1714,8 @@
       }
 
       function compareOverlayAchievementItemsByCurrentSort(itemA, itemB) {
+        const pinOrder = Number(itemB?.dataset?.pinned === "1") - Number(itemA?.dataset?.pinned === "1");
+        if (pinOrder) return pinOrder;
         const fallback =
           getOverlayAchievementItemDefaultIndex(itemA) -
           getOverlayAchievementItemDefaultIndex(itemB);
@@ -1519,6 +1753,17 @@
         }
 
         if (overlayAchievementTableViewState.raritySort !== "off") {
+          const aPlatinum = itemA?.dataset?.platinum === "1";
+          const bPlatinum = itemB?.dataset?.platinum === "1";
+          if (aPlatinum || bPlatinum) {
+            return (
+              AchievementOrder.comparePlatinumRarity(
+                aPlatinum,
+                bPlatinum,
+                overlayAchievementTableViewState.raritySort,
+              ) || fallback
+            );
+          }
           const aValue = getOverlayAchievementItemNumericValue(
             itemA,
             "sortRarity",
@@ -1567,7 +1812,8 @@
           item.style.display = statusMatches ? "" : "none";
           if (statusMatches) visibleCount += 1;
         });
-        filteredEmpty.hidden = visibleCount > 0 || achievementsList.style.display === "none";
+        filteredEmpty.hidden =
+          visibleCount > 0 || achievementsList.style.display === "none";
       }
 
       function clearNotificationNavigationTarget() {
@@ -1691,6 +1937,9 @@
       setupOverlayFilterControls();
 
       function updateStats(achievements, savedData) {
+        achievements = achievements.filter(
+          (achievement) => achievement.synthetic_platinum !== true,
+        );
         const total = achievements.length;
         const unlocked = achievements.reduce((count, ach) => {
           const saved = savedData?.achievements?.[ach.name];
@@ -1732,26 +1981,38 @@
         }
         isLoading = true;
         pendingConfigName = null;
+        const loadGeneration = overlayLoadGeneration;
+        const isStale = () => loadGeneration !== overlayLoadGeneration ||
+          currentConfigName !== configName ||
+          (pendingConfigName && pendingConfigName !== configName);
 
         try {
           await applyOverlayLanguage();
+          if (isStale()) return;
           const configMeta = await window.api.getConfigByName?.(configName);
+          if (isStale()) return;
           const platformForRaritySort = String(configMeta?.platform || "")
             .trim()
             .toLowerCase();
           const useTrophyTypeRaritySortFallback =
             platformForRaritySort === "rpcs3" ||
             platformForRaritySort === "shadps4" ||
-            platformForRaritySort === "ps3recomp" || platformForRaritySort === "ps4recomp" ||
+            platformForRaritySort === "ps3recomp" ||
+            platformForRaritySort === "ps4recomp" ||
             platformForRaritySort === "kytyps5";
-          const achievementsDataObj =
-            await window.api.loadAchievementData(configName, {
+          const achievementsDataObj = await window.api.loadAchievementData(
+            configName,
+            {
               includeRarity: true,
-            });
+            },
+          );
+          if (isStale()) return;
           const savedAchievementsObj =
             await window.api.loadSavedAchievements(configName);
+          if (isStale()) return;
           const lang = overlayLang;
           const prefs = await loadOverlayPrefs();
+          if (isStale()) return;
           const trophyModeEnabled = prefs?.trophyModeEnabled === true;
 
           if (!Array.isArray(achievementsDataObj.achievements)) {
@@ -1772,11 +2033,10 @@
             savedAchievementsObj,
             lang,
           );
-          if (pendingConfigName && pendingConfigName !== configName) return;
-
           const isSameConfig = currentConfigName === configName;
           const isSameHash = currentDataHash === newHash;
           if (isSameConfig && isSameHash) {
+            if (achievementPinsView.setData(configName, savedAchievementsObj?.achievementPins)) achievementPinsView.refresh();
             flushPendingNotificationNavigation();
             return;
           }
@@ -1799,7 +2059,7 @@
           // Update stats
           updateStats(achievements, savedAchievementsObj);
 
-          // Sort achievements: unlocked first, then locked
+          // Same source-order Platinum and unlocked/locked grouping as the table.
           achievements.sort((a, b) => {
             const aUnlocked = savedAchievementsObj?.achievements?.[a.name]
               ?.earned
@@ -1809,7 +2069,12 @@
               ?.earned
               ? 1
               : 0;
-            return bUnlocked - aUnlocked;
+            return AchievementOrder.compareDefaultOrder(
+              a,
+              b,
+              aUnlocked,
+              bUnlocked,
+            );
           });
 
           let defaultItemIndex = 0;
@@ -1829,10 +2094,7 @@
             let statusHTML = `<div class="status-locked">${faWithFallback(
               "fas fa-lock",
               "🔒",
-            )} ${tUi(
-              "overlay.statusLocked",
-              "Locked",
-            )}</div>`;
+            )} ${tUi("overlay.statusLocked", "Locked")}</div>`;
             let earnedTimeHTML = "";
             let progressHTML = "";
             const trophyModeTier = trophyModeEnabled
@@ -1840,26 +2102,34 @@
                   useNativeTrophyType: useTrophyTypeRaritySortFallback,
                 })
               : "";
-            const hasNativeTrophyType = useTrophyTypeRaritySortFallback &&
+            const hasNativeTrophyType =
+              (useTrophyTypeRaritySortFallback ||
+                mapTrophyTypeToRaritySortValue(
+                  achievement?.trophyType || achievement?.trophy_type,
+                ) === 0) &&
               mapTrophyTypeToRaritySortValue(
                 achievement?.trophyType || achievement?.trophy_type,
               ) !== null;
-            const trophyModeLabel = trophyModeEnabled && !hasNativeTrophyType
-              ? getTrophyModeTierLabel(trophyModeTier)
-              : "";
+            const trophyModeLabel =
+              trophyModeEnabled && !hasNativeTrophyType
+                ? getTrophyModeTierLabel(trophyModeTier)
+                : "";
             const rarityText = formatRarityPercent(achievement, {
-              includeNativeTrophyType: !trophyModeEnabled || hasNativeTrophyType,
+              includeNativeTrophyType:
+                !trophyModeEnabled || hasNativeTrophyType,
             });
             const trophyModeHTML = trophyModeLabel
-              ? ` · <span class="trophy-tier-label trophy-tier-${trophyModeTier}">${trophyModeLabel}</span>`
+              ? `${resolveRarityPercent(achievement) !== null ? `${rarityText} - ` : ""}<span class="trophy-tier-label trophy-tier-${trophyModeTier}">${trophyModeLabel}</span>`
               : "";
             const nativeTrophyTier = hasNativeTrophyType
-              ? resolveTrophyModeDisplayTier(achievement, { useNativeTrophyType: true })
+              ? resolveTrophyModeDisplayTier(achievement, {
+                  useNativeTrophyType: true,
+                })
               : "";
             const nativeTrophyHTML = hasNativeTrophyType
               ? `<span class="trophy-tier-label trophy-tier-${nativeTrophyTier}">${rarityText}</span>`
               : rarityText;
-            const rarityHTML = `<div class="achievement-rarity">${tUi("overlay.rarityLabel", "Rarity")}: ${nativeTrophyHTML}${trophyModeHTML}</div>`;
+            const rarityHTML = `<div class="achievement-rarity">${trophyModeHTML || nativeTrophyHTML}</div>`;
             const saved =
               savedAchievementsObj?.achievements?.[achievement.name];
             const isUnlocked = !!saved?.earned;
@@ -1874,7 +2144,8 @@
                 : achievement.description &&
                   typeof achievement.description === "object" &&
                   Object.values(achievement.description).some(
-                    (value) => typeof value === "string" && value.trim().length > 0,
+                    (value) =>
+                      typeof value === "string" && value.trim().length > 0,
                   );
             const descText = isDescriptionMasked ? hiddenLabel : description;
             const rarityPercentValue = resolveRarityPercent(achievement);
@@ -1883,10 +2154,7 @@
               statusHTML = `<div class="status-unlocked">${faWithFallback(
                 "fas fa-unlock",
                 "🔓",
-              )} ${tUi(
-                "overlay.statusUnlocked",
-                "Unlocked",
-              )}</div>`;
+              )} ${tUi("overlay.statusUnlocked", "Unlocked")}</div>`;
               earnedTimeHTML = `<div class="achievement-time">${formatTimestamp(
                 saved.earned_time,
               )}</div>`;
@@ -1896,8 +2164,11 @@
               progressHTML = `
                     <div class="achievement-progress">
                     ${tUi("overlay.progressLabel", "Progress")}: ${effectiveProgress.progress} / ${effectiveProgress.max}
-                    <div class="progress-bar" style="margin-top: 4px; height: 4px;">
+                    <div class="achievement-progress-meter">
+                    <div class="progress-bar">
                         <div class="progress-fill" style="width: ${effectiveProgress.percent}%;"></div>
+                    </div>
+                    <span class="achievement-progress-percent">${effectiveProgress.percent}%</span>
                     </div>
                     </div>`;
             }
@@ -1905,6 +2176,9 @@
             const listItem = document.createElement("li");
             listItem.className = "achievement-item";
             listItem.dataset.achievementName = String(achievement.name);
+            listItem.dataset.platinum = AchievementOrder.isPlatinum(achievement)
+              ? "1"
+              : "0";
             const rarityGlowTierClass = resolveRarityGlowTierClass(
               achievement,
               {
@@ -1954,7 +2228,10 @@
               toggle.setAttribute("aria-pressed", "false");
               toggle.addEventListener("click", () => {
                 const revealed = toggle.getAttribute("aria-pressed") === "true";
-                toggle.setAttribute("aria-pressed", revealed ? "false" : "true");
+                toggle.setAttribute(
+                  "aria-pressed",
+                  revealed ? "false" : "true",
+                );
                 toggle.textContent = revealed ? hiddenLabel : description;
               });
               descriptionEl.appendChild(toggle);
@@ -1969,11 +2246,15 @@
             }
             resolveAchievementIcon(imgEl, achievementsDataObj.config_path, rel);
           });
+          achievementPinsView.setData(configName, savedAchievementsObj?.achievementPins);
           applyOverlayAchievementViewState();
 
           currentConfigName = configName;
           currentDataHash = newHash;
-          overlayAchievementActions.setData(configName, savedAchievementsObj?.achievements);
+          overlayAchievementActions.setData(
+            configName,
+            savedAchievementsObj?.achievements,
+          );
           flushPendingNotificationNavigation();
         } finally {
           isLoading = false;
@@ -2009,7 +2290,10 @@
               window.i18nUi &&
               typeof window.i18nUi.setUiLanguage === "function"
             ) {
-              window.i18nUi.setUiLanguage(overlayUiLang).then(updateOverlayFilterControls).catch(console.error);
+              window.i18nUi
+                .setUiLanguage(overlayUiLang)
+                .then(updateOverlayFilterControls)
+                .catch(console.error);
             }
           }
         } else {
@@ -2020,12 +2304,16 @@
         if (uiLanguageChanged || contentLanguageChanged) {
           currentDataHash = null;
         }
-        if (currentConfigName && (uiLanguageChanged || contentLanguageChanged)) {
+        if (
+          currentConfigName &&
+          (uiLanguageChanged || contentLanguageChanged)
+        ) {
           loadAchievements(currentConfigName);
         }
       });
 
       window.api.onLoadOverlayData((configName) => {
+        overlayLoadGeneration++;
         overlayAchievementActions.setConfig(configName);
         const achievementsList = document.getElementById("achievements-list");
         const emptyState = document.getElementById("empty-state");
@@ -2043,7 +2331,6 @@
           currentConfigName = null;
           currentDataHash = null;
           pendingConfigName = null;
-          isLoading = false;
           return;
         }
 
@@ -2081,6 +2368,11 @@
 
       window.api.on("overlay-preferences-updated", (payload) => {
         if (!payload || typeof payload !== "object") return;
+        if (Object.prototype.hasOwnProperty.call(payload, "overlayBackgroundTransparency")) {
+          overlayBackgroundRevision++;
+          overlayPrefs = { ...(overlayPrefs || {}), overlayBackgroundTransparency: window.OverlayOpacity.normalizeTransparency(payload.overlayBackgroundTransparency) };
+          applyOverlayBackgroundTransparency(overlayPrefs.overlayBackgroundTransparency);
+        }
         if (Object.prototype.hasOwnProperty.call(payload, "appTheme")) {
           registerOverlayThemes(payload);
           overlayPrefs = {
@@ -2103,12 +2395,20 @@
             loadAchievements(currentConfigName);
           }
         }
-        if (["trophyModeEnabled", "trophyModeGoldThreshold", "trophyModeSilverThreshold"]
-            .some((key) => Object.prototype.hasOwnProperty.call(payload, key))) {
+        if (
+          [
+            "trophyModeEnabled",
+            "trophyModeGoldThreshold",
+            "trophyModeSilverThreshold",
+          ].some((key) => Object.prototype.hasOwnProperty.call(payload, key))
+        ) {
           overlayPrefs = {
             ...(overlayPrefs || {}),
             trophyModeEnabled: payload.trophyModeEnabled === true,
-            ...TrophyMode.normalizeTrophyModeThresholds({ ...overlayPrefs, ...payload }),
+            ...TrophyMode.normalizeTrophyModeThresholds({
+              ...overlayPrefs,
+              ...payload,
+            }),
           };
           overlayPrefsLoaded = true;
           currentDataHash = null;
@@ -2284,9 +2584,12 @@
 
       window.onload = () => {
         const version = overlayViewStateVersion;
-        Promise.resolve(window.api.getAchievementTableViewState?.()).then((state) => {
-          if (state && version === overlayViewStateVersion) applyOverlayAchievementTableViewState(state);
-        }).catch(console.error);
+        Promise.resolve(window.api.getAchievementTableViewState?.())
+          .then((state) => {
+            if (state && version === overlayViewStateVersion)
+              applyOverlayAchievementTableViewState(state);
+          })
+          .catch(console.error);
         window.api.requestCurrentConfig?.();
         setupOverlayKeyboardScroll();
         setupOverlayDragRegion();

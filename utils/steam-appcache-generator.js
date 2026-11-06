@@ -1,6 +1,8 @@
+const { parseSteamCommunityTitle } = require("./steam-community-schema");
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const { downloadSteamCommunityImage, isSteamImageFile } = require("./steam-community-images");
 const axios = require("axios");
 const { createLogger } = require("./logger");
 const { sanitizeConfigName } = require("./playtime-store");
@@ -38,6 +40,12 @@ function sanitizeFileName(name) {
 function applyLaunchMetadataToConfig(configData, metadata) {
   if (!configData || !metadata) return false;
   let changed = false;
+  for (const field of ["relative_executable", "relative_working_directory"]) {
+    if (typeof metadata[field] === "string" && metadata[field].trim() && !String(configData.launch_metadata?.[field] || "").trim()) {
+      configData.launch_metadata = { ...configData.launch_metadata, [field]: metadata[field] };
+      changed = true;
+    }
+  }
   const processName = normalizeProcessNameValue(metadata.process_name);
   const args = String(metadata.arguments || "");
   if (
@@ -58,62 +66,22 @@ const steamStoreCache = new Map();
 
 const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121 Safari/537.36";
-function decodeHtml(s) {
-  return String(s || "")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-function cleanText(x) {
-  return decodeHtml(String(x || "").replace(/<[^>]*>/g, ""))
-    .replace(/\s+/g, " ")
-    .trim();
-}
-function isBadName(name) {
-  const n = (name || "").trim();
-  return !n || /^steam hunters$/i.test(n);
-}
-function extractNameFromSteamHuntersHtml(html) {
-  const H = String(html || "");
-  // 1) Banner: <span.flex-link-underline> from <h1><a>…</a></h1>
-  //    (not “Steam Hunters”, second)
-  let m =
-    /<main[\s\S]*?<div[^>]*class="[^"]*\bbanner\b[^"]*"[^>]*>[\s\S]*?<div[^>]*class="[^"]*\bmedia-body\b[^"]*"[^>]*>[\s\S]*?<h1[^>]*>[\s\S]*?<a[^>]*>\s*<span[^>]*class="[^"]*\bflex-link-underline\b[^"]*"[^>]*>[\s\S]*?<\/span>\s*<span[^>]*class="[^"]*\bflex-link-underline\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(
-      H
-    );
-  if (m && m[1]) {
-    const name = cleanText(m[1]);
-    if (!isBadName(name)) return name;
-  }
-  // 2) Breadcrumb: <span class="text-ellipsis app-name after">
-  m =
-    /<header[\s\S]*?<span[^>]*class="[^"]*\btext-ellipsis\b[^"]*\bapp-name\b[^"]*(?:\bafter\b)?[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(
-      H
-    );
-  if (m && m[1]) {
-    const name = cleanText(m[1]);
-    if (!isBadName(name)) return name;
-  }
-  return null;
-}
-async function getGameNameFromSteamHunters(appid) {
+async function getGameNameFromSteamCommunity(appid) {
   try {
-    const url = `https://steamhunters.com/apps/${appid}/achievements`;
+    const url = `https://steamcommunity.com/achievements/${appid}?l=english`;
     const res = await axios.get(url, {
       headers: { "User-Agent": UA, Accept: "text/html" },
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
     });
     if (res.status >= 400) return null;
-    const name = extractNameFromSteamHuntersHtml(res.data || "");
+    const name = parseSteamCommunityTitle(res.data, appid);
     if (!name) {
-      autoConfigLogger.warn("steam-hunters:name-missing", { appid });
+      autoConfigLogger.warn("steamcommunity:name-missing", { appid });
     }
     return name || null;
   } catch (e) {
-    autoConfigLogger.warn("steam-hunters:request-failed", {
+    autoConfigLogger.warn("steamcommunity:request-failed", {
       appid,
       error: e?.message || String(e),
     });
@@ -121,7 +89,7 @@ async function getGameNameFromSteamHunters(appid) {
   }
 }
 
-async function fetchSteamStoreName(appid, fetchImpl = global.fetch) {
+async function fetchSteamStoreName(appid, fetchImpl = global.fetch, userDataDir = "") {
   if (!appid) return null;
   const key = String(appid);
   if (steamStoreCache.has(key)) return steamStoreCache.get(key);
@@ -136,7 +104,7 @@ async function fetchSteamStoreName(appid, fetchImpl = global.fetch) {
     return localSteamDbName;
   }
   if (typeof fetchImpl !== "function") {
-    const fallback = await getGameNameFromSteamHunters(appid);
+    const fallback = await getGameNameFromSteamCommunity(appid);
     if (fallback) {
       steamStoreCache.set(key, fallback);
       return fallback;
@@ -148,8 +116,9 @@ async function fetchSteamStoreName(appid, fetchImpl = global.fetch) {
   try {
     const url = `https://store.steampowered.com/api/appdetails?appids=${appid}`;
     const res = await fetchImpl(url, { signal: ctrl.signal });
-    if (!res.ok) return null;
+    if (!res.ok) throw new Error(`Steam store HTTP ${res.status}`);
     const data = await res.json();
+    require("./game-presentation-metadata").store({ userDataDir, platform: "steam-official", appid, kind: "steam", payload: data });
     const entry = data?.[String(appid)];
     const name = entry?.success ? entry?.data?.name : null;
     const resolved = name && typeof name === "string" ? name : null;
@@ -158,11 +127,11 @@ async function fetchSteamStoreName(appid, fetchImpl = global.fetch) {
       return resolved;
     }
   } catch {
-    // fallthrough to SteamHunters
+    // fallthrough to SteamCommunity
   } finally {
     clearTimeout(t);
   }
-  const fallback = await getGameNameFromSteamHunters(appid);
+  const fallback = await getGameNameFromSteamCommunity(appid);
   if (fallback) {
     steamStoreCache.set(key, fallback);
     return fallback;
@@ -229,77 +198,9 @@ async function writeSteamOfficialAchievementPercentages(schemaRoot, appid, schem
   }
 }
 
-function resolveSteamOfficialLibraryCacheDir(statsDir, appid) {
-  const statsPath = path.resolve(String(statsDir || ""));
-  const baseName = path.basename(statsPath).toLowerCase();
-  const appcacheDir =
-    baseName === "stats"
-      ? path.dirname(statsPath)
-      : baseName === "appcache"
-      ? statsPath
-      : path.join(statsPath, "appcache");
-  return path.join(appcacheDir, "librarycache", String(appid));
-}
+const pickSteamOfficialLibraryCacheImages = require("./game-artwork-steam-cache").pick;
 
-function listFilesRecursive(rootDir, maxDepth = 6) {
-  const out = [];
-  const walk = (dir, depth) => {
-    if (depth > maxDepth) return;
-    let entries = [];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(full, depth + 1);
-      } else if (entry.isFile()) {
-        out.push(full);
-      }
-    }
-  };
-  walk(rootDir, 0);
-  return out;
-}
-
-function pickSteamOfficialLibraryCacheImages(statsDir, appid) {
-  const libraryCacheDir = resolveSteamOfficialLibraryCacheDir(statsDir, appid);
-  if (!fs.existsSync(libraryCacheDir)) {
-    return {
-      libraryCacheDir,
-      headerPath: "",
-      portraitPath: "",
-    };
-  }
-  const files = listFilesRecursive(libraryCacheDir, 6);
-  const byName = new Map();
-  for (const file of files) {
-    const lower = path.basename(file).toLowerCase();
-    if (!byName.has(lower)) byName.set(lower, []);
-    byName.get(lower).push(file);
-  }
-  const first = (name) => (byName.get(name) || [])[0] || "";
-  const firstMatch = (matcher) => {
-    for (const [name, matches] of byName.entries()) {
-      if (matcher(name)) return matches[0] || "";
-    }
-    return "";
-  };
-  const headerPath = first("header.jpg");
-  const portraitPath =
-    first("library_600x900.jpg") ||
-    first("library_capsule.jpg") ||
-    firstMatch((name) => /^library_capsule(?:_[a-z0-9]+)*\.jpg$/i.test(name));
-  return {
-    libraryCacheDir,
-    headerPath,
-    portraitPath,
-  };
-}
-
-function importSteamOfficialLibraryCacheImages(statsDir, appid, configsDir) {
+async function importSteamOfficialLibraryCacheImages(statsDir, appid, configsDir) {
   const appidStr = String(appid || "");
   const picked = pickSteamOfficialLibraryCacheImages(statsDir, appidStr);
   const targetDir = path.join(
@@ -318,7 +219,7 @@ function importSteamOfficialLibraryCacheImages(statsDir, appid, configsDir) {
     if (picked.headerPath) {
       ensureDir(targetDir);
       if (!fs.existsSync(headerDest)) {
-        fs.copyFileSync(picked.headerPath, headerDest);
+        await require("./game-artwork-storage").importBuffer(headerDest, await fs.promises.readFile(picked.headerPath), { source: "steam-cache" });
         copiedHeader = true;
       } else {
         skippedHeaderExisting = true;
@@ -327,7 +228,7 @@ function importSteamOfficialLibraryCacheImages(statsDir, appid, configsDir) {
     if (picked.portraitPath) {
       ensureDir(targetDir);
       if (!fs.existsSync(portraitDest)) {
-        fs.copyFileSync(picked.portraitPath, portraitDest);
+        await require("./game-artwork-storage").importBuffer(portraitDest, await fs.promises.readFile(picked.portraitPath), { source: "steam-cache" });
         copiedPortrait = true;
       } else {
         skippedPortraitExisting = true;
@@ -384,13 +285,16 @@ function importSteamOfficialLibraryCacheImages(statsDir, appid, configsDir) {
   };
 }
 
-function downloadViaHttps(url, dest) {
+function downloadViaHttps(url, dest, timeoutMs = 20000) {
   return new Promise((resolve) => {
     let settled = false;
     let response = null;
+    let request = null;
+    let deadline = null;
     const finalize = (ok) => {
       if (settled) return;
       settled = true;
+      if (deadline) clearTimeout(deadline);
       resolve(ok);
     };
     const cleanupFile = () => {
@@ -399,6 +303,7 @@ function downloadViaHttps(url, dest) {
       } catch {}
     };
     const handleError = () => {
+      if (settled) return;
       try {
         if (response && typeof response.destroy === "function") {
           response.destroy();
@@ -407,6 +312,7 @@ function downloadViaHttps(url, dest) {
       try {
         file.destroy();
       } catch {}
+      try { if (request && !request.destroyed) request.destroy(); } catch {}
       cleanupFile();
       finalize(false);
     };
@@ -420,7 +326,7 @@ function downloadViaHttps(url, dest) {
     }
 
     file.on("error", handleError);
-    https
+    request = https
       .get(url, { headers: { "User-Agent": UA } }, (res) => {
         response = res;
         if (res.statusCode !== 200) {
@@ -433,20 +339,21 @@ function downloadViaHttps(url, dest) {
         file.on("finish", () => file.close(() => finalize(true)));
       })
       .on("error", handleError)
-      .setTimeout(20000, function () {
+      .setTimeout(timeoutMs, function () {
         this.destroy(new Error("Download timed out"));
       });
+    deadline = setTimeout(handleError, timeoutMs);
   });
 }
 
-async function download(url, dest, fetchImpl = global.fetch) {
+async function download(url, dest, fetchImpl = global.fetch, timeoutMs = 20000) {
   if (!url) return false;
   const targetUrl = url.replace(/^http:/, "https:");
   if (typeof fetchImpl !== "function") {
-    return await downloadViaHttps(targetUrl, dest);
+    return await downloadViaHttps(targetUrl, dest, timeoutMs);
   }
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), 20000);
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const r = await fetchImpl(targetUrl, {
       signal: ctrl.signal,
@@ -467,7 +374,7 @@ function queueSteamOfficialImageDownload(queue, appid, url, dest, label) {
   if (!url || !dest) return;
   const key = path.normalize(dest).toLowerCase();
   if (queue.has(key)) return;
-  if (fs.existsSync(dest)) return;
+  if (isSteamImageFile(dest)) return;
   queue.set(key, {
     url,
     dest,
@@ -489,13 +396,18 @@ async function waitForSteamOfficialImageDownloads(appid, queue, context) {
       const item = downloads[nextIndex++];
       let ok = false;
       let error = "";
+      let attempted = [];
       try {
-        ok = await download(item.url, item.dest);
+        ok = await downloadSteamCommunityImage({
+          appid, value: item.url, dest: item.dest,
+          download: (url, target, ms) => download(url, target, global.fetch, ms),
+          onFailure: (details) => { attempted = details.attempted; error = details.error; },
+        });
       } catch (err) {
         error = err?.message || String(err);
         ok = false;
       }
-      if (ok && fs.existsSync(item.dest)) {
+      if (ok && isSteamImageFile(item.dest)) {
         downloaded++;
         continue;
       }
@@ -507,6 +419,7 @@ async function waitForSteamOfficialImageDownloads(appid, queue, context) {
         url: item.url,
         dest: item.dest,
         error,
+        attempted,
       });
     }
   }
@@ -543,6 +456,22 @@ function applyProgressMetadata(target, source) {
     }
   }
   return changed;
+}
+
+function clearMissingImageReferences(entries, schemaDir, attemptedImages = null) {
+  let cleared = 0;
+  for (const entry of entries) {
+    for (const field of ["icon", "icon_gray"]) {
+      if (!entry[field]) continue;
+      const file = path.join(schemaDir, entry[field]);
+      if (attemptedImages && !attemptedImages.has(path.normalize(file).toLowerCase())) continue;
+      if (!isSteamImageFile(file)) {
+        entry[field] = "";
+        cleared++;
+      }
+    }
+  }
+  return cleared;
 }
 
 async function writeSchemaFromEntries(appid, entries, schemaDir) {
@@ -608,6 +537,7 @@ async function writeSchemaFromEntries(appid, entries, schemaDir) {
     imageDownloads,
     "write-schema",
   );
+  clearMissingImageReferences(rewritten, schemaDir);
 
   fs.writeFileSync(
     path.join(schemaDir, "achievements.json"),
@@ -708,7 +638,7 @@ async function updateSchemaFromAppcache(appid, entries, schemaDir) {
     }
     if (existing.icon && iconUrl) {
       const iconPath = path.join(schemaDir, existing.icon);
-      if (!fs.existsSync(iconPath)) {
+      if (!isSteamImageFile(iconPath)) {
         repairedImages++;
         queueSteamOfficialImageDownload(
           imageDownloads,
@@ -721,7 +651,7 @@ async function updateSchemaFromAppcache(appid, entries, schemaDir) {
     }
     if (existing.icon_gray && grayUrl) {
       const grayPath = path.join(schemaDir, existing.icon_gray);
-      if (!fs.existsSync(grayPath)) {
+      if (!isSteamImageFile(grayPath)) {
         repairedImages++;
         queueSteamOfficialImageDownload(
           imageDownloads,
@@ -742,6 +672,11 @@ async function updateSchemaFromAppcache(appid, entries, schemaDir) {
     imageDownloads,
     "update-schema",
   );
+  const clearedImages = clearMissingImageReferences(cur, schemaDir, imageDownloads);
+  if (clearedImages) {
+    changed += clearedImages;
+    updated = true;
+  }
   const imagesUpdated = imageResult.downloaded > 0;
   if (updated) {
     fs.writeFileSync(schemaPath, JSON.stringify(cur, null, 2), "utf8");
@@ -908,7 +843,7 @@ async function generateConfigFromAppcacheBin(
     userStats,
   );
 
-  const storeName = await fetchSteamStoreName(appid);
+  const storeName = await fetchSteamStoreName(appid, global.fetch, path.dirname(configsDir));
   const resolvedBase = storeName || schemaGameName || String(appid || "");
   const defaultCfgName = `${resolvedBase} (Steam)`;
   emitProgress({
@@ -992,6 +927,7 @@ async function generateConfigFromAppcacheBin(
       payload,
       await fetchSteamDbLaunchMetadata(appid)
     );
+    await require("./game-executable-finder").autoFindExecutable(payload);
     emitProgress({
       phase: "writingConfig",
       percent: 82,
@@ -1011,11 +947,13 @@ async function generateConfigFromAppcacheBin(
     });
   }
 
-  const importedImages = importSteamOfficialLibraryCacheImages(
+  const importedImages = await importSteamOfficialLibraryCacheImages(
     statsDir,
     appid,
     configsDir
   );
+  if (created || schemaUpdated) await require("./game-presentation-service").refresh({
+    userDataDir: path.dirname(configsDir), config: payload, force: true, reason: "steam-official-schema" });
 
   return {
     appid,
@@ -1033,6 +971,7 @@ async function generateConfigFromAppcacheBin(
 }
 
 module.exports = {
+  pickSteamOfficialLibraryCacheImages,
   generateConfigFromAppcacheBin,
   writeSchemaFromEntries,
   updateSchemaFromAppcache,

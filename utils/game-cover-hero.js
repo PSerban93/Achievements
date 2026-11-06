@@ -1,10 +1,7 @@
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
-const axios = require("axios");
 
 const {
-  fetchSteamGridDbImage,
   STEAMGRID_HERO_DIMENSIONS,
 } = require("./game-cover");
 const { createLogger } = require("./logger");
@@ -12,11 +9,9 @@ const { createLogger } = require("./logger");
 const GAME_COVER_HERO_BASENAME = "game-cover-hero";
 const GAME_COVER_LANDSCAPE_SOURCE_FILENAME = "landscape-source.txt";
 const GAME_COVER_HERO_DIMENSIONS = STEAMGRID_HERO_DIMENSIONS;
-const GAME_COVER_HERO_MAX_BYTES = 15 * 1024 * 1024;
-const GAME_COVER_HERO_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp", ".gif"];
+const GAME_COVER_HERO_MAX_BYTES = require("./game-artwork-policy").MAX_BYTES;
+const GAME_COVER_HERO_EXTENSIONS = require("./game-artwork-storage").EXTENSIONS;
 const gameCoverHeroLogger = createLogger("covers");
-const pendingGameCoverHeroes = new Map();
-let gameCoverHeroQueue = Promise.resolve();
 
 function sanitizePathSegment(value) {
   const sanitized = String(value || "")
@@ -30,6 +25,8 @@ function normalizeGameCoverSearchTerm(value) {
   if (!normalized) return "";
   const suffixPattern =
     /\s*\((?:steam|steam[-\s]?official|epic|epic[-\s]?official|uplay|ubisoft|ubisoft[-\s]?official|ea|ea[-\s]?official|gog|gog[-\s]?official|xbox(?:[-\s]?pc)?|retroachievements|ps4 recomp|pc ports?|xbox 360 recomp|xenia|rpcs3|ps4|shadps4|ps5|kytyps5|markerpatch|madnesspatch|xlivelessness)\)\s*$/i;
+  const withoutVariant = normalized.replace(/(?:\s+\[\d+\])+$/, "");
+  if (suffixPattern.test(withoutVariant)) normalized = withoutVariant;
   while (suffixPattern.test(normalized)) {
     normalized = normalized.replace(suffixPattern, "").trim();
   }
@@ -46,19 +43,7 @@ function getGameCoverHeroDirectory(userDataPath, platform, appid) {
 function resolveExistingGameCoverHeroPath(userDataPath, platform, appid) {
   const imageDir = getGameCoverHeroDirectory(userDataPath, platform, appid);
   if (!imageDir) return "";
-  for (const extension of GAME_COVER_HERO_EXTENSIONS) {
-    const candidate = path.join(
-      imageDir,
-      `${GAME_COVER_HERO_BASENAME}${extension}`,
-    );
-    try {
-      const stats = fs.statSync(candidate);
-      if (stats.isFile() && stats.size > 0) {
-        return candidate;
-      }
-    } catch {}
-  }
-  return "";
+  return require("./game-artwork-storage").existingAt(imageDir, GAME_COVER_HERO_BASENAME);
 }
 
 function detectImageExtension(buffer, contentType = "", sourceUrl = "") {
@@ -107,166 +92,39 @@ function detectImageExtension(buffer, contentType = "", sourceUrl = "") {
   return "";
 }
 
-async function downloadGameCoverHero(url, imageDir) {
-  const response = await axios.get(url, {
-    responseType: "arraybuffer",
-    timeout: 25000,
-    maxContentLength: GAME_COVER_HERO_MAX_BYTES,
-    maxBodyLength: GAME_COVER_HERO_MAX_BYTES,
-    headers: {
-      Accept: "image/webp,image/apng,image/*,*/*;q=0.8",
-      "User-Agent": "Achievements",
-    },
-  });
-  const buffer = Buffer.from(response?.data || []);
-  if (!buffer.length || buffer.length > GAME_COVER_HERO_MAX_BYTES) {
-    throw new Error("invalid-hero-image-size");
-  }
-  const extension = detectImageExtension(
-    buffer,
-    response?.headers?.["content-type"],
-    url,
-  );
-  if (!extension) throw new Error("unsupported-hero-image-format");
+async function downloadGameCoverHero(url, imageDir, options = {}) {
+  let buffer = await require("./game-artwork-http").download(url);
+  let extension = require("./game-artwork-storage").signature(buffer);
+  if (!GAME_COVER_HERO_EXTENSIONS.includes(extension)) throw new Error("unsupported-hero-image-format");
+  if (options.imageProcessor) {
+    const processed = await options.imageProcessor(buffer, extension);
+    buffer = processed.buffer; extension = processed.extension;
+    if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > GAME_COVER_HERO_MAX_BYTES || !GAME_COVER_HERO_EXTENSIONS.includes(extension)) throw new Error("invalid-processed-artwork");
+  } else await require("./game-artwork-validation").decodeImage(buffer);
+  const basename = sanitizePathSegment(options.basename || GAME_COVER_HERO_BASENAME);
+  if (!basename) throw new Error("invalid-artwork-name");
 
-  await fs.promises.mkdir(imageDir, { recursive: true });
-  const destination = path.join(
-    imageDir,
-    `${GAME_COVER_HERO_BASENAME}${extension}`,
-  );
-  const temporary = path.join(
-    imageDir,
-    `.${GAME_COVER_HERO_BASENAME}-${process.pid}-${crypto.randomBytes(6).toString("hex")}.tmp`,
-  );
-  try {
-    await fs.promises.writeFile(temporary, buffer, { flag: "wx" });
-    await fs.promises.rename(temporary, destination);
-    await Promise.all(
-      GAME_COVER_HERO_EXTENSIONS.filter((item) => item !== extension).map(
-        async (item) => {
-          try {
-            await fs.promises.unlink(
-              path.join(imageDir, `${GAME_COVER_HERO_BASENAME}${item}`),
-            );
-          } catch {}
-        },
-      ),
-    );
-    return destination;
-  } finally {
-    try {
-      await fs.promises.unlink(temporary);
-    } catch {}
-  }
-}
-
-async function ensureGameCoverHero(options = {}) {
-  const userDataPath = String(options.userDataPath || "").trim();
-  const platform = sanitizePathSegment(options.platform);
-  const appid = sanitizePathSegment(options.appid);
-  const searchTerm = normalizeGameCoverSearchTerm(options.title);
-  const existingPath = resolveExistingGameCoverHeroPath(
-    userDataPath,
-    platform,
-    appid,
-  );
-  if (existingPath) {
-    gameCoverHeroLogger.info("game-cover-hero:already-exists", {
-      appid,
-      platform,
-      path: existingPath,
-    });
-    return { ok: true, existing: true, path: existingPath };
-  }
-  if (!userDataPath || !platform || !appid || !searchTerm) {
-    return { ok: false, skipped: true, reason: "missing-identity" };
-  }
-
-  if (platform === "x360recomp") {
-    const imageDir = getGameCoverHeroDirectory(userDataPath, platform, appid);
-    for (const url of require("./x360-recomp-art").artworkUrls(appid, "landscape")) {
-      try {
-        const savedPath = await downloadGameCoverHero(url, imageDir);
-        return { ok: true, existing: false, path: savedPath, url };
-      } catch {}
-    }
-  }
-  gameCoverHeroLogger.info("game-cover-hero:fetch-start", {
-    appid,
-    platform,
-    term: searchTerm,
-    dimensions: GAME_COVER_HERO_DIMENSIONS,
-  });
-  const url = await fetchSteamGridDbImage(searchTerm, {
-    appid: `${platform}:${appid}:game-cover-hero`,
-    size: GAME_COVER_HERO_DIMENSIONS,
-    assetType: "heroes",
-  });
-  const imageDir = getGameCoverHeroDirectory(userDataPath, platform, appid);
-  const savedPath = await downloadGameCoverHero(url, imageDir);
-  gameCoverHeroLogger.info("game-cover-hero:downloaded", {
-    appid,
-    platform,
-    term: searchTerm,
-    path: savedPath,
-    url,
-  });
-  return { ok: true, existing: false, path: savedPath, url };
+  const storage = require("./game-artwork-storage");
+  const type = basename === "game-cover-hero" ? "hero" : basename === "header" ? "header" : "cover";
+  const result = await storage.publish({ dir: imageDir, base: basename, type, buffer, extension, source: "legacy-download", url });
+  return result.path;
 }
 
 function queueGameCoverHero(options = {}) {
-  const platform = sanitizePathSegment(options.platform);
-  const appid = sanitizePathSegment(options.appid);
-  const key = `${platform.toLowerCase()}::${appid.toLowerCase()}`;
-  if (!platform || !appid) {
-    return Promise.resolve({
-      ok: false,
-      skipped: true,
-      reason: "missing-identity",
+  const config = { ...(options.config || {}), platform: options.platform, appid: String(options.appid || ""),
+    displayName: options.title || options.config?.displayName || "" };
+  return require("./game-artwork-service").get().ensure({ config, userDataDir: options.userDataPath }, { type: "hero", force: options.force === true })
+    .then(result => result.results[0]).catch(error => {
+      gameCoverHeroLogger.warn("game-cover-hero:failed", { appid: config.appid, platform: config.platform, error: error.message });
+      return { ok: false, error: error.message };
     });
-  }
-  const existingPath = resolveExistingGameCoverHeroPath(
-    options.userDataPath,
-    platform,
-    appid,
-  );
-  if (existingPath) {
-    return Promise.resolve({ ok: true, existing: true, path: existingPath });
-  }
-  if (pendingGameCoverHeroes.has(key)) return pendingGameCoverHeroes.get(key);
-
-  gameCoverHeroLogger.info("game-cover-hero:queued", {
-    appid,
-    platform,
-    reason: options.reason || null,
-  });
-  const queued = gameCoverHeroQueue
-    .catch(() => {})
-    .then(() => ensureGameCoverHero({ ...options, platform, appid }))
-    .catch((error) => {
-      gameCoverHeroLogger.warn("game-cover-hero:failed", {
-        appid,
-        platform,
-        reason: options.reason || null,
-        error: error?.message || String(error),
-      });
-      return {
-        ok: false,
-        error: error?.message || String(error),
-      };
-    })
-    .finally(() => {
-      pendingGameCoverHeroes.delete(key);
-    });
-  pendingGameCoverHeroes.set(key, queued);
-  gameCoverHeroQueue = queued;
-  return queued;
 }
 
 module.exports = {
   GAME_COVER_HERO_BASENAME,
   GAME_COVER_LANDSCAPE_SOURCE_FILENAME,
   GAME_COVER_HERO_DIMENSIONS,
+  GAME_COVER_HERO_MAX_BYTES,
   detectImageExtension,
   downloadGameCoverHero,
   getGameCoverHeroDirectory,

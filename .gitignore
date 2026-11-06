@@ -9,11 +9,16 @@ dist/
 /my_login.txt
 scripts/
 logs/
-docs/
+/docs/*
+!/docs/build/
+/docs/build/*
+!/docs/build/replay-media.md
+!/docs/build/installer-close.md
+/docs/internal/
 /native/**/target/
-tests/
-tests/overlay-shortcut-manager.test.js
-build/WINDOWS-SIGNING.md
+/utils/vendor/replay-media/
+# Automated tests and local test artifacts are not published.
+/tests/
 
 # Private signing material must never be committed.
 *.pfx

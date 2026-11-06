@@ -75,6 +75,8 @@ function parseSchemaParseLaunchMetadata(raw = {}, appid = "") {
     appid: String(appid || "").trim(),
     process_name: collectProcessNames(rows),
     arguments: String(best.arguments || ""),
+    relative_executable: String(best.executable || ""),
+    relative_working_directory: String(best.workingDirectory || ""),
   };
 }
 

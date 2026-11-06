@@ -897,6 +897,25 @@ h1 {
   color: var(--app-text);
 }
 
+.modal .input-with-button.executable-controls {
+  position: relative;
+}
+
+.modal .executable-controls input {
+  padding-right: 68px;
+}
+
+.modal .executable-controls #findExecutableBtn {
+  right: 34px;
+  height: 24px;
+}
+
+#findExecutableBtn svg {
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
 button,
 input,
 select {
@@ -1087,6 +1106,11 @@ html:not(.fa-ready) #toggleDashboardBtn::before {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+html:not([data-show-create-manual-config="true"]) #createNewConfigBtn,
+html:not([data-show-create-manual-config="true"]) #dashboardCreateNewConfigBtn {
+  display: none !important;
 }
 
 #createNewConfigBtn {
@@ -1600,12 +1624,12 @@ body.booting #dashboardOverlay * {
   pointer-events: none !important;
 }
 
-body.booting #dashboardGrid .dash-card,
-body.booting #dashboardGrid .dash-card * {
+body.booting #dashboardBody .dash-card,
+body.booting #dashboardBody .dash-card * {
   transition: none !important;
 }
 
-body.booting #dashboardGrid .dash-card:hover {
+body.booting #dashboardBody .dash-card:hover {
   transform: none !important;
   box-shadow: none !important;
 }
@@ -1943,7 +1967,8 @@ body.profile-importing #bootLoading {
   color: var(--app-muted);
 }
 
-#settingsSearchInput::-webkit-search-cancel-button {
+#settingsSearchInput::-webkit-search-cancel-button,
+#configSearchInput::-webkit-search-cancel-button {
   -webkit-appearance: none;
   width: 16px;
   height: 16px;
@@ -1961,7 +1986,8 @@ body.profile-importing #bootLoading {
     transform 0.12s ease;
 }
 
-#settingsSearchInput::-webkit-search-cancel-button:hover {
+#settingsSearchInput::-webkit-search-cancel-button:hover,
+#configSearchInput::-webkit-search-cancel-button:hover {
   background-color: rgba(255, 45, 65, 0.18);
   box-shadow: 0 0 5px rgba(255, 45, 65, 0.9);
   opacity: 1;
@@ -2121,14 +2147,17 @@ body.profile-importing #bootLoading {
   margin-top: 0;
 }
 
-#themeCustomisationSection,
-#notificationCustomisationSection,
 .settings-options-disclosure,
 .settings-notification-disclosure {
   padding: 16px 18px 20px;
   border: 1px solid var(--app-border-subtle);
   border-radius: var(--app-radius-lg);
   background: var(--app-panel-bg);
+}
+
+#themeCustomisationSection > summary,
+#notificationCustomisationSection > summary {
+  padding: 8px 0;
 }
 
 .settings-disclosure[open] > summary {
@@ -3983,6 +4012,66 @@ body.profile-importing #bootLoading {
   width: 150px;
 }
 
+.folders-actions,
+.folders-management-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.folders-actions {
+  margin-bottom: 16px;
+}
+
+.executable-search-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  margin-left: auto;
+  max-width: 100%;
+}
+
+.folders-actions button {
+  max-width: 100%;
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+#generationProgressCancelExecutableBtn[hidden],
+#appConfirmCancelBtn[hidden] {
+  display: none;
+}
+
+#generationProgressCancelExecutableBtn {
+  pointer-events: auto;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+#generationProgressPercent {
+  margin-left: auto;
+}
+
+#generationProgressCancelExecutableBtn:hover:not(:disabled) {
+  background: var(--close-red, #c42b1c);
+  color: #fff;
+}
+
+#foldersTab .folders-lumaplay-control {
+  margin-top: 0;
+}
+
 .settings-control.notification-monitor-control {
   flex-direction: column;
   align-items: stretch;
@@ -4124,6 +4213,29 @@ body.profile-importing #bootLoading {
 .achievement-progress {
   font-size: 0.85em;
   color: #888;
+}
+
+.achievement-progress-meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  max-width: 80%;
+}
+
+.achievement-progress-meter > .progress-bar {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+  margin-top: 0;
+}
+
+.achievement-progress-percent {
+  flex-shrink: 0;
+  min-width: 4ch;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .settings-control .input-with-button {
@@ -4584,7 +4696,7 @@ body.profile-importing #bootLoading {
   align-items: center;
   gap: 6px;
   min-width: 0;
-  width: 100%;
+  /* width: 100%; */
   padding: 8px 10px 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   background: var(--app-card-footer-bg);
@@ -4703,10 +4815,10 @@ body.profile-importing #bootLoading {
 }
 
 .dashboard-collection-create-preview {
-  width: 100px;
+  width: 150px;
   aspect-ratio: 100 / 156;
   box-sizing: border-box;
-  align-self: flex-start;
+  align-self: center;
 }
 
 .dashboard-collection-create-preview img,
@@ -4721,13 +4833,35 @@ body.profile-importing #bootLoading {
   display: none;
 }
 
-.dashboard-collection-create-art-column button {
+.dashboard-collection-create-image-actions {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dashboard-collection-create-image-actions button {
   margin: 0;
-  width: 100%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-collection-create-modal > .dashboard-collections-actions {
+  flex-shrink: 0;
+  align-items: flex-start;
+}
+
+#dashboardCollectionCreateSubmit {
+  flex: 0 1 auto;
+  margin-left: auto;
+  max-width: 50%;
+  overflow-wrap: anywhere;
 }
 
 #dashboardCollectionCreateModal
-  .dashboard-collection-create-art-column
+  .dashboard-collection-create-image-actions
   button:focus {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--app-accent-2);
@@ -4745,6 +4879,16 @@ body.profile-importing #bootLoading {
 .dashboard-collection-create-fields label {
   color: var(--app-text);
   font-weight: 600;
+}
+
+#dashboardCollectionCreateModal[data-card-layout="portrait"]
+  .dashboard-collection-create-art-column {
+  justify-content: center;
+}
+
+#dashboardCollectionCreateModal[data-card-layout="portrait"]
+  .dashboard-collection-create-preview {
+  align-self: center;
 }
 
 #dashboardCollectionCreateName {
@@ -4955,7 +5099,7 @@ body.profile-importing #bootLoading {
 /* Dashboard shell: card layouts remain controlled by the existing rules. */
 #dashboardHeader {
   position: relative;
-  z-index: 2;
+  z-index: 6;
   grid-template-columns: 28px minmax(0, 1fr) 28px;
   grid-template-areas:
     ". stats close"
@@ -5486,6 +5630,11 @@ body.profile-importing #bootLoading {
 }
 
 #dashboardCollectionCreateModal[data-card-layout="landscape"]
+  .dashboard-collection-create-art-column {
+  justify-content: center;
+}
+
+#dashboardCollectionCreateModal[data-card-layout="landscape"]
   .dashboard-collection-create-preview {
   width: var(--collection-create-art-width, 334px);
 }
@@ -5576,7 +5725,7 @@ body.profile-importing #bootLoading {
 }
 
 #dashboardCollectionCreateModal
-  .dashboard-collection-create-art-column
+  .dashboard-collection-create-image-actions
   button:not(:disabled):hover,
 #dashboardCollectionsModal
   .dashboard-collection-row-action:not(:disabled):hover,
@@ -5712,6 +5861,31 @@ body.profile-importing #bootLoading {
 .dash-card:focus-visible {
   outline: 2px solid #6ee7ff;
 }
+
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-dashboard-3d="true"] #dashboardBody :is(.dash-card, .dashboard-collection-card) {
+    transition: transform var(--dash-3d-return, 200ms) ease-out, border-color 0.12s ease, outline-color 0.12s ease;
+  }
+  :root[data-dashboard-3d="true"] #dashboardBody :is(.dash-card, .dashboard-collection-card).dash-card-3d-hover {
+    transform: perspective(var(--dash-3d-perspective, 900px)) translateY(calc(-1 * var(--dash-3d-lift, 2px)))
+      rotateX(var(--dash-tilt-x, 0deg)) rotateY(var(--dash-tilt-y, 0deg)) scale(var(--dash-3d-zoom, 1.02));
+    transition: transform var(--dash-3d-follow, 100ms) ease-out, border-color 0.12s ease, outline-color 0.12s ease;
+    z-index: 1;
+    will-change: transform;
+  }
+}
+.dashboard-3d-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 12px 18px;
+  margin: 12px 0;
+}
+.dashboard-3d-controls[hidden] { display: none; }
+.dashboard-3d-control { min-width: 0; }
+.dashboard-3d-control > label { display: block; margin-bottom: 6px; }
+.dashboard-3d-control-inputs { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 10px; align-items: center; }
+.dashboard-3d-control-inputs input[type="number"] { width: 100%; min-width: 0; box-sizing: border-box; }
+#settings-dashboard3dReset { grid-column: 1 / -1; justify-self: start; }
 /* Thumb */
 .dash-thumb {
   width: 100%;
@@ -5831,11 +6005,35 @@ body.profile-importing #bootLoading {
   transition: width 0.25s ease;
 }
 
+.dash-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 90%;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--app-text);
+  opacity: 0.78;
+}
+
+.dash-stats-progress {
+  flex: 0 0 auto;
+}
+.dash-stats-playtime {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: end;
+}
+
 /* Floating Play Button */
 .dash-play {
   position: absolute;
   right: 8px;
-  bottom: 38px;
+  bottom: 58px;
   width: 38px;
   height: 38px;
   border-radius: var(--app-radius-pill);
@@ -5870,10 +6068,10 @@ body.profile-importing #bootLoading {
 }
 
 .dash-card:hover .dash-play.is-disabled,
-#dashboardGrid .dash-card.active .dash-play.is-disabled,
-#dashboardGrid .dash-card:focus .dash-play.is-disabled,
-#dashboardGrid .dash-card:focus-within .dash-play.is-disabled,
-#dashboardGrid .dash-card .dash-play.force-show.is-disabled {
+#dashboardBody .dash-card.active .dash-play.is-disabled,
+#dashboardBody .dash-card:focus .dash-play.is-disabled,
+#dashboardBody .dash-card:focus-within .dash-play.is-disabled,
+#dashboardBody .dash-card .dash-play.force-show.is-disabled {
   cursor: not-allowed;
   filter: grayscale(30%);
   background: var(--dracula-comment);
@@ -5891,20 +6089,20 @@ body.window-maximized .dashboard-collection-cards {
   gap: 16px;
 }
 
-#dashboardGrid .dash-card {
+#dashboardBody .dash-card {
   position: relative;
   outline: none;
 }
 
-#dashboardGrid .dash-card:focus {
+#dashboardBody .dash-card:focus {
   outline: 2px solid rgba(139, 233, 253, 0.5);
   outline-offset: 2px;
 }
 
-#dashboardGrid .dash-card.active .dash-play,
-#dashboardGrid .dash-card:focus .dash-play,
-#dashboardGrid .dash-card:focus-within .dash-play,
-#dashboardGrid .dash-card .dash-play.force-show {
+#dashboardBody .dash-card.active .dash-play,
+#dashboardBody .dash-card:focus .dash-play,
+#dashboardBody .dash-card:focus-within .dash-play,
+#dashboardBody .dash-card .dash-play.force-show {
   opacity: 1;
   transform: none;
   pointer-events: auto;
@@ -6235,9 +6433,9 @@ html.settings-open #dashboardOverlay * {
 }
 
 /* Dashboard focus visibility */
-#dashboardGrid .dash-card.active,
-#dashboardGrid .dash-card:focus,
-#dashboardGrid .dash-card:focus-visible {
+#dashboardBody .dash-card.active,
+#dashboardBody .dash-card:focus,
+#dashboardBody .dash-card:focus-visible {
   outline: 3px solid var(--dracula-cyan, #8be9fd);
   box-shadow: 0 0 0 3px rgba(139, 233, 253, 0.25);
   border-radius: var(--app-radius-xl);
@@ -6371,6 +6569,18 @@ body.settings-open {
 }
 .platform-guide-item .platform-guide-list {
   margin-top: 8px;
+}
+
+.platform-guide-item code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.platform-guide-item .documentation-external-link {
+  margin: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 :root {
@@ -7324,6 +7534,75 @@ html:not(.fa-ready) #mainScroll #toggleBtn::before {
   margin: 0;
 }
 
+.config-search-popup {
+  position: fixed;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  box-sizing: border-box;
+  border: 1px solid var(--app-select-border-focus, var(--app-accent));
+  border-radius: var(--app-radius-md, 8px);
+  background: var(--app-select-bg, var(--app-input-bg));
+  color: var(--app-select-text, var(--app-text));
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+#configSearchInput {
+  width: 100%;
+  min-width: 0;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--app-border-subtle);
+  border-radius: var(--app-radius-sm, 4px);
+  background: var(--app-input-bg);
+  color: var(--app-text);
+  font: inherit;
+}
+
+.config-search-results {
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+
+.config-search-option {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--app-radius-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.config-search-option:hover {
+  background: var(--app-select-option-hover-bg, var(--app-hover-bg));
+}
+
+.config-search-option[aria-selected="true"] {
+  background: var(--app-select-option-selected-bg, var(--app-accent));
+  color: var(--app-select-option-selected-text, var(--app-text));
+}
+
+.config-search-empty {
+  padding: 8px 10px;
+  color: var(--app-muted);
+}
+
+.config-search-empty[hidden] {
+  display: none;
+}
+
 #mainScroll .config-controls .field-label,
 #mainScroll .config-controls #configList,
 #mainScroll .config-controls #muteProgressRow,
@@ -7613,4 +7892,161 @@ html:not(.fa-ready) #mainScroll #toggleBtn::before {
   #mainScroll .ms-ach-card table.achievements {
     min-width: 620px;
   }
+}
+
+#achievementEnablerModal {
+  z-index: 10007;
+  padding: 16px;
+  box-sizing: border-box;
+}
+#achievementEnablerModal .achievement-enabler-content {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 100%);
+  height: min(880px, 100%);
+  max-width: 100%;
+  max-height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-panel-radius, 12px);
+  background: var(--app-panel-bg);
+}
+
+#achievementEnablerModal .achievement-enabler-content.modal-resize-positioned {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+}
+#achievementEnablerModal .achievement-enabler-content.modal-resizing {
+  transition: none;
+  user-select: none;
+}
+
+#achievementMediaModal {
+  z-index: 100010;
+  padding: 12px;
+  box-sizing: border-box;
+}
+#achievementMediaModal .achievement-media-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-panel-radius, 12px);
+  background: var(--app-panel-bg);
+  color: var(--app-text);
+  box-sizing: border-box;
+}
+#achievementMediaModal .modal-resize-positioned {
+  position: absolute;
+}
+#achievementMediaModal .modal-resizing {
+  transition: none;
+  user-select: none;
+}
+#achievementMediaModal header {
+  padding: 0 40px 0 0;
+  flex: none;
+  min-height: 30px;
+}
+#achievementMediaModal h3 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+}
+#achievementMediaModal select {
+  width: 100%;
+  min-width: 0;
+  flex: none;
+}
+#achievementMediaModal .achievement-media-stage {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #080a0e;
+  border-radius: var(--app-radius-md, 8px);
+}
+#achievementMediaModal video,
+#achievementMediaModal img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+#achievementMediaModal [hidden] {
+  display: none !important;
+}
+#achievementMediaModal .achievement-media-player-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: none;
+}
+#achievementMediaModal #achievementMediaSeek {
+  flex: 1;
+  min-width: 90px;
+  padding: 0;
+}
+#achievementMediaModal #achievementMediaVolume {
+  width: 90px;
+  min-width: 50px;
+  padding: 0;
+}
+#achievementMediaModal output {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  font-size: 12px;
+}
+#achievementMediaModal footer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+  min-width: 0;
+  font-size: 12px;
+}
+#achievementMediaModal .achievement-media-caption {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#achievementMediaModal #achievementMediaStatus {
+  color: var(--app-text-muted, var(--app-text));
+  overflow-wrap: anywhere;
+}
+#settings-replayControls[hidden],
+#settings-replayMonitorControl[hidden],
+#settings-recordsControls .settings-control[hidden] {
+  display: none !important;
+}
+#settings-replayControls .settings-description {
+  line-height: 1.5;
+  margin: 10px 0;
+}
+#settings-replayBefore,
+#settings-replayAfter {
+  max-width: 110px;
+}
+.record-backend-control {
+  flex-wrap: wrap;
+}
+#settings-recordBackendSelect {
+  width: 310px;
+  max-width: 100%;
 }

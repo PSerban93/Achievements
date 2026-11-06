@@ -272,8 +272,11 @@ impl GraphicsCaptureApiHandler for Capture {
                     .CopyResource(&image.texture, frame.as_raw_texture());
             }
         }
-        unsafe {
-            self.context.Flush();
+        if self.mapper.is_none() {
+            // ToneMapper already flushes its copy and draw together.
+            unsafe {
+                self.context.Flush();
+            }
         }
         // Keep the pooled Arc as the lease, so strong_count guards all readers.
         let mut latest = self.shared.latest.lock().unwrap();
@@ -525,6 +528,7 @@ fn run_pipeline(
     let mut previous_missed = 0u64;
     let mut previous_copy_loss_repeats = 0u64;
     let mut governor = RateGovernor::default();
+    let mut fixed_pressure_windows = 0u32;
     let mut ready = false;
     let mut stopping_at = None;
     let mut audio_packets = VecDeque::new();
@@ -632,7 +636,13 @@ fn run_pipeline(
                     {
                         let sample = {
                             let _gpu = shared.gpu_lock.lock().unwrap();
-                            converter.sample(&image.texture, time, duration, video.hardware)?
+                            converter.sample(
+                                &image.texture,
+                                image_timestamp,
+                                time,
+                                duration,
+                                video.hardware,
+                            )?
                         };
                         if let Some(sample) = sample {
                             if time - last_keyframe >= 10_000_000 {
@@ -832,6 +842,28 @@ fn run_pipeline(
             let elapsed = (now - last_stats) as f64 / 10_000_000.0;
             let produced = video.produced - previous_output;
             let drops = pressure_drops - previous_drops;
+            if !flags.unlocked {
+                let expected = f64::from(rate.ceil_fps()) * elapsed;
+                let overloaded = PressureWindow {
+                    encoder_drops: drops,
+                    ..Default::default()
+                }
+                .encoder_pressure(expected);
+                fixed_pressure_windows = if overloaded {
+                    fixed_pressure_windows + 1
+                } else {
+                    0
+                };
+                // Report sustained pressure once per episode, without silently
+                // changing a selected 30/60 FPS mode or restarting capture.
+                if fixed_pressure_windows == 2 {
+                    emit(
+                        json!({"type":"encoder-overloaded", "requestedFps":rate.ceil_fps(),
+                        "encodedFps":produced as f64 / elapsed, "encoderDrops":drops,
+                        "encoderName":video.name, "width":width, "height":height}),
+                    );
+                }
+            }
             if flags.unlocked {
                 let effective = pacer.as_ref().map(|p| p.rate).unwrap_or(rate);
                 let expected = effective.ceil_fps() as f64 * elapsed;
@@ -891,6 +923,10 @@ fn run_pipeline(
                 "captureSamplingSkips":shared.skipped.load(Ordering::Relaxed),
                 "copyLossRepeatedFrames":copy_loss_repeats,
                 "duplicateFrames":duplicate_frames, "missedDeadlines":missed_deadlines,
+                "gpuConvertedFrames":converter.converted_frames,
+                "gpuReusedFrames":converter.reused_frames,
+                "captureFrameAgeMs":ticks_to_ms(now.saturating_sub(shared.last_copy.load(Ordering::Acquire) as i64)),
+                "encoderOldestPendingMs":video.oldest_pending().map(|time| ticks_to_ms(now.saturating_sub(time))),
                 "audioSubmittedFrames":audio_encoder.as_ref().map(|a| a.submitted),
                 "audioEncodedFrames":audio_encoder.as_ref().map(|a| a.produced),
                 "audioPendingInputs":audio_packets.len(), "audioPipelineStalled":audio_stalled,

@@ -2,11 +2,15 @@
 
 // Only the recording phase defers quit. Resume the normal application cleanup
 // once terminal recorder messages have been consumed, or the deadline expires.
-async function drainAchievementRecorderForQuit(controller, { reportError, timeoutMs = 75_000 } = {}) {
+function recorderQuitTimeout(controller, timeoutMs) {
+  const value=timeoutMs ?? controller?.getQuitTimeoutMs?.() ?? 75_000;
+  return Number.isFinite(value) && value>0 ? Math.min(30*60_000,value) : 75_000;
+}
+async function drainAchievementRecorderForQuit(controller, { reportError, timeoutMs } = {}) {
   if (!controller) return;
   let timer;
   const deadline = new Promise((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Recorder quit deadline expired")), timeoutMs);
+    timer = setTimeout(() => reject(new Error("Recorder quit deadline expired")), recorderQuitTimeout(controller,timeoutMs));
   });
   try {
     await Promise.race([controller.stop("app-before-quit"), deadline]);
@@ -18,7 +22,7 @@ async function drainAchievementRecorderForQuit(controller, { reportError, timeou
   }
 }
 
-function createAchievementRecorderQuitGuard({ getController, resumeQuit, reportError, timeoutMs = 75_000 }) {
+function createAchievementRecorderQuitGuard({ getController, resumeQuit, reportError, timeoutMs }) {
   let allowed = false;
   let draining = false;
   return function deferRecorderQuit(event) {
@@ -38,4 +42,4 @@ function createAchievementRecorderQuitGuard({ getController, resumeQuit, reportE
   };
 }
 
-module.exports = { createAchievementRecorderQuitGuard, drainAchievementRecorderForQuit };
+module.exports = { createAchievementRecorderQuitGuard, drainAchievementRecorderForQuit, recorderQuitTimeout };

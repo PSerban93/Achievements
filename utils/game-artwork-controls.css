@@ -1,0 +1,14 @@
+.game-artwork-modal { color:var(--app-text,#e5e9f0); background:var(--app-panel-bg,#172532); border:1px solid var(--app-border-subtle,#4c6478); border-radius:12px; width:min(640px,calc(100vw - 40px)); max-width:calc(100vw - 40px); max-height:85vh; min-width:min(340px,calc(100vw - 40px)); padding:20px; overflow:auto; resize:both; box-shadow:0 18px 70px #0009; font:inherit; }
+.game-artwork-modal::backdrop { background:#0008; }
+.game-artwork-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.game-artwork-heading h3 { margin:0; }.game-artwork-heading p { margin:6px 0 12px; overflow-wrap:anywhere; }
+.game-artwork-heading .settings-close-button { flex:0 0 30px; width:30px; height:30px; display:grid; place-items:center; padding:0; line-height:1; }
+.game-artwork-types { display:flex; flex-wrap:wrap; gap:7px; margin:10px 0; }
+.game-artwork-types button,.game-artwork-source { color:inherit; background:var(--app-card-bg,#203448); border:1px solid var(--app-border-subtle,#4c6478); border-radius:7px; padding:9px 12px; cursor:pointer; font:inherit; margin:0; overflow-wrap:anywhere; }
+.game-artwork-types button[aria-pressed="true"] { border-color:var(--color-accent,#64b5f6); background:var(--color-button-hover,#31536d); }
+.game-artwork-sources { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:9px; margin:14px 0; }
+.game-artwork-source { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:5px; min-height:44px; }
+.game-artwork-modal button:focus-visible { outline:2px solid var(--color-accent,#64b5f6); outline-offset:2px; }
+.game-artwork-modal button:disabled { opacity:.55; cursor:wait; }.game-artwork-status .is-success { color:#81c995; }.game-artwork-status .is-error { color:#ffad91; }
+.dashboard-details-hero { position:relative; }.dashboard-artwork-action { position:absolute; z-index:2; right:10px; top:10px; background:#152431df; border:1px solid #8aa4b8; border-radius:6px; color:#fff; min-width:30px; min-height:30px; cursor:pointer; }
+.dashboard-artwork-hero { top:auto; bottom:12px; right:14px; }

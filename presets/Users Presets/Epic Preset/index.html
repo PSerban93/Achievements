@@ -58,8 +58,6 @@
       const tFadeOut  = 440;
 
       const marginEnd = 40;
-      const dSlideL  = tIconIn;
-
       const computeTotal = () =>
         Math.max(MIN_TOTAL, Number(metaDur?.content || baseTotal));
 
@@ -93,7 +91,7 @@
         setVar("--tSlideBk", sSlideBk);
         setVar("--tFade", sFadeOut);
 
-        setVar("--dSlideL", dSlideL);
+        setVar("--dSlideL", sIconIn);
         setVar("--dOpen", dOpen);
         setVar("--dClose", dClose);
         setVar("--dSlideBk", dSlideBk);

@@ -899,6 +899,7 @@ function readSchemaParseGeneratedResult(appid, appOutputDir, outDir) {
   const destImgDir = path.join(outDir, "img");
   copyImageDirectory(sourceImgDir, destImgDir);
   const hasProductInfo = copySchemaParseProductInfo(appOutputDir, outDir);
+  require("./game-presentation-metadata").captureSteamOutput(appid, appOutputDir, outDir);
 
   logger.info("schema-parse:run:success", {
     appid,

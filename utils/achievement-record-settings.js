@@ -15,6 +15,7 @@ const DEFAULT_ACHIEVEMENT_RECORD_PREFERENCES = Object.freeze({
   enableHdrRecords: false,
   recordFps: 30,
   recordDurationSeconds: 20,
+  recordBackend: "native",
 });
 
 function normalizeAchievementRecordFps(value, fallback = 30) {
@@ -52,6 +53,7 @@ function normalizeAchievementRecordPreferences(prefs = {}, defaults = {}) {
       source.recordDurationSeconds,
       normalizeAchievementRecordDuration(fallback.recordDurationSeconds, 20),
     ),
+    recordBackend: ["nvidia", "amd"].includes(source.recordBackend) ? source.recordBackend : "native",
   };
 }
 
@@ -78,6 +80,7 @@ function shouldEnableAchievementRecorder(options = {}) {
   const configName = String(options.configName || "").trim();
   return (
     platform === "win32" &&
+    !["nvidia", "amd"].includes(prefs.recordBackend) &&
     prefs.disableAchievementRecords === false &&
     options.configMode === "active" &&
     configName.length > 0

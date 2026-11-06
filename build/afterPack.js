@@ -8,11 +8,16 @@ module.exports = async (context) => {
     throw new Error("afterPack: appOutDir is missing");
   }
   const projectDir = context.packager?.projectDir || context.projectDir || process.cwd();
+  require("./verify-bundled-notification-assets").verifyBundledNotificationAssets({
+    projectDir,
+    resourcesDir: context.packager.getResourcesDir(appOutDir),
+  });
   require("./verify-x360-lzx").verifyPackagedX360Lzx({
     projectDir,
     resourcesDir: context.packager.getResourcesDir(appOutDir),
   });
   if (context.electronPlatformName !== "win32") return;
+  await require("./verify-replay-media").verify(path.join(appOutDir, "resources", "app.asar.unpacked", "utils", "vendor", "replay-media"));
 
   const requiredUnpackedUtilities = [
     ["Electron browser host", "electron-browser-host.js"],

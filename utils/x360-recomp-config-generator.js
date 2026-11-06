@@ -147,6 +147,7 @@ async function generateConfig(game, configsDir, options = {}) {
     x360_recomp_format_version: 2,
     language: existing?.data.language || "english" };
   const progressState = applyProgressSources(game, data, existing?.data);
+  if (!existing) await require("./game-executable-finder").autoFindExecutable(data);
   const configUpdated = changedWrite(path.join(configsDir, `${name}.json`), data);
   logger.info(`x360recomp:schema:${schemaUpdated ? old.length ? "updated" : "created" : "unchanged"}`, {
     appid: game.titleId, config: name, source: metadata.source, count: metadata.schema.length, profile,

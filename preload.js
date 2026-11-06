@@ -11,6 +11,29 @@ ipcRenderer.on("show-notification", (_event, data) => {
   lastNotificationPayload = data;
 });
 
+// Existing Default templates in AppData keep their user-edited layout. Add the
+// percentage at render time when they predate the bundled percentage element.
+ipcRenderer.on("show-progress", (_event, data) => {
+  const row = document.querySelector(".progress-notification .bar-container");
+  const bar = row?.querySelector(".progress-bar");
+  if (!row || !bar) return;
+  let percentage = row.querySelector(".progress-percentage");
+  if (!percentage) {
+    percentage = document.createElement("span");
+    percentage.className = "progress-percentage";
+    Object.assign(percentage.style, { flexShrink: "0", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums",
+      fontSize: "calc(var(--progress-title-size, 16px) * 0.8)" });
+    Object.assign(row.style, { display: "flex", alignItems: "center", gap: "8px", marginTop: "var(--progress-bar-margin-top, 5px)" });
+    Object.assign(bar.style, { flex: "1", minWidth: "0", marginTop: "0" });
+    row.appendChild(percentage);
+  }
+  const current = Number(data?.progress), maximum = Number(data?.max_progress);
+  const valid = data?.progress !== null && data?.progress !== undefined && data?.progress !== "" &&
+    Number.isFinite(current) && Number.isFinite(maximum) && maximum > 0;
+  percentage.hidden = !valid;
+  percentage.textContent = valid ? `${Math.max(0, Math.min(100, Math.round(current / maximum * 100)))}%` : "";
+});
+
 let achievementTableStateRequestId = 0;
 
 function subscribeIpc(channel, callback, mapArgs = (_event, data) => [data]) {
@@ -707,6 +730,7 @@ contextBridge.exposeInMainWorld("api", {
       return { success: false, error: String(e?.message || e) };
     }
   },
+  setAchievementPins: (payload) => ipcRenderer.invoke("achievement-pins:set", payload),
   refreshSelectedConfigRarity: async (configName) => {
     try {
       return await ipcRenderer.invoke("rarity:refresh-selected-config", {
@@ -722,6 +746,7 @@ contextBridge.exposeInMainWorld("api", {
   },
 
   // Presets
+  findSelectedConfigPlatinum: (configName) => ipcRenderer.invoke("platinum:find-selected-config", configName),
   loadPresets: () => ipcRenderer.invoke("load-presets"),
   loadSanPresets: () => ipcRenderer.invoke("load-san-presets"),
   loadSanDesignerTemplates: () =>
@@ -815,6 +840,8 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("config:select-active", configData),
   toggleOverlay: (selectedConfig) =>
     ipcRenderer.send("toggle-overlay", selectedConfig),
+  previewOverlayOpacity: (value) => ipcRenderer.send("overlay:preview-opacity", value),
+  previewOverlayBackgroundTransparency: (value) => ipcRenderer.send("overlay:preview-background-transparency", value),
   syncAchievementTableViewState: (state) =>
     ipcRenderer.send("ach-table:view-state", state),
   getAchievementTableViewState: () => new Promise((resolve) => {
@@ -858,6 +885,14 @@ contextBridge.exposeInMainWorld("api", {
   savePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   updatePreferences: (prefs) => ipcRenderer.invoke("preferences:update", prefs),
   loadPreferences: () => ipcRenderer.invoke("load-preferences"),
+  openAchievementEnabler: () => ipcRenderer.invoke("achievement-enabler:open"),
+  achievementEnablerCommand: async (action, payload) => {
+    const result = await ipcRenderer.invoke("achievement-enabler:command", action, payload);
+    if (!result.ok) throw new Error(result.error);
+    return result.value;
+  },
+  onAchievementEnablerEvent: (callback) =>
+    subscribeIpc("achievement-enabler:event", callback, (_event, message) => [message]),
   listNotificationDisplays: () => ipcRenderer.invoke("notification-displays:list"),
   onNotificationDisplaysChanged: (callback) => subscribeIpc("notification-displays:changed", callback, (_event, payload) => [payload]),
   getDashboardUiState: () => ipcRenderer.sendSync("dashboard:ui-state:load"),
@@ -895,6 +930,8 @@ contextBridge.exposeInMainWorld("api", {
   closeNotificationWindow: () => ipcRenderer.send("close-notification-window"),
   notificationRenderReady: () => ipcRenderer.send("notification-render-ready"),
   notificationScreenshotReady: (details) => ipcRenderer.send("notification-screenshot-ready", details),
+  notificationRecordVisible: (details) => ipcRenderer.send("notification-record-visible", details),
+  getReplayStatus: () => ipcRenderer.invoke("record-replay:status"),
   parseStatsBin: (filePath) => ipcRenderer.invoke("parse-stats-bin", filePath),
   selectFile: () => ipcRenderer.invoke("select-file"),
   selectImageFile: () => ipcRenderer.invoke("select-image-file"),
@@ -913,6 +950,10 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.invoke("renameAndSaveConfig", oldName, config),
   selectExecutable: (currentPath) =>
     ipcRenderer.invoke("selectExecutable", currentPath),
+  findGameExecutable: (payload) => ipcRenderer.invoke("executable-finder:one", payload),
+  findAllGameExecutables: () => ipcRenderer.invoke("executable-finder:all"),
+  cancelExecutableSearch: () => ipcRenderer.invoke("executable-finder:cancel"),
+  onExecutableSearchProgress: (callback) => subscribeIpc("executable-finder:progress", callback),
   launchExecutable: (exeOrPayload, args, workingDirectory) =>
     ipcRenderer.invoke(
       "launchExecutable",
@@ -999,6 +1040,18 @@ contextBridge.exposeInMainWorld("api", {
   onAutoSelectConfig: (handler) =>
     subscribeIpc("auto-select-config", handler, (_event, name) => [name]),
   appNavigationReady: () => ipcRenderer.send("app-navigation:ready"),
+  listAchievementMedia: (payload) => ipcRenderer.invoke("achievement-media:list", payload),
+  getGameMediaGallery: (configName) => ipcRenderer.invoke("achievement-media:gallery", { configName }),
+  getDashboardGameDetails: (configName) => ipcRenderer.invoke("dashboard:game-details", configName),
+  getDashboardArtwork: (configName) => ipcRenderer.invoke("dashboard:artwork", configName),
+  getGameArtworkSources: (payload) => ipcRenderer.invoke("artwork:sources", payload),
+  downloadGameArtwork: (payload) => ipcRenderer.invoke("artwork:download", payload),
+  ensureGameArtwork: (payload) => ipcRenderer.invoke("artwork:ensure", payload),
+  ensureDashboardArtwork: (configName) => ipcRenderer.invoke("dashboard:ensure-artwork", configName),
+  refreshDashboardGameDetails: (configName) => ipcRenderer.invoke("dashboard:refresh-game-details", configName),
+  openAchievementMedia: (payload) => ipcRenderer.invoke("achievement-media:open", payload),
+  achievementMediaReady: () => ipcRenderer.send("achievement-media:ready"),
+  onAchievementMedia: (callback) => subscribeIpc("achievement-media:show", callback),
   appNavigationResult: (payload) =>
     ipcRenderer.send("app-navigation:result", payload),
   onAppNavigationOpen: (handler) =>
@@ -1051,12 +1104,17 @@ contextBridge.exposeInMainWorld("api", {
   openEaApp: (payload) => ipcRenderer.invoke("ea-app:open", payload),
   openExternalUrl: (url) => ipcRenderer.invoke("open-external-url", url),
   trayAction: (action) => ipcRenderer.send("tray:action", action),
+  refreshTrayRecentGames: () => ipcRenderer.invoke("tray:recent-games"),
+  activateRecentTrayGame: (configName, action = "open") => ipcRenderer.invoke("tray:recent-game", configName, action),
+  onTrayRecentGames: (callback) =>
+    subscribeIpc("tray:recent-games-changed", callback, (_event, games) => [games]),
   setStartWithWindows: (enabled) =>
     ipcRenderer.invoke("startup:set-start-with-windows", enabled),
   getStartWithWindows: () =>
     ipcRenderer.invoke("startup:get-start-with-windows"),
   getTotalPlaytime: (configName) =>
     ipcRenderer.invoke("playtime:get-total", configName),
+  getPlaytimeTotalsSnapshot: () => ipcRenderer.invoke("playtime:get-totals"),
   getLastPlayedSnapshot: () => ipcRenderer.invoke("playtime:last-played"),
   onLastPlayedUpdate: (callback) =>
     subscribeIpc("playtime:last-played-updated", callback, (_event, payload) => [payload]),

@@ -1,3 +1,4 @@
+const { parseSteamCommunityTitle } = require("./steam-community-schema");
 // auto-config-generator.js
 const { app } = require("electron");
 const fs = require("fs");
@@ -61,6 +62,18 @@ const { createBlacklistState } = require("./blacklist-identity");
 const { watchGenerationProcess } = require("./generation-process-timeout");
 const { attachSchemaParseCoordinator, IPC_ENV: SCHEMA_PARSE_IPC_ENV } = require("./schema-parse-coordinator");
 let autoGenerationBlacklistHandler = null;
+let generatedConfigPlatinumHandler = null;
+function configureGeneratedConfigPlatinum(handler) {
+  generatedConfigPlatinumHandler = typeof handler === "function" ? handler : null;
+}
+function notifyGeneratedConfigPlatinum(filePath) {
+  if (!generatedConfigPlatinumHandler) return;
+  // Enrichment runs after schema generation (including rarity), without holding
+  // the batch open or changing its successful result on a lookup failure.
+  Promise.resolve().then(() => generatedConfigPlatinumHandler(filePath)).catch(error => {
+    autoConfigLogger.warn("platinum:lookup-failed", { filePath, error: error?.message || String(error) });
+  });
+}
 function configureAutoGenerationBlacklist(handler) {
   autoGenerationBlacklistHandler = typeof handler === "function" ? handler : null;
 }
@@ -499,6 +512,12 @@ function sanitizeFilename(name) {
 function applyLaunchMetadataToConfig(configData, metadata) {
   if (!configData || !metadata) return false;
   let changed = false;
+  for (const field of ["relative_executable", "relative_working_directory"]) {
+    if (typeof metadata[field] === "string" && metadata[field].trim() && !String(configData.launch_metadata?.[field] || "").trim()) {
+      configData.launch_metadata = { ...configData.launch_metadata, [field]: metadata[field] };
+      changed = true;
+    }
+  }
   const processName = normalizeProcessNameValue(metadata.process_name);
   const args = String(metadata.arguments || "");
   if (
@@ -722,6 +741,7 @@ async function generateGogOfficialConfigForProduct(
   applyExecutableLaunchMetadataToConfig(nextConfig, gogLaunchMetadata);
   if (nextConfig.steamAppId) delete nextConfig.steamAppId;
 
+  if (!fs.existsSync(targetInfo.filePath)) await require("./game-executable-finder").autoFindExecutable(nextConfig);
   const previousSerialized = fs.existsSync(targetInfo.filePath)
     ? fs.readFileSync(targetInfo.filePath, "utf8")
     : null;
@@ -736,6 +756,9 @@ async function generateGogOfficialConfigForProduct(
     filePath: targetInfo.filePath,
     name: targetInfo.name,
   });
+  if (created || (nextConfig.platinum_achievement && !require("./platinum-enrichment").readMetadata(nextConfig))) {
+    notifyGeneratedConfigPlatinum(targetInfo.filePath);
+  }
 
   if (
     typeof opts.onSeedCache === "function" &&
@@ -983,6 +1006,7 @@ async function generateUbisoftOfficialConfigForProduct(
     );
   }
 
+  if (!fs.existsSync(targetInfo.filePath)) await require("./game-executable-finder").autoFindExecutable(nextConfig);
   const previousSerialized = fs.existsSync(targetInfo.filePath)
     ? fs.readFileSync(targetInfo.filePath, "utf8")
     : null;
@@ -997,6 +1021,9 @@ async function generateUbisoftOfficialConfigForProduct(
     filePath: targetInfo.filePath,
     name: path.basename(targetInfo.filePath, ".json"),
   });
+  if (created || (nextConfig.platinum_achievement && !require("./platinum-enrichment").readMetadata(nextConfig))) {
+    notifyGeneratedConfigPlatinum(targetInfo.filePath);
+  }
 
   const spoolSnapshot = buildUbisoftOfficialSnapshot(
     readUbisoftSpoolFileSafe(spoolFilePath)?.records || [],
@@ -1209,6 +1236,7 @@ async function generateEaOfficialConfigForProduct(appid, outputDir, opts = {}) {
   };
   if (nextConfig.steamAppId) delete nextConfig.steamAppId;
 
+  if (!fs.existsSync(targetInfo.filePath)) await require("./game-executable-finder").autoFindExecutable(nextConfig);
   const previousSerialized = fs.existsSync(targetInfo.filePath)
     ? fs.readFileSync(targetInfo.filePath, "utf8")
     : null;
@@ -1223,6 +1251,9 @@ async function generateEaOfficialConfigForProduct(appid, outputDir, opts = {}) {
     filePath: targetInfo.filePath,
     name: path.basename(targetInfo.filePath, ".json"),
   });
+  if (created || (nextConfig.platinum_achievement && !require("./platinum-enrichment").readMetadata(nextConfig))) {
+    notifyGeneratedConfigPlatinum(targetInfo.filePath);
+  }
 
   if (
     typeof opts.onSeedCache === "function" &&
@@ -1280,54 +1311,22 @@ function decodeHtml(s) {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
 }
-function cleanText(x) {
-  return decodeHtml(String(x || "").replace(/<[^>]*>/g, ""))
-    .replace(/\s+/g, " ")
-    .trim();
-}
-function isBadName(name) {
-  const n = (name || "").trim();
-  return !n || /^steam hunters$/i.test(n);
-}
-function extractNameFromSteamHuntersHtml(html) {
-  const H = String(html || "");
-  // 1) Banner: <span.flex-link-underline> from <h1><a>…</a></h1>
-  //    (not “Steam Hunters”, second)
-  let m =
-    /<main[\s\S]*?<div[^>]*class="[^"]*\bbanner\b[^"]*"[^>]*>[\s\S]*?<div[^>]*class="[^"]*\bmedia-body\b[^"]*"[^>]*>[\s\S]*?<h1[^>]*>[\s\S]*?<a[^>]*>\s*<span[^>]*class="[^"]*\bflex-link-underline\b[^"]*"[^>]*>[\s\S]*?<\/span>\s*<span[^>]*class="[^"]*\bflex-link-underline\b[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(
-      H,
-    );
-  if (m && m[1]) {
-    const name = cleanText(m[1]);
-    if (!isBadName(name)) return name;
-  }
-  // 2) Breadcrumb: <span class="text-ellipsis app-name after">
-  m =
-    /<header[\s\S]*?<span[^>]*class="[^"]*\btext-ellipsis\b[^"]*\bapp-name\b[^"]*(?:\bafter\b)?[^"]*"[^>]*>([\s\S]*?)<\/span>/i.exec(
-      H,
-    );
-  if (m && m[1]) {
-    const name = cleanText(m[1]);
-    if (!isBadName(name)) return name;
-  }
-  return null;
-}
-async function getGameNameFromSteamHunters(appid) {
+async function getGameNameFromSteamCommunity(appid) {
   try {
-    const url = `https://steamhunters.com/apps/${appid}/achievements`;
+    const url = `https://steamcommunity.com/achievements/${appid}?l=english`;
     const res = await axios.get(url, {
       headers: { "User-Agent": UA, Accept: "text/html" },
       timeout: 15000,
       validateStatus: (s) => s >= 200 && s < 500,
     });
     if (res.status >= 400) return null;
-    const name = extractNameFromSteamHuntersHtml(res.data || "");
+    const name = parseSteamCommunityTitle(res.data, appid);
     if (!name) {
-      autoConfigLogger.warn("steam-hunters:name-missing", { appid });
+      autoConfigLogger.warn("steamcommunity:name-missing", { appid });
     }
     return name || null;
   } catch (e) {
-    autoConfigLogger.warn("steam-hunters:request-failed", {
+    autoConfigLogger.warn("steamcommunity:request-failed", {
       appid,
       error: e?.message || String(e),
     });
@@ -1405,6 +1404,7 @@ async function getGameNameFromGogDb(appid) {
   for (const attempt of attempts) {
     try {
       const res = await axios.get(attempt.url, { timeout: 15000 });
+      require("./game-presentation-metadata").store({ userDataDir, platform: "gog", appid: normalizedAppId, kind: "gog", payload: res.data });
       const title = extractGogTitle(res.data);
       if (title) {
         gogNameFallbackAppIds.add(normalizedAppId);
@@ -1471,6 +1471,7 @@ async function getEpicTitle(appid) {
     const url = `https://store-content.ak.epicgames.com/api/en-US/content/products/${slug}`;
     const res = await axios.get(url, { timeout: 15000 });
     const data = res.data || {};
+    require("./game-presentation-metadata").store({ userDataDir, platform: "epic", appid, kind: "epic", payload: data });
     const candidates = [];
     if (typeof data.productName === "string") candidates.push(data.productName);
     else if (data.productName && typeof data.productName.value === "string")
@@ -1502,11 +1503,7 @@ async function getEpicTitle(appid) {
         const downloadIf = async (url, fileName) => {
           if (!url) return;
           try {
-            const resp = await axios.get(url, {
-              responseType: "arraybuffer",
-              timeout: 20000,
-            });
-            fs.writeFileSync(path.join(imagesRoot, fileName), resp.data);
+            await require("./game-artwork-storage").importUrl(url, path.join(imagesRoot, fileName), { source: "epic-store", timeoutMs: 20000 });
           } catch (e) {
             autoConfigLogger.warn("epic:cover-download-failed", {
               appid,
@@ -1561,15 +1558,7 @@ async function cacheEpicEmulatorImages(appid, identity) {
     for (const url of target.urls) {
       if (!url) continue;
       try {
-        const response = await axios.get(url, {
-          responseType: "arraybuffer",
-          timeout: 20000,
-        });
-        if (!String(response.headers?.["content-type"] || "").startsWith("image/")) {
-          throw new Error("Cover response is not an image");
-        }
-        fs.mkdirSync(imageDir, { recursive: true });
-        fs.writeFileSync(target.path, response.data);
+        await require("./game-artwork-storage").importUrl(url, target.path, { source: "epic-catalog", timeoutMs: 20000 });
         break;
       } catch (error) {
         autoConfigLogger.warn("epic:cover-download-failed", {
@@ -1791,6 +1780,7 @@ async function getGameName(appid, opts = {}, retries = 2) {
     const url = `https://store.steampowered.com/api/appdetails?appids=${appid}`;
     const res = await axios.get(url, { timeout: 15000 });
     const entry = res.data?.[String(appid)];
+    require("./game-presentation-metadata").store({ userDataDir, platform: "steam", appid, kind: "steam", payload: res.data });
     if (entry?.success && entry?.data?.name) {
       nameFromStore = entry.data.name;
     } else {
@@ -1811,11 +1801,11 @@ async function getGameName(appid, opts = {}, retries = 2) {
     });
   }
   if (nameFromStore) return nameFromStore;
-  // Fallback SteamHunters
-  autoConfigLogger.info("fallback:steam-hunters", { appid });
-  const shName = await getGameNameFromSteamHunters(appid);
-  if (shName) return shName;
-  autoConfigLogger.warn("fallback:steam-hunters-failed", { appid });
+  // Fallback SteamCommunity
+  autoConfigLogger.info("fallback:steamcommunity", { appid });
+  const communityName = await getGameNameFromSteamCommunity(appid);
+  if (communityName) return communityName;
+  autoConfigLogger.warn("fallback:steamcommunity-failed", { appid });
   const schemaParseOutputName = resolveSchemaParseOutputDisplayName(
     resolveSchemaParseRuntimeDir(userDataDir),
     appid,
@@ -2030,6 +2020,8 @@ function runAchievementsGenerator(
         const nextLaunchMetadata = {
           process_name: normalizeProcessNameValue(msg.process_name),
           arguments: String(msg.arguments || ""),
+          relative_executable: String(msg.relative_executable || ""),
+          relative_working_directory: String(msg.relative_working_directory || ""),
         };
         const nextDisplayName = String(msg.displayName || "").trim();
         if (nextDisplayName) {
@@ -2037,6 +2029,7 @@ function runAchievementsGenerator(
         }
         if (
           hasProcessNameValue(nextLaunchMetadata.process_name) ||
+          !!nextLaunchMetadata.relative_executable ||
           String(nextLaunchMetadata.arguments || "").trim()
         ) {
           launchMetadata = nextLaunchMetadata;
@@ -2167,6 +2160,7 @@ function validateGeneratedSchemaDir(schemaDir) {
 }
 
 function replaceSchemaDirWithBackup(sourceDir, destDir) {
+  require("./game-presentation-metadata").inherit(sourceDir, destDir);
   if (!fs.existsSync(sourceDir)) {
     throw new Error("Generated schema directory is missing");
   }
@@ -2634,9 +2628,12 @@ async function runAchievementsGeneratorBatch(
         const nextLaunchMetadata = {
           process_name: normalizeProcessNameValue(msg.process_name),
           arguments: String(msg.arguments || ""),
+          relative_executable: String(msg.relative_executable || ""),
+          relative_working_directory: String(msg.relative_working_directory || ""),
         };
         if (
           hasProcessNameValue(nextLaunchMetadata.process_name) ||
+          !!nextLaunchMetadata.relative_executable ||
           String(nextLaunchMetadata.arguments || "").trim()
         ) {
           launchMetadataByAppId.set(appid, nextLaunchMetadata);
@@ -2804,6 +2801,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
     const itemEmu = taskOverride?.emu || opts.emu || null;
     let itemLaunchMetadata =
       taskOverride?.launchMetadata || opts.launchMetadata || null;
+    let schemaGenerated = taskOverride?.schemaGenerated === true;
     processed++;
     emitBatchProgress(itemIndex, 2, {
       appid,
@@ -2911,6 +2909,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
               onProgress: (progress) => emitBatchProgress(itemIndex, progress.percent || 0, progress),
             });
             outcome = generated.generationResult;
+            schemaGenerated = true;
             itemLaunchMetadata = generated.launchMetadata || itemLaunchMetadata;
             itemPreferredName = generated.displayName || itemPreferredName;
           }
@@ -3145,6 +3144,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
                 }
               }
               generated = true;
+              schemaGenerated = true;
               break;
             } catch (err) {
               if (["SCHEMA_PARSE_CANCELLED", "GENERATION_CANCELLED"].includes(err?.code)) throw err;
@@ -3351,6 +3351,7 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
             name: curr.name || safeName,
           },
         );
+        if (schemaGenerated) notifyGeneratedConfigPlatinum(filePath);
         await maybeSeedAchCache({
           appid,
           configName: safeName,
@@ -3430,7 +3431,9 @@ async function generateGameConfigs(folderPath, outputDir, opts = {}) {
       phase: "writingConfig",
       detail: "Writing config",
     });
+    await require("./game-executable-finder").autoFindExecutable(gameData, schemaLaunchMetadata || itemLaunchMetadata || {});
     fs.writeFileSync(filePath, JSON.stringify(gameData, null, 2));
+    notifyGeneratedConfigPlatinum(filePath);
     registerConfigVariant(configVariantIndex, uplayId, platformMeta.platform, {
       filePath,
       name: safeName,
@@ -4024,6 +4027,8 @@ async function generateConfigsForAppIds(tasks, outputDir, opts = {}) {
           }
           try {
             replaceSchemaDirWithBackup(sourceDir, destDir);
+            current.schemaGenerated = true;
+            taskOverrides.set(appid, current);
           } catch (error) {
             if (!isEmulatorGeneration(platform)) throw error;
             current.generationResult = { appid, platform: outcome?.platform || platform,
@@ -4390,6 +4395,7 @@ async function generateConfigForAppId(appid, outputDir, opts = {}) {
   }
 }
 module.exports = {
+  configureGeneratedConfigPlatinum,
   configureAutoGenerationBlacklist,
   generateGameConfigs,
   generateConfigsForAppIds,

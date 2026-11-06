@@ -18,6 +18,9 @@ module.exports = async (context) => {
     files.push(packaged);
   }
   if (context.packager.config.forceCodeSigning === true) {
+    const replayRoot = path.join(context.appOutDir, "resources", "app.asar.unpacked", "utils", "vendor", "replay-media");
+    await require("./verify-replay-media").verify(replayRoot);
+    files.push(path.join(replayRoot, "ffmpeg.exe"), path.join(replayRoot, "ffprobe.exe"));
     await verifyWindowsSignatures(files);
   }
 };

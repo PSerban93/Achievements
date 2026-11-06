@@ -3,6 +3,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const chokidar = require("chokidar");
+const { createWatchedFileChangeGuard } = require("./watched-file-change-guard");
 const achievementLockRuntime = require("./achievement-lock-runtime");
 const { createLogger } = require("./logger");
 const { generationDetail, getGenerationBlacklistDecision } = require("./emulator-generation-result");
@@ -6305,7 +6306,7 @@ module.exports = function makeWatchedFolders({
         updateSchemaFromTrophy(meta.config_path, parsedTrophy);
       } catch {}
     }
-    if (isPs4 && meta?.config_path) {
+    if (isPs4 && !isPs4ProgressXml && meta?.config_path) {
       try {
         const parsedPs4 = parsePs4TrophySetDir(
           resolvePs4TrophyDirForMeta(meta) || path.dirname(filePath),
@@ -8341,6 +8342,7 @@ module.exports = function makeWatchedFolders({
         watcherOptions.binaryInterval = 1000;
       }
       const watcher = chokidar.watch(targets, watcherOptions);
+      const ps4SourceChanges = isPs4Meta(meta) ? createWatchedFileChangeGuard() : null;
       let readySettled = false;
       let resolveReady = null;
       const readyPromise = new Promise((resolve) => {
@@ -8498,6 +8500,13 @@ module.exports = function makeWatchedFolders({
             .find((p) => /^[0-9a-fA-F]+$/.test(p));
           if (detected && detected !== appid.toLowerCase()) return;
         }
+        if (ps4SourceChanges && !retryFlag) {
+          const sourceChange = ps4SourceChanges.inspect(resolvedPath);
+          if (!sourceChange.changed) return;
+          watcherLogger.info("shadps4:progress-source:event", {
+            appid, config: meta.name, event: ev, filePath: resolvedPath, reason: sourceChange.reason,
+          });
+        }
         const initial = ev === "add" && bootMode;
         const isTenoke = meta.__tenoke === true || tenokeIds.has(String(appid));
 
@@ -8546,7 +8555,7 @@ module.exports = function makeWatchedFolders({
             forceEmptyPrev: isTenoke && ev === "add",
             isAddEvent: ev === "add",
           });
-        } catch {}
+        } catch { ps4SourceChanges?.forget(resolvedPath); }
 
         if (result === "__retry__") {
           setTimeout(() => {
@@ -8588,7 +8597,10 @@ module.exports = function makeWatchedFolders({
       };
 
       watcher
-        .on("ready", () => settleReady(true))
+        .on("ready", () => {
+          if (ps4SourceChanges) for (const target of targets) ps4SourceChanges.prime(target);
+          settleReady(true);
+        })
         .on("add", (fp) => onHit("add", fp))
         .on("change", (fp) => onHit("change", fp))
         .on("error", (err) => {
@@ -11978,14 +11990,9 @@ module.exports = function makeWatchedFolders({
           defaultDetail: "",
           usePhaseOnlyDetails: true,
           useAggregateProgressOverrides: false,
+          deferStartUntilVisible: true,
         });
         storageProgress.start();
-        storageProgress.updateTask(storageTask, 0, {
-          itemName: "XLiveLessNess",
-          phase: "writingConfig",
-          detail: "",
-          percent: 15,
-        });
         try {
           const linked = [];
           const changed = [];
@@ -12025,6 +12032,9 @@ module.exports = function makeWatchedFolders({
               }
               roots.push(storageRoot);
               try {
+                storageProgress.updateTask(storageTask, 0, {
+                  itemName: "XLiveLessNess", phase: "finalizing", detail: "", percent: 15,
+                });
                 const cfgPath = path.join(configsDir, `${meta.name}.json`);
                 const config = JSON.parse(await fsp.readFile(cfgPath, "utf8"));
                 config.xlln_storage_roots = roots;
@@ -12063,12 +12073,8 @@ module.exports = function makeWatchedFolders({
             root: storageRoot,
             configs: linked,
           });
-          storageProgress.updateTask(storageTask, 0, {
-            itemName: "XLiveLessNess",
-            phase: linkFailed ? "failed" : "completed",
-            detail: "",
-            percent: 100,
-          });
+          storageProgress.settleTask(storageTask, 0, linkFailed ? { failed: true, reason: "storage-link-failed" }
+            : changed.length ? { configUpdated: true } : { reason: "unchanged" });
           storageProgress.finish(linkFailed ? "failed" : "success", "");
           return {
             handled: true,
@@ -12147,6 +12153,7 @@ module.exports = function makeWatchedFolders({
       defaultDetail: "",
       usePhaseOnlyDetails: true,
       useAggregateProgressOverrides: false,
+      deferStartUntilVisible: true,
     });
     let generationFailed = false;
     generationProgress.start();
@@ -12232,9 +12239,9 @@ module.exports = function makeWatchedFolders({
         generationProgress.updateTask(progressTask, gameIndex, {
           appid: game.titleId,
           itemName: progressTask.itemName,
-          phase: "generatingSchema",
+          phase: "preparing",
           detail: "",
-          percent: 15,
+          percent: 5,
         });
         const result = await ensureXLiveLessNessConfig({
           game,
@@ -12242,19 +12249,21 @@ module.exports = function makeWatchedFolders({
           localAppData: process.env.LOCALAPPDATA || "",
           schemaLanguages,
           forceSchemaRefresh: rescanInProgress.value || opts.forceLocalPatchRefresh === true,
+          onSchemaRefresh: () => generationProgress.updateTask(progressTask, gameIndex, {
+            appid: game.titleId, itemName: progressTask.itemName, phase: "generatingSchema", detail: "", percent: 15,
+          }),
         });
         for (const warning of result.metadataWarnings || []) watcherLogger.warn("xlivelessness:metadata-warning", {
           appid: game.titleId, config: result.name, warning,
         });
         results.push({ ...result, gameRoot: game.root });
-        generationProgress.updateTask(progressTask, gameIndex, {
-          appid: game.titleId,
-          itemName:
-            result.config?.displayName || result.name || progressTask.itemName,
-          phase: "completed",
-          detail: "",
-          percent: 100,
+        if (result.updated && !result.schemaUpdated) generationProgress.updateTask(progressTask, gameIndex, {
+          appid: game.titleId, itemName: result.name || progressTask.itemName, phase: "finalizing", detail: "", percent: 90,
         });
+        generationProgress.settleTask(progressTask, gameIndex,
+          result.created || result.updated || result.schemaUpdated
+            ? { created: result.created, configUpdated: result.updated, schemaUpdated: result.schemaUpdated }
+            : { reason: "unchanged" });
         watcherLogger.info("xlivelessness:scan-complete", {
           root: detection.root,
           appid: game.titleId,
@@ -12927,13 +12936,24 @@ module.exports = function makeWatchedFolders({
         if (!settings.valid) watcherLogger.warn("kytyps5:settings:pending", { root, error: settings.error });
         for (const error of discovered.errors) watcherLogger.warn("kytyps5:discovery:pending", error);
         await initialState?.updateGameSources?.(discovered.games, settings);
-        if (pending && initialState?.missingTitles !== missingTitles.join(",")) {
-          watcherLogger.warn("kytyps5:discovery:metadata-missing", {
-            root, titleIds: missingTitles, settingsPath: discovered.filePath,
-            gameRoots: discovered.gameRoots,
-          });
+        const missingKinds = kytyDiscovery.classifyMissingTitles(missingTitles, discovered);
+        const missingSignature = JSON.stringify([missingKinds, settings.valid, discovered.errors.length > 0]);
+        if (missingTitles.length && initialState?.missingTitles !== missingSignature) {
+          const details = { root, settingsPath: discovered.filePath, gameRoots: discovered.gameRoots,
+            retry: retryDiscovery ? "scoped-recovery" : "source-events" };
+          if (missingKinds.activeIncomplete.length) watcherLogger.warn("kytyps5:discovery:metadata-missing", {
+            ...details, titleIds: missingKinds.activeIncomplete, status: "active-installation-incomplete", reason: "trophy-packages-missing" });
+          if (missingKinds.unresolvedRuntime.length) {
+            const readable = settings.valid && discovered.errors.length === 0;
+            watcherLogger[readable ? "info" : "warn"]("kytyps5:discovery:runtime-title-unresolved", {
+              ...details, titleIds: missingKinds.unresolvedRuntime,
+              status: readable ? "no-active-installation-found" : "discovery-incomplete",
+              historicalPossible: readable, sourceErrors: discovered.errors.length });
+          }
         }
-        if (initialState) initialState.missingTitles = missingTitles.join(",");
+        const resolvedTitles = (initialState?.missingTitleIds || []).filter(id => discovered.games.has(id));
+        if (resolvedTitles.length) watcherLogger.info("kytyps5:discovery:metadata-resolved", { root, titleIds: resolvedTitles });
+        if (initialState) { initialState.missingTitles = missingSignature; initialState.missingTitleIds = missingTitles; }
         const games = [...discovered.games.values()].filter((game) =>
           !retryPaths || retryPaths.has(normalizeRoot(game.gamePath)));
         const progressTasks = games.map((game) => ({ appid: game.titleId, itemName: game.title }));
@@ -13994,6 +14014,17 @@ module.exports = function makeWatchedFolders({
           shouldSkipPath,
         );
         if (trophyDirs.length) {
+          scanTelemetry.handledBy = "rpcs3";
+          scanTelemetry.discovered = trophyDirs.length;
+          const rpcs3Stats = scanTelemetry.rpcs3 = {
+            checked: 0, created: 0, updated: 0, unchanged: 0, skipped: 0, failed: 0,
+            schemaUpdated: 0, configUpdated: 0,
+          };
+          const rpcs3GenerationTasks = new Set();
+          const markRpcs3Generation = (taskIndex) => {
+            rpcs3GenerationTasks.add(taskIndex);
+            scanTelemetry.generationTasks = rpcs3GenerationTasks.size;
+          };
           const schemaRoot = path.join(configsDir, "schema");
           const rpcs3AppIds = new Set();
           let rpcs3Changed = false;
@@ -14007,7 +14038,7 @@ module.exports = function makeWatchedFolders({
             rootLabel: path.basename(rootPath || scanBase || "") || "",
             fallbackItemName: "RPCS3",
             defaultDetail: "Parsing RPCS3 trophies",
-            deferStartUntilVisible: bootMode === true,
+            deferStartUntilVisible: true,
           });
           rpcs3BatchProgress.start();
           const handleTrophyDir = async (task, taskIndex) => {
@@ -14020,11 +14051,13 @@ module.exports = function makeWatchedFolders({
             const appid = String(
               task?.appid || path.basename(trophyDir),
             ).trim();
+            rpcs3Stats.checked++;
             if (
               !appid ||
               isAppIdBlacklisted(appid, "rpcs3", blacklistState) ||
               rpcs3AppIds.has(appid)
             ) {
+              rpcs3Stats.skipped++;
               rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
                 itemName: appid,
@@ -14038,11 +14071,9 @@ module.exports = function makeWatchedFolders({
               rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
                 itemName: appid,
-                phase: bootMode ? "preparing" : "generatingSchema",
-                detail: bootMode
-                  ? "Checking RPCS3 trophies"
-                  : "Parsing RPCS3 trophies",
-                percent: bootMode ? 5 : 15,
+                phase: "preparing",
+                detail: "Checking RPCS3 trophies",
+                percent: 5,
               });
               const result = await generateConfigFromTrophyDir(
                 trophyDir,
@@ -14050,9 +14081,14 @@ module.exports = function makeWatchedFolders({
                 {
                   schemaRoot,
                   bootMode,
+                  onGenerationProgress: (progress) => {
+                    markRpcs3Generation(resolvedTaskIndex);
+                    rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, progress);
+                  },
                 },
               );
               if (!result || result.skipped) {
+                rpcs3Stats.skipped++;
                 rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
                   appid,
                   itemName: result?.name || appid,
@@ -14066,7 +14102,15 @@ module.exports = function makeWatchedFolders({
                 result?.created === true ||
                 result?.schemaUpdated === true ||
                 result?.configUpdated === true;
-              if (rpcs3ResultChanged) rpcs3Changed = true;
+              if (rpcs3ResultChanged) {
+                rpcs3Changed = true;
+                markRpcs3Generation(resolvedTaskIndex);
+              }
+              if (result.created === true) rpcs3Stats.created++;
+              else if (rpcs3ResultChanged) rpcs3Stats.updated++;
+              else rpcs3Stats.unchanged++;
+              if (result.schemaUpdated === true) rpcs3Stats.schemaUpdated++;
+              if (result.configUpdated === true) rpcs3Stats.configUpdated++;
               rpcs3SchemaResults.push(result);
               if (
                 (result.created || result.schemaUpdated) &&
@@ -14101,6 +14145,7 @@ module.exports = function makeWatchedFolders({
                 percent: 100,
               });
             } catch (err) {
+              rpcs3Stats.failed++;
               rpcs3BatchProgress.updateTask(task, resolvedTaskIndex, {
                 appid,
                 itemName: appid,
@@ -14151,7 +14196,10 @@ module.exports = function makeWatchedFolders({
               broadcastAll("refresh-achievements-table");
             }
           }
-          rpcs3BatchProgress.finish("success", "Config generation completed");
+          rpcs3BatchProgress.finish(
+            rpcs3Stats.failed > 0 ? "failed" : "success",
+            rpcs3Stats.failed > 0 ? "RPCS3 trophy processing failed" : "Config generation completed",
+          );
           // Trophy roots are handled by RPCS3 flow only (avoid auto-config conflicts).
           return;
         }
@@ -15698,11 +15746,14 @@ module.exports = function makeWatchedFolders({
           handledBy: scanTelemetry.handledBy,
           discovered: scanTelemetry.discovered,
           generationTasks: scanTelemetry.generationTasks,
+          ...(scanTelemetry.rpcs3 ? { rpcs3: scanTelemetry.rpcs3 } : {}),
           strictProfile: getStrictRootProfile(rootPath)?.key || null,
           specializedProfile:
             getSpecializedStrictRootProfile(rootPath)?.key || null,
           localPatchStateSource: scanTelemetry.localPatchStateSource,
           scanReason: String(opts.scanReason || "") || null,
+          triggerFile: String(opts.triggerFile || "") || null,
+          triggerEvent: String(opts.triggerEvent || "") || null,
           bootMode,
           rescan: rescanInProgress.value === true,
         });
@@ -15866,6 +15917,25 @@ module.exports = function makeWatchedFolders({
     const rootWatchDepth = discoveryWatchPolicy.depth;
     const watchStartedAt = Date.now();
     let rootWatcherReady = false;
+    const discoveryChanges = createWatchedFileChangeGuard();
+    const rpcs3DiscoveryAnchors = (discoveryWatchPolicy.anchors || [])
+      .filter((anchor) => anchor.kind.startsWith("rpcs3-"));
+    const isRpcs3DiscoveryPath = (file) => rpcs3DiscoveryAnchors
+      .some((anchor) => isPathInsideRoot(anchor.path, file));
+    const ignoredDiscoveryEvents = new Set();
+    const discoveryContentOptions = (file) => ({ content: !/\.(?:exe|dll)$/i.test(file) });
+    const inspectDiscoveryEvent = (file, event, platform) => {
+      const result = discoveryChanges.inspect(file, discoveryContentOptions(file));
+      const key = normalizeRoot(file);
+      if (result.changed) {
+        ignoredDiscoveryEvents.delete(key);
+        watcherLogger.info("discovery-source:event", { root, platform, event, filePath: file, reason: result.reason });
+      } else if (!ignoredDiscoveryEvents.has(key)) {
+        ignoredDiscoveryEvents.add(key);
+        watcherLogger.debug("discovery-source:unchanged", { root, platform, event, filePath: file, reason: result.reason });
+      }
+      return result.changed;
+    };
 
     const watcher = chokidar.watch(root, {
       persistent: true,
@@ -15985,9 +16055,16 @@ module.exports = function makeWatchedFolders({
       return true;
     };
 
-    const schedule = () => {
+    const schedule = (cause = null) => {
       if (state.stopped) return;
       if (deferRootEventForBootScan("debounced-scan")) return;
+      if (cause?.scanReason) {
+        state.pendingScanContext = {
+          scanReason: String(cause.scanReason),
+          triggerFile: String(cause.triggerFile || ""),
+          triggerEvent: String(cause.triggerEvent || ""),
+        };
+      }
       clearTimeout(state.debounce);
       state.debounce = setTimeout(async () => {
         if (state.stopped) return;
@@ -16007,7 +16084,9 @@ module.exports = function makeWatchedFolders({
             stopFolderWatcher(root);
             return;
           }
-          await scanRootOnce(root, { localPatchState: state.localPatchState });
+          const scanContext = state.pendingScanContext || { scanReason: "watch:debounced-scan" };
+          state.pendingScanContext = null;
+          await scanRootOnce(root, { localPatchState: state.localPatchState, ...scanContext });
         } catch (e) {
           notifyWarn(`Watch rescan failed for "${root}": ${e.message}`);
         } finally {
@@ -16100,7 +16179,7 @@ module.exports = function makeWatchedFolders({
       return base === "universelan.ini" || /^goggame-\d+\.info$/i.test(base);
     };
 
-    const routeLocalPatchEvent = async (eventPath) => {
+    const routeLocalPatchEvent = async (eventPath, event = "unknown") => {
       let signatureEvent = isLocalPatchSignatureEvent(root, eventPath);
       if (!signatureEvent) {
         await state.localPatchStatePromise;
@@ -16110,10 +16189,16 @@ module.exports = function makeWatchedFolders({
         );
       }
       const previous = state.localPatchState;
+      const xllnSignature = signatureEvent && (previous.type === XLIVELESSNESS_PLATFORM ||
+        /(?:^|[\\/])xlive\.dll$|\.exe\.cfg$/i.test(eventPath));
+      if (xllnSignature && !inspectDiscoveryEvent(eventPath, event, XLIVELESSNESS_PLATFORM)) {
+        // This event belongs to XLiveLessNess even when it only reports access.
+        return true;
+      }
       if (signatureEvent) {
-        state.localPatchState = await refreshLocalPatchState({
-          forceXLiveLessNessRefresh: true,
-        });
+        try {
+          state.localPatchState = await refreshLocalPatchState({ forceXLiveLessNessRefresh: true });
+        } catch (error) { discoveryChanges.forget(eventPath); throw error; }
         if (
           previous?.type !== state.localPatchState.type ||
           previous?.active !== state.localPatchState.active
@@ -16167,7 +16252,7 @@ module.exports = function makeWatchedFolders({
       return alternatePlatform;
     };
 
-    const handleModernPs4FileEvent = async (filePath) => {
+    const handleModernPs4FileEvent = async (filePath, event = "unknown") => {
       const base = path.basename(filePath || "").toLowerCase();
       const parts = String(filePath || "").split(/[\\/]+/);
       let npcommid = "";
@@ -16207,9 +16292,13 @@ module.exports = function makeWatchedFolders({
       }
 
       if (!npcommid || !schemaDir || !fs.existsSync(schemaDir)) return false;
+      if (!inspectDiscoveryEvent(filePath, event, "shadps4")) return true;
       const blacklistState = getBlacklistState();
+      const existingMeta = getPs4ConfigMetasByNpCommId(npcommid).find((candidate) =>
+        normalizeRoot(resolvePs4TrophyDirForMeta(candidate) || "") === normalizeRoot(schemaDir) &&
+        configMetaHasValidSchema(candidate));
       const mapped =
-        buildShadPs4LogNpCommMap(root).get(npcommid.toLowerCase()) ||
+        existingMeta || buildShadPs4LogNpCommMap(root).get(npcommid.toLowerCase()) ||
         buildShadPs4LegacyNpCommMap(root).get(npcommid.toLowerCase()) ||
         buildShadPs4LogTitleMap(root).get(
           normalizeShadPs4TitleKey(readPs4TitleFromSchemaDir(schemaDir).title),
@@ -16234,24 +16323,21 @@ module.exports = function makeWatchedFolders({
       }
 
       try {
-        const result = await generateConfigFromPs4Dir(schemaDir, configsDir, {
-          schemaRoot: path.join(configsDir, "schema"),
-          appid,
-          npcommid,
-          progressPath,
-          userId,
-        });
+        const progressOnly = !!progressPath && isPs4ProgressXmlPath(filePath) && !!existingMeta;
+        const result = progressOnly
+          ? { ...existingMeta, created: false, configUpdated: false, schemaUpdated: false }
+          : await generateConfigFromPs4Dir(schemaDir, configsDir, {
+              schemaRoot: path.join(configsDir, "schema"), appid, npcommid, progressPath, userId,
+            });
         if (!result || result.skipped) return true;
-        await indexExistingConfigsSync();
-        let meta = pickMetaForPath(result.appid, progressPath || filePath);
+        if (!progressOnly) await indexExistingConfigsSync();
+        let meta = progressOnly ? existingMeta : pickMetaForPath(result.appid, progressPath || filePath);
         if (!meta) {
           const metas = getPs4ConfigMetasByNpCommId(npcommid);
           meta = metas.length ? metas[0] : null;
         }
         if (meta) {
-          attachSaveWatcherForAppId(String(meta.appid), {
-            suppressInitialNotify: false,
-          });
+          if (!progressOnly) attachSaveWatcherForAppId(String(meta.appid), { suppressInitialNotify: false });
           if (result.created || result.schemaUpdated || result.configUpdated) {
             await invalidateDashboardSummaryForSchemaResults(
               result,
@@ -16341,19 +16427,23 @@ module.exports = function makeWatchedFolders({
           }
         }
       } catch (err) {
+        discoveryChanges.forget(filePath);
         notifyWarn(`PS4 trophy parse failed "${schemaDir}": ${err.message}`);
       }
       return true;
     };
 
-    const handleTrophyAuxiliaryFileEvent = (filePath) => {
+    const handleTrophyAuxiliaryFileEvent = (filePath, event) => {
       if (
         typeof discoveryWatchPolicy.isRuntimeAuxiliaryFile !== "function" ||
         !discoveryWatchPolicy.isRuntimeAuxiliaryFile(filePath)
       ) {
         return false;
       }
-      schedule();
+      const shadScope = isShadPs4RuntimePath(filePath) || discoveryWatchPolicy.mode?.includes("shadps4");
+      const rpcs3Scope = isRpcs3DiscoveryPath(filePath);
+      if ((shadScope || rpcs3Scope) && !inspectDiscoveryEvent(filePath, event || "auxiliary", rpcs3Scope ? "rpcs3" : "shadps4")) return true;
+      schedule({ scanReason: "watch:trophy-auxiliary", triggerFile: filePath, triggerEvent: event || "auxiliary" });
       return true;
     };
 
@@ -16363,6 +16453,32 @@ module.exports = function makeWatchedFolders({
 
     watcher
       .on("ready", () => {
+        for (const [directory, names] of Object.entries(watcher.getWatched?.() || {})) {
+          const candidates = new Set(names);
+          // These existing files are intentionally ignored during Chokidar's
+          // initial walk. Seed only the known auxiliary directories, otherwise
+          // their first later access can be mistaken for a new asset.
+          const shadAuxiliaryDirectory =
+            (isShadPs4RuntimePath(directory) || discoveryWatchPolicy.anchors?.some((anchor) => anchor.kind.startsWith("shadps4-"))) &&
+            /^(?:xml|icons)$/i.test(path.basename(directory));
+          const rpcs3AuxiliaryDirectory = isRpcs3DiscoveryPath(directory) && /^npwr[0-9a-z_]+$/i.test(path.basename(directory));
+          if (shadAuxiliaryDirectory || rpcs3AuxiliaryDirectory) {
+            try {
+              for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+                if (entry.isFile() && /^(?:TROP(?:_\d{2})?\.XML|ICON0\.PNG|TROP\d{3}\.PNG)$/i.test(entry.name)) candidates.add(entry.name);
+              }
+            } catch {}
+          }
+          for (const name of candidates) {
+            const file = path.resolve(directory, name);
+            if (/\.(?:exe|exe\.cfg)$|(?:^|[\\/])xlive\.dll$/i.test(file) ||
+                isPs4ProgressXmlPath(file) || /[\\/]Xml[\\/]TROP(?:_\d{2})?\.XML$/i.test(file) ||
+                /[\\/]icons[\\/](?:icon0|trop\d{3})\.png$/i.test(file) ||
+                (rpcs3AuxiliaryDirectory && discoveryWatchPolicy.isRuntimeAuxiliaryFile(file))) {
+              discoveryChanges.prime(file, discoveryContentOptions(file));
+            }
+          }
+        }
         rootWatcherReady = true;
         watcherLogger.info("watch-folder:ready-timing", {
           root,
@@ -16423,7 +16539,7 @@ module.exports = function makeWatchedFolders({
           scheduleDiscoveryPolicyRestart("gog-marker-changed");
           return;
         }
-        if (await routeLocalPatchEvent(filePath)) return;
+        if (await routeLocalPatchEvent(filePath, "add")) return;
         if (await handleUbisoftOfficialRootFileEvent(root, filePath)) {
           return;
         }
@@ -16433,8 +16549,8 @@ module.exports = function makeWatchedFolders({
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
-        if (handleTrophyAuxiliaryFileEvent(filePath)) return;
-        if (await handleModernPs4FileEvent(filePath)) {
+        if (handleTrophyAuxiliaryFileEvent(filePath, "add")) return;
+        if (await handleModernPs4FileEvent(filePath, "add")) {
           return;
         }
         if (isShadPs4RuntimePath(root) || isShadPs4RuntimePath(filePath)) {
@@ -16703,7 +16819,7 @@ module.exports = function makeWatchedFolders({
           scheduleDiscoveryPolicyRestart("gog-marker-changed");
           return;
         }
-        if (await routeLocalPatchEvent(filePath)) return;
+        if (await routeLocalPatchEvent(filePath, "change")) return;
         if (await handleUbisoftOfficialRootFileEvent(root, filePath)) {
           return;
         }
@@ -16713,8 +16829,8 @@ module.exports = function makeWatchedFolders({
         if (await handleGogOfficialRootFileEvent(root, filePath)) {
           return;
         }
-        if (handleTrophyAuxiliaryFileEvent(filePath)) return;
-        if (await handleModernPs4FileEvent(filePath)) {
+        if (handleTrophyAuxiliaryFileEvent(filePath, "change")) return;
+        if (await handleModernPs4FileEvent(filePath, "change")) {
           return;
         }
         if (isShadPs4RuntimePath(root) || isShadPs4RuntimePath(filePath)) {
@@ -17023,7 +17139,7 @@ module.exports = function makeWatchedFolders({
 
         // PS4/RPCS3: let the dedicated scan handle it (avoid generateConfigForAppId, which expects a numeric appid)
         if (looksPs4 || looksRpcs3) {
-          schedule();
+          schedule(looksRpcs3 ? { scanReason: "watch:rpcs3-directory", triggerFile: dir, triggerEvent: "addDir" } : null);
           return;
         }
 
@@ -17201,11 +17317,12 @@ module.exports = function makeWatchedFolders({
       })
       .on("unlink", async (filePath) => {
         if (deferRootEventForBootScan("watch:unlink")) return;
+        if (isRpcs3DiscoveryPath(filePath) && handleTrophyAuxiliaryFileEvent(filePath, "unlink")) return;
         if (isGogDiscoveryMarkerEvent(filePath)) {
           scheduleDiscoveryPolicyRestart("gog-marker-removed");
           return;
         }
-        await routeLocalPatchEvent(filePath);
+        await routeLocalPatchEvent(filePath, "unlink");
       })
       .on("unlinkDir", async (dirPath) => {
         if (!bootOnboardingGateOpen) {
@@ -17213,7 +17330,7 @@ module.exports = function makeWatchedFolders({
           return;
         }
         if (deferRootEventForBootScan("watch:unlinkDir")) return;
-        await routeLocalPatchEvent(dirPath);
+        await routeLocalPatchEvent(dirPath, "unlinkDir");
         if (!rescanInProgress.value) schedule();
       })
       .on("error", (err) => {

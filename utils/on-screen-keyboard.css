@@ -1,0 +1,26 @@
+.osk-modal[hidden] { display: none !important; }
+.osk-modal { position: fixed; inset: 38px 0 0; z-index: 2147483000; display: flex; align-items: flex-end; justify-content: center; padding: 16px; box-sizing: border-box; background: #0008; }
+.osk-panel { width: min(860px,100%); max-height: 85vh; overflow: auto; padding: 18px; box-sizing: border-box; background: var(--app-panel-bg); color: var(--app-text); border: 1px solid var(--app-border-subtle); border-radius: var(--app-radius-panel); box-shadow: var(--app-shadow-panel); }
+.osk-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.osk-header h3 { margin: 0; font-size: 1.125rem; overflow-wrap: anywhere; }
+.osk-header .settings-close-button { position: static; inset: auto; transform: none; flex-shrink: 0; }
+.osk-editor { position: relative; margin-bottom: 14px; font-size: 1.125rem; line-height: 1.5; }
+.osk-editor .osk-display { display: block; width: 100%; min-height: 42px; margin: 0; resize: none; box-sizing: border-box; font: inherit; padding: 10px 12px; border: 1px solid var(--app-border-subtle); border-radius: var(--app-radius-md); background: var(--app-input-bg,var(--app-bg)); color: transparent; caret-color: transparent; }
+.osk-editor .osk-display::selection { background: transparent; color: transparent; }
+.osk-display-mirror { position: absolute; inset: 1px auto 1px 1px; overflow: hidden; pointer-events: none; color: var(--app-text); border-radius: var(--app-radius-md); }
+.osk-mirror-content { position: relative; min-height: 100%; padding: 10px 12px; box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; }
+.osk-editor[data-multiline="false"] .osk-mirror-content { white-space: pre; width: max-content; min-width: 100%; }
+.osk-text-selection { background: var(--app-accent); color: var(--app-bg); }
+.osk-caret { display: inline-block; width: 0; height: 1.2em; border-inline-start: 2px solid var(--app-accent); margin-inline-end: -2px; vertical-align: text-bottom; }
+.osk-keys { display: flex; flex-direction: column; gap: 7px; }
+.osk-row { display: flex; justify-content: center; gap: 7px; flex-wrap: wrap; }
+.osk-key { flex: 1 1 0; min-width: 28px; max-width: 74px; min-height: 42px; padding: 7px; margin: 0; font: inherit; font-size: 1.0625rem; color: var(--app-text); background: var(--app-card-bg); border: 1px solid var(--app-border-subtle); border-radius: var(--app-radius-md); box-shadow: none; }
+.osk-key:focus-visible, .osk-key:focus { outline: 2px solid var(--app-accent); outline-offset: 1px; }
+.osk-key[aria-pressed="true"] { background: var(--app-accent); color: var(--app-bg); }
+.osk-key-wide { flex-grow: 3; max-width: none; }
+.osk-action-row { margin-top: 7px; justify-content: flex-end; }
+.osk-action-row .osk-key { max-width: 145px; }
+.osk-done { border-color: var(--app-accent); font-weight: 700; }
+.osk-hint { display: flex; flex-wrap: wrap; gap: 8px 16px; margin: 14px 0 0; color: var(--app-muted); font-size: .8125rem; line-height: 1.5; }
+.osk-hint .ctl { margin: 0; }
+@media (max-width: 540px) { .osk-modal { padding: 6px; } .osk-panel { padding: 12px; } .osk-row { gap: 4px; } .osk-key { min-width: 22px; min-height: 38px; padding: 4px; } }

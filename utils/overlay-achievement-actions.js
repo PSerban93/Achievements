@@ -128,20 +128,46 @@
       cancel();
       closeFilters();
       const name = row.dataset.achievementName;
+      const rowBounds = row.getBoundingClientRect();
+      const pointerX = Number.isFinite(event.clientX) ? event.clientX : rowBounds.right - 12;
+      const pointerY = Number.isFinite(event.clientY) ? event.clientY : rowBounds.top + 12;
       if (!selected.has(name)) { selected.clear(); selected.add(name); }
       anchor = name;
       paint();
       const ticket = generation, targetConfig = configName;
       let capabilities;
       try { capabilities = await api.setAchievementManualState({ configName: targetConfig, action: "lock-capabilities" }); }
-      catch { return; }
+      catch { capabilities = {}; }
       if (!allowed() || generation !== ticket || targetConfig !== configName) return;
-      const ids = [...selected];
+      const ids = [...selected].filter(id => snapshot[id]?.synthetic_platinum !== true);
       const manual = ids.filter(id => snapshot[id]?.manual === true);
       const locked = ids.filter(id => !snapshot[id]?.earned && snapshot[id]?.manual !== true);
       const earned = ids.filter(id => snapshot[id]?.earned);
       const clear = snapshot[name]?.manual === true || (!locked.length && manual.length);
       const targets = clear ? manual : locked;
+      for (const [pinned, key, fallback] of [
+        [true, "achievementPins.pin", "Pin Achievement to Top ({count})"],
+        [false, "achievementPins.unpin", "Unpin Achievement ({count})"],
+      ]) {
+        const names = rows().filter(item => selected.has(item.dataset.achievementName) &&
+          !snapshot[item.dataset.achievementName]?.earned && snapshot[item.dataset.achievementName]?.manual !== true &&
+          (item.dataset.pinned === "1") !== pinned).map(item => item.dataset.achievementName);
+        if (!names.length) continue;
+        const button = itemButton(tr(key, fallback, { count: names.length }), pinned ? "pin-achievements" : "unpin-achievements");
+        button.onclick = async () => {
+          if (!allowed() || busy || generation !== ticket || targetConfig !== configName) return;
+          busy = true;
+          closeMenu();
+          try {
+            const result = await api.setAchievementPins({ configName: targetConfig, achievementNames: names, pinned });
+            if (!result?.success) throw new Error(result?.error);
+          } catch (error) {
+            console.error("Overlay achievement pin action failed:", error);
+            if (generation === ticket) notify(tr("achievementPins.failed", "Failed to update pinned achievements."), true);
+          } finally { busy = false; }
+        };
+        menu.append(button);
+      }
       if (targets.length) {
         const key = clear ? "achievementManualClearSelected" : "achievementManualUnlockSelected";
         const button = itemButton(tr(key, clear ? "Clear Manual Unlock ({count})" : "Mark Selected as Manually Unlocked ({count})", { count: targets.length }), clear ? "clear-manual" : "mark-unlocked");
@@ -158,12 +184,38 @@
         button.onclick = () => run("restore-locked", { configName: targetConfig, names: [] }, ticket);
         menu.append(button);
       }
+      const position = () => {
+        const pad = 8, bounds = menu.getBoundingClientRect();
+        menu.style.left = `${Math.max(pad, Math.min(pointerX, window.innerWidth - bounds.width - pad))}px`;
+        menu.style.top = `${Math.max(pad, Math.min(pointerY, window.innerHeight - bounds.height - pad))}px`;
+      };
+      if (snapshot[name]?.earned === true || snapshot[name]?.earned === 1) {
+        const loading = !menu.childElementCount ? itemButton(tr("achievementMedia.checking", "Checking saved captures…"), "media-loading") : null;
+        if (loading) { loading.disabled = true; menu.append(loading); }
+        Promise.resolve().then(() => api.listAchievementMedia({ configName: targetConfig, achievementId: name })).catch(() => ({})).then(media => {
+          if (!allowed() || generation !== ticket || targetConfig !== configName || menu.hidden) return;
+          loading?.remove();
+          for (const [kind, key, fallback] of [["screenshot", "achievementMedia.screenshot", "Show Screenshot"], ["record", "achievementMedia.record", "Show Record"]]) {
+            if (!(media[kind] > 0)) continue;
+            const button = itemButton(tr(key, fallback), `show-${kind}`);
+            button.setAttribute("role", "menuitem");
+            button.onclick = async () => {
+              if (!allowed() || generation !== ticket || targetConfig !== configName) return;
+              closeMenu();
+              try {
+                const result = await api.openAchievementMedia({ configName: targetConfig, achievementId: name, kind });
+                if (!result?.success) notify(tr("achievementMedia.unavailable", "This saved file is unavailable or cannot be played."), true);
+              } catch { notify(tr("achievementMedia.unavailable", "This saved file is unavailable or cannot be played."), true); }
+            };
+            menu.append(button);
+          }
+          if (!menu.childElementCount) closeMenu(); else position();
+        });
+      }
       if (!menu.childElementCount) return;
       menu.querySelectorAll("button").forEach(button => button.setAttribute("role", "menuitem"));
       menu.hidden = false;
-      const pad = 8, bounds = menu.getBoundingClientRect();
-      menu.style.left = `${Math.max(pad, Math.min(event.clientX, window.innerWidth - bounds.width - pad))}px`;
-      menu.style.top = `${Math.max(pad, Math.min(event.clientY, window.innerHeight - bounds.height - pad))}px`;
+      position();
     }
     list.addEventListener("contextmenu", event => {
       const row = event.target.closest(".achievement-item[data-achievement-name]");

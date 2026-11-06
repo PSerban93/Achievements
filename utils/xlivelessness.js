@@ -1602,6 +1602,7 @@ async function ensureXLiveLessNessConfig(options = {}) {
   let achievementCount = previous.xlln_schema_achievement_count || game.spa.achievements.length;
   let metadataWarnings = game.spa.warnings || [];
   if (needsSchemaRefresh) {
+    options.onSchemaRefresh?.();
     // Only first import, changed base metadata or explicit
     // Rescan enumerate DLC metadata. Live unlocks never regenerate a schema.
     const packFiles = await listDlcSpaFiles(storageRoots, game.titleId);

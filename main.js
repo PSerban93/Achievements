@@ -15,6 +15,7 @@ const {
   shell,
   Notification,
   nativeImage,
+  utilityProcess,
 } = require("electron");
 process.env.ACHIEVEMENTS_ELECTRON_EXECUTABLE = process.execPath;
 const x360Recomp = require("./utils/x360-recomp-state");
@@ -61,6 +62,8 @@ const CRC32 = require("crc-32");
 const AdmZip = require("adm-zip");
 const SanPresetCapabilities = require("./utils/san-preset-capabilities");
 const NativePresetDimensions = require("./utils/notification-preset-dimensions");
+const Dashboard3DSettings = require("./utils/dashboard-3d-settings");
+const DashboardExperienceSettings = require("./utils/dashboard-experience-settings");
 const NotificationPlacement = require("./utils/notification-placement");
 const { parseProgressPreset, getProgressValues, installProgressNotificationRenderer } = require("./utils/notification-progress");
 const progressPresetWindows = new WeakSet();
@@ -130,6 +133,7 @@ const {
   isVerifiedSummaryComplete,
   shouldResetPlatinumFromSummary,
 } = require("./utils/platinum-summary");
+const PlatinumEnrichment = require("./utils/platinum-enrichment");
 const { createUplayNameResolver } = require("./utils/uplay-achievement-identity");
 const {
   getRareTestRarityTiers,
@@ -160,6 +164,9 @@ const {
   normalizeAchievementRecordPreferences,
   shouldEnableAchievementRecorder,
 } = require("./utils/achievement-record-settings");
+const { ExternalReplayController, backend: getRecordBackend } = require("./utils/external-replay-controller");
+const { PendingExternalReplay } = require("./utils/pending-external-replay");
+const { ReplayReadinessWarnings } = require("./utils/replay-readiness-warnings");
 const {
   validateAppIdDirectoryTarget,
 } = require("./utils/config-deletion-paths");
@@ -253,6 +260,7 @@ const {
 } = require("./utils/schema-parse-coordinator");
 const {
   startPlaytimeLogWatcher,
+  configurePlaytimePreferences,
   flushPlaytimeSessions,
   rebasePlaytimeSession,
   cacheHeaderImage,
@@ -356,6 +364,7 @@ const {
   normalizeProcessNameValue,
   processNameValuesEqual,
 } = require("./utils/process-name-utils");
+const { gameProcessName, resolveGameProcessName } = require("./utils/game-launch-process");
 const {
   PROCESS_CONFIG_MATCH,
   classifyProcessConfigMatch,
@@ -376,6 +385,7 @@ const coverUiLogger = createLogger("covers");
 const prefsLogger = createLogger("preferences");
 const persistenceLogger = createLogger("persistence");
 const execLogger = createLogger("execution");
+const executableFinderLogger = createLogger("executable-finder", { level: "info" });
 const schemaLogger = createLogger("achschema");
 const rarityLogger = createLogger("rarity");
 const updateLogger = createLogger("updates");
@@ -1941,46 +1951,63 @@ function migrateDefaultPresetsIfNeeded() {
     fs.mkdirSync(userPresetsFolder, { recursive: true });
   } catch (err) {
     appLogger.warn("presets:user-dir-create-failed", { error: err.message });
+    return false;
   }
 
+  let pendingBackup = null;
   try {
     if (fs.existsSync(userPresetsFolder)) {
       const entries = fs.readdirSync(userPresetsFolder);
       if (entries.length > 0) {
         const baseUserDir = path.dirname(userPresetsFolder);
-        const backupDir = path.join(
+        const backupDir = getUniqueSiblingPath(path.join(
           baseUserDir,
           `presets_backup_${targetVersion}`,
-        );
-        if (!fs.existsSync(backupDir)) {
-          copyFolderOnce(userPresetsFolder, backupDir);
-          appLogger.info("presets:backup-created", {
-            backupDir,
-            version: targetVersion,
-          });
-        }
+        ));
+        // An older interrupted copy may already occupy the usual backup path.
+        // Preserve it and publish this backup only once every file was copied.
+        pendingBackup = getUniqueSiblingPath(`${backupDir}.pending`);
+        copyFolderOnce(userPresetsFolder, pendingBackup);
+        fs.renameSync(pendingBackup, backupDir);
+        pendingBackup = null;
+        appLogger.info("presets:backup-created", {
+          backupDir,
+          version: targetVersion,
+        });
       }
     }
   } catch (err) {
     appLogger.warn("presets:backup-failed", { error: err.message });
+    if (pendingBackup) {
+      try { fs.rmSync(pendingBackup, { recursive: true, force: true }); }
+      catch (cleanupError) {
+        appLogger.warn("presets:backup-cleanup-failed", {
+          path: pendingBackup, error: cleanupError.message,
+        });
+      }
+    }
+    return false;
   }
 
   try {
     copyFolderOverwrite(defaultPresetsFolder, userPresetsFolder);
-    appLogger.info("presets:migrated", {
-      version: targetVersion,
-      source: defaultPresetsFolder,
-      target: userPresetsFolder,
-    });
   } catch (err) {
     appLogger.warn("presets:migration-failed", { error: err.message });
+    return false;
   }
 
   try {
     fs.writeFileSync(versionFile, targetVersion, "utf8");
   } catch (err) {
     appLogger.warn("presets:version-write-failed", { error: err.message });
+    return false;
   }
+  appLogger.info("presets:migrated", {
+    version: targetVersion,
+    source: defaultPresetsFolder,
+    target: userPresetsFolder,
+  });
+  return true;
 }
 
 function copyProgressTemplateToUserPresetsOnce() {
@@ -2410,18 +2437,26 @@ function resolveShadPs4AchievementCacheUserId(
     : "";
 }
 
+const OverlayOpacity = require("./utils/overlay-opacity");
 const DEFAULT_PREFERENCES = {
   ...NotificationPlacement.defaults(),
   startInTray: false,
+  minimizeToTrayOnPlay: false,
   screenshotFolder: getDefaultScreenshotFolder(),
   recordsFolder: getDefaultRecordFolder(),
   recordFps: 30,
   recordDurationSeconds: 20,
+  recordBackend: "native",
+  recordReplayBeforeSeconds: null,
+  recordReplayAfterSeconds: null,
+  recordReplayMonitorSignature: "",
   enableHdrRecords: false,
   appTheme: "dracula",
   dashboardCardLayout: "portrait",
   overlayShortcut: "",
   overlayInteractShortcut: "\\",
+  overlayOpacity: 100,
+  overlayBackgroundTransparency: 0,
   sound: "mute",
   soundVolume: 100,
   preset: "default",
@@ -2446,6 +2481,8 @@ const DEFAULT_PREFERENCES = {
   startMaximized: false,
   disableHardwareAcceleration: true,
   settingsCompactMode: true,
+  onScreenKeyboardEnabled: false,
+  showCreateManualConfig: false,
   disableUpdate: false,
   disablePlaytime: false,
   showNotificationRarityPercentage: true,
@@ -2514,6 +2551,9 @@ const DEFAULT_PREFERENCES = {
   ],
   ignoreLeadingArticlesSort: true,
   hideZeroCompletionGames: false,
+  dashboard3dEffects: false,
+  ...Dashboard3DSettings.defaults,
+  ...DashboardExperienceSettings.defaults,
   schemaLanguages: [...SCHEMA_LANGUAGE_VALUES],
   steamApiKey: "",
   steamOfficialSteamId: "",
@@ -2588,6 +2628,8 @@ function mergeWithDefaultPreferences(prefs = {}) {
   );
   merged.dashboardCardLayout =
     merged.dashboardCardLayout === "landscape" ? "landscape" : "portrait";
+  merged.overlayOpacity = OverlayOpacity.normalize(merged.overlayOpacity);
+  merged.overlayBackgroundTransparency = OverlayOpacity.normalizeTransparency(merged.overlayBackgroundTransparency);
   Object.assign(merged, normalizeTrophyModeThresholds(merged));
   for (const key of Object.keys(NotificationPlacement.defaults())) {
     merged[key] = NotificationPlacement.normalizeOffset(merged[key]);
@@ -2650,6 +2692,24 @@ const blacklistedConfigKeysSet = new Set();
 let watchedFoldersApi = null;
 let cachedPreferences = {};
 let mainWindow;
+let achievementEnablerController = null;
+ipcMain.handle("achievement-enabler:open", (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+    throw new Error("Invalid Achievement Enabler sender.");
+  }
+  if (!achievementEnablerController) {
+    const { createEnablerController } = require("./utils/achievement-enabler/controller");
+    achievementEnablerController = createEnablerController({
+      app, BrowserWindow, ipcMain, dialog, shell, utilityProcess,
+      getParent: () => mainWindow,
+      getPreferences: () => readPrefsSafe(),
+      getThemes: () => getThemeRegistryPayload(),
+      logger: createLogger("achievement-enabler"),
+    });
+  }
+  achievementEnablerController.open();
+  return true;
+});
 let selectedConfigPath = null;
 let selectedConfig = null;
 let selectedPlatform = null;
@@ -3874,7 +3934,7 @@ function mapAchgenUiMessage(message) {
     return tUi(
       "main.achgen.steam.api.missing",
       {},
-      "Steam API key not found. Running in SteamDB/SteamHunters mode. (English only)",
+      "Steam API key not found. Using public Steam sources.",
     );
   }
   if (/Achievements schema done/i.test(msg)) {
@@ -4770,8 +4830,10 @@ ipcMain.handle("app:update-install", async () => {
   // electron-updater starts its installer before app.quit(). Finish clips before
   // handing control to it, using the same bounded drain as an ordinary quit.
   pendingAchievementRecordQueue.clear("app-update-install");
+  pendingExternalReplay.clear("app-update-install");
+  pendingExternalReplayNotifications.clear();
   await require("./utils/achievement-recorder-quit").drainAchievementRecorderForQuit(
-    achievementRecorderController,
+    getCombinedRecordingDrain(),
     { reportError: (error) => recordLogger.warn("achievement-recorder:quit-drain-failed", {
       error: error?.message || String(error),
     }) },
@@ -5357,9 +5419,13 @@ function maybeShowOverlayAfterRendererReady(reason = "unknown") {
   return true;
 }
 
+let overlayOpacityPreview = null;
+let overlayBackgroundTransparencyPreview = null;
 function setOverlayWindowOpacitySafely(value, reason = "unknown") {
   if (!overlayWindow || overlayWindow.isDestroyed()) return false;
-  const nextOpacity = Math.max(0, Math.min(1, Number(value)));
+  const visibilityOpacity = Math.max(0, Math.min(1, Number(value)));
+  if (!Number.isFinite(visibilityOpacity)) return false;
+  const nextOpacity = visibilityOpacity * OverlayOpacity.ratio(overlayOpacityPreview ?? cachedPreferences?.overlayOpacity);
   try {
     overlayWindow.setOpacity(nextOpacity);
     overlayLogger.debug("overlay:opacity:set", {
@@ -5377,6 +5443,49 @@ function setOverlayWindowOpacitySafely(value, reason = "unknown") {
     return false;
   }
 }
+
+function refreshOverlayOpacity(reason) {
+  if (!overlayWindow || overlayWindow.isDestroyed() || !overlayPresented || !overlayWindow.isVisible()) return;
+  // Zero belongs to the existing hidden/show-ack handshake; never reveal it here.
+  try {
+    if (overlayWindow.getOpacity() <= 0) return;
+    setOverlayWindowOpacitySafely(1, reason);
+  } catch (error) { overlayLogger.debug("overlay:opacity:refresh-failed", { reason, error: error.message }); }
+}
+const overlayOpacityPreviewOwners = new WeakSet();
+function refreshOverlayBackgroundTransparency() {
+  if (!overlayWindow || overlayWindow.isDestroyed()) return;
+  overlayWindow.webContents.send("overlay-preferences-updated", {
+    overlayBackgroundTransparency: OverlayOpacity.normalizeTransparency(overlayBackgroundTransparencyPreview ?? cachedPreferences?.overlayBackgroundTransparency),
+  });
+}
+function authorizeOverlayAppearancePreview(event) {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) return false;
+  if (!overlayOpacityPreviewOwners.has(event.sender)) {
+    overlayOpacityPreviewOwners.add(event.sender);
+    const clear = () => {
+      overlayOpacityPreview = overlayBackgroundTransparencyPreview = null;
+      refreshOverlayOpacity("preferences:overlay-opacity-reset");
+      refreshOverlayBackgroundTransparency();
+    };
+    event.sender.on("did-start-navigation", (details, _url, _inPlace, isMainFrame) => {
+      if (details.isMainFrame ?? isMainFrame) clear();
+    });
+    event.sender.on("render-process-gone", clear);
+    event.sender.once("destroyed", clear);
+  }
+  return true;
+}
+ipcMain.on("overlay:preview-opacity", (event, value) => {
+  if (!authorizeOverlayAppearancePreview(event)) return;
+  overlayOpacityPreview = value == null ? null : OverlayOpacity.normalize(value);
+  refreshOverlayOpacity("preferences:overlay-opacity-preview");
+});
+ipcMain.on("overlay:preview-background-transparency", (event, value) => {
+  if (!authorizeOverlayAppearancePreview(event)) return;
+  overlayBackgroundTransparencyPreview = value == null ? null : OverlayOpacity.normalizeTransparency(value);
+  refreshOverlayBackgroundTransparency();
+});
 
 function armOverlayVisibilityAckTimeout(visible, source) {
   clearOverlayVisibilityAckTimeout();
@@ -6654,6 +6763,7 @@ configsWatcher
       notifyConfigsChanged();
       queueAutoSelectIndexUpsertFromConfigPath(p);
       const configName = path.basename(p, ".json");
+      queueConfigPlatinumLookup(configName);
       invalidateDashboardSummaryEntry(configName, "config-added").catch(
         () => {},
       );
@@ -6673,6 +6783,10 @@ configsWatcher
   })
   .on("change", (p) => {
     if (p.endsWith(".json")) {
+      try {
+        const config = JSON.parse(fs.readFileSync(p, "utf8"));
+        if (PlatinumEnrichment.isSearchSupported(config) && config.platinum_achievement && !PlatinumEnrichment.readMetadata(config)) void queueConfigPlatinumLookup(path.basename(p, ".json"));
+      } catch {}
       markGameBarWidgetSnapshotDirty("config-changed");
       notifyConfigsChanged();
       queueAutoSelectIndexUpsertFromConfigPath(p);
@@ -6753,6 +6867,7 @@ cachedPreferences = ensurePreferencesFile();
 if (!cachedPreferences || typeof cachedPreferences !== "object") {
   cachedPreferences = {};
 }
+configurePlaytimePreferences(() => cachedPreferences);
 try {
   setBlacklistedAppIds(cachedPreferences?.[BLACKLIST_PREF_KEY]);
   setBlacklistedConfigKeys(cachedPreferences?.[BLACKLIST_CONFIG_PREF_KEY]);
@@ -6933,6 +7048,14 @@ function applyPreferenceSideEffects(
       prefsSnapshot,
     );
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "overlayOpacity")) {
+    overlayOpacityPreview = null;
+    refreshOverlayOpacity("preferences:overlay-opacity-saved");
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "overlayBackgroundTransparency")) {
+    overlayBackgroundTransparencyPreview = null;
+    refreshOverlayBackgroundTransparency();
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "showHiddenDescription")) {
     markGameBarWidgetSnapshotDirty("hidden-description-preference-changed");
     if (overlayWindow && !overlayWindow.isDestroyed()) {
@@ -6980,6 +7103,9 @@ function applyPreferenceSideEffects(
     Object.prototype.hasOwnProperty.call(patch, "disableAchievementRecords") ||
     Object.prototype.hasOwnProperty.call(patch, "recordFps") ||
     Object.prototype.hasOwnProperty.call(patch, "recordDurationSeconds") ||
+    Object.prototype.hasOwnProperty.call(patch, "recordBackend") ||
+    Object.prototype.hasOwnProperty.call(patch, "recordReplayBeforeSeconds") ||
+    Object.prototype.hasOwnProperty.call(patch, "recordReplayAfterSeconds") ||
     Object.prototype.hasOwnProperty.call(patch, "enableHdrRecords") ||
     Object.prototype.hasOwnProperty.call(patch, "notificationMonitorId")
   ) {
@@ -7066,6 +7192,8 @@ function applyPreferenceSideEffects(
 
 function updatePreferences(patch = {}) {
   const incoming = { ...(patch || {}) };
+  if (Object.prototype.hasOwnProperty.call(incoming, "overlayOpacity")) incoming.overlayOpacity = OverlayOpacity.normalize(incoming.overlayOpacity);
+  if (Object.prototype.hasOwnProperty.call(incoming, "overlayBackgroundTransparency")) incoming.overlayBackgroundTransparency = OverlayOpacity.normalizeTransparency(incoming.overlayBackgroundTransparency);
   let removeSteamKey = false;
   let restoreShortcutRegistrations = null;
 
@@ -7085,6 +7213,20 @@ function updatePreferences(patch = {}) {
       incoming.recordFps,
       DEFAULT_PREFERENCES.recordFps,
     );
+  }
+  if (Object.prototype.hasOwnProperty.call(incoming, "recordBackend")) {
+    incoming.recordBackend = getRecordBackend(incoming);
+  }
+  for (const key of ["recordReplayBeforeSeconds", "recordReplayAfterSeconds"]) {
+    if (Object.prototype.hasOwnProperty.call(incoming, key)) {
+      const value = Number(incoming[key]);
+      if (incoming[key] === null || !Number.isFinite(value)) delete incoming[key];
+      else incoming[key] = Math.max(1, Math.min(120, value));
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(incoming, "recordReplayMonitorSignature")) {
+    incoming.recordReplayMonitorSignature = typeof incoming.recordReplayMonitorSignature === "string"
+      ? incoming.recordReplayMonitorSignature.slice(0, 8192) : "";
   }
   if (Object.prototype.hasOwnProperty.call(incoming, "notificationMonitorId")) {
     incoming.notificationMonitorId = typeof incoming.notificationMonitorId === "string"
@@ -7392,6 +7534,7 @@ const DASHBOARD_UI_STATE_VALUES = {
   progressSort: new Set(["off", "asc", "desc"]),
   updatedSort: new Set(["off", "asc", "desc"]),
   lastPlayedSort: new Set(["off", "asc", "desc"]),
+  addedSort: new Set(["off", "asc", "desc"]),
 };
 
 ipcMain.on("dashboard:ui-state:load", (event) => {
@@ -7417,7 +7560,7 @@ ipcMain.on("dashboard:ui-state:save", (event, patch) => {
     return;
   }
   const entries = Object.entries(patch);
-  if (entries.length < 1 || entries.length > 9) {
+  if (entries.length < 1 || entries.length > 10) {
     prefsLogger.warn("dashboard:ui-state:save-rejected", { reason: "size" });
     event.returnValue = false;
     return;
@@ -7428,11 +7571,12 @@ ipcMain.on("dashboard:ui-state:save", (event, patch) => {
       : null;
     const valid =
       allowedValues?.has(value) ||
+      (key === "viewSections" && require("./utils/dashboard-view-settings").valid(value)) ||
       (key === "sortPriority" &&
         typeof value === "string" &&
-        value.split(",").length === 4 &&
-        new Set(value.split(",")).size === 4 &&
-        value.split(",").every((mode) => ["name", "progress", "updated", "lastPlayed"].includes(mode))) ||
+        (value.split(",").length === 5 || (value.split(",").length === 4 && !value.split(",").includes("added"))) &&
+        new Set(value.split(",")).size === value.split(",").length &&
+        value.split(",").every((mode) => ["name", "progress", "updated", "lastPlayed", "added"].includes(mode))) ||
       (key === "collectionFilter" &&
         typeof value === "string" &&
         value.length > 0 &&
@@ -7511,8 +7655,8 @@ async function getScreenshotRootFolder() {
   return resolved.root;
 }
 
-async function getRecordRootFolder() {
-  const prefs = readPrefsSafe();
+async function getRecordRootFolder(preferencesSnapshot) {
+  const prefs = preferencesSnapshot || readPrefsSafe();
   const fallback = getDefaultRecordFolder();
   const preferred = prefs.recordsFolder || fallback;
   const resolved = await resolveWritableMediaRootFolder({
@@ -7529,8 +7673,8 @@ async function getRecordRootFolder() {
   return resolved.root;
 }
 
-async function prepareAchievementRecordOutputPath(gameName, achievementName) {
-  const root = await getRecordRootFolder();
+async function prepareAchievementRecordOutputPath(gameName, achievementName, preferencesSnapshot) {
+  const root = await getRecordRootFolder(preferencesSnapshot);
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const output = buildUniqueAchievementMediaPath({
       root,
@@ -7554,6 +7698,108 @@ async function prepareAchievementRecordOutputPath(gameName, achievementName) {
 }
 
 let achievementRecorderController = null;
+let externalReplayController = null;
+let externalReplayBackend = "native";
+let externalReplayMonitorId = "";
+let lastExternalReplayWarningAt = 0;
+let replayReadinessWaitingForWindow = false;
+const replayReadinessWarnings = new ReplayReadinessWarnings({
+  getPreferences: () => cachedPreferences,
+  inspect: prefs => getExternalReplayController().inspect(prefs),
+  isQuitting: () => isQuitting,
+  translate: (key, fallback) => tUi(key, {}, fallback),
+  log: (result, reason) => recordLogger[result.ok ? "info" : "warn"]("external-replay:settings-check", { ...result, reason }),
+  notify: message => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return false;
+    if (mainWindow.webContents.isLoadingMainFrame()) {
+      if (!replayReadinessWaitingForWindow) {
+        replayReadinessWaitingForWindow = true;
+        mainWindow.webContents.once("did-finish-load", () => {
+          replayReadinessWaitingForWindow = false;
+          replayReadinessWarnings.flush();
+        });
+      }
+      return false;
+    }
+    notifyInfo(message);
+    return true;
+  },
+});
+const pendingExternalReplayNotifications = new Map();
+const pendingExternalReplay = new PendingExternalReplay({
+  getPreferences: () => cachedPreferences,
+  isActive: data => !isQuitting && isAchievementRecordNotificationForActiveConfig(data),
+  submit: (data, options) => getExternalReplayController().enqueue(data, options),
+  log: (event, details) => recordLogger.info(`external-replay:${event}`, details),
+});
+function getExternalReplayController() {
+  if (externalReplayController) return externalReplayController;
+  externalReplayController = new ExternalReplayController({
+    getPreferences: () => cachedPreferences,
+    getMonitor: () => ({ target: notificationDisplays.resolve(cachedPreferences.notificationMonitorId || ""), displays: notificationDisplays.displays }),
+    prepareOutput: (data, prefs) => prepareAchievementRecordOutputPath(data.__recordGameName || resolveScreenshotGameName(data, getNotificationConfigName(data)), data.displayName || "Achievement", prefs),
+    ensureNativeStopped: () => achievementRecorderController?.setEnabled(false, "external-replay"),
+    journalRoot: path.join(app.getPath("userData"), "replay-jobs"),
+  });
+  for (const event of ["queued", "stage", "saved", "source-removed", "source-retained", "cancelled", "recovery", "failed"]) {
+    externalReplayController.on(event, (details) => {
+      const expectedRetention = event === "source-retained" && ["history-for-following-notifications", "ownership-unconfirmed"].includes(details.reason);
+      recordLogger[event === "failed" || (event === "source-retained" && !expectedRetention) ? "warn" : "info"](`external-replay:${event}`, details);
+      if (event === "saved" && details.audioWarnings?.length) {
+        recordLogger.warn("external-replay:audio-warning", { id: details.id, outputPath: details.outputPath, warnings: details.audioWarnings });
+      }
+      if (event === "saved" && details.partial) {
+        recordLogger.warn("external-replay:partial", { id: details.id, outputPath: details.outputPath,
+          requestedBeforeSeconds: details.requestedBeforeSeconds, requestedAfterSeconds: details.requestedAfterSeconds,
+          selectedBeforeSeconds: details.selectedBeforeSeconds, selectedAfterSeconds: details.selectedAfterSeconds,
+          duration: details.duration, notificationIncluded: details.notificationIncluded, reasons: details.partialReasons });
+      }
+      if (event === "failed") {
+        if (!replayReadinessWarnings.observe(details, details.provider) && Date.now() - lastExternalReplayWarningAt > 30_000) {
+          lastExternalReplayWarningAt = Date.now();
+          notifyInfo(tUi("recordReplay.failed", {}, "Replay could not be saved. Check Recording settings and records.log for details."));
+        }
+      }
+    });
+  }
+  void externalReplayController.recover();
+  return externalReplayController;
+}
+function getCombinedRecordingDrain() {
+  if (!externalReplayController) return achievementRecorderController;
+  return {
+    status: { running: true },
+    getQuitTimeoutMs: () => externalReplayController.getQuitTimeoutMs(),
+    stop: (reason) => Promise.all([externalReplayController.stop(), achievementRecorderController?.stop(reason)]),
+    forceStop: (reason) => { externalReplayController.forceStop(reason); achievementRecorderController?.forceStop(reason); },
+  };
+}
+function shouldRecordExternalReplay(data) {
+  return !isQuitting && process.platform === "win32" && getRecordBackend(cachedPreferences) !== "native" &&
+    cachedPreferences.disableAchievementRecords === false && !data?.isTest && data?.notificationType !== "progress";
+}
+function recordExternalReplayVisible(data, source, details = {}) {
+  if (!shouldRecordExternalReplay(data)) return;
+  recordLogger.info("external-replay:notification-visible", { source, config: data.config_path, displayName: data.displayName,
+    stage: ["painted-title", "painted-content", "painted-image"].includes(details.reason) ? details.reason : null,
+    elapsedMs: Number.isFinite(details.elapsedMs) ? details.elapsedMs : null });
+  pendingExternalReplay.visible({ ...data, __recordGameName: resolveScreenshotGameName(data, getNotificationConfigName(data) || selectedConfig) });
+}
+function flushPendingExternalReplayRecords() {
+  if (isQuitting || process.platform !== "win32" || selectedConfigMode !== "active" || !isNonEmptyString(selectedConfig)) return;
+  pendingExternalReplay.flush({ configName: selectedConfig, platform: selectedPlatform });
+}
+ipcMain.handle("record-replay:status", async (event) => {
+  if (isQuitting || !mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== event.sender.mainFrame) return { ok: false, error: "Unavailable" };
+  return replayReadinessWarnings.check(cachedPreferences, "manual");
+});
+ipcMain.on("notification-record-visible", (event, details = {}) => {
+  if (event.senderFrame !== event.sender.mainFrame || details.ready !== true) return;
+  const data = pendingExternalReplayNotifications.get(event.sender.id);
+  if (!data) return;
+  pendingExternalReplayNotifications.delete(event.sender.id);
+  recordExternalReplayVisible(data, "animated-content-visible", details);
+});
 let achievementRecorderSyncRevision = 0;
 let achievementRecorderPipelineStallSamples = 0;
 const ACHIEVEMENT_RECORDER_FINALIZER_TIMEOUT_MS = 120_000;
@@ -7827,6 +8073,9 @@ function getAchievementRecorderController() {
   achievementRecorderController.on("hdr-tone-map-fallback", (details) => {
     recordLogger.warn("achievement-recorder:hdr-tone-map-fallback", details);
   });
+  achievementRecorderController.on("encoder-overloaded", (details) => {
+    recordLogger.warn("achievement-recorder:encoder-overloaded", details);
+  });
   achievementRecorderController.on("capture-stats", (details) => {
     recordLogger.info("achievement-recorder:capture-stats", details);
     if (details?.pipelineStalled === true) {
@@ -7917,6 +8166,16 @@ function syncAchievementRecorderState(
   reason = "unknown",
   prefs = cachedPreferences,
 ) {
+  const backend = getRecordBackend(prefs);
+  if (backend !== externalReplayBackend || prefs?.disableAchievementRecords !== false ||
+      reason === "display-change" || externalReplayMonitorId !== String(prefs?.notificationMonitorId || "")) {
+    externalReplayController?.cancel("recording-backend-or-enabled-state-changed");
+    pendingExternalReplayNotifications.clear();
+    pendingExternalReplay.clear("recording-backend-monitor-or-enabled-state-changed");
+  }
+  externalReplayBackend = backend;
+  externalReplayMonitorId = String(prefs?.notificationMonitorId || "");
+  void replayReadinessWarnings.sync(prefs).catch(error => recordLogger.warn("external-replay:readiness-check-failed", { error: error.message }));
   const revision = ++achievementRecorderSyncRevision;
   const intendedConfig = selectedConfig;
   const preferenceEnabled =
@@ -8059,6 +8318,7 @@ async function captureAchievementUnlockRecord(
     isQuitting ||
     process.platform !== "win32" ||
     cachedPreferences?.disableAchievementRecords !== false ||
+    getRecordBackend(cachedPreferences) !== "native" ||
     notificationData?.isTest === true
   ) {
     return null;
@@ -8132,6 +8392,7 @@ function sanitizeFilename(name) {
 }
 
 // --- Achievements schema generator (manual configs) ---
+const { mergeSchemaLaunchMetadata, enrichRegeneratedConfigLaunch } = require("./utils/schema-regeneration-launch");
 async function runAchievementsGenerator(
   appid,
   schemaBaseDir,
@@ -8190,13 +8451,15 @@ async function runAchievementsGenerator(
 
     // forward logs to UI (same topic as auto-configs)
     const receiveDownloadWarning = createSchemaDownloadWarningReceiver();
+    const launchMetadataIds = new Set([String(appid), ...(opts.launchMetadataAppIds || []).map(String)]);
+    let launchMetadata = null;
     let settled = false;
     const finishGeneration = (code) => {
       if (settled) return;
       settled = true;
       deadline.clear();
       if (deadline.error) { reject(deadline.error); return; }
-      code === 0 ? resolve() : reject(new Error(`Code: ${code}`));
+      code === 0 ? resolve({ launchMetadata }) : reject(new Error(`Code: ${code}`));
     };
     const flushLines = (chunk, level) => {
       String(chunk)
@@ -8210,6 +8473,15 @@ async function runAchievementsGenerator(
     cp.on("message", (msg) => {
       if (!msg) return;
       if (receiveDownloadWarning(msg)) return;
+      if (msg.type === "achgen:launch-metadata") {
+        const matchesRequest = msg.folderId
+          ? String(msg.folderId) === String(appid)
+          : !msg.appid || launchMetadataIds.has(String(msg.appid));
+        if (matchesRequest) {
+          launchMetadata = mergeSchemaLaunchMetadata(launchMetadata, msg);
+        }
+        return;
+      }
       if (msg.type === "achgen:complete") {
         finishGeneration(msg.ok ? 0 : 1);
         return;
@@ -8310,6 +8582,7 @@ function validateGeneratedSchemaDir(schemaDir) {
 }
 
 function replaceSchemaDirWithBackup(sourceDir, destDir) {
+  require("./utils/game-presentation-metadata").inherit(sourceDir, destDir);
   if (!fs.existsSync(sourceDir)) {
     throw new Error("Generated schema directory is missing");
   }
@@ -8451,6 +8724,7 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
     try {
       const result = await ensureEpicOfficialSchema(appid, destDir, {
         ...options,
+        userDataDir: app.getPath("userData"),
         productId:
           options?.epic_product_id ||
           options?.epicProductId ||
@@ -8501,6 +8775,8 @@ async function ensureSchemaForApp(appid, platform = "steam", options = {}) {
         clientId: options?.gog_client_id || options?.gogClientId,
         userId: options?.gog_user_id || options?.gogUserId,
       });
+      await require("./utils/game-presentation-service").refresh({ userDataDir: app.getPath("userData"),
+        config: { appid, platform: "gog-official", config_path: destDir }, force: true, reason: "gog-official-schema" });
       if (result?.dir && fs.existsSync(achJson)) {
         emitGenerationProgress({
           phase: "finalizing",
@@ -11932,6 +12208,7 @@ ipcMain.on("boot:overlay-hidden", () => {
 });
 
 // List existing configs
+const configAddedTimes = require("./utils/config-added-times").createStore(path.join(app.getPath("userData"), "config-added-times.json"));
 function listConfigs() {
   const files = fs.readdirSync(configsDir);
   return files
@@ -12090,9 +12367,7 @@ ipcMain.handle("saveConfig", async (event, config) => {
         splitString: true,
       })
         ? normalizeProcessNameValue(config.process_name, { splitString: true })
-        : exePath
-          ? path.basename(exePath)
-          : "",
+        : gameProcessName(exePath),
     };
 
     const sanitizedAppId = sanitizeAppIdForPlatform(
@@ -12390,6 +12665,7 @@ ipcMain.handle("saveConfig", async (event, config) => {
               percent: 96,
             });
             // 2) Schema Done (set new config path)
+            void queueConfigPlatinumLookup(payload.name);
             emitSchemaReady(
               {
                 name: payload.name,
@@ -12489,17 +12765,8 @@ function resolveLocalGameHeaderPath(appid, platformArg, options = {}) {
       );
       if (heroPath) return heroPath;
     }
-    for (const filename of [
-      "header.jpg",
-      "header.jpeg",
-      "header.png",
-      "header.webp",
-    ]) {
-      const candidate = path.join(imageDir, filename);
-      try {
-        if (fs.statSync(candidate).isFile()) return candidate;
-      } catch {}
-    }
+    const headerPath = require("./utils/game-artwork-storage").existingAt(imageDir, "header");
+    if (headerPath) return headerPath;
     if (!preferHero) {
       heroPath = resolveExistingGameCoverHeroPath(
         app.getPath("userData"),
@@ -12540,6 +12807,8 @@ ipcMain.handle("loadConfigs", () => {
     };
     const fullPath = path.join(configsDir, file);
     try {
+      const configStat = fs.statSync(fullPath);
+      meta.addedAt = configStat.birthtimeMs > 0 ? configStat.birthtimeMs : configStat.mtimeMs;
       const raw = JSON.parse(fs.readFileSync(fullPath, "utf8"));
       const mapping = raw?.appid
         ? uplayToSteam.get(String(raw.appid).trim())
@@ -12747,7 +13016,11 @@ ipcMain.handle("loadConfigs", () => {
     return meta;
   });
   ipcLogger.info("loadConfigs:success", { count: configs.length });
-  return configs;
+  try { return configAddedTimes.observe(configs); }
+  catch (error) {
+    persistenceLogger.warn("config-added-times:read-failed", { error: error.message });
+    return configs;
+  }
 });
 
 // Handler for folder load
@@ -13265,7 +13538,81 @@ function resolveSteamAppIdForRarity(config = {}) {
   };
 }
 
-ipcMain.handle("load-achievements", async (event, configName, options = {}) => {
+const achievementPins = require("./utils/achievement-pins").createStore({ resolveSchema: resolveAchievementsSchemaPath });
+function publishAchievementPins(configName, result) {
+  if (result?.changed) broadcastToAll("achievement-pins:changed", { configName, ids: result.ids, revision: result.revision, scope: result.scope });
+}
+function reconcileAchievementPins(configName, config, snapshot) {
+  try {
+    const result = achievementPins.reconcile(configName, config, snapshot);
+    publishAchievementPins(configName, result);
+    return result;
+  } catch (error) {
+    ipcLogger.warn("achievement-pins:reconcile-failed", { configName, error: error.message });
+    return null;
+  }
+}
+function withPlatinumProjection(handler, snapshot = false) {
+  return async (event, configName, ...args) => {
+    const result = await handler(event, configName, ...args);
+    if (!result?.achievements) return result;
+    try {
+      const file = resolveConfigJsonPath(configsDir, configName);
+      const config = JSON.parse(fs.readFileSync(file, "utf8"));
+      result.platinumSearchSupported = PlatinumEnrichment.isSearchSupported(config);
+      result.achievements = snapshot
+        ? PlatinumEnrichment.augmentSnapshot(config, result.achievements)
+        : PlatinumEnrichment.augmentSchema(config, result.achievements);
+      if (snapshot && !result.error) result.achievementPins = reconcileAchievementPins(configName, config, result.achievements);
+    } catch {}
+    return result;
+  };
+}
+
+function queueConfigPlatinumLookup(configName, { force = false } = {}) {
+  const file = resolveConfigJsonPath(configsDir, configName);
+  if (!file) return Promise.resolve({ success: false, code: "config-missing" });
+  try {
+    if (!PlatinumEnrichment.isSearchSupported(JSON.parse(fs.readFileSync(file, "utf8")))) {
+      return Promise.resolve({ success: false, skipped: true, code: "platform-unsupported" });
+    }
+  } catch { return Promise.resolve({ success: false, code: "config-read-failed" }); }
+  return PlatinumEnrichment.findForConfig(file, { force, logger: rarityLogger,
+    languages: [resolveAchievementLanguageForConfig(configName)] }).then(async result => {
+    rarityLogger.info("platinum:lookup-result", { configName, success: result.success,
+      kind: result.kind, code: result.code, cached: result.cached === true, sourceUrl: result.sourceUrl });
+    if (result.success && !result.cached) {
+      await invalidateDashboardSummaryEntry(configName, "platinum-updated");
+      broadcastToAll("configs:changed");
+      broadcastToAll("refresh-achievements-table", { configName, skipPlatinumCheck: true });
+      if (selectedConfig === configName && overlayWindow && !overlayWindow.isDestroyed()) {
+        overlayWindow.webContents.send("load-overlay-data", configName);
+      }
+    }
+    return result;
+  }).catch(error => {
+    rarityLogger.warn("platinum:lookup-failed", { configName, code: error.code, error: error.message });
+    return { success: false, code: "lookup-failed" };
+  });
+}
+
+function withPlatinumAfterRarity(handler) {
+  return async (event, payload = {}) => {
+    const result = await handler(event, payload);
+    if (result?.success) void queueConfigPlatinumLookup(result.configName || (typeof payload === "string" ? payload : payload.configName));
+    return result;
+  };
+}
+
+ipcMain.handle("platinum:find-selected-config", async (event, configName) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) {
+    return { success: false, code: "invalid-sender" };
+  }
+  if (typeof configName !== "string" || !configName.trim()) return { success: false, code: "config-required" };
+  return queueConfigPlatinumLookup(configName.trim(), { force: true });
+});
+
+ipcMain.handle("load-achievements", withPlatinumProjection(async (event, configName, options = {}) => {
   const includeRarity = options?.includeRarity !== false;
   ipcLogger.info("load-achievements:request", { configName, includeRarity });
   try {
@@ -13394,11 +13741,11 @@ ipcMain.handle("load-achievements", async (event, configName, options = {}) => {
     }
     return { achievements: null, config_path: "" };
   }
-});
+}));
 
 ipcMain.handle(
   "load-saved-achievements",
-  async (_event, configName, options = null) => {
+  withPlatinumProjection(async (_event, configName, options = null) => {
     const requestOptions = normalizeAchievementCacheOptions(options);
     ipcLogger.info("load-saved-achievements:request", {
       configName,
@@ -14493,7 +14840,7 @@ ipcMain.handle(
       });
       return { achievements: {}, save_path: "", error: error.message };
     }
-  },
+  }, true),
 );
 
 function collectConfigSaveDeletionDirectories({
@@ -14736,6 +15083,12 @@ ipcMain.handle("delete-config", async (_event, payload) => {
         fs.unlinkSync(configPath),
       );
       configFileDeleted = true;
+      try { configAddedTimes.remove(safeName); }
+      catch (error) { pushDeleteWarning("config-added-times:delete-failed", { configName: safeName, error: error.message }); }
+      if (configData) {
+        try { achievementPins.remove(safeName, configData); }
+        catch (error) { pushDeleteWarning("achievement-pins:delete-failed", { configName: safeName, error: error.message }); }
+      }
       if (platform === "ps4recomp") {
         for (const cachePath of listScopedAchievementCachePaths(safeName, platform)) {
           ps4RecompCacheWriter.cancel(cachePath);
@@ -15645,10 +15998,12 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
     });
 
     let schemaResult = null;
+    let generationLaunchMetadata = null;
     try {
       if (platform === "epic-official") {
         schemaResult = await ensureEpicOfficialSchema(appid, destDir, {
           ...config,
+          userDataDir: app.getPath("userData"),
           productId: config?.epic_product_id || config?.epicProductId,
           sandboxId:
             config?.epic_sandbox_id ||
@@ -15666,13 +16021,14 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
         const tempRoot = createSchemaRegenerateTempRoot(platform, appid);
         const tempDestDir = path.join(tempRoot, platform, appid);
         try {
-          await runAchievementsGenerator(
+          const generated = await runAchievementsGenerator(
             appid,
             tempRoot,
             app.getPath("userData"),
             {
               platform,
               langs: getSchemaLanguagesFromPreferences(),
+              launchMetadataAppIds: platform === "uplay" && config.steamAppId ? [config.steamAppId] : [],
               onProgress: (progress) => {
                 const childPercent = clampGenerationPercent(
                   progress?.percent,
@@ -15696,6 +16052,7 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
               },
             },
           );
+          generationLaunchMetadata = generated?.launchMetadata || null;
           const validation = validateGeneratedSchemaDir(tempDestDir);
           if (!validation.ok) {
             ipcLogger.warn("schema:regenerate-empty-output-kept-existing", {
@@ -15755,6 +16112,16 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
       }
       progressJob?.update({
         phase: "finalizing",
+        detail: "Checking game launch settings",
+        percent: 92,
+      });
+      const launchUpdate = await enrichRegeneratedConfigLaunch({
+        filePath: cfgFile, appid, platform,
+        metadata: generationLaunchMetadata, logger: executableFinderLogger,
+      });
+      if (launchUpdate.updated) notifyConfigsChanged();
+      progressJob?.update({
+        phase: "finalizing",
         detail: "Refreshing achievements",
         percent: 96,
       });
@@ -15763,10 +16130,14 @@ ipcMain.handle("schema:regenerate", async (event, payload) => {
         appid,
         config_path: destDir,
       });
+      void queueConfigPlatinumLookup(safeName);
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send("refresh-achievements-table", safeName);
       }
-      if (overlayWindow && !overlayWindow.isDestroyed()) {
+      if (
+        overlayWindow && !overlayWindow.isDestroyed() &&
+        sanitizeOptionalConfigName(selectedConfig) === safeName
+      ) {
         overlayWindow.webContents.send("load-overlay-data", safeName);
         overlayWindow.webContents.send("set-language", {
           language: selectedLanguage,
@@ -15923,6 +16294,116 @@ const ICON_PNG_PATH = app.isPackaged
 const TRAY_MENU_WIDTH = 180;
 const TRAY_MENU_HEIGHT = 170;
 const TRAY_MENU_HEIGHT_WITH_RESUME = 220;
+let trayRecentGames = [];
+let trayRecentGamesRefresh = null;
+let trayRecentGamesRefreshRequested = false;
+const trayGameIconCache = new Map();
+const trayGenericIconCache = new Map();
+
+function getRecentTrayGameEntries() {
+  return require("./utils/tray-recent-games").selectRecentGames(getCombinedLastPlayedSnapshot(), {
+    readConfig: readConfigForAchievementCache,
+    isBlacklisted: isAppIdBlacklisted,
+    isValidName: name => name === sanitizeOptionalConfigName(name),
+  });
+}
+
+async function getGenericTrayGameIcon(executable) {
+  if (process.platform !== "win32") return null;
+  const suffix = path.extname(executable).toLowerCase();
+  const extension = /^\.[a-z0-9]{1,16}$/.test(suffix) ? suffix : ".exe";
+  if (!trayGenericIconCache.has(extension)) {
+    if (trayGenericIconCache.size >= 16) trayGenericIconCache.delete(trayGenericIconCache.keys().next().value);
+    // Ask Windows for the file type's default icon. This path is never created.
+    const probe = path.join(app.getPath("temp"), `.Achievements-tray-icon-${crypto.randomUUID()}${extension}`);
+    trayGenericIconCache.set(extension, app.getFileIcon(probe, { size: "small" })
+      .then(icon => icon.isEmpty() ? null : icon.toPNG()).catch(() => null));
+  }
+  return trayGenericIconCache.get(extension);
+}
+
+async function getRecentTrayGameIcon(config) {
+  const executable = String(config.executable || "").trim();
+  if (executable) {
+    try {
+      const stat = await fs.promises.stat(executable);
+      const key = `${executable}:${stat.size}:${stat.mtimeMs}`;
+      if (!trayGameIconCache.has(key)) {
+        if (trayGameIconCache.size >= 64) trayGameIconCache.delete(trayGameIconCache.keys().next().value);
+        trayGameIconCache.set(key, app.getFileIcon(executable, { size: "small" }).then(async icon => {
+          if (icon.isEmpty()) return "";
+          const generic = await getGenericTrayGameIcon(executable);
+          return generic && icon.toPNG().equals(generic) ? "" : icon.toDataURL();
+        }).catch(() => ""));
+      }
+      const icon = await trayGameIconCache.get(key);
+      if (icon) return icon;
+    } catch {}
+  }
+  const customPortrait = typeof config.custom_cover_path === "string" ? config.custom_cover_path.trim() : "";
+  if (customPortrait && getLocalImageMetadata(customPortrait, true)) return pathToFileURL(customPortrait).href;
+  const platform = normalizePlatform(config.platform) || "steam";
+  const appid = String(config.appid || "");
+  if (/^[a-z0-9_-]+$/i.test(platform) && /^[a-z0-9_-]+$/i.test(appid)) {
+    const imageDir = path.join(app.getPath("userData"), "images", platform, appid);
+    const portrait = pickExistingCoverImagePath(imageDir, appid);
+    if (portrait) return pathToFileURL(portrait).href;
+    const cover = require("./utils/game-artwork-storage").existingAt(imageDir, "header");
+    if (cover) return pathToFileURL(cover).href;
+  }
+  return pathToFileURL(ICON_PNG_PATH).href;
+}
+
+function refreshRecentTrayGames() {
+  trayRecentGamesRefreshRequested = true;
+  if (trayRecentGamesRefresh) return trayRecentGamesRefresh;
+  trayRecentGamesRefresh = (async () => {
+    do {
+      trayRecentGamesRefreshRequested = false;
+      try {
+        const entries = getRecentTrayGameEntries();
+        const next = await Promise.all(entries.map(async entry => ({ configName: entry.configName, name: entry.name,
+          lastPlayedAt: entry.lastPlayedAt, canPlay: Boolean(String(entry.config.executable || "").trim()),
+          icon: await getRecentTrayGameIcon(entry.config) })));
+        trayRecentGames = next;
+        if (trayMenuWindow && !trayMenuWindow.isDestroyed()) {
+          trayMenuWindow.webContents.send("tray:recent-games-changed", next);
+          if (trayMenuWindow.isVisible()) positionTrayMenu();
+          else applyTrayMenuScale();
+        }
+      } catch (error) {
+        appLogger.warn("tray:recent-games-failed", { error: error?.message || String(error) });
+      }
+    } while (trayRecentGamesRefreshRequested);
+  })().finally(() => { trayRecentGamesRefresh = null; });
+  return trayRecentGamesRefresh;
+}
+
+function isTrayMenuSender(event) {
+  return trayMenuWindow && !trayMenuWindow.isDestroyed() && event.sender === trayMenuWindow.webContents && event.senderFrame === trayMenuWindow.webContents.mainFrame;
+}
+
+ipcMain.handle("tray:recent-games", async event => {
+  if (!isTrayMenuSender(event)) throw new Error("Invalid tray menu sender.");
+  await refreshRecentTrayGames();
+  return true;
+});
+
+ipcMain.handle("tray:recent-game", async (event, configName, action = "open") => {
+  if (!isTrayMenuSender(event)) throw new Error("Invalid tray menu sender.");
+  if (action !== "open" && action !== "play") return { success: false, reason: "invalid-action" };
+  const entry = typeof configName === "string" && getRecentTrayGameEntries().find(game => game.configName === configName);
+  if (!entry) { void refreshRecentTrayGames(); return { success: false, reason: "not-recent" }; }
+  if (action === "play" && !String(entry.config.executable || "").trim()) return { success: false, reason: "launch-unavailable" };
+  hideTrayMenu();
+  if (action === "play") {
+    const result = await launchConfiguredExecutable({ configName: entry.configName });
+    appLogger.info("tray:recent-game-launch", { configName: entry.configName, success: result.success });
+    if (result.success) return result;
+  }
+  requestAppNavigation({ configName: entry.configName }, { source: "tray-recent-game" });
+  return { success: true, openedConfig: true };
+});
 
 function shouldShowTrayResumeStartup() {
   return (
@@ -15932,9 +16413,10 @@ function shouldShowTrayResumeStartup() {
 }
 
 function getTrayMenuTargetHeight() {
-  return shouldShowTrayResumeStartup()
+  const base = shouldShowTrayResumeStartup()
     ? TRAY_MENU_HEIGHT_WITH_RESUME
     : TRAY_MENU_HEIGHT;
+  return base + (trayRecentGames.length ? trayRecentGames.length * 40 + 17 : 0);
 }
 
 function getTrayScaleFactor() {
@@ -15950,8 +16432,9 @@ function getTrayScaleFactor() {
 function applyTrayMenuScale() {
   if (!trayMenuWindow || trayMenuWindow.isDestroyed()) return;
   const scale = getTrayScaleFactor();
-  const width = Math.max(120, Math.round(TRAY_MENU_WIDTH));
-  const height = Math.max(120, Math.round(getTrayMenuTargetHeight()));
+  const display = tray ? screen.getDisplayNearestPoint(tray.getBounds()) : screen.getPrimaryDisplay();
+  const width = Math.min(display.workArea.width, trayRecentGames.length ? 280 : TRAY_MENU_WIDTH);
+  const height = Math.min(display.workArea.height, Math.max(120, Math.round(getTrayMenuTargetHeight())));
   trayMenuWindow.setBounds({ width, height }, false);
   if (!trayMenuWindow.webContents.isDestroyed()) {
     trayMenuWindow.webContents.setZoomFactor(1);
@@ -16474,6 +16957,7 @@ function createTrayMenuWindow() {
   trayMenuWindow.loadFile("tray-menu.html");
   trayMenuWindow.webContents.once("did-finish-load", () => {
     applyTrayMenuScale();
+    void refreshRecentTrayGames();
   });
   trayMenuWindow.on("blur", () => {
     if (trayMenuWindow && !trayMenuWindow.isDestroyed()) {
@@ -16531,6 +17015,7 @@ function toggleTrayMenu() {
     return;
   }
   positionTrayMenu();
+  void refreshRecentTrayGames();
   win.show();
   win.focus();
 }
@@ -17284,7 +17769,7 @@ function createNotificationWindow(message) {
     frame: false,
     show: false,
     alwaysOnTop: true,
-    focusable: true,
+    focusable: false,
     resizable: false,
     fullscreenable: false,
     skipTaskbar: true,
@@ -17313,6 +17798,14 @@ function createNotificationWindow(message) {
   notificationWindow.setFullScreenable(false);
   notificationWindow.setFocusable(false);
   notificationWindow.setIgnoreMouseEvents(true, { forward: true });
+  if (message.notificationType === "progress") {
+    notificationWindow.on("focus", () => {
+      notificationLogger.warn("progress-notification:unexpected-focus", {
+        preset: message.preset || "default",
+        displayName: message.displayName || "",
+      });
+    });
+  }
   if (!isSanNotification)
     notificationWindow.webContents.setZoomFactor(presetScale);
   notificationWindow.loadFile(presetHtml);
@@ -17360,6 +17853,16 @@ function createNotificationWindow(message) {
             error: err?.message || String(err),
           },
         );
+      }
+    }
+    if (message.recordRequested === true) {
+      try {
+        const { installNotificationRecordVisibility } = require("./utils/notification-record-visibility");
+        await notificationWindow.webContents.executeJavaScript(
+          `(${installNotificationRecordVisibility.toString()})(${JSON.stringify({ displayName: message.displayName, durationMs: message.durationMs })})`,
+        );
+      } catch (error) {
+        recordLogger.warn("external-replay:visibility-install-failed", { error: error?.message || String(error) });
       }
     }
     if (message.screenshotRequested === true) {
@@ -17881,94 +18384,17 @@ ipcMain.handle("redownloadGameHeader", async (_event, payload = {}) => {
   }
 });
 
-ipcMain.handle("redownloadXboxSavedPortraitCover", async (_event, payload = {}) => {
-  const appid = normalizeSafeImageAppId(payload?.appid);
-  const configName = String(payload?.configName || "").trim();
-  if (!appid || !/^[a-z0-9_-]+$/i.test(appid)) {
-    return { success: false, error: "invalid-xbox-cover-target" };
-  }
-  if (configName) {
-    try {
-      const configPath = resolveConfigJsonPath(configsDir, configName);
-      const config = JSON.parse(await fs.promises.readFile(configPath, "utf8"));
-      if (
-        normalizePlatform(config?.platform) !== "xbox-pc" ||
-        String(config?.appid || config?.appId || "").trim() !== appid
-      ) {
-        return { success: false, error: "config-identity-mismatch" };
-      }
-    } catch {
-      return { success: false, error: "config-unavailable" };
-    }
-  } else if (normalizePlatform(getPlatformForAppId(appid)) !== "xbox-pc") {
-    return { success: false, error: "config-identity-mismatch" };
-  }
-
-  const imageDir = path.join(
-    app.getPath("userData"),
-    "images",
-    "xbox-pc",
-    appid,
-  );
-  let coverUrl = "";
-  try {
-    const saved = JSON.parse(
-      await fs.promises.readFile(path.join(imageDir, "sources.json"), "utf8"),
-    );
-    coverUrl = String(saved?.coverUrl || "").trim();
-  } catch {}
-  if (!/^https?:\/\//i.test(coverUrl)) {
-    return { success: false, error: "xbox-cover-url-missing" };
-  }
-
-  let tempPath = "";
-  try {
-    const response = await axios.get(coverUrl, {
-      responseType: "arraybuffer",
-      timeout: 15000,
-      maxContentLength: 15 * 1024 * 1024,
-      maxBodyLength: 15 * 1024 * 1024,
-    });
-    const buffer = Buffer.from(response?.data || []);
-    const mime = detectImageMimeFromBuffer(buffer);
-    if (!mime || buffer.length > 15 * 1024 * 1024) {
-      throw new Error("Invalid Xbox cover image");
-    }
-    const extension = getCoverExtensionFromMeta({ contentType: mime });
-    await fs.promises.mkdir(imageDir, { recursive: true });
-    tempPath = path.join(
-      imageDir,
-      `.${appid}-cover-${crypto.randomBytes(6).toString("hex")}.tmp`,
-    );
-    const fullPath = path.join(imageDir, `${appid}${extension}`);
-    await fs.promises.writeFile(tempPath, buffer);
-    await fs.promises.rename(tempPath, fullPath);
-    tempPath = "";
-    removeSiblingCoverImageFormats(imageDir, appid, fullPath);
-    broadcastToAll("update-image", { appid, platform: "xbox-pc" });
-    ipcLogger.info("xbox-cover:saved-url-hit", { appid, coverUrl });
-    return { success: true, path: fullPath };
-  } catch (error) {
-    ipcLogger.warn("xbox-cover:saved-url-miss", {
-      appid,
-      error: error?.message || String(error),
-    });
-    return { success: false, error: error?.message || String(error) };
-  } finally {
-    if (tempPath) await fs.promises.unlink(tempPath).catch(() => {});
-  }
+ipcMain.handle("redownloadXboxSavedPortraitCover", async (event, payload = {}) => {
+  const context = gameArtworkRequestContext(event, payload);
+  if (context.config.platform !== "xbox-pc") return { success: false, error: "config-identity-mismatch" };
+  const response = await gameArtworkService.ensure(context, { type: "cover", source: "xbox-title", manual: true });
+  const result = response.results[0];
+  return { ...result, success: result.ok };
 });
 
 // Check if executable file exists
-ipcMain.handle("checkExecutableExists", async (_event, exePath) => {
-  if (!exePath) return false;
-  try {
-    await fs.promises.access(exePath, fs.constants.F_OK);
-    return true;
-  } catch {
-    return false;
-  }
-});
+const checkExecutableAvailability = require("./utils/executable-availability").createExecutableAvailabilityCheck({ logger: executableFinderLogger });
+ipcMain.handle("checkExecutableExists", (_event, exePath) => checkExecutableAvailability(exePath));
 
 // Save image locally from renderer
 ipcMain.handle(
@@ -17994,10 +18420,9 @@ ipcMain.handle(
       );
       if (!fs.existsSync(imageDir)) fs.mkdirSync(imageDir, { recursive: true });
       const fullPath = path.join(imageDir, `${appid}${extension}`);
-      removeSiblingCoverImageFormats(imageDir, appid, fullPath);
-      fs.writeFileSync(fullPath, Buffer.from(buffer));
+      const savedPath = await require("./utils/game-artwork-storage").importBuffer(fullPath, Buffer.from(buffer), { source: "renderer-import", url: meta.sourceUrl || "" });
       broadcastToAll("update-image", { appid: String(appid), platform });
-      return { success: true, path: fullPath };
+      return { success: true, path: savedPath };
     } catch (err) {
       notifyError(tUi("main.notify.image.saveFailed", { error: err.message }));
       return { success: false, error: err.message };
@@ -18296,6 +18721,9 @@ function handlePlatinumComplete({
   configPath,
   isActive = false,
 }) {
+  // Native/explicitly mapped Platinum is notified by its own unlock event.
+  // Completion paths from any importer must not queue a second banner.
+  try { if (readConfigForAchievementCache(configName)?.native_platinum === true) return; } catch {}
   const dedupKey =
     (configName ? sanitizeConfigName(configName) : "") ||
     (appid ? String(appid) : "") ||
@@ -18314,8 +18742,20 @@ function handlePlatinumComplete({
   const scale = getNotificationTimingPreferences("platinum", prefs).scale;
   const safeName = configName ? sanitizeConfigName(configName) : "";
 
+  let completionMetadata = null;
+  try {
+    const file = resolveConfigJsonPath(configsDir, configName);
+    const config = JSON.parse(fs.readFileSync(file, "utf8"));
+    const metadata = PlatinumEnrichment.readMetadata(config);
+    if (metadata?.kind === "completion") completionMetadata = { ...metadata.achievement,
+      config_path: path.dirname(PlatinumEnrichment.schemaPath(config)) };
+  } catch {}
   const message = {
-    displayName: tUi("main.notify.platinumCompleteTitle", {}, "100% Completed"),
+    name: completionMetadata?.name || "",
+    icon: completionMetadata?.icon,
+    icon_gray: completionMetadata?.icon_gray,
+    trophyType: "platinum",
+    displayName: completionMetadata ? getSafeLocalizedText(completionMetadata.displayName, resolveAchievementLanguageForConfig(configName)) : tUi("main.notify.platinumCompleteTitle", {}, "100% Completed"),
     description: tUi(
       "main.notify.platinumCompleteDescription",
       {},
@@ -18325,13 +18765,14 @@ function handlePlatinumComplete({
     position,
     sound,
     scale,
-    config_path: configPath || null,
+    config_path: completionMetadata?.config_path || configPath || null,
     save_path: savePath || null,
     configName: configName || null,
     appid: appid ? String(appid) : null,
     platform: platform || null,
     __isPlatinum: true,
   };
+  if (completionMetadata) message.description = getSafeLocalizedText(completionMetadata.description, resolveAchievementLanguageForConfig(configName));
 
   if (isActive) {
     // Mark flag but defer popup until queue is idle
@@ -22291,6 +22732,15 @@ function getNotificationSanRareThreshold(achievement = {}, prefs = cachedPrefere
 }
 
 function queueAchievementNotification(achievement) {
+  // Account importers do not all forward trophy fields. Resolve the explicit
+  // schema mapping by stable achievement ID without changing the unlock state.
+  if (achievement?.configName && !achievement.trophyType && !achievement.trophy_type) {
+    try {
+      const config = readConfigForAchievementCache(achievement.configName);
+      if (PlatinumEnrichment.isSearchSupported(config) && config?.platinum_achievement?.kind === "native" &&
+          String(config.platinum_achievement.name) === String(achievement.name)) achievement = { ...achievement, trophyType: "platinum" };
+    } catch {}
+  }
   if (
     startupProfileRestoreResult?.applied === true &&
     global.bootDone !== true &&
@@ -22316,7 +22766,7 @@ function queueAchievementNotification(achievement) {
   const isPlatinum =
     achievement.isPlatinum === true ||
     achievement.__isPlatinum === true ||
-    (usesTrophyTier && trophyType === "platinum");
+    trophyType === "platinum";
   const isTest = achievement.isTest === true;
   const isTestRare =
     achievement.isTestRare === true || achievement.forceTestRare === true;
@@ -22529,18 +22979,7 @@ function resolveGameHeaderPathForNotification(achievement = {}) {
     }
   }
   if (!platform) return "";
-  const headerPath = path.join(
-    app.getPath("userData"),
-    "images",
-    platform,
-    appid,
-    "header.jpg",
-  );
-  try {
-    return fs.existsSync(headerPath) ? headerPath : "";
-  } catch {
-    return "";
-  }
+  return resolveLocalGameHeaderPath(appid, platform, { primaryOnly: true }) || "";
 }
 
 function resolveGameCoverHeroPathForNotification(achievement = {}) {
@@ -22655,6 +23094,7 @@ function queueGameCoverHeroForConfig(
     return;
   }
   void queueGameCoverHero({
+    config,
     userDataPath: app.getPath("userData"),
     appid,
     platform,
@@ -23514,7 +23954,8 @@ function showCustomAchievementNotification({
   const targetDisplay = getNotificationDisplay();
   try {
     notificationWindow = createNotificationWindow({
-      ...notificationData, screenshotRequested: shouldScreenshot === true, __notificationMonitorDisplay: targetDisplay,
+      ...notificationData, screenshotRequested: shouldScreenshot === true,
+      recordRequested: shouldRecordExternalReplay(notificationData), __notificationMonitorDisplay: targetDisplay,
     });
     registerAnimatedNotificationNavigation(
       notificationWindow,
@@ -23531,6 +23972,7 @@ function showCustomAchievementNotification({
   }
 
   const notificationWebContentsId = notificationWindow.webContents.id;
+  if (shouldRecordExternalReplay(notificationData)) pendingExternalReplayNotifications.set(notificationWebContentsId, notificationData);
   if (playSound) {
     playAchievementNotificationSound(achievement);
   }
@@ -23572,6 +24014,9 @@ function showCustomAchievementNotification({
       closeTimer = null;
     }
     clearPendingNotificationScreenshot(notificationWebContentsId, "notification-closed");
+    if (pendingExternalReplayNotifications.delete(notificationWebContentsId)) {
+      recordLogger.warn("external-replay:notification-not-visible", { config: notificationData.config_path, displayName: notificationData.displayName });
+    }
     windowLogger.info("create-notification-window:closed", {
       preset: notificationData.preset || "default",
       position: notificationData.position || "center-bottom",
@@ -23840,6 +24285,7 @@ function processNextNotification() {
           type: "achievement",
         });
         if (status === "success") {
+          recordExternalReplayVisible(notificationData, "gamebar-acknowledged");
           playAchievementNotificationSound(achievement);
           if (shouldScreenshot) {
             notificationLogger.info("notification:screenshot-trigger", {
@@ -23959,6 +24405,7 @@ function processNextNotification() {
         onShow: () => {
           if (nativeFallbackStarted || queueEntryFinished) return;
           nativeShowReceived = true;
+          recordExternalReplayVisible(notificationData, "native-windows-show");
           scheduleNativeCompletion(NATIVE_WINDOWS_QUEUE_INTERVAL_MS, "shown");
         },
         onFailed: (error) => {
@@ -25191,6 +25638,8 @@ function savePreviousAchievements(
       return false;
     }
     const onSaved = () => {
+      const pinConfig = readConfigForAchievementCache(configName);
+      if (pinConfig) reconcileAchievementPins(configName, pinConfig, ordered);
       markGameBarWidgetSnapshotDirty("achievement-cache-saved");
       queueDashboardSummaryReconcile(configName, "achievement-cache-saved");
       persistenceLogger.info("save-achievement-cache", {
@@ -25533,6 +25982,9 @@ async function monitorAchievementsFile(filePath) {
   previousAchievements = loadedPreviousAchievements;
   const ps4PreviousByPath = new Map();
   const ps4FirstLoadByPath = new Map();
+  const selectedPs4SourceChanges = isPs4
+    ? require("./utils/watched-file-change-guard").createWatchedFileChangeGuard()
+    : null;
   const normalizePs4ProgressKey = (fp) =>
     path.normalize(String(fp || "")).toLowerCase();
   const makePs4CacheOptionsForPath = (sourcePath) => {
@@ -25667,6 +26119,14 @@ async function monitorAchievementsFile(filePath) {
       ? (isPs4ProgressXmlPath(activeFilePath) ? activeFilePath : "") ||
         selectedPs4ProgressPath
       : "";
+    if (selectedPs4SourceChanges && activePs4ProgressPath && opts?.updatePs4User === true && !isRetry) {
+      const sourceChange = selectedPs4SourceChanges.inspect(activePs4ProgressPath);
+      if (!sourceChange.changed || sourceChange.reason === "removed") return;
+      ipcLogger.info("shadps4:selected-progress:event", {
+        configName, event: "watchFile", filePath: activePs4ProgressPath,
+        userId: getPs4UserIdFromProgressPath(activePs4ProgressPath), reason: sourceChange.reason,
+      });
+    }
     const activeCacheOptions = isPs4
       ? makePs4CacheOptionsForPath(activeFilePath)
       : currentCacheOptions;
@@ -25920,7 +26380,7 @@ async function monitorAchievementsFile(filePath) {
               position: selectedPosition,
               sound: selectedSound || "mute",
               soundPath: selectedSound
-                ? path.join(app.getAppPath(), "sounds", selectedSound)
+                ? resolveSanSoundPath(selectedSound) || path.join(userSoundsFolder, selectedSound)
                 : null,
             });
             initialTouched = true;
@@ -26282,6 +26742,7 @@ async function monitorAchievementsFile(filePath) {
         currentAchievementsFilePath = primary;
         for (const fp of watchFiles) {
           processSnapshot(false, fp, { updatePs4User: false });
+          selectedPs4SourceChanges.prime(fp);
         }
         refreshAchievementsUi();
 
@@ -26858,6 +27319,9 @@ async function applyActiveConfigUpdate(
     if (ready !== true || selectedConfigMode !== "active") return 0;
     return flushPendingAchievementUnlockRecords();
   });
+  // External replay is already buffering in the GPU software. Selection must
+  // release its pending requests even when the native recorder returns false.
+  flushPendingExternalReplayRecords();
 
   if (isBlacklisted) {
     currentAppId = appIdString || null;
@@ -28085,8 +28549,11 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
     const oldConfigPath = resolveConfigJsonPath(configsDir, oldName);
     const newConfigPath = path.join(configsDir, `${safeNew}.json`);
     let prevConfig = null;
+    let configCreationBeforeRename = 0;
     if (fs.existsSync(oldConfigPath)) {
       try {
+        const stat = fs.statSync(oldConfigPath);
+        configCreationBeforeRename = stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
         prevConfig = JSON.parse(fs.readFileSync(oldConfigPath, "utf8"));
       } catch {}
     }
@@ -28116,9 +28583,7 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
         ? normalizeProcessNameValue(newConfig.process_name, {
             splitString: true,
           })
-        : exePath
-          ? path.basename(exePath)
-          : "",
+        : gameProcessName(exePath),
     };
 
     const sanitizedAppId = sanitizeAppIdForPlatform(
@@ -28368,6 +28833,19 @@ ipcMain.handle("renameAndSaveConfig", async (event, oldName, newConfig) => {
 
     pendingMissingAchievementFiles.delete(safeOld);
     pendingMissingAchievementFiles.delete(safeNew);
+    try { configAddedTimes.move(safeOld, safeNew, configCreationBeforeRename); }
+    catch (error) { persistenceLogger.warn("config-added-times:rename-failed", { configName: safeOld, error: error.message }); }
+    if (prevConfig) {
+      try {
+        const currentConfig = JSON.parse(fs.readFileSync(newConfigPath, "utf8"));
+        if (String(prevConfig.appid) === String(currentConfig.appid) &&
+            (normalizePlatform(prevConfig.platform) || "steam") === (normalizePlatform(currentConfig.platform) || "steam")) {
+          achievementPins.move(safeOld, prevConfig, safeNew, currentConfig);
+        } else achievementPins.remove(safeOld, prevConfig);
+      } catch (error) {
+        ipcLogger.warn("achievement-pins:rename-failed", { configName: safeOld, error: error.message });
+      }
+    }
 
     try {
       const collectionResult = await gameCollectionsStore.renameConfig(
@@ -29863,6 +30341,7 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
       )
         return;
       setOverlayWindowOpacitySafely(1, "overlay-window:show:reveal");
+      refreshOverlayBackgroundTransparency();
       if (!overlayInteractive) applyOverlayInputMode();
       applyOverlayFocusMode();
       applyOverlayKeyboardScrollShortcutRegistration();
@@ -29956,6 +30435,13 @@ function createOverlayWindow(selectedConfig, initialPresented = true) {
   // Intentionally avoid blur-driven state changes here. The overlay is designed to be non-focusable.
 }
 
+const executableFinderController = require("./utils/game-executable-finder-ipc").registerExecutableFinder({
+  ipcMain, dialog, configsDir, getWindow: () => mainWindow,
+  t: (key) => tUi(key), logger: executableFinderLogger,
+  changed: () => broadcastToAll("configs:changed"),
+});
+app.on("before-quit", () => executableFinderController.cancel());
+
 ipcMain.handle("selectExecutable", async (_event, currentPath) => {
   const requestedPath = String(currentPath || "").trim();
   let initialDirectory = "";
@@ -30002,7 +30488,7 @@ ipcMain.handle("selectExecutable", async (_event, currentPath) => {
     selectedPath,
     executable: selectedPath,
     arguments: "",
-    processName: path.basename(selectedPath),
+    processName: await resolveGameProcessName(selectedPath),
     workingDirectory: path.dirname(selectedPath),
     shortcutPath: "",
     isShortcut: false,
@@ -30028,7 +30514,7 @@ ipcMain.handle("selectExecutable", async (_event, currentPath) => {
       selectedPath,
       executable: target,
       arguments: String(details?.args || "").trim(),
-      processName: path.basename(target),
+      processName: await resolveGameProcessName(target),
       workingDirectory:
         String(details?.cwd || "").trim() || path.dirname(target),
       shortcutPath: selectedPath,
@@ -30048,9 +30534,7 @@ ipcMain.handle("selectExecutable", async (_event, currentPath) => {
   }
 });
 
-ipcMain.handle(
-  "launchExecutable",
-  async (_event, exeOrPayload, argsString, workingDirectory) => {
+async function launchConfiguredExecutable(exeOrPayload, argsString, workingDirectory) {
     try {
       const launchPayload =
         exeOrPayload && typeof exeOrPayload === "object" ? exeOrPayload : null;
@@ -30102,9 +30586,11 @@ ipcMain.handle(
             : path.dirname(exePath);
       const launchExecutable = isAppsFolderTarget ? "explorer.exe" : exePath;
       const launchArgs = isAppsFolderTarget ? [exePath] : args;
-      const child = spawn(launchExecutable, launchArgs, {
+      const script = require("./utils/game-script-launch").scriptLaunch(launchExecutable, launchArgs);
+      const child = spawn(script?.executable || launchExecutable, script?.args || launchArgs, {
         cwd,
         detached: true,
+        ...(script ? { env: script.env, windowsHide: true, windowsVerbatimArguments: script.windowsVerbatimArguments || false } : {}),
         ...(ps3Launch ? { env: { ...process.env, ...ps3Launch.env } } : {}),
         stdio: waitForPs4Runtime ? ["ignore", "ignore", "pipe"] : "ignore",
       });
@@ -30137,6 +30623,14 @@ ipcMain.handle(
         }
       });
       child.unref();
+
+      if (requestedConfigName && configData && cachedPreferences?.minimizeToTrayOnPlay === true) {
+        child.once("spawn", () => {
+          if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
+          minimizeWindow();
+          execLogger.info("play:minimized-to-tray", { configName: requestedConfigName, pid: child.pid || null });
+        });
+      }
 
       if (requestedConfigName && configData) {
         if (waitForPs4Runtime) {
@@ -30181,8 +30675,10 @@ ipcMain.handle(
       );
       return { success: false, error: err?.message || String(err) };
     }
-  },
-);
+}
+
+ipcMain.handle("launchExecutable", (_event, exeOrPayload, argsString, workingDirectory) =>
+  launchConfiguredExecutable(exeOrPayload, argsString, workingDirectory));
 
 let currentAppId = null;
 const EPIC_OFFICIAL_ACTIVE_POLL_INITIAL_MS = 45000;
@@ -30414,16 +30910,6 @@ function getEpicOfficialUnlockedDelta(
     }
   }
   return { changed, unlockedKeys };
-}
-
-function countEpicOfficialEarnedAchievements(snapshot = {}) {
-  let count = 0;
-  for (const entry of Object.values(snapshot || {})) {
-    if (entry && typeof entry === "object" && entry.earned === true) {
-      count += 1;
-    }
-  }
-  return count;
 }
 
 function preserveEpicOfficialEarnedStateFromCache(
@@ -31847,6 +32333,7 @@ function showProgressNotification(data) {
     skipTaskbar: true,
     hasShadow: false,
     show: false,
+    type: "notification",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -31859,6 +32346,12 @@ function showProgressNotification(data) {
   progressWindow.setVisibleOnAllWorkspaces(true);
   progressWindow.setFullScreenable(false);
   progressWindow.setFocusable(false);
+  progressWindow.setIgnoreMouseEvents(true, { forward: true });
+  progressWindow.on("focus", () => {
+    notificationLogger.warn("progress-notification:unexpected-focus", {
+      displayName: data?.displayName || "",
+    });
+  });
   let failed = false;
   const closeFailedProgress = (reason, error = null) => {
     if (failed || progressWindow.isDestroyed()) return;
@@ -31904,7 +32397,7 @@ function showProgressNotification(data) {
         config: data?.config_path || null,
       });
       windowLogger.info("create-progress-window:ready-to-show");
-      progressWindow.show();
+      progressWindow.showInactive();
       progressWindow.webContents.send("show-progress", {
         ...data, scale, durationMs: progressDurationMs,
       });
@@ -31944,6 +32437,8 @@ ipcMain.on("set-disable-playtime", (_event, value) => {
 let playtimeWindow = null;
 let playtimeAlreadyClosing = false;
 let pendingPlayData = null;
+const playtimeCloseTimers = new WeakMap();
+const playtimeReadyWindows = new WeakSet();
 let lastRandomNotificationHeaderPath = "";
 
 function getNotificationFallbackHeaderPath() {
@@ -31984,15 +32479,10 @@ function getRandomLocalHeaderImagePath({
       const entryPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
         pendingDirs.push(entryPath);
-        continue;
       }
-      if (!entry.isFile() || entry.name.toLowerCase() !== "header.jpg") {
-        continue;
-      }
-      try {
-        if (fs.statSync(entryPath).size > 0) headers.push(entryPath);
-      } catch {}
     }
+    const header = require("./utils/game-artwork-storage").existingAt(currentDir, "header");
+    if (header) headers.push(header);
   }
   if (cacheForPreview && !cached) {
     previewHeaderCache = { root: imagesRoot, savedAt: Date.now(), headers };
@@ -32071,18 +32561,10 @@ function getRandomLocalGameCoverImagePath({ fallbackToDefault = true } = {}) {
       const entryPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
         pendingDirs.push(entryPath);
-        continue;
       }
-      if (
-        !entry.isFile() ||
-        !/^game-cover-hero\.(?:jpe?g|png|webp|gif)$/i.test(entry.name)
-      ) {
-        continue;
-      }
-      try {
-        if (fs.statSync(entryPath).size > 0) heroes.push(entryPath);
-      } catch {}
     }
+    const hero = require("./utils/game-artwork-storage").existingAt(currentDir, "game-cover-hero");
+    if (hero) heroes.push(hero);
   }
 
   if (heroes.length) {
@@ -32143,19 +32625,11 @@ function getPlaytimeNotificationScale(prefs = {}) {
 }
 
 ipcMain.on("show-playtime", (_event, playData) => {
-  let prefsSnapshot = {};
-  try {
-    const cur = fs.existsSync(preferencesPath)
-      ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
-      : {};
-    prefsSnapshot = cur && typeof cur === "object" ? cur : {};
-    if (cur.disablePlaytime === true || global.disablePlaytime === true) {
-      if (playtimeWindow && !playtimeWindow.isDestroyed())
-        playtimeWindow.close();
-      return;
-    }
-  } catch (e) {
-    if (global.disablePlaytime === true) return;
+  const prefsSnapshot = cachedPreferences || {};
+  if (prefsSnapshot.disablePlaytime === true || global.disablePlaytime === true) {
+    pendingPlayData = null;
+    if (playtimeWindow && !playtimeWindow.isDestroyed()) playtimeWindow.close();
+    return;
   }
 
   const normalized = normalizePlayPayload({
@@ -32206,6 +32680,7 @@ ipcMain.on("show-test-playtime-notification", (_event, options = {}) => {
 });
 
 function createPlaytimeWindow(playData = {}) {
+  const requestedAt = performance.now();
   windowLogger.info("create-playtime-window:start", {
     displayName: playData?.displayName || playData?.name || null,
     phase: playData?.phase || "start",
@@ -32213,47 +32688,31 @@ function createPlaytimeWindow(playData = {}) {
   const phase = playData.phase || "start";
   const isTestPlaytime = playData.isTestPlaytime === true;
 
-  try {
-    const cur = fs.existsSync(preferencesPath)
-      ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
-      : {};
-    if (
-      !isTestPlaytime &&
-      (cur.disablePlaytime === true || global.disablePlaytime === true)
-    ) {
-      return;
-    }
-  } catch (e) {
-    if (!isTestPlaytime && global.disablePlaytime === true) return;
-  }
+  const prefs = cachedPreferences || {};
+  if (!isTestPlaytime && (prefs.disablePlaytime === true || global.disablePlaytime === true)) return;
 
   if (playtimeWindow && !playtimeWindow.isDestroyed()) {
+    pendingPlayData = normalizePlayPayload(playData);
+    if (!playtimeReadyWindows.has(playtimeWindow)) {
+      windowLogger.info("create-playtime-window:pending", { reason: "renderer-loading", phase });
+      return;
+    }
     if (!playtimeAlreadyClosing) {
       windowLogger.info("create-playtime-window:reuse", {
         reason: "closing-existing",
       });
       playtimeAlreadyClosing = true;
-      const normalized = normalizePlayPayload(playData);
-      const isStop = normalized.phase === "stop";
-      if (!isStop) {
-        pendingPlayData = normalized;
-      } else {
-        pendingPlayData = null;
-      }
+      const normalized = pendingPlayData;
+      const closingWindow = playtimeWindow;
       try {
         playtimeWindow.webContents.send("start-close-animation", normalized);
       } catch {}
-      setTimeout(
+      playtimeCloseTimers.set(closingWindow, setTimeout(
         () => {
-          try {
-            if (playtimeWindow && !playtimeWindow.isDestroyed())
-              playtimeWindow.close();
-          } finally {
-            playtimeAlreadyClosing = false;
-          }
+          if (!closingWindow.isDestroyed()) closingWindow.close();
         },
         Math.max(1200, (normalized.holdMs || 0) + 400),
-      );
+      ));
     }
     return;
   }
@@ -32268,12 +32727,8 @@ function createPlaytimeWindow(playData = {}) {
   const winHeight = 340;
   let playtimeScale = 1;
   let playtimeDurationMs = 0;
-  let playtimePlacement = NotificationPlacement.read("playtime", cachedPreferences, isTestPlaytime ? playData : null);
+  const playtimePlacement = NotificationPlacement.read("playtime", prefs, isTestPlaytime ? playData : null);
   try {
-    const prefs = fs.existsSync(preferencesPath)
-      ? JSON.parse(fs.readFileSync(preferencesPath, "utf8"))
-      : {};
-    playtimePlacement = NotificationPlacement.read("playtime", prefs, isTestPlaytime ? playData : null);
     playtimeScale = getPlaytimeNotificationScale(prefs);
     playtimeDurationMs = Math.round(getNotificationTimingPreferences("playtime", prefs).duration * 1000);
   } catch {}
@@ -32289,7 +32744,7 @@ function createPlaytimeWindow(playData = {}) {
     workArea: { x: ax, y: ay, width: aw, height: ah }, ...playtimePlacement,
   });
 
-  playtimeWindow = new BrowserWindow({
+  const localWindow = playtimeWindow = new BrowserWindow({
     width: scaledWinWidth,
     height: scaledWinHeight,
     x,
@@ -32304,13 +32759,14 @@ function createPlaytimeWindow(playData = {}) {
     focusable: false,
     fullscreenable: false,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(__dirname, "utils", "playtime-preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
     },
   });
   windowLogger.info("create-playtime-window:browserwindow-created", {
+    createMs: Math.round(performance.now() - requestedAt),
     size: { width: scaledWinWidth, height: scaledWinHeight },
     baseSize: { width: winWidth, height: winHeight },
     scale: playtimeScale,
@@ -32324,22 +32780,27 @@ function createPlaytimeWindow(playData = {}) {
   playtimeWindow.loadFile("playtime.html");
 
   playtimeWindow.webContents.once("dom-ready", () => {
+    if (localWindow.isDestroyed() || playtimeWindow !== localWindow) return;
     try {
       const scale = playtimeScale;
       const source = pendingPlayData ?? playData;
       const payload = normalizePlayPayload({
-        ...source, phase, scale, durationMs: playtimeDurationMs,
+        ...source, phase: source.phase || phase, scale, durationMs: playtimeDurationMs,
       });
 
       pendingPlayData = null;
       playtimeAlreadyClosing = false;
-      playtimeWindow.show();
+      playtimeReadyWindows.add(localWindow);
+      localWindow.showInactive();
       windowLogger.info("create-playtime-window:dom-ready", {
         displayName: payload.displayName,
         phase: payload.phase,
         scale,
+        readyMs: Math.round(performance.now() - requestedAt),
+        windowId: localWindow.id,
+        focused: localWindow.isFocused(),
       });
-      playtimeWindow.webContents.send("show-playtime", payload);
+      localWindow.webContents.send("show-playtime", payload);
     } catch (err) {
       console.error(
         tUi(
@@ -32351,28 +32812,24 @@ function createPlaytimeWindow(playData = {}) {
     }
   });
 
-  const closePlaytimeWindowHandler = () => {
-    const next = pendingPlayData;
-    if (playtimeWindow && !playtimeWindow.isDestroyed()) {
-      playtimeWindow.close();
-      playtimeAlreadyClosing = false;
-    }
-    if (next) {
-      pendingPlayData = null;
-      createPlaytimeWindow(next);
-    }
+  const closePlaytimeWindowHandler = (event) => {
+    if (event?.sender !== localWindow.webContents || event.senderFrame !== event.sender.mainFrame) return;
+    if (!localWindow.isDestroyed()) localWindow.close();
   };
-  ipcMain.once("close-playtime-window", closePlaytimeWindowHandler);
+  ipcMain.on("close-playtime-window", closePlaytimeWindowHandler);
 
-  const localWindow = playtimeWindow;
   localWindow.on("closed", () => {
+    clearTimeout(playtimeCloseTimers.get(localWindow));
+    playtimeCloseTimers.delete(localWindow);
     windowLogger.info("create-playtime-window:closed");
     ipcMain.removeListener("close-playtime-window", closePlaytimeWindowHandler);
     if (playtimeWindow === localWindow) {
+      const next = pendingPlayData;
+      pendingPlayData = null;
       playtimeWindow = null;
       playtimeAlreadyClosing = false;
+      if (next && !isQuitting) createPlaytimeWindow(next);
     }
-    pendingPlayData = null;
   });
 }
 
@@ -34489,11 +34946,13 @@ ipcMain.handle("resolve-icon-url", async (_event, configPath, rel) => {
 });
 
 const {
+  configureGeneratedConfigPlatinum,
   configureAutoGenerationBlacklist,
   generateGameConfigs,
   generateConfigsForAppIds,
   generateConfigForAppId,
 } = require("./utils/auto-config-generator");
+configureGeneratedConfigPlatinum(file => queueConfigPlatinumLookup(path.basename(file, ".json")));
 configureAutoGenerationBlacklist((result) => {
   const { blacklistScope } = require("./utils/emulator-generation-result");
   const scope = blacklistScope(result);
@@ -36425,17 +36884,7 @@ function getImagePlatformCandidates(appid, platform) {
   );
 }
 
-const SUPPORTED_LOCAL_COVER_EXTENSIONS = [
-  ".jpg",
-  ".jpeg",
-  ".jpe",
-  ".jfif",
-  ".png",
-  ".webp",
-  ".gif",
-  ".bmp",
-  ".avif",
-];
+const SUPPORTED_LOCAL_COVER_EXTENSIONS = require("./utils/game-artwork-storage").EXTENSIONS;
 
 const LOCAL_COVER_MIME_BY_EXTENSION = {
   ".png": "image/png",
@@ -36527,9 +36976,7 @@ function getCoverImageCandidatePaths(baseDir, appid) {
   const safeBaseDir = String(baseDir || "").trim();
   const safeAppId = String(appid || "").trim();
   if (!safeBaseDir || !safeAppId) return [];
-  return SUPPORTED_LOCAL_COVER_EXTENSIONS.map((extension) =>
-    path.join(safeBaseDir, `${safeAppId}${extension}`),
-  );
+  return require("./utils/game-artwork-storage").candidatePaths(safeBaseDir, safeAppId);
 }
 
 function pickExistingCoverImagePath(baseDir, appid) {
@@ -36940,7 +37387,7 @@ ipcMain.handle("startup:set-start-with-windows", async (_e, enabled) => {
 
 ipcMain.handle(
   "rarity:refresh-selected-config",
-  async (_event, payload = {}) => {
+  withPlatinumAfterRarity(async (_event, payload = {}) => {
     const incomingName =
       typeof payload === "string"
         ? payload
@@ -37730,7 +38177,7 @@ ipcMain.handle(
         ),
       };
     }
-  },
+  }),
 );
 
 ipcMain.handle("open-external-url", async (_evt, url) => {
@@ -38443,11 +38890,14 @@ ipcMain.handle("uplay:steam-appid", async (_evt, appid) => {
 const {
   accumulatePlaytime,
   getPlaytimeInfo,
+  getPlaytimeTotalsSnapshot,
   getLastPlayedSnapshot,
-  setPlaytimeTotal,
+  setPlaytimeTotalAsync,
+  hasPendingPlaytimeWrites,
+  waitForPlaytimeWrites,
 } = require("./utils/playtime-store");
 
-ipcMain.handle("playtime:last-played", () => {
+function getCombinedLastPlayedSnapshot() {
   const snapshot = getLastPlayedSnapshot();
   const active = require("./utils/playtime-log-watcher").getActiveLastPlayed();
   for (const [name, timestamp] of Object.entries(active)) {
@@ -38457,7 +38907,9 @@ ipcMain.handle("playtime:last-played", () => {
     });
   }
   return snapshot;
-});
+}
+
+ipcMain.handle("playtime:last-played", getCombinedLastPlayedSnapshot);
 
 ipcMain.on("playtime:session-started", (_event, payload = {}) => {
   broadcastToAll("playtime:last-played-updated", {
@@ -38468,7 +38920,8 @@ ipcMain.on("playtime:session-started", (_event, payload = {}) => {
 
 ipcMain.on("playtime:session-ended", (_event, payload = {}) => {
   const safeKey = sanitizeConfigName(payload.configName || "");
-  const info = getPlaytimeInfo(safeKey);
+  const info = Number.isFinite(payload.totalMs) && Number.isFinite(payload.updatedAt)
+    ? payload : getPlaytimeInfo(safeKey);
   const totalMs =
     typeof payload.totalMs === "number" ? payload.totalMs : info.totalMs;
   const updatedAt = Number(info.updatedAt) || (totalMs > 0 ? Date.now() : 0);
@@ -38488,6 +38941,7 @@ ipcMain.handle("playtime:get-total", async (_event, configName) => {
   const safe = sanitizeConfigName(configName);
   return getPlaytimeInfo(safe);
 });
+ipcMain.handle("playtime:get-totals", () => getPlaytimeTotalsSnapshot());
 
 ipcMain.handle("playtime:set-total", async (_event, payload = {}) => {
   try {
@@ -38496,8 +38950,7 @@ ipcMain.handle("playtime:set-total", async (_event, payload = {}) => {
       return { ok: false };
     }
     const configName = sanitizeConfigName(payload.configName);
-    const info = setPlaytimeTotal(configName, payload.totalMs);
-    rebasePlaytimeSession(configName);
+    const info = await setPlaytimeTotalAsync(configName, payload.totalMs, () => rebasePlaytimeSession(configName));
     broadcastToAll("playtime:update", { configName, ...info });
     requestDashboardRefresh({ mode: "summary", reason: "playtime-edited", configName });
     return { ok: true, ...info };
@@ -38970,6 +39423,146 @@ function validateAchievementActionOwner(event, configName, owner) {
     throw new Error("Achievement action interaction changed");
   }
 }
+async function readLocalAchievementPresentation(configName) {
+  if (!configName || sanitizeConfigName(configName) !== configName) return null;
+  const context = resolveManualAchievementCacheContext(configName);
+  if (!context) return null;
+  if (context.platform === "ps4recomp") Object.assign(context.options, ps4Recomp.cacheOptions(context.config));
+  if (context.platform === "ps3recomp") Object.assign(context.options, ps3Recomp.cacheOptions(context.config));
+  if (context.platform === "pcports") Object.assign(context.options, pcPorts.cacheOptions(context.config));
+  const schemaFile = resolveAchievementsSchemaPath(context.config);
+  if (!schemaFile) return null;
+  const schema = JSON.parse(await fs.promises.readFile(schemaFile, "utf8"));
+  const snapshot = await loadPreviousAchievements(context.safeName, context.platform, context.options);
+  return { config: context.config, schemaRoot: path.dirname(schemaFile),
+    schema: PlatinumEnrichment.augmentSchema(context.config, schema), snapshot: PlatinumEnrichment.augmentSnapshot(context.config, snapshot) };
+}
+ipcMain.handle("achievement-pins:set", async (event, payload = {}) => {
+  try {
+    if (event.senderFrame !== event.sender.mainFrame) throw new Error("Invalid achievement pins sender");
+    const owner = achievementActionOwner(event, payload.configName);
+    const context = await readLocalAchievementPresentation(payload.configName);
+    validateAchievementActionOwner(event, payload.configName, owner);
+    if (!context) throw new Error("Unknown achievement config");
+    const result = achievementPins.update(payload.configName, context.config, {
+      ids: payload.achievementNames, pinned: payload.pinned, schema: context.schema, snapshot: context.snapshot,
+    });
+    publishAchievementPins(payload.configName, result);
+    ipcLogger.info("achievement-pins:updated", { configName: payload.configName, pinned: payload.pinned, count: result.ids.length });
+    return { success: true, ...result };
+  } catch (error) {
+    ipcLogger.warn("achievement-pins:update-failed", { configName: payload.configName, error: error.message });
+    return { success: false, error: error.message };
+  }
+});
+const resolveDashboardArtwork = require("./utils/game-presentation-artwork").createArtworkResolver(buffer => require("./utils/game-artwork-validation").size(nativeImage, buffer));
+async function getDashboardPresentation(config) {
+  const userDataDir = app.getPath("userData");
+  const metadata = require("./utils/game-presentation-metadata").read({ userDataDir, config, language: readPrefsSafe().uiLanguage || "english" });
+  const artwork = await resolveDashboardArtwork({ config, userDataDir,
+    cover: resolveLocalGameImagePath(config.appid, config.platform),
+    header: resolveLocalGameHeaderPath(config.appid, config.platform, { primaryOnly: true }) });
+  return { metadata, artwork };
+}
+const gameDetailsService = require("./utils/game-presentation-service");
+function gameArtworkConfig(config) {
+  const platform = normalizePlatform(config.platform) || "steam";
+  const steamId = ["uplay", "ubisoft-official"].includes(platform) ? uplayToSteam.get(String(config.appid))?.steam_appid : "";
+  return { ...config, platform, ...(steamId && !config.steamAppId ? { steamAppId: String(steamId) } : {}) };
+}
+const gameArtworkService = require("./utils/game-artwork-service").configure({
+  processImage: require("./utils/game-artwork-process").createImageProcessor(nativeImage),
+  measure: buffer => require("./utils/game-artwork-validation").size(nativeImage, buffer),
+  onSaved: (context, result) => {
+    const { config } = context;
+    dashboardHeaderMisses.delete(`${config.platform}:${config.appid}`);
+    previewHeaderCache = null;
+    if (result.type !== "hero") void refreshRecentTrayGames().catch(error => ipcLogger.warn("artwork:tray-refresh-failed", { error: error.message }));
+    broadcastToAll("update-image", { appid: String(config.appid), platform: config.platform,
+      variant: result.type === "header" ? "landscape" : result.type === "cover" ? "portrait" : "hero", artworkType: result.type, artwork: true });
+  },
+});
+const dashboardAssetService = require("./utils/game-presentation-assets").createAssetService({
+  resolve: getDashboardPresentation, refreshMetadata: gameDetailsService.refresh,
+  imageProcessor: require("./utils/game-artwork-process").createImageProcessor(nativeImage),
+  ensureArtwork: (context, type, options) => gameArtworkService.ensure({ ...context, config: gameArtworkConfig(context.config) }, { type, force: options.force }),
+});
+function dashboardRequestContext(event, configName) {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error("Invalid Dashboard sender");
+  const context = resolveManualAchievementCacheContext(configName);
+  if (!context) throw new Error("Unknown Dashboard config");
+  return context;
+}
+function gameArtworkRequestContext(event, payload = {}) {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error("Invalid artwork sender");
+  let name = String(payload.configName || "").trim();
+  if (!name && payload.appid) {
+    for (const file of fs.readdirSync(configsDir)) {
+      if (!file.endsWith(".json")) continue;
+      try {
+        const config = JSON.parse(fs.readFileSync(path.join(configsDir, file), "utf8"));
+        if (String(config.appid) === String(payload.appid) && (!payload.platform || normalizePlatform(config.platform) === normalizePlatform(payload.platform))) { name = file.slice(0, -5); break; }
+      } catch {}
+    }
+  }
+  if (!name || /[\\/\u0000-\u001f]/.test(name)) throw new Error("Invalid artwork config");
+  const file = resolveConfigJsonPath(configsDir, name);
+  if (!file) throw new Error("Unknown artwork config");
+  const config = gameArtworkConfig(JSON.parse(fs.readFileSync(file, "utf8")));
+  if ((payload.appid && String(config.appid) !== String(payload.appid)) ||
+      (payload.platform && normalizePlatform(payload.platform) !== config.platform)) throw new Error("Artwork config identity changed");
+  return { config, userDataDir: app.getPath("userData") };
+}
+ipcMain.handle("artwork:sources", (event, payload = {}) => {
+  const context = gameArtworkRequestContext(event, payload);
+  const type = payload.type || "all";
+  if (!["cover", "header", "hero", "all"].includes(type)) throw new Error("Invalid artwork type");
+  return { sources: gameArtworkService.list(context.config, type), configName: payload.configName, appid: String(context.config.appid),
+    platform: context.config.platform, title: context.config.displayName || context.config.name };
+});
+ipcMain.handle("artwork:download", async (event, payload = {}) => {
+  const context = gameArtworkRequestContext(event, payload);
+  return gameArtworkService.ensure(context, { type: payload.type, source: payload.source || "automatic", manual: true });
+});
+ipcMain.handle("artwork:ensure", async (event, payload = {}) => {
+  const context = gameArtworkRequestContext(event, payload);
+  return gameArtworkService.ensure(context, { type: payload.type || "cover" });
+});
+ipcMain.handle("dashboard:ensure-artwork", async (event, configName) => {
+  const context = dashboardRequestContext(event, configName);
+  return dashboardAssetService.ensure({ config: context.config, userDataDir: app.getPath("userData") });
+});
+ipcMain.handle("dashboard:refresh-game-details", async (event, configName) => {
+  const context = dashboardRequestContext(event, configName), userDataDir = app.getPath("userData");
+  const result = await gameDetailsService.refresh({ config: context.config, userDataDir, force: true, reason: "manual" });
+  const presentation = await dashboardAssetService.ensure({ config: context.config, userDataDir, force: true });
+  return { ...presentation, result: { ok: result.ok, code: result.code } };
+});
+ipcMain.handle("dashboard:artwork", async (event, configName) => {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error("Invalid Dashboard sender");
+  const context = resolveManualAchievementCacheContext(configName);
+  return context ? (await getDashboardPresentation(context.config)).artwork : null;
+});
+ipcMain.handle("dashboard:game-details", async (event, configName) => {
+  if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error("Invalid Dashboard sender");
+  const owner = achievementActionOwner(event, configName);
+  // Presentation must read the local schema/cache, without starting account
+  // syncs, save parsers, config generation or rarity requests.
+  const context = await readLocalAchievementPresentation(configName);
+  validateAchievementActionOwner(event, configName, owner);
+  return context ? { ...context, playtime: getPlaytimeInfo(configName), ...(await getDashboardPresentation(context.config)) } : null;
+});
+require("./utils/achievement-media-ipc").registerAchievementMedia({
+  ipcMain, getMainWindow: () => mainWindow,
+  owner: achievementActionOwner, validateOwner: validateAchievementActionOwner,
+  getContext: readLocalAchievementPresentation,
+  getConfigNames: async () => (await fs.promises.readdir(configsDir)).filter(file => /\.json$/i.test(file)).map(file => file.slice(0, -5)),
+  roots: () => {
+    const prefs = readPrefsSafe();
+    return { screenshot: [prefs.screenshotFolder, getDefaultScreenshotFolder()], record: [prefs.recordsFolder, getDefaultRecordFolder()] };
+  },
+  showMain: showMainWindowForNavigation, logger: appLogger,
+});
 async function handleAchievementLockAction(event, payload) {
   let context;
   try {
@@ -39423,20 +40016,38 @@ async function flagPlatinumFromCacheOnBoot() {
 
 const deferQuitForAchievementRecorder = require("./utils/achievement-recorder-quit")
   .createAchievementRecorderQuitGuard({
-    getController: () => achievementRecorderController,
+    getController: () => getCombinedRecordingDrain(),
     resumeQuit: () => app.quit(),
     reportError: (error) => recordLogger.warn("achievement-recorder:quit-drain-failed", {
       error: error?.message || String(error),
     }),
   });
 
+let playtimeQuitDrainPending = false;
 app.on("before-quit", (event) => {
   if (deferQuitForAchievementRecorder(event)) {
     isQuitting = true;
     pendingAchievementRecordQueue.clear("app-before-quit");
+    pendingExternalReplay.clear("app-before-quit");
+    pendingExternalReplayNotifications.clear();
+    return;
+  }
+  // Async writes must finish before the synchronous final session flush. Wait
+  // without blocking Electron, and let watcher completion handlers run first.
+  if (hasPendingPlaytimeWrites() || playtimeQuitDrainPending) {
+    event.preventDefault();
+    isQuitting = true;
+    if (!playtimeQuitDrainPending) {
+      playtimeQuitDrainPending = true;
+      void waitForPlaytimeWrites().finally(() => setImmediate(() => {
+        playtimeQuitDrainPending = false;
+        app.quit();
+      }));
+    }
     return;
   }
   persistMainWindowState("before-quit");
+  achievementEnablerController?.dispose();
   if (bootPlatinumAuditTimer) {
     clearTimeout(bootPlatinumAuditTimer);
     bootPlatinumAuditTimer = null;
@@ -39455,7 +40066,10 @@ app.on("before-quit", (event) => {
   ps4RecompCacheWriter.close();
   dashboardSummaryStore.flush().catch(() => {});
   pendingAchievementRecordQueue.clear("app-before-quit");
+  pendingExternalReplay.clear("app-before-quit");
+  pendingExternalReplayNotifications.clear();
   achievementRecorderController?.forceStop("app-before-quit");
+  externalReplayController?.forceStop("app-before-quit");
   stopAutoSelectProcessPoller();
   try {
     processPoller.setEnabled(false);

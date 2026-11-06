@@ -33,8 +33,9 @@ function excludeFromRootFiles(originalFiles) {
   return filtered;
 }
 
-module.exports = (context) => {
+module.exports = async (context) => {
   if (context.electronPlatformName !== "win32") return;
+  await require("./verify-replay-media").verify(require("path").join(context.packager.projectDir, "utils/vendor/replay-media"));
   const packager = context.packager;
   // The platform options are shared between architecture builds. Do not allow
   // a concurrent ia32 build to inherit the x64-only exclusion.

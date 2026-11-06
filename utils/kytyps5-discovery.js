@@ -131,24 +131,24 @@ async function discoverGames(root, shouldSkip = () => false, options = {}) {
   // Process explicit launcher sources first. If both a directory and an
   // archive contain the same PPSA, choose one complete source, never merge them.
   const stack = [root, ...settings.gameRoots.slice().reverse()].map((dir) => ({ dir, depth: 0 }));
-  const seen = new Set(), games = new Map(), errors = [];
+  const seen = new Set(), games = new Map(), errors = [], pendingGames = [];
   let visited = 0;
   while (stack.length && visited < 20000) {
     const { dir, depth } = stack.pop();
     const key = process.platform === "win32" ? dir.toLowerCase() : dir;
     if (seen.has(key) || excluded.some((source) => relativeInside(source, dir) != null) || shouldSkip(dir)) continue;
     seen.add(key); visited += 1;
-    let candidate = false;
+    let candidate = false, identity = null;
     try {
       const stat = await fs.promises.stat(dir);
       candidate = stat.isFile() && isArchivePath(dir);
       if (candidate || (stat.isDirectory() && fs.existsSync(path.join(dir, "sce_sys", "param.json")))) {
         candidate = true;
-        const identity = readGameIdentity(dir);
+        identity = readGameIdentity(dir);
         if (listTrophyPackages(dir).length) {
           // Prefer the first discovered copy; do not merge packages across game roots.
           if (!games.has(identity.titleId)) games.set(identity.titleId, identity);
-        }
+        } else pendingGames.push(identity);
         continue; // Never recurse through all game assets.
       }
       if (!stat.isDirectory() || depth >= MAX_GAME_DISCOVERY_DEPTH) continue;
@@ -162,10 +162,19 @@ async function discoverGames(root, shouldSkip = () => false, options = {}) {
         stack.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
       }
     } catch (error) {
-      if (candidate) errors.push({ gamePath: dir, error: error.message });
+      if (candidate) {
+        errors.push({ gamePath: dir, error: error.message });
+        if (identity) pendingGames.push(identity);
+      }
     }
   }
-  return { ...settings, games, errors };
+  return { ...settings, games, errors, pendingGames };
+}
+
+function classifyMissingTitles(titleIds, discovery) {
+  const incomplete = new Set((discovery.pendingGames || []).map(game => String(game.titleId).toUpperCase()));
+  return { activeIncomplete: titleIds.filter(id => incomplete.has(id.toUpperCase())),
+    unresolvedRuntime: titleIds.filter(id => !incomplete.has(id.toUpperCase())) };
 }
 
 async function listRuntimeTitles(root, directory) {
@@ -423,5 +432,5 @@ function createDiscoveryWatcher(root, onScan, onError, shouldSkip = () => false,
   return { watcher, readyPromise, trophies, saveData, updateGameSources };
 }
 
-module.exports = { isKytyRoot, emulatorRootForFolder, readSettings, discoverGames,
+module.exports = { isKytyRoot, emulatorRootForFolder, readSettings, discoverGames, classifyMissingTitles,
   resolveGameUserId, listTrophyTitles, listSaveDataTitles, listProgress, createDiscoveryWatcher, isGameSourceActive };

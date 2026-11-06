@@ -428,6 +428,7 @@ async function generateConfig(game, configsDir, options = {}) {
     process_name: previousEntry && game.port === "generic" ? previous.process_name || "" : previous.process_name && previous.process_name !== "bb-probe.exe" ? previous.process_name :
       game.processName || previous.process_name || "", language: previous.language || "english" };
   delete config.ps4_recomp_cache_root;
+  if (!previousEntry) await require("./game-executable-finder").autoFindExecutable(config);
   options.onProgress?.({ phase: "finalizingConfig", percent: 90, appid: game.appid, itemName: game.title });
   const configUpdated = changedWrite(path.join(configsDir, `${finalName}.json`), config);
   return { ...config, config, schemaDir, created: !previousEntry, schemaUpdated, configUpdated };

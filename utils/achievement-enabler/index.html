@@ -1,0 +1,64 @@
+<template id="achievementEnablerTemplate">
+  <slot name="resize-handles"></slot>
+  <header class="ae-header">
+    <img src="assets/icons/achievement-enabler.svg" alt="">
+    <div><h1>Achievement Enabler</h1><p data-i18n="enabler.intro"></p></div>
+    <span id="version" class="ae-version" hidden></span>
+    <button id="closePanel" class="ae-close" type="button" data-i18n-aria-label="title.closeDashboard" data-i18n-title="title.closeDashboard">×</button>
+  </header>
+  <main>
+    <div id="error" class="ae-error" role="alert" hidden></div>
+    <aside class="ae-card ae-support-note" role="note">
+      <p data-i18n="enabler.supportNote">Report any issues with Achievement Enabler on its GitHub project page, not in the Achievements repository.</p>
+      <button id="reportIssue" data-i18n="enabler.reportIssue">Report an issue</button>
+    </aside>
+    <div class="ae-steps">
+      <section class="ae-card" id="downloadStep">
+        <div class="ae-step-title"><span>1</span><h2 data-i18n="enabler.download"></h2></div>
+        <p data-i18n="enabler.downloadHelp"></p>
+        <div class="ae-actions"><button id="download" data-i18n="enabler.download"></button><button id="check" data-i18n="enabler.check"></button></div>
+        <progress id="downloadProgress" hidden max="100"></progress>
+        <div id="updateInfo" class="ae-note" aria-live="polite"></div>
+      </section>
+      <section class="ae-card" id="adapterStep">
+        <div class="ae-step-title"><span>2</span><h2 data-i18n="enabler.adapters"></h2></div>
+        <p data-i18n="enabler.adaptersHelp"></p>
+        <div class="ae-actions"><button id="instructions" data-i18n="enabler.instructions"></button><button id="files" data-i18n="enabler.openFolder"></button></div>
+        <label class="ae-ack"><input id="acknowledge" type="checkbox"><span data-i18n="enabler.acknowledge"></span></label>
+      </section>
+    </div>
+    <aside class="ae-card ae-account-note" role="note" aria-labelledby="dummyAccountTitle">
+      <strong id="dummyAccountTitle" data-i18n="enabler.dummyAccountTitle">Before running Achievement Enabler</strong>
+      <p data-i18n="enabler.dummyAccountNote">For Steam and Ubisoft, create %SystemDrive%\steamcmd\_AchievementEnabler\dummy_account.txt. Put the username of a throwaway Steam account on the first line and its password on the second line. EA, Epic, and GOG do not require this file.</p>
+    </aside>
+    <section class="ae-card ae-game">
+      <aside class="ae-rune-note" role="note">
+        <strong data-i18n="enabler.runeTitle">Important for RUNE releases</strong>
+        <p data-i18n="enabler.runeNote">Complete these renames before applying Achievement Enabler. Rename the RUNE emulator file steam_api64.dll to steam_api64.rune, then restore the original Steam library by renaming steam_api64.rne to steam_api64.dll.</p>
+      </aside>
+      <div><div class="ae-step-title"><span>3</span><h2 data-i18n="enabler.game"></h2></div><p data-i18n="enabler.gameHelp"></p></div>
+      <div class="ae-game-controls"><button id="choose" data-i18n="enabler.choose"></button><button id="start" class="ae-primary" data-i18n="enabler.start"></button></div>
+      <div id="gameFolder" class="ae-path"></div>
+    </section>
+    <section class="ae-card ae-session" aria-busy="false">
+      <div class="ae-session-heading"><h2 data-i18n="enabler.script"></h2><span id="status" role="status"></span><button id="stop" data-i18n="enabler.stop"></button></div>
+      <p id="resultReason" class="ae-result-reason" role="status" hidden></p>
+      <p id="sessionHelp" data-i18n="enabler.answerHelp"></p>
+      <pre id="currentOutput" class="ae-current" aria-live="off"></pre>
+      <form id="answerForm" class="ae-answer">
+        <input id="answer" type="text" autocomplete="off" spellcheck="false" data-i18n-aria-label="enabler.answer">
+        <button id="send" type="submit" class="ae-primary" data-i18n="enabler.send"></button>
+        <button id="sendKey" type="button" data-i18n="enabler.sendKey"></button>
+      </form>
+      <div class="ae-quick" data-i18n-aria-label="enabler.quick">
+        <button data-key="Y">Y</button><button data-key="N">N</button><button data-key="1">1</button><button data-key="2">2</button>
+        <button data-key="3">3</button>
+        <button data-key="enter" data-i18n="enabler.enter"></button><button data-key=" " data-i18n="enabler.space"></button>
+        <label><input id="hideAnswer" type="checkbox"><span data-i18n="enabler.hideAnswer"></span></label>
+      </div>
+      <details id="details"><summary data-i18n="enabler.details"></summary><div id="terminal"></div></details>
+      <p class="ae-note" data-i18n="enabler.stopHelp"></p>
+    </section>
+  </main>
+
+</template>

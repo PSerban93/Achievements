@@ -534,19 +534,30 @@ pub fn bytes_sample(bytes: &[u8], time: i64, duration: i64) -> Result<IMFSample>
 }
 
 type TexturePool = Arc<Mutex<Vec<SendDirectX<ID3D11Texture2D>>>>;
+// The cache and every in-flight MF sample hold a lease. A texture can only
+// return to the writable pool after all of them have released it.
+struct SurfaceLease<T> {
+    value: Option<T>,
+    pool: Arc<Mutex<Vec<T>>>,
+}
+impl<T> Drop for SurfaceLease<T> {
+    fn drop(&mut self) {
+        if let Some(value) = self.value.take() {
+            self.pool.lock().unwrap().push(value);
+        }
+    }
+}
+type TextureLease = SurfaceLease<SendDirectX<ID3D11Texture2D>>;
 #[implement(IMFAsyncCallback)]
 struct RecycleTexture {
-    pool: TexturePool,
-    texture: Mutex<Option<SendDirectX<ID3D11Texture2D>>>,
+    lease: Mutex<Option<Arc<TextureLease>>>,
 }
 impl IMFAsyncCallback_Impl for RecycleTexture_Impl {
     fn GetParameters(&self, _: *mut u32, _: *mut u32) -> Result<()> {
         Err(windows::core::Error::from_hresult(E_NOTIMPL))
     }
     fn Invoke(&self, _: Ref<IMFAsyncResult>) -> Result<()> {
-        if let Some(texture) = self.texture.lock().unwrap().take() {
-            self.pool.lock().unwrap().push(texture);
-        }
+        self.lease.lock().unwrap().take();
         Ok(())
     }
 }
@@ -563,6 +574,9 @@ pub struct GpuConverter {
     pool: TexturePool,
     allocated: usize,
     max_textures: usize,
+    cached: Option<((usize, i64), Arc<TextureLease>)>,
+    pub converted_frames: u64,
+    pub reused_frames: u64,
 }
 
 impl GpuConverter {
@@ -647,6 +661,9 @@ impl GpuConverter {
                 pool: Arc::new(Mutex::new(Vec::new())),
                 allocated: 0,
                 max_textures: (128 * 1024 * 1024 / bytes.max(1)).clamp(2, 16) as usize,
+                cached: None,
+                converted_frames: 0,
+                reused_frames: 0,
             })
         }
     }
@@ -654,117 +671,142 @@ impl GpuConverter {
     pub fn sample(
         &mut self,
         input: &ID3D11Texture2D,
+        source_time: i64,
         time: i64,
         duration: i64,
         hardware: bool,
     ) -> Result<Option<IMFSample>> {
         unsafe {
-            let available = self.pool.lock().unwrap().pop();
-            let texture = match available {
-                Some(t) => t.0,
-                None if self.allocated < self.max_textures => {
-                    let mut texture = None;
-                    self.device.CreateTexture2D(
-                        &D3D11_TEXTURE2D_DESC {
-                            Width: self.width,
-                            Height: self.height,
-                            MipLevels: 1,
-                            ArraySize: 1,
-                            Format: DXGI_FORMAT_NV12,
-                            SampleDesc: DXGI_SAMPLE_DESC {
-                                Count: 1,
-                                Quality: 0,
+            let key = (input.as_raw() as usize, source_time);
+            let cached = self
+                .cached
+                .as_ref()
+                .filter(|(previous, _)| *previous == key)
+                .map(|(_, lease)| lease.clone());
+            let reused = cached.is_some();
+            let lease = if let Some(lease) = cached {
+                lease
+            } else {
+                // Release our last source's cache reference before taking a surface.
+                // Samples retained by the encoder continue owning their leases.
+                self.cached = None;
+                let available = self.pool.lock().unwrap().pop();
+                let texture = match available {
+                    Some(t) => t.0,
+                    None if self.allocated < self.max_textures => {
+                        let mut texture = None;
+                        self.device.CreateTexture2D(
+                            &D3D11_TEXTURE2D_DESC {
+                                Width: self.width,
+                                Height: self.height,
+                                MipLevels: 1,
+                                ArraySize: 1,
+                                Format: DXGI_FORMAT_NV12,
+                                SampleDesc: DXGI_SAMPLE_DESC {
+                                    Count: 1,
+                                    Quality: 0,
+                                },
+                                Usage: D3D11_USAGE_DEFAULT,
+                                BindFlags: D3D11_BIND_RENDER_TARGET.0 as u32,
+                                ..Default::default()
                             },
-                            Usage: D3D11_USAGE_DEFAULT,
-                            BindFlags: D3D11_BIND_RENDER_TARGET.0 as u32,
-                            ..Default::default()
-                        },
-                        None,
-                        Some(&mut texture),
-                    )?;
-                    self.allocated += 1;
-                    texture.unwrap()
-                }
-                None => return Ok(None),
+                            None,
+                            Some(&mut texture),
+                        )?;
+                        self.allocated += 1;
+                        texture.unwrap()
+                    }
+                    None => return Ok(None),
+                };
+                Arc::new(SurfaceLease {
+                    value: Some(SendDirectX(texture)),
+                    pool: self.pool.clone(),
+                })
             };
+            let texture = &lease.value.as_ref().unwrap().0;
+            if !reused {
+                let mut input_view = None;
+                let mut input_desc = D3D11_TEXTURE2D_DESC::default();
+                input.GetDesc(&mut input_desc);
+                let source = RECT {
+                    left: 0,
+                    top: 0,
+                    right: input_desc.Width as i32,
+                    bottom: input_desc.Height as i32,
+                };
+                self.video_context.VideoProcessorSetStreamSourceRect(
+                    &self.processor,
+                    0,
+                    true,
+                    Some(&source),
+                );
+                let scale = (self.width as f64 / input_desc.Width as f64)
+                    .min(self.height as f64 / input_desc.Height as f64);
+                let w = (input_desc.Width as f64 * scale) as i32;
+                let h = (input_desc.Height as f64 * scale) as i32;
+                let left = (self.width as i32 - w) / 2;
+                let top = (self.height as i32 - h) / 2;
+                let target = RECT {
+                    left,
+                    top,
+                    right: left + w,
+                    bottom: top + h,
+                };
+                self.video_context.VideoProcessorSetStreamDestRect(
+                    &self.processor,
+                    0,
+                    true,
+                    Some(&target),
+                );
+                self.video_device.CreateVideoProcessorInputView(
+                    input,
+                    &self.enumerator,
+                    &D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
+                        ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
+                        ..Default::default()
+                    },
+                    Some(&mut input_view),
+                )?;
+                let mut output_view = None;
+                self.video_device.CreateVideoProcessorOutputView(
+                    texture,
+                    &self.enumerator,
+                    &D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
+                        ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
+                        ..Default::default()
+                    },
+                    Some(&mut output_view),
+                )?;
+                let mut streams = [D3D11_VIDEO_PROCESSOR_STREAM {
+                    Enable: true.into(),
+                    pInputSurface: ManuallyDrop::new(input_view),
+                    ..Default::default()
+                }];
+                let converted = self.video_context.VideoProcessorBlt(
+                    &self.processor,
+                    output_view.as_ref().unwrap(),
+                    0,
+                    &streams,
+                );
+                drop(ManuallyDrop::take(&mut streams[0].pInputSurface));
+                converted?;
+                self.context.Flush();
+                self.converted_frames += 1;
+                self.cached = Some((key, lease.clone()));
+            } else {
+                self.reused_frames += 1;
+            }
             let recycle: IMFAsyncCallback = RecycleTexture {
-                pool: self.pool.clone(),
-                texture: Mutex::new(Some(SendDirectX(texture.clone()))),
+                lease: Mutex::new(Some(lease.clone())),
             }
             .into();
             let tracked = MFCreateTrackedSample()?;
             tracked.SetAllocator(&recycle, None)?;
             let sample: IMFSample = tracked.cast()?;
-            let mut input_view = None;
-            let mut input_desc = D3D11_TEXTURE2D_DESC::default();
-            input.GetDesc(&mut input_desc);
-            let source = RECT {
-                left: 0,
-                top: 0,
-                right: input_desc.Width as i32,
-                bottom: input_desc.Height as i32,
-            };
-            self.video_context.VideoProcessorSetStreamSourceRect(
-                &self.processor,
-                0,
-                true,
-                Some(&source),
-            );
-            let scale = (self.width as f64 / input_desc.Width as f64)
-                .min(self.height as f64 / input_desc.Height as f64);
-            let w = (input_desc.Width as f64 * scale) as i32;
-            let h = (input_desc.Height as f64 * scale) as i32;
-            let left = (self.width as i32 - w) / 2;
-            let top = (self.height as i32 - h) / 2;
-            let target = RECT {
-                left,
-                top,
-                right: left + w,
-                bottom: top + h,
-            };
-            self.video_context.VideoProcessorSetStreamDestRect(
-                &self.processor,
-                0,
-                true,
-                Some(&target),
-            );
-            self.video_device.CreateVideoProcessorInputView(
-                input,
-                &self.enumerator,
-                &D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC {
-                    ViewDimension: D3D11_VPIV_DIMENSION_TEXTURE2D,
-                    ..Default::default()
-                },
-                Some(&mut input_view),
-            )?;
-            let mut output_view = None;
-            self.video_device.CreateVideoProcessorOutputView(
-                &texture,
-                &self.enumerator,
-                &D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC {
-                    ViewDimension: D3D11_VPOV_DIMENSION_TEXTURE2D,
-                    ..Default::default()
-                },
-                Some(&mut output_view),
-            )?;
-            let mut streams = [D3D11_VIDEO_PROCESSOR_STREAM {
-                Enable: true.into(),
-                pInputSurface: ManuallyDrop::new(input_view),
-                ..Default::default()
-            }];
-            let converted = self.video_context.VideoProcessorBlt(
-                &self.processor,
-                output_view.as_ref().unwrap(),
-                0,
-                &streams,
-            );
-            drop(ManuallyDrop::take(&mut streams[0].pInputSurface));
-            converted?;
-            self.context.Flush();
             if hardware {
                 sample.AddBuffer(&MFCreateDXGISurfaceBuffer(
                     &ID3D11Texture2D::IID,
-                    &texture,
+                    texture,
                     0,
                     false,
                 )?)?;
@@ -778,7 +820,7 @@ impl GpuConverter {
                 self.device
                     .CreateTexture2D(&desc, None, Some(&mut staging))?;
                 let staging = staging.unwrap();
-                self.context.CopyResource(&staging, &texture);
+                self.context.CopyResource(&staging, texture);
                 let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
                 self.context
                     .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))?;
@@ -893,6 +935,35 @@ pub fn save_mp4(
 mod integration_tests {
     use super::*;
     use std::time::{Duration, Instant};
+    #[test]
+    fn surface_returns_only_after_cache_and_every_encoder_sample_release_it() {
+        let pool = Arc::new(Mutex::new(Vec::new()));
+        let cached = Arc::new(SurfaceLease {
+            value: Some(42u32),
+            pool: pool.clone(),
+        });
+        let sample_one = cached.clone();
+        let sample_two = cached.clone();
+        drop(cached);
+        drop(sample_one);
+        assert!(pool.lock().unwrap().is_empty());
+        std::thread::spawn(move || drop(sample_two)).join().unwrap();
+        assert_eq!(*pool.lock().unwrap(), vec![42]);
+    }
+
+    #[test]
+    fn sample_release_cannot_recycle_a_cached_surface() {
+        let pool = Arc::new(Mutex::new(Vec::new()));
+        let cached = Arc::new(SurfaceLease {
+            value: Some(42u32),
+            pool: pool.clone(),
+        });
+        let sample = cached.clone();
+        drop(sample);
+        assert!(pool.lock().unwrap().is_empty());
+        drop(cached);
+        assert_eq!(*pool.lock().unwrap(), vec![42]);
+    }
     // Requires a Windows GPU/driver. Explicitly invoked, never run by normal
     // unit tests or by Customisation. Artifacts stay in the system temp folder.
     #[test]
@@ -970,9 +1041,13 @@ mod integration_tests {
                     assert!(Instant::now() < deadline, "encoder did not request input");
                     std::thread::sleep(Duration::from_millis(1));
                 }
-                unsafe {
-                    context
-                        .ClearRenderTargetView(&rtv, &[i as f32 / (fps * 2) as f32, 0.2, 0.7, 1.0]);
+                if i % 2 == 0 {
+                    unsafe {
+                        context.ClearRenderTargetView(
+                            &rtv,
+                            &[i as f32 / (fps * 2) as f32, 0.2, 0.7, 1.0],
+                        );
+                    }
                 }
                 let time = origin + i64::from(i) * 10_000_000 / i64::from(fps);
                 let duration = origin + i64::from(i + 1) * 10_000_000 / i64::from(fps) - time;
@@ -982,7 +1057,8 @@ mod integration_tests {
                 let deadline = Instant::now() + Duration::from_secs(5);
                 loop {
                     if let Some(sample) = converter.sample(
-                        if i == fps { &resized } else { &texture },
+                        if i / 2 == fps / 2 { &resized } else { &texture },
+                        i64::from(i / 2),
                         time,
                         duration,
                         encoder.hardware,
@@ -1009,6 +1085,8 @@ mod integration_tests {
                 encoder.produced, encoder.submitted,
                 "missing output samples at {fps} FPS"
             );
+            assert_eq!(converter.converted_frames, u64::from(fps));
+            assert_eq!(converter.reused_frames, u64::from(fps));
             assert!(
                 packets[0].keyframe,
                 "first sample was not independently decodable"

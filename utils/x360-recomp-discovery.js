@@ -37,6 +37,14 @@ const PORTS = [
 ];
 const RUNTIMES = ["rexruntime.dll", "rexruntimerd.dll"];
 const acceptsTitle = (port, id) => port.id === id || port.ids?.includes(id);
+// A read-only title hint for presentation lookups. Native XDBF/SPA metadata
+// sometimes abbreviates the title; this does not scan paths or change identity.
+function knownTitleForId(value) {
+  const id = String(value || "").replace(/^0x/i, "").toUpperCase();
+  if (!/^[A-F0-9]{8}$/.test(id)) return "";
+  const titles = [...new Set(PORTS.filter(port => acceptsTitle(port, id)).map(port => port.title).filter(Boolean))];
+  return titles.length === 1 ? titles[0] : "";
+}
 const safeProfile = (name) => state.validProfile(name) && !["__proto__", "constructor", "prototype"].includes(name);
 function portableHint(root, entries, blocked) {
   const has = (name, type) => entries.some(entry => entry.name.toLowerCase() === name && entry[type]() &&
@@ -864,5 +872,5 @@ function isDiscoveryMarker(file) {
     /\.exe$/i.test(name) && RUNTIMES.some((runtime) => fs.existsSync(path.join(path.dirname(file), runtime)));
 }
 
-module.exports = { discoverGames, readXexTitle, filesAt, inside, isDiscoveryMarker, hasInstallationHint, validateKnownInstallation, localProfile,
+module.exports = { discoverGames, readXexTitle, filesAt, inside, isDiscoveryMarker, hasInstallationHint, validateKnownInstallation, localProfile, knownTitleForId,
   readProgressCandidate: (file) => statesAt(path.dirname(file), () => false, []).find((item) => state.samePath(item.file, file)) || null };

@@ -156,15 +156,31 @@
 
       .bar-container {
         width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: var(--progress-bar-margin-top);
+      }
+
+      .progress-percentage {
+        flex-shrink: 0;
+        white-space: nowrap;
+        font-size: calc(var(--progress-title-size) * 0.8);
+        font-variant-numeric: tabular-nums;
+      }
+
+      .progress-percentage[hidden] {
+        display: none;
       }
 
       .progress-bar {
+        flex: 1;
+        min-width: 0;
         width: 100%;
         height: var(--progress-bar-height);
         border-radius: var(--progress-bar-radius);
         background: #444;
         overflow: hidden;
-        margin-top: var(--progress-bar-margin-top);
       }
 
       .progress-fill {
@@ -183,6 +199,7 @@
           <div class="progress-bar">
             <div class="progress-fill"></div>
           </div>
+          <span class="progress-percentage" hidden></span>
         </div>
       </div>
     </div>
@@ -194,6 +211,7 @@
         const titleEl = document.querySelector(".title");
         const imgEl = document.querySelector(".progress-icon img");
         const fill = document.querySelector(".progress-fill");
+        const percentageEl = document.querySelector(".progress-percentage");
         const metaDur = document.querySelector('meta[name="duration"]');
         const sizeMeta = document.querySelector("meta[width][height]");
         const defaultDurationMs = Math.max(0, Number(metaDur?.content || 5000));
@@ -309,14 +327,17 @@
             const rawScale = Number(data.scale ?? 1);
             const scale =
               Number.isFinite(rawScale) && rawScale > 0 ? rawScale : 1;
-            const pct =
-              max > 0 ? Math.min(100, Math.round((cur / max) * 100)) : 0;
+            const hasProgress = data.progress !== null && data.progress !== undefined && data.progress !== "" &&
+              Number.isFinite(cur) && Number.isFinite(max) && max > 0;
+            const pct = hasProgress ? Math.max(0, Math.min(100, Math.round((cur / max) * 100))) : 0;
             const isFloatProgress = data.progress_is_float === true;
 
             const title = `${name}: ${formatProgressValue(cur, isFloatProgress)}/${formatProgressValue(max, isFloatProgress)}`;
             titleEl.textContent = title;
             applyProgressProfile(title, pct, scale);
             fill.style.width = `${pct}%`;
+            percentageEl.hidden = !hasProgress;
+            percentageEl.textContent = hasProgress ? `${pct}%` : "";
             scheduleClose(totalDurationMs);
             await resolveAchievementIcon(imgEl, data.config_path, data.icon);
           } catch (e) {

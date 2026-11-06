@@ -1,0 +1,7 @@
+.achievement-pin-badge {
+  display: inline-block;
+  margin-inline-end: .4em;
+  font-size: .85em;
+  vertical-align: baseline;
+}
+.achievement-pin-badge[hidden] { display: none; }

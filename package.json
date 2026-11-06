@@ -1,6 +1,6 @@
 {
   "name": "Achievements",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "Achievements",
   "author": "JokerVerse",
   "main": "main.js",
@@ -14,6 +14,8 @@
     "test:boot-cache": "node tests/achievement-cache-meta-store.test.js && node tests/dashboard-summary-store.test.js && node tests/uplay-mapping-refresh.test.js",
     "test:achievement-recorder": "node tests/achievement-recorder.test.js",
     "test:dashboard-refresh": "node tests/dashboard-refresh.test.js",
+    "test:game-artwork": "node tests/verify-game-artwork-service.js && node tests/verify-game-artwork-providers.js && node tests/verify-game-artwork-native.js && node tests/verify-game-artwork-regressions.js && node tests/verify-game-artwork-electron.js",
+    "test:game-artwork:live": "node tests/verify-game-artwork-live.js --steamgriddb",
     "test:gamebar-widget": "node tests/gamebar-widget-bridge.test.js",
     "test:collections": "node tests/game-collections.test.js",
     "build:recorder": "cargo build --release --locked --manifest-path native/achievement-recorder/Cargo.toml",
@@ -21,22 +23,34 @@
     "build:hdr-screenshot": "cargo build --release --locked --manifest-path native/hdr-screenshot/Cargo.toml",
     "copy:hdr-screenshot": "node -e \"const fs=require('fs');fs.mkdirSync('utils/native',{recursive:true});fs.copyFileSync('native/hdr-screenshot/target/release/achievements-hdr-screenshot.exe','utils/native/achievements-hdr-screenshot.exe')\"",
     "verify:recorder": "node build/verify-recorder.js",
+    "prepare:replay-media": "node build/prepare-replay-media.js",
+    "verify:replay-media": "node build/verify-replay-media.js",
+    "test:external-replay": "node tests/verify-nvidia-session.js && node tests/verify-external-replay.js && node tests/verify-pending-external-replay.js && node tests/verify-replay-batches.js && node tests/verify-replay-safety.js && node tests/verify-partial-replay.js && node tests/verify-replay-queues.js && node tests/verify-replay-hotkey-ui.js && node tests/verify-replay-readiness.js && node tests/verify-replay-hotkeys.js && node tests/verify-amd-registry-fallback.js",
     "verify:packaged-recorder": "node build/verify-recorder.js --packaged",
     "verify:hdr-screenshot": "node build/verify-hdr-screenshot.js",
     "verify:packaged-hdr-screenshot": "node build/verify-hdr-screenshot.js --packaged",
+    "verify:enabler": "node build/run-electron-script.js build/verify-achievement-enabler.js",
+    "verify:installer-close": "node tests/verify-installer-close.js",
     "verify:process-tree": "node build/run-electron-script.js build/verify-windows-process-tree.js",
     "verify:san-runtime": "node build/verify-san-runtime.js",
+    "verify:notification-assets": "node tests/verify-notification-assets.js",
+    "verify:preset-migration": "node tests/verify-preset-migration.js",
+    "verify:overlay-loads": "node tests/verify-overlay-loads.js",
+    "verify:dashboard-3d": "node tests/verify-dashboard-3d.js",
+    "verify:dashboard-experience": "node tests/verify-dashboard-experience.js",
+    "verify:game-metadata": "node tests/verify-game-presentation-metadata.js && node tests/verify-game-presentation-runtime.js && node tests/verify-game-presentation-sources.js && node tests/verify-game-presentation-search.js",
+    "verify:game-artwork-native": "node tests/verify-game-artwork-native.js",
     "build:x360-lzx": "node build/build-x360-lzx.js",
     "verify:x360-lzx": "node build/verify-x360-lzx.js",
     "prepare:process-tree": "npm run verify:process-tree",
-    "prepare:native:windows": "npm run build:recorder && npm run copy:recorder && npm run verify:recorder && npm run build:hdr-screenshot && npm run copy:hdr-screenshot && npm run verify:hdr-screenshot",
+    "prepare:native:windows": "npm run prepare:replay-media && npm run build:recorder && npm run copy:recorder && npm run verify:recorder && npm run build:hdr-screenshot && npm run copy:hdr-screenshot && npm run verify:hdr-screenshot",
     "prepare:recorder:windows": "npm run prepare:native:windows",
     "prepare:recorder": "node build/prepare-recorder.js",
-    "pack": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --dir && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
-    "dist:self-signed": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && node build/build-self-signed.js && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
-    "dist": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
-    "dist:signed": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never --config.forceCodeSigning=true && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
-    "dist:unsigned": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never --config.win.signExecutable=false --config.forceCodeSigning=false && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot"
+    "pack": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:enabler && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --dir && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dist:self-signed": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:enabler && npm run verify:san-runtime && npm run verify:x360-lzx && node build/build-self-signed.js && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dist": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:enabler && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dist:signed": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:enabler && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never --config.forceCodeSigning=true && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot",
+    "dist:unsigned": "npm run prepare:recorder && npm run prepare:process-tree && npm run verify:enabler && npm run verify:san-runtime && npm run verify:x360-lzx && electron-builder --win --x64 --publish never --config.win.signExecutable=false --config.forceCodeSigning=false && npm run verify:packaged-recorder && npm run verify:packaged-hdr-screenshot"
   },
   "build": {
     "appId": "com.achievements.app",
@@ -60,6 +74,7 @@
       "**/node_modules/teex/**",
       "**/node_modules/text-decoder/**",
       "**/node_modules/@vscode/windows-process-tree/**",
+      "**/node_modules/node-pty/**",
       "**/node_modules/screenshot-desktop/**",
       "**/node_modules/playwright-core/**"
     ],
@@ -82,8 +97,8 @@
       "tray-menu.html",
       "tray-menu.js",
       "tray-menu.css",
-      "sounds/**/*",
-      "presets/**/*",
+      "!sounds/**/*",
+      "!presets/**/*",
       "utils/**/*",
       "utils/pslist-wrapper.mjs",
       "assets/**",
@@ -133,6 +148,7 @@
       "icon": "icon.ico"
     },
     "nsis": {
+      "include": "build/installer.nsh",
       "oneClick": false,
       "perMachine": true,
       "allowToChangeInstallationDirectory": true,
@@ -167,8 +183,8 @@
         "tray-menu.html",
         "tray-menu.js",
         "tray-menu.css",
-        "sounds/**/*",
-        "presets/**/*",
+        "!sounds/**/*",
+        "!presets/**/*",
         "utils/**/*",
         "utils/pslist-wrapper.mjs",
         "assets/**",
@@ -179,42 +195,47 @@
         "!**/*.password",
         "!**/node_modules/playwright-core/.local-browsers/**",
         "!utils/native/achievements-recorder.exe",
-        "!utils/native/achievements-hdr-screenshot.exe"
+        "!utils/native/achievements-hdr-screenshot.exe",
+        "!utils/vendor/replay-media/**"
       ]
     }
   },
   "dependencies": {
     "@vscode/windows-process-tree": "0.8.0",
     "@xboxreplay/xboxlive-auth": "^5.1.0",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "adm-zip": "0.6.1",
-    "axios": "1.20.0",
+    "axios": "1.21.0",
     "cheerio": "^1.1.2",
     "chokidar": "6.0.0",
     "crc-32": "^1.2.2",
     "electron-updater": "^6.8.11",
     "ini": "6.0.0",
-    "koffi": "3.3.4",
+    "koffi": "3.3.6",
+    "node-pty": "1.1.0",
     "playwright-core": "1.64.1",
     "ps-list": "9.0.0",
-    "screenshot-desktop": "1.15.7",
+    "screenshot-desktop": "1.15.8",
     "smol-toml": "1.9.1",
     "tar-stream": "3.2.2",
     "uiohook-napi": "1.5.5"
   },
   "devDependencies": {
-    "electron": "45.0.0",
+    "electron": "45.2.3",
     "electron-builder": "^26.18.0",
     "jsdom": "29.1.1",
     "playwright": "1.64.1",
     "resedit": "3.1.0"
   },
   "overrides": {
-    "minimatch": ">=10.2.1",
+    "minimatch": "11.0.1",
     "temp": {
       "rimraf": "^5.0.10"
     },
     "glob": {
-      "minimatch": ">=10.2.1"
+      ".": "14.0.2",
+      "minimatch": "11.0.1"
     },
     "@electron/asar": "4.3.1",
     "@electron/fuses": "2.1.3",
@@ -222,17 +243,16 @@
       "resedit": "3.1.0"
     },
     "@electron/get@3.1.0": {
-      "got": "16.1.0"
+      "got": "16.1.0",
+      "global-agent": "4.1.6"
     },
-    "fs-extra": "11.4.1",
-    "global-agent@3.0.0": {
-      "roarr": "3.3.0"
-    }
+    "fs-extra": "11.4.1"
   },
   "allowScripts": {
     "electron-winstaller": true,
     "electron": true,
     "koffi": true,
+    "node-pty": true,
     "@vscode/windows-process-tree": true,
     "uiohook-napi": true
   }

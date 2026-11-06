@@ -587,6 +587,11 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
 
   parsed.appid = appid;
   const title = parsed.title || appid;
+  const reportProgress = (phase, detail, percent) => {
+    try {
+      options.onGenerationProgress?.({ appid: String(appid), itemName: title, phase, detail, percent });
+    } catch {} // Progress reporting must not affect trophy generation.
+  };
   const trophyCount = parsed.trophies?.length || 0;
   const snapshot = buildSnapshotFromTrophy(parsed);
   const schemaRoot = options.schemaRoot || path.join(configsDir, "schema");
@@ -626,7 +631,9 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
     schemaChanged = schemaContentChanged || res.assetsUpdated === true;
     added = res.added || 0;
     currentEntries = res.entries || [];
+    if (schemaChanged) reportProgress("generatingSchema", "Updating RPCS3 trophy schema", 35);
   } else {
+    reportProgress("generatingSchema", "Generating RPCS3 trophy schema", 15);
     currentEntries = writeSchemaAssets(schemaDir, parsed);
     schemaContentChanged = true;
     schemaChanged = true;
@@ -663,6 +670,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
       (added > 0 || !hasMultiLang(currentEntries) || !hasAllRarityPct(currentEntries))
     ) {
       schemaLogger.info("rpcs3:exophase:start", { appid: String(appid), title, platform: "rpcs3" });
+      reportProgress("generatingSchema", "Completing RPCS3 trophy metadata", 50);
       try {
         const exoData = await fetchExophaseAchievementsMultiLang({
           title: title || appid, platform: "rpcs3", schemaAchievements: currentEntries,
@@ -713,6 +721,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
     }
     const configUpdated = hasConfigChanges(existing.data, merged);
     if (configUpdated) {
+      reportProgress("finalizing", "Updating RPCS3 config", 85);
       fs.writeFileSync(existing.filePath, JSON.stringify(merged, null, 2));
       autoConfigLogger.info("rpcs3:config:updated", {
         appid,
@@ -731,6 +740,7 @@ async function generateConfigFromTrophyDir(trophyDir, configsDir, options = {}) 
     };
   }
 
+  reportProgress("finalizing", "Creating RPCS3 config", 85);
   fs.writeFileSync(configPath, JSON.stringify(payload, null, 2));
   autoConfigLogger.info("rpcs3:config:created", {
     appid,

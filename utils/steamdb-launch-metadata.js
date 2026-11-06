@@ -100,6 +100,8 @@ function toLaunchMetadata(option, appid, allOptions = []) {
     appid: String(appid || ""),
     process_name: processNames || "",
     arguments: String(option.arguments || ""),
+    relative_executable: String(option.executable || ""),
+    relative_working_directory: String(option.workingDirectory || ""),
   };
 }
 

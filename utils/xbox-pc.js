@@ -1255,6 +1255,7 @@ async function downloadImage(url, outputPath, timeoutMs, options = {}) {
       return outputPath;
     }
   } catch {}
+  if (options.gameArtwork) return require("./game-artwork-storage").importUrl(url, outputPath, { source: "xbox-title", timeoutMs });
   const response = await axios.get(url, {
     timeout: Math.max(3000, Number(timeoutMs) || 15000),
     responseType: "arraybuffer",
@@ -1550,39 +1551,36 @@ async function importXboxPcLibrary(configsDir, options = {}) {
         const sourcesPath = path.join(coverDir, "sources.json");
         const previousSources = readXboxCoverSources(sourcesPath);
         const savedSources = {};
+        let savedCoverPath = coverPath;
         try {
           if (artwork.coverUrl) {
             const savedCover = await downloadImage(
               artwork.coverUrl,
               coverPath,
               options.timeoutMs,
-              { overwrite: previousSources.coverUrl !== artwork.coverUrl },
+              { overwrite: previousSources.coverUrl !== artwork.coverUrl, gameArtwork: true },
             );
-            if (savedCover) savedSources.coverUrl = artwork.coverUrl;
+            if (savedCover) { savedCoverPath = savedCover; savedSources.coverUrl = artwork.coverUrl; }
           }
           if (
             artwork.headerUrl &&
             artwork.headerUrl === artwork.coverUrl &&
             savedSources.coverUrl
           ) {
-            await fsp.copyFile(coverPath, headerPath);
+            await require("./game-artwork-storage").importBuffer(headerPath, await fsp.readFile(savedCoverPath), { source: "xbox-title", url: artwork.headerUrl });
             savedSources.headerUrl = artwork.headerUrl;
           } else if (artwork.headerUrl) {
             const savedHeader = await downloadImage(
               artwork.headerUrl,
               headerPath,
               options.timeoutMs,
-              { overwrite: previousSources.headerUrl !== artwork.headerUrl },
+              { overwrite: previousSources.headerUrl !== artwork.headerUrl, gameArtwork: true },
             );
             if (savedHeader) savedSources.headerUrl = artwork.headerUrl;
           }
           if (savedSources.coverUrl || savedSources.headerUrl) {
             await fsp.mkdir(coverDir, { recursive: true });
-            await fsp.writeFile(
-              sourcesPath,
-              JSON.stringify(savedSources, null, 2),
-              "utf8",
-            );
+            await require("./game-artwork-storage").rememberUrls(coverDir, savedSources);
           }
         } catch {}
       }
